@@ -51,7 +51,8 @@ services:
       DEBUG: ${DEBUG:-false}
     ports:
       # wb-chz занимает 8000 — этот проект на 8001
-      - "127.0.0.1:8001:8000"
+      # 0.0.0.0 — доступ с вашего ПК по IP сервера
+      - "8001:8000"
     volumes:
       - fulfillment_media:/app/media
       - fulfillment_static:/app/staticfiles
@@ -104,6 +105,15 @@ services:
       redis:
         condition: service_healthy
     command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fulfillment_frontend
+    ports:
+      - "8080:80"
     restart: unless-stopped
 
 volumes:
