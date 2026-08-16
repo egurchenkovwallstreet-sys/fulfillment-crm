@@ -133,6 +133,55 @@
   background: #1d4ed8;
 }
 
+.btn--ghost {
+  background: transparent;
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar__user {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.8rem;
+}
+
+.sidebar__user strong {
+  color: #f1f5f9;
+}
+
+.sidebar__user span {
+  color: #94a3b8;
+}
+
+.loading-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  gap: 1rem;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.loading-screen__spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Stats */
 .stats-grid {
   display: grid;
