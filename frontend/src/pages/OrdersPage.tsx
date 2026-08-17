@@ -23,6 +23,13 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Отменён',
 }
 
+function formatSyncMessage(result: Awaited<ReturnType<typeof syncOrders>>): string {
+  const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
+  const updated = result.updated ?? result.results?.reduce((s, r) => s + (r.updated ?? 0), 0) ?? 0
+  const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
+  return `Синхронизация завершена: из WB получено ${fetched}, новых ${created}, обновлено ${updated}`
+}
+
 export function OrdersPage() {
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
@@ -71,8 +78,7 @@ export function OrdersPage() {
       if (result.errors?.length) {
         setError(result.errors.map((e) => e.error).join('; '))
       }
-      const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
-      setSuccess(`Синхронизация завершена. Новых заказов: ${created}`)
+      setSuccess(formatSyncMessage(result))
       await loadData(sellerId === '' ? undefined : sellerId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
@@ -156,7 +162,10 @@ export function OrdersPage() {
 
       <div className="orders-grid">
         <section className="panel orders-table-panel">
-          <h2 className="section-title">Заказы ({orders.length})</h2>
+          <h2 className="section-title">
+            Заказы ({orders.length}
+            {orders.length > 0 && ` · новых: ${orders.filter((o) => o.status === 'new').length}`})
+          </h2>
           <div className="orders-table-wrap">
             <table className="orders-table">
               <thead>

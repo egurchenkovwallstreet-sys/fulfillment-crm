@@ -35,7 +35,9 @@ export function DashboardPage() {
     try {
       const result = await syncOrders()
       const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
-      setSyncMessage(`Синхронизировано. Новых заказов: ${created}`)
+      const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
+      const updated = result.updated ?? result.results?.reduce((s, r) => s + (r.updated ?? 0), 0) ?? 0
+      setSyncMessage(`Из WB получено ${fetched}, новых ${created}, обновлено ${updated}`)
       await loadStats()
     } catch (err) {
       setSyncMessage(err instanceof Error ? err.message : 'Ошибка синхронизации')
