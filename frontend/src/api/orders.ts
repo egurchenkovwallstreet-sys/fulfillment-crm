@@ -1,0 +1,96 @@
+import { apiFetch } from './client'
+
+export interface Order {
+  id: number
+  wb_order_id: number
+  barcode: string
+  seller: number
+  seller_name: string
+  cell_number: string
+  status: string
+  status_display: string
+  marking_bound: boolean
+  created_at: string
+}
+
+export interface OrderStats {
+  orders_today: number
+  in_picking: number
+  new_orders: number
+  sellers_count?: number
+  sku_count: number
+}
+
+export interface PickListItem {
+  id: number
+  cell_number: string
+  barcode: string
+  product_name: string
+  quantity: number
+  picked_quantity: number
+}
+
+export interface PickList {
+  id: number
+  seller: number
+  seller_name: string
+  is_completed: boolean
+  created_at: string
+  items: PickListItem[]
+  items_count: number
+  total_quantity: number
+}
+
+export interface PickListBrief {
+  id: number
+  seller: number
+  seller_name: string
+  is_completed: boolean
+  created_at: string
+  items_count: number
+}
+
+export interface SyncResult {
+  success: boolean
+  created?: number
+  updated?: number
+  without_product?: number
+  fetched?: number
+  results?: SyncResult[]
+  errors?: { seller_id: number; error: string }[]
+}
+
+export function fetchOrders(params?: { seller_id?: number; status?: string }) {
+  const search = new URLSearchParams()
+  if (params?.seller_id) search.set('seller_id', String(params.seller_id))
+  if (params?.status) search.set('status', params.status)
+  const qs = search.toString()
+  return apiFetch<Order[]>(`/api/orders/${qs ? `?${qs}` : ''}`)
+}
+
+export function fetchOrderStats() {
+  return apiFetch<OrderStats>('/api/orders/stats/')
+}
+
+export function syncOrders(sellerId?: number) {
+  return apiFetch<SyncResult>('/api/orders/sync/', {
+    method: 'POST',
+    body: JSON.stringify(sellerId ? { seller_id: sellerId } : {}),
+  })
+}
+
+export function fetchPickLists(sellerId?: number) {
+  const qs = sellerId ? `?seller_id=${sellerId}` : ''
+  return apiFetch<PickListBrief[]>(`/api/orders/pick-lists/${qs}`)
+}
+
+export function fetchPickList(id: number) {
+  return apiFetch<PickList>(`/api/orders/pick-lists/${id}/`)
+}
+
+export function generatePickList(sellerId: number) {
+  return apiFetch<PickList>('/api/orders/pick-lists/generate/', {
+    method: 'POST',
+    body: JSON.stringify({ seller_id: sellerId }),
+  })
+}

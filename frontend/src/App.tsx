@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { DashboardPage } from './pages/DashboardPage'
 import { IntakePage } from './pages/IntakePage'
 import { LoginPage } from './pages/LoginPage'
+import { OrdersPage } from './pages/OrdersPage'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -26,6 +27,7 @@ function AppRoutes() {
           <Route path="/" element={<DashboardPage />} />
           <Route element={<ManagerRoute />}>
             <Route path="/intake" element={<IntakePage />} />
+            <Route path="/orders" element={<OrdersPage />} />
           </Route>
         </Route>
       </Route>

@@ -1,9 +1,48 @@
+import { useCallback, useEffect, useState } from 'react'
 import { ProcessFlow } from '../components/ProcessFlow'
 import { StatCard } from '../components/StatCard'
+import { fetchOrderStats, syncOrders } from '../api/orders'
 import { useAuth } from '../context/AuthContext'
 
 export function DashboardPage() {
   const { user, isAdmin, isManager, isSeller } = useAuth()
+  const [stats, setStats] = useState({
+    orders_today: 0,
+    in_picking: 0,
+    new_orders: 0,
+    sellers_count: 0,
+    sku_count: 0,
+  })
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
+
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await fetchOrderStats()
+      setStats(data)
+    } catch {
+      // stats optional on first load
+    }
+  }, [])
+
+  useEffect(() => {
+    loadStats()
+  }, [loadStats])
+
+  async function handleSync() {
+    setSyncing(true)
+    setSyncMessage('')
+    try {
+      const result = await syncOrders()
+      const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
+      setSyncMessage(`Синхронизировано. Новых заказов: ${created}`)
+      await loadStats()
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : 'Ошибка синхронизации')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   if (!user) return null
 
@@ -15,30 +54,47 @@ export function DashboardPage() {
           <p>
             {isSeller && user.seller_name
               ? `Кабинет селлера: ${user.seller_name}`
-              : 'Обзор операций фулфилмента · обновление каждые 15 мин'}
+              : 'Обзор операций фулфилмента · автообновление каждые 15 мин'}
           </p>
         </div>
-        <button type="button" className="btn btn--primary">
-          Обновить данные WB
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={handleSync}
+          disabled={syncing}
+        >
+          {syncing ? 'Обновление…' : 'Обновить данные WB'}
         </button>
       </header>
+
+      {syncMessage && <div className="dashboard-sync-msg">{syncMessage}</div>}
 
       <section className="stats-grid">
         <StatCard
           label="Заказов сегодня"
-          value="—"
+          value={String(stats.orders_today)}
           hint={isSeller ? 'Ваши заказы' : 'Синхронизация с WB'}
           tone="blue"
         />
         {isAdmin && (
-          <StatCard label="Селлеров" value="—" hint="Подключено к API" tone="purple" />
+          <StatCard
+            label="Селлеров"
+            value={String(stats.sellers_count ?? '—')}
+            hint="Подключено к API"
+            tone="purple"
+          />
         )}
         {(isAdmin || isManager) && (
-          <StatCard label="На сборке" value="—" hint="Лист подбора" tone="orange" />
+          <StatCard
+            label="На сборке"
+            value={String(stats.in_picking)}
+            hint={`Новых: ${stats.new_orders}`}
+            tone="orange"
+          />
         )}
         <StatCard
           label={isSeller ? 'Мои остатки (SKU)' : 'Остатков (SKU)'}
-          value="—"
+          value={String(stats.sku_count)}
           hint="По ячейкам склада"
           tone="green"
         />
@@ -76,8 +132,8 @@ export function DashboardPage() {
           <ul className="checklist">
             <li className="checklist__item checklist__item--done">Авторизация JWT + роли</li>
             <li className="checklist__item checklist__item--done">Модуль приёмки товара</li>
-            <li className="checklist__item">Интеграция Wildberries FBS</li>
-            <li className="checklist__item">Модуль заказов и сборки</li>
+            <li className="checklist__item checklist__item--done">Модуль заказов и листа подбора</li>
+            <li className="checklist__item">Интеграция Wildberries FBS (токены)</li>
             <li className="checklist__item">Печать этикеток Xprinter</li>
           </ul>
         </div>

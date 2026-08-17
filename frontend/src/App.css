@@ -115,6 +115,15 @@
   font-size: 0.95rem;
 }
 
+.dashboard-sync-msg {
+  margin: -0.5rem 0 1rem;
+  padding: 0.65rem 1rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
 .btn {
   border: none;
   border-radius: 8px;
@@ -131,6 +140,16 @@
 
 .btn--primary:hover {
   background: #1d4ed8;
+}
+
+.btn--secondary {
+  background: #fff;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+}
+
+.btn--secondary:hover {
+  background: #f8fafc;
 }
 
 .btn--ghost {

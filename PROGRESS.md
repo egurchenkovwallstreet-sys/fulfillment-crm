@@ -13,8 +13,8 @@
 
 ## Текущий статус проекта
 **Дата последнего обновления:** 18.08.2026  
-**Общий статус:** 🔧 Исправление падения backend (контейнер web)  
-**Стадия:** Деплой фикса миграций + перезапуск на сервере
+**Общий статус:** 📦 Модуль заказов FBS и лист подбора готов  
+**Стадия:** Следующий шаг — печать этикеток FBS или полная интеграция WB (токены селлеров)
 
 **Выбранный стек:**
 - Backend: Python 3.12 + Django 5 + Django REST Framework
@@ -76,6 +76,8 @@
 | 16.08.2026 | Авторизация JWT + роли | ✅ | login, /me, страница входа, RBAC |
 | 17.08.2026 | Назначение админа | ✅ | E.Gurchenkov@yandex.ru |
 | 17.08.2026 | Модуль приёмки | ✅ | API + UI, ячейки, история |
+| 18.08.2026 | Починка деплоя (миграции, админка) | ✅ | web контейнер, :8080/admin |
+| 18.08.2026 | Модуль заказов FBS + лист подбора | ✅ | API, WB client, UI /orders |
 
 ---
 
@@ -83,10 +85,10 @@
 
 ### Backend (Django apps)
 - **accounts** — User с ролями (admin/manager/seller), JWT login, `/api/auth/me/`
-- **sellers** — модель Seller, WB-токен (зашифрованный, пока пустой)
-- **warehouse** — Cell, Product, PriceGroup, StockOperation; **приёмка** (`services/intake.py`, views)
-- **orders** — Order, PickList, Supply (модели, без API)
-- **integrations** — AuditLog, Celery tasks (WB sync — заглушка)
+- **sellers** — модель Seller, WB-токен (зашифрованный)
+- **warehouse** — Cell, Product, PriceGroup, StockOperation; **приёмка**
+- **orders** — Order, PickList, PickListItem; **синхронизация WB**, **лист подбора**
+- **integrations** — AuditLog, WB client (`wb_client.py`), Celery sync
 
 ### API endpoints (работают)
 | Метод | URL | Описание |
@@ -99,13 +101,19 @@
 | GET | `/api/warehouse/intake/lookup/` | Поиск баркода |
 | POST | `/api/warehouse/intake/` | Приёмка товара |
 | GET | `/api/warehouse/intake/history/` | История приёмок |
+| GET | `/api/orders/` | Список заказов FBS |
+| GET | `/api/orders/stats/` | KPI для дашборда |
+| POST | `/api/orders/sync/` | Ручная синхронизация WB |
+| GET | `/api/orders/pick-lists/` | Листы подбора |
+| POST | `/api/orders/pick-lists/generate/` | Сформировать лист по ячейкам |
+| GET | `/api/orders/pick-lists/<id>/` | Детали листа подбора |
 
 ### Frontend (React)
 - Страница входа `/login`
-- Дашборд `/` (по ролям)
+- Дашборд `/` (KPI, кнопка «Обновить данные WB»)
 - Приёмка `/intake` (admin + manager)
+- **Заказы `/orders`** — список, синхронизация WB, лист подбора, печать
 - Боковое меню, защищённые маршруты
-- API через nginx proxy `/api/` → backend
 
 ### Management commands
 - `python manage.py seed_cells` — создаёт ячейки 1..50 (если пусто)
@@ -118,9 +126,9 @@
 2. [x] Проектирование базы данных
 3. [x] Авторизация и роли (JWT, RBAC)
 4. [x] Модуль приёмки
-5. [x] **Починить админку** — миграции в git, entrypoint без makemigrations
-6. [ ] Модуль заказов и листа подбора
-7. [ ] Интеграция с API Wildberries FBS (тестовый контур)
+5. [x] Починить админку
+6. [x] **Модуль заказов и листа подбора**
+7. [ ] Интеграция с API Wildberries FBS (токены селлеров в админке)
 8. [ ] Модуль печати этикеток FBS (Xprinter 365/370)
 9. [ ] Модуль Честного знака
 10. [ ] Модуль поставок и ШК
@@ -136,22 +144,12 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Админка :8001 не открывается (502 / web unhealthy) | ✅ Исправлено | Ошибка импорта в `services/intake.py`: `.models` → `apps.warehouse.models` |
-| `git pull` конфликт docker-compose.yml | ⚠️ Было | На сервере: `git checkout -- docker-compose.yml` перед pull, или не править файл вручную |
-| Python на ПК не установлен | ✅ Решено | Docker только на сервере |
+| Админка без порта (404) | ℹ️ | Использовать `:8080/admin/` или `:8001/admin/` |
+| Нет токенов WB у селлеров | ⚠️ | Добавить в /admin → Селлеры → токен API |
+| Товары не привязаны к заказам | ℹ️ | Сначала приёмка, потом sync — баркоды должны совпадать |
+| `git pull` конфликт docker-compose.yml | ⚠️ Было | `git checkout -- docker-compose.yml` перед pull |
 | Xprinter из веб | ⚠️ Исследование | Локальный print-bridge |
-| Честный знак API WB | ⚠️ Тестирование | Тестовые КИЗ |
-| WB sync остатков | ⚠️ Заглушка | `sync_wb_stocks` — только лог, API не подключён |
-| Нет селлеров в БД для теста приёмки | ℹ️ | Добавить в /admin → Селлеры |
-
-### Диагностика админки (для ассистента)
-```bash
-cd /opt/fulfillment-crm
-docker compose ps
-docker compose logs web --tail 80
-curl -I http://127.0.0.1:8001/admin/
-docker compose up --build -d
-```
+| WB sync остатков | ⚠️ Заглушка | `sync_wb_stocks` — только лог |
 
 ---
 
@@ -165,7 +163,8 @@ docker compose up --build -d
 | 16.08.2026 | WhiteNoise, редизайн UI, frontend Docker :8080 | Ассистент |
 | 16.08.2026 | JWT авторизация, login page | Ассистент |
 | 17.08.2026 | Модуль приёмки (API + IntakePage) | Ассистент |
-| 18.08.2026 | Фикс: Django migrations в git, entrypoint, healthcheck web | Ассистент |
+| 18.08.2026 | Фикс деплоя, миграции, админка | Ассистент |
+| 18.08.2026 | Модуль заказов FBS + лист подбора | Ассистент |
 
 ---
 
@@ -174,6 +173,8 @@ docker compose up --build -d
 - `e40585d` — Fix admin styles, dashboard UI
 - `a87a128` — JWT authentication
 - `7e542d4` — Intake module
+- `6be50cc` — Fix intake import, admin works
+- (текущий) — Orders FBS + pick list module
 
 ---
 

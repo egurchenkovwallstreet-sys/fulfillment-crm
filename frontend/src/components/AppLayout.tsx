@@ -30,7 +30,9 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
-            <span className="sidebar__link sidebar__link--disabled">Заказы</span>
+            <NavLink to="/orders" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Заказы
+            </NavLink>
           )}
           {(isAdmin || isManager) && (
             <span className="sidebar__link sidebar__link--disabled">Поставки</span>
