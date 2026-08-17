@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 import httpx
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+PAGE_LIMIT = 1000
+REQUEST_INTERVAL_SEC = 0.25
 
 
 class WBApiError(Exception):
@@ -20,6 +24,14 @@ class WBApiError(Exception):
 class WBOrderData:
   wb_order_id: int
   barcode: str
+
+
+@dataclass
+class WBFetchResult:
+  orders: list[WBOrderData] = field(default_factory=list)
+  pages: int = 0
+  raw_total: int = 0
+  skipped_no_barcode: int = 0
 
 
 class WBClient:
@@ -42,6 +54,8 @@ class WBClient:
 
     if response.status_code == 401:
       raise WBApiError("Токен WB недействителен", status_code=401)
+    if response.status_code == 429:
+      raise WBApiError("Превышен лимит запросов WB API", status_code=429)
     if response.status_code >= 400:
       raise WBApiError(
         f"WB API ошибка {response.status_code}: {response.text[:200]}",
@@ -52,21 +66,51 @@ class WBClient:
       return {}
     return response.json()
 
-  def fetch_new_orders(self) -> list[WBOrderData]:
-    """GET /api/v3/orders/new — новые сборочные задания FBS."""
-    payload = self._request("GET", "/api/v3/orders/new")
-    orders = payload.get("orders", []) if isinstance(payload, dict) else []
-    result: list[WBOrderData] = []
+  def fetch_new_orders(self) -> WBFetchResult:
+    """GET /api/v3/orders/new — все новые сборочные задания FBS (с пагинацией)."""
+    result = WBFetchResult()
+    next_cursor = 0
+    seen_ids: set[int] = set()
 
-    for item in orders:
-      wb_id = item.get("id")
-      if wb_id is None:
-        continue
-      barcode = _extract_barcode(item)
-      if not barcode:
-        logger.warning("WB order %s without barcode, skipped", wb_id)
-        continue
-      result.append(WBOrderData(wb_order_id=int(wb_id), barcode=barcode))
+    while True:
+      payload = self._request(
+        "GET",
+        "/api/v3/orders/new",
+        params={"limit": PAGE_LIMIT, "next": next_cursor},
+      )
+      if not isinstance(payload, dict):
+        break
+
+      orders = payload.get("orders") or []
+      result.pages += 1
+      result.raw_total += len(orders)
+
+      for item in orders:
+        wb_id = item.get("id")
+        if wb_id is None:
+          continue
+        wb_id = int(wb_id)
+        if wb_id in seen_ids:
+          continue
+        seen_ids.add(wb_id)
+
+        barcode = _extract_barcode(item)
+        if not barcode:
+          result.skipped_no_barcode += 1
+          logger.warning("WB order %s without barcode, skipped", wb_id)
+          continue
+        result.orders.append(WBOrderData(wb_order_id=wb_id, barcode=barcode))
+
+      next_val = payload.get("next", 0) or 0
+      try:
+        next_cursor = int(next_val)
+      except (TypeError, ValueError):
+        next_cursor = 0
+
+      if not orders or next_cursor == 0:
+        break
+
+      time.sleep(REQUEST_INTERVAL_SEC)
 
     return result
 

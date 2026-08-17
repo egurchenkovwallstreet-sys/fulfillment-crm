@@ -35,7 +35,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   client = WBClient(token)
 
   try:
-    wb_orders = client.fetch_new_orders()
+    fetch_result = client.fetch_new_orders()
   except WBApiError as exc:
     AuditLog.objects.create(
       user=user,
@@ -46,6 +46,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     )
     raise SyncError(str(exc)) from exc
 
+  wb_orders = fetch_result.orders
   created = 0
   updated = 0
   skipped = 0
@@ -71,12 +72,18 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.WB_SYNC,
-    message=f"Синхронизация заказов WB: +{created}, обновлено {updated}",
+    message=(
+      f"Синхронизация заказов WB: +{created}, обновлено {updated}, "
+      f"из WB {fetch_result.raw_total}"
+    ),
     details={
       "created": created,
       "updated": updated,
       "without_product": skipped,
+      "skipped_no_barcode": fetch_result.skipped_no_barcode,
       "fetched": len(wb_orders),
+      "raw_total": fetch_result.raw_total,
+      "pages": fetch_result.pages,
       "synced_at": timezone.now().isoformat(),
     },
   )
@@ -87,6 +94,9 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "updated": updated,
     "without_product": skipped,
     "fetched": len(wb_orders),
+    "raw_total": fetch_result.raw_total,
+    "skipped_no_barcode": fetch_result.skipped_no_barcode,
+    "pages": fetch_result.pages,
   }
 
 

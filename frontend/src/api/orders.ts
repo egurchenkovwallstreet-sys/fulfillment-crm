@@ -56,6 +56,9 @@ export interface SyncResult {
   updated?: number
   without_product?: number
   fetched?: number
+  raw_total?: number
+  skipped_no_barcode?: number
+  pages?: number
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]
 }

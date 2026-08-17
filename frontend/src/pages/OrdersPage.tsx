@@ -27,7 +27,16 @@ function formatSyncMessage(result: Awaited<ReturnType<typeof syncOrders>>): stri
   const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
   const updated = result.updated ?? result.results?.reduce((s, r) => s + (r.updated ?? 0), 0) ?? 0
   const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
-  return `Синхронизация завершена: из WB получено ${fetched}, новых ${created}, обновлено ${updated}`
+  const rawTotal = result.raw_total ?? result.results?.reduce((s, r) => s + (r.raw_total ?? 0), 0) ?? fetched
+  const skippedBarcode =
+    result.skipped_no_barcode
+    ?? result.results?.reduce((s, r) => s + (r.skipped_no_barcode ?? 0), 0)
+    ?? 0
+  let message = `Синхронизация: в WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, обновлено ${updated}`
+  if (skippedBarcode > 0) {
+    message += `, без баркода пропущено ${skippedBarcode}`
+  }
+  return message
 }
 
 export function OrdersPage() {
