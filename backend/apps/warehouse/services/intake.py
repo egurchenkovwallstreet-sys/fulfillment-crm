@@ -4,7 +4,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.tasks import sync_wb_stocks
 from apps.sellers.models import Seller
 
-from .models import Cell, Product, StockOperation
+from apps.warehouse.models import Cell, Product, StockOperation
 
 
 class IntakeError(Exception):

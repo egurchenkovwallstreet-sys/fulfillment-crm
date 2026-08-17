@@ -136,7 +136,7 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Админка :8001 не открывается (502 / web unhealthy) | 🔧 В работе | nginx: Host web + /admin/ через :8080; PUBLIC_HOST в docker-compose (не .env) |
+| Админка :8001 не открывается (502 / web unhealthy) | ✅ Исправлено | Ошибка импорта в `services/intake.py`: `.models` → `apps.warehouse.models` |
 | `git pull` конфликт docker-compose.yml | ⚠️ Было | На сервере: `git checkout -- docker-compose.yml` перед pull, или не править файл вручную |
 | Python на ПК не установлен | ✅ Решено | Docker только на сервере |
 | Xprinter из веб | ⚠️ Исследование | Локальный print-bridge |
