@@ -21,10 +21,15 @@ ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS",
     default=["localhost", "127.0.0.1", "web"],
 )
+ALLOWED_HOSTS = [host for host in ALLOWED_HOSTS if host]
 # Внутренние хосты Docker/healthcheck — всегда разрешены, независимо от .env
 for _host in ("localhost", "127.0.0.1", "web"):
     if _host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(_host)
+# IP сервера задаётся в docker-compose (не в .env)
+PUBLIC_HOST = env("PUBLIC_HOST", default="")
+if PUBLIC_HOST and PUBLIC_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(PUBLIC_HOST)
 
 INSTALLED_APPS = [
     "django.contrib.admin",

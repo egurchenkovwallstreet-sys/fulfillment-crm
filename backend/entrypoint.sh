@@ -46,6 +46,11 @@ PY
 echo "Applying migrations..."
 python manage.py migrate --noinput --fake-initial
 
+if [[ "$1" == "celery" ]]; then
+  echo "Starting Celery..."
+  exec "$@"
+fi
+
 echo "Seeding warehouse cells..."
 python manage.py seed_cells || true
 

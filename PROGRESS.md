@@ -35,7 +35,7 @@
 | **Папка на сервере** | `/opt/fulfillment-crm` |
 | **IP сервера** | `5.129.243.246` (Timeweb VPS) |
 | **Frontend (дашборд)** | http://5.129.243.246:8080 |
-| **Backend + админка** | http://5.129.243.246:8001/admin |
+| **Backend + админка** | http://5.129.243.246:8001/admin или http://5.129.243.246:8080/admin |
 | **API** | http://5.129.243.246:8001/api/ (через nginx frontend: `/api/` → `web:8000`) |
 
 ### Изоляция от других проектов (НЕ ТРОГАТЬ!)
@@ -136,7 +136,7 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Админка :8001 не открывается (контейнер web unhealthy) | 🔧 В работе | Фикс: `--fake-initial`, healthcheck по порту, ALLOWED_HOSTS всегда включает localhost/web |
+| Админка :8001 не открывается (502 / web unhealthy) | 🔧 В работе | nginx: Host web + /admin/ через :8080; PUBLIC_HOST в docker-compose (не .env) |
 | `git pull` конфликт docker-compose.yml | ⚠️ Было | На сервере: `git checkout -- docker-compose.yml` перед pull, или не править файл вручную |
 | Python на ПК не установлен | ✅ Решено | Docker только на сервере |
 | Xprinter из веб | ⚠️ Исследование | Локальный print-bridge |
