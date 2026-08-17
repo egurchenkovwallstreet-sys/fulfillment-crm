@@ -43,9 +43,14 @@ for i in range(30):
         time.sleep(2)
 PY
 
-python manage.py makemigrations --noinput
+echo "Applying migrations..."
 python manage.py migrate --noinput
-python manage.py seed_cells
+
+echo "Seeding warehouse cells..."
+python manage.py seed_cells || true
+
+echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
+echo "Starting application..."
 exec "$@"
