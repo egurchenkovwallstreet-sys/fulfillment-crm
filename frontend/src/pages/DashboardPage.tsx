@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ProcessFlow } from '../components/ProcessFlow'
 import { StatCard } from '../components/StatCard'
-import { fetchOrderStats, syncOrders } from '../api/orders'
+import { fetchOrderStats, syncOrders, type OrderStats } from '../api/orders'
 import { useAuth } from '../context/AuthContext'
 
 export function DashboardPage() {
   const { user, isAdmin, isManager, isSeller } = useAuth()
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<OrderStats>({
     orders_today: 0,
     in_picking: 0,
     new_orders: 0,
