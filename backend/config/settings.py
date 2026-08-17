@@ -30,6 +30,10 @@ for _host in ("localhost", "127.0.0.1", "web"):
 PUBLIC_HOST = env("PUBLIC_HOST", default="")
 if PUBLIC_HOST and PUBLIC_HOST not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(PUBLIC_HOST)
+for _port in ("8080", "8001"):
+    _host_port = f"{PUBLIC_HOST}:{_port}" if PUBLIC_HOST else ""
+    if _host_port and _host_port not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_host_port)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -145,6 +149,19 @@ CORS_ALLOWED_ORIGINS = env.list(
         "http://127.0.0.1:8080",
     ],
 )
+
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+CSRF_TRUSTED_ORIGINS = [origin for origin in CSRF_TRUSTED_ORIGINS if origin]
+for _origin in CORS_ALLOWED_ORIGINS:
+    if _origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_origin)
+if PUBLIC_HOST:
+    for _port in ("8080", "8001"):
+        _origin = f"http://{PUBLIC_HOST}:{_port}"
+        if _origin not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(_origin)
+
+USE_X_FORWARDED_HOST = True
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379/0")
