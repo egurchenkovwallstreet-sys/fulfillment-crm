@@ -17,7 +17,14 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="dev-insecure-change-me-in-production")
 DEBUG = env("DEBUG")
-ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=["localhost", "127.0.0.1", "web"],
+)
+# Внутренние хосты Docker/healthcheck — всегда разрешены, независимо от .env
+for _host in ("localhost", "127.0.0.1", "web"):
+    if _host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_host)
 
 INSTALLED_APPS = [
     "django.contrib.admin",

@@ -136,7 +136,7 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Админка :8001 не открывается (контейнер web упал) | ✅ Исправлено в коде | Причина: миграции не были в git, `makemigrations` в entrypoint ломал старт. Добавлены migrations/, entrypoint только `migrate`. ALLOWED_HOSTS с IP в .env не используем (убирали ранее). Деплой: `git pull && docker compose up --build -d` |
+| Админка :8001 не открывается (контейнер web unhealthy) | 🔧 В работе | Фикс: `--fake-initial`, healthcheck по порту, ALLOWED_HOSTS всегда включает localhost/web |
 | `git pull` конфликт docker-compose.yml | ⚠️ Было | На сервере: `git checkout -- docker-compose.yml` перед pull, или не править файл вручную |
 | Python на ПК не установлен | ✅ Решено | Docker только на сервере |
 | Xprinter из веб | ⚠️ Исследование | Локальный print-bridge |

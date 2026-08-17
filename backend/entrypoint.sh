@@ -44,7 +44,7 @@ for i in range(30):
 PY
 
 echo "Applying migrations..."
-python manage.py migrate --noinput
+python manage.py migrate --noinput --fake-initial
 
 echo "Seeding warehouse cells..."
 python manage.py seed_cells || true
