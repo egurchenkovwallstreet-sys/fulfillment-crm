@@ -12,5 +12,6 @@ def sync_wb_orders():
 @shared_task
 def sync_wb_stocks(seller_id: int):
   """Push stock quantities to WB for a seller."""
-  # TODO: implement
-  pass
+  # TODO: implement WB FBS stocks API
+  import logging
+  logging.getLogger(__name__).info("WB stock sync queued for seller %s", seller_id)
