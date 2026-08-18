@@ -30,8 +30,8 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
-            <NavLink to="/orders" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
-              Заказы
+            <NavLink to="/assembly" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Сборка FBS
             </NavLink>
           )}
           {(isAdmin || isManager) && (

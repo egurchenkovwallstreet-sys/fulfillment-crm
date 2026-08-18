@@ -77,6 +77,9 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   PickListItem.objects.bulk_create(items)
 
   order_ids = [oid for data in grouped.values() for oid in data["order_ids"]]
-  Order.objects.filter(id__in=order_ids).update(status=Order.Status.IN_PICKING)
+  Order.objects.filter(id__in=order_ids).update(
+    status=Order.Status.IN_PICKING,
+    pick_list=pick_list,
+  )
 
   return pick_list

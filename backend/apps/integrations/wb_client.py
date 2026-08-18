@@ -114,6 +114,35 @@ class WBClient:
 
     return result
 
+  def fetch_order_stickers(
+    self,
+    order_ids: list[int],
+    *,
+    sticker_type: str = "png",
+    width: int = 58,
+    height: int = 40,
+  ) -> list[dict]:
+    """POST /api/v3/orders/stickers — стикеры сборочных заданий."""
+    if not order_ids:
+      return []
+
+    stickers: list[dict] = []
+    batch_size = 100
+
+    for i in range(0, len(order_ids), batch_size):
+      batch = order_ids[i : i + batch_size]
+      payload = self._request(
+        "POST",
+        "/api/v3/orders/stickers",
+        params={"type": sticker_type, "width": width, "height": height},
+        json={"orders": batch},
+      )
+      if isinstance(payload, dict):
+        stickers.extend(payload.get("stickers") or [])
+      time.sleep(REQUEST_INTERVAL_SEC)
+
+    return stickers
+
 
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []

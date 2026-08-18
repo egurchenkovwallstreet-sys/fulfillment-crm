@@ -7,13 +7,23 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsManager
 from apps.sellers.models import Seller
 
-from .models import Order, PickList
+from .models import Order, PickList, Supply
 from .serializers import (
+  OrderAssemblySerializer,
+  OrderPrintSerializer,
   OrderSerializer,
   OrderSyncSerializer,
   PickListBriefSerializer,
   PickListGenerateSerializer,
   PickListSerializer,
+  ScanPrintSerializer,
+  SellerAssemblyCountersSerializer,
+)
+from .services.assembly import (
+  AssemblyError,
+  get_seller_stage_counts,
+  scan_and_print,
+  start_assembly,
 )
 from .services.pick_list import PickListError, generate_pick_list
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
@@ -75,9 +85,7 @@ class OrderStatsView(APIView):
       "new_orders": new_orders,
     }
 
-    if user.role == "admin":
-      data["sellers_count"] = Seller.objects.filter(is_active=True).count()
-    elif user.role == "manager":
+    if user.role in ("admin", "manager"):
       data["sellers_count"] = Seller.objects.filter(is_active=True).count()
 
     from apps.warehouse.models import Product
@@ -111,7 +119,7 @@ class OrderSyncView(APIView):
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       return Response({"success": True, **result})
 
-    if not (user.role in ("admin", "manager")):
+    if user.role not in ("admin", "manager"):
       return Response(status=status.HTTP_403_FORBIDDEN)
 
     if seller_id:
@@ -167,3 +175,116 @@ class PickListGenerateView(APIView):
       PickListSerializer(pick_list).data,
       status=status.HTTP_201_CREATED,
     )
+
+
+class AssemblySellerListView(APIView):
+  """Список селлеров со счётчиками заказов по стадиям."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request):
+    sellers = Seller.objects.filter(is_active=True).order_by("company_name")
+    payload = []
+    for seller in sellers:
+      counts = get_seller_stage_counts(seller)
+      total_active = sum(
+        counts[k]
+        for k in ("new", "in_picking", "assembled", "label_printed", "marked", "in_supply")
+      )
+      payload.append({
+        "id": seller.id,
+        "company_name": seller.company_name,
+        **counts,
+        "total_active": total_active,
+      })
+    return Response(SellerAssemblyCountersSerializer(payload, many=True).data)
+
+
+class AssemblySellerDetailView(APIView):
+  """Кабинет сборки конкретного селлера."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    counts = get_seller_stage_counts(seller)
+    stage = request.query_params.get("stage", "")
+    orders_qs = Order.objects.filter(seller=seller).select_related("product", "product__cell")
+    if stage:
+      orders_qs = orders_qs.filter(status=stage)
+    else:
+      orders_qs = orders_qs.exclude(status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED])
+
+    orders = orders_qs.order_by("-created_at")[:300]
+
+    active_pick_list = (
+      PickList.objects.filter(seller=seller, is_completed=False)
+      .prefetch_related("items__cell", "items__product")
+      .order_by("-created_at")
+      .first()
+    )
+
+    supplies_forming = Supply.objects.filter(
+      seller=seller,
+      status=Supply.Status.FORMING,
+    ).count()
+
+    return Response({
+      "seller": {"id": seller.id, "company_name": seller.company_name},
+      "counts": counts,
+      "supplies_forming": supplies_forming,
+      "orders": OrderAssemblySerializer(orders, many=True).data,
+      "active_pick_list": (
+        PickListSerializer(active_pick_list).data if active_pick_list else None
+      ),
+    })
+
+
+class AssemblyStartView(APIView):
+  """Начать сборку: лист подбора + стикеры WB."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      result = start_assembly(seller, user=request.user)
+    except PickListError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    pick_list = PickList.objects.filter(pk=result["pick_list_id"]).first()
+    return Response({
+      "success": True,
+      **result,
+      "pick_list": PickListSerializer(pick_list).data if pick_list else None,
+    }, status=status.HTTP_201_CREATED)
+
+
+class AssemblyScanPrintView(APIView):
+  """Скан баркода → данные стикера для печати."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ScanPrintSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      order = scan_and_print(
+        seller,
+        serializer.validated_data["barcode"],
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({
+      "success": True,
+      "order": OrderPrintSerializer(order).data,
+    })

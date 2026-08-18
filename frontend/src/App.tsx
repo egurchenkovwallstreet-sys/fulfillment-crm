@@ -2,10 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { ManagerRoute, ProtectedRoute } from './components/ProtectedRoute'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { AssemblySellerPage } from './pages/AssemblySellerPage'
+import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { IntakePage } from './pages/IntakePage'
 import { LoginPage } from './pages/LoginPage'
-import { OrdersPage } from './pages/OrdersPage'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -27,7 +28,9 @@ function AppRoutes() {
           <Route path="/" element={<DashboardPage />} />
           <Route element={<ManagerRoute />}>
             <Route path="/intake" element={<IntakePage />} />
-            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/assembly" element={<AssemblySellersPage />} />
+            <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />
+            <Route path="/orders" element={<AssemblySellersPage />} />
           </Route>
         </Route>
       </Route>

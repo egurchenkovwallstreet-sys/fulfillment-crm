@@ -21,8 +21,48 @@ class OrderSerializer(serializers.ModelSerializer):
       "cell_number",
       "status",
       "status_display",
+      "has_sticker",
       "marking_bound",
       "created_at",
+    )
+
+
+class OrderAssemblySerializer(serializers.ModelSerializer):
+  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
+  status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+  class Meta:
+    model = Order
+    fields = (
+      "id",
+      "wb_order_id",
+      "barcode",
+      "cell_number",
+      "status",
+      "status_display",
+      "has_sticker",
+      "sticker_part_a",
+      "sticker_part_b",
+      "marking_bound",
+      "created_at",
+    )
+
+
+class OrderPrintSerializer(serializers.ModelSerializer):
+  status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+  class Meta:
+    model = Order
+    fields = (
+      "id",
+      "wb_order_id",
+      "barcode",
+      "status",
+      "status_display",
+      "sticker_file",
+      "sticker_part_a",
+      "sticker_part_b",
+      "has_sticker",
     )
 
 
@@ -87,6 +127,19 @@ class PickListBriefSerializer(serializers.ModelSerializer):
     return obj.items.count()
 
 
+class SellerAssemblyCountersSerializer(serializers.Serializer):
+  id = serializers.IntegerField()
+  company_name = serializers.CharField()
+  new = serializers.IntegerField()
+  in_picking = serializers.IntegerField()
+  assembled = serializers.IntegerField()
+  label_printed = serializers.IntegerField()
+  marked = serializers.IntegerField()
+  in_supply = serializers.IntegerField()
+  shipped = serializers.IntegerField()
+  total_active = serializers.IntegerField()
+
+
 class OrderSyncSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField(required=False, allow_null=True)
 
@@ -105,3 +158,7 @@ class PickListGenerateSerializer(serializers.Serializer):
     if not Seller.objects.filter(pk=value, is_active=True).exists():
       raise serializers.ValidationError("Селлер не найден или неактивен")
     return value
+
+
+class ScanPrintSerializer(serializers.Serializer):
+  barcode = serializers.CharField(max_length=200)

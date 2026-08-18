@@ -31,6 +31,18 @@ class Order(models.Model):
     choices=Status.choices,
     default=Status.NEW,
   )
+  pick_list = models.ForeignKey(
+    "PickList",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="orders",
+  )
+  has_sticker = models.BooleanField("Стикер получен", default=False)
+  sticker_file = models.TextField("Стикер (base64)", blank=True)
+  sticker_part_a = models.CharField("Стикер partA", max_length=50, blank=True)
+  sticker_part_b = models.CharField("Стикер partB", max_length=50, blank=True)
+  sticker_fetched_at = models.DateTimeField(null=True, blank=True)
   marking_code = models.CharField("Код Честного знака", max_length=500, blank=True)
   marking_bound = models.BooleanField("Маркировка привязана", default=False)
   created_at = models.DateTimeField(auto_now_add=True)
