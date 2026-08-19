@@ -13,6 +13,7 @@ from apps.orders.services.wb_status import (
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
+  is_wb_in_delivery,
   wb_in_delivery_q,
   save_wb_counts_to_seller,
 )
