@@ -15,6 +15,7 @@ from .serializers import (
   SellerBriefSerializer,
   StockOperationSerializer,
 )
+from .services.cells import cells_queryset_ordered
 from .services.intake import IntakeError, perform_intake
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
 
@@ -32,7 +33,7 @@ class CellListView(APIView):
 
   def get(self, request):
     free_only = request.query_params.get("free") == "1"
-    cells = Cell.objects.all().order_by("number")
+    cells = cells_queryset_ordered(Cell.objects.all())
     if free_only:
       cells = cells.filter(is_occupied=False)
     return Response(CellSerializer(cells, many=True).data)

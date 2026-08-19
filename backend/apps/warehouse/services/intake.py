@@ -5,6 +5,7 @@ from apps.integrations.tasks import sync_wb_stocks
 from apps.sellers.models import Seller
 
 from apps.warehouse.models import Cell, Product, StockOperation
+from apps.warehouse.services.cells import first_free_cell
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 
 
@@ -22,12 +23,7 @@ def _assign_cell(cell_mode: str, cell_id: int | None) -> Cell:
       raise IntakeError("Ячейка не найдена") from exc
     return cell
 
-  cell = (
-    Cell.objects.select_for_update()
-    .filter(is_occupied=False)
-    .order_by("number")
-    .first()
-  )
+  cell = first_free_cell()
   if not cell:
     raise IntakeError("Нет свободных ячеек")
   return cell

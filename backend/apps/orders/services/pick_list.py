@@ -64,7 +64,7 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   items: list[PickListItem] = []
   for (_cell_id, _product_id, barcode), data in sorted(
     grouped.items(),
-    key=lambda entry: entry[1]["cell"].number,
+    key=lambda entry: int(entry[1]["cell"].number),
   ):
     items.append(
       PickListItem(

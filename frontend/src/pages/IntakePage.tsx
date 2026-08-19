@@ -19,7 +19,7 @@ export function IntakePage() {
   const [history, setHistory] = useState<IntakeHistoryItem[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [barcode, setBarcode] = useState('')
-  const [quantity, setQuantity] = useState(1)
+  const [quantityInput, setQuantityInput] = useState('1')
   const [productName, setProductName] = useState('')
   const [cellMode, setCellMode] = useState<'auto' | 'manual'>('auto')
   const [cellId, setCellId] = useState<number | ''>('')
@@ -95,6 +95,12 @@ export function IntakePage() {
       return
     }
 
+    const quantity = parseInt(quantityInput, 10)
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      setError('Укажите количество — целое число от 1')
+      return
+    }
+
     setLoading(true)
     try {
       const result = await submitIntake({
@@ -112,7 +118,7 @@ export function IntakePage() {
       )
       setBarcode('')
       setLookup(null)
-      setQuantity(1)
+      setQuantityInput('1')
       setProductName('')
       setCellId('')
       const [cellsData, historyData] = await Promise.all([
@@ -280,10 +286,12 @@ export function IntakePage() {
                 <label className="intake-field intake-field--quantity">
                   Количество
                   <input
-                    type="number"
-                    min={1}
-                    value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={quantityInput}
+                    onChange={(e) => setQuantityInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1"
                     required
                   />
                 </label>
