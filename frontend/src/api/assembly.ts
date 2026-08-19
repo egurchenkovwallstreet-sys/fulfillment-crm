@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import type { PickList } from './orders'
+import type { SellerWarehouse } from './sellers'
 
 export interface SellerAssemblyCounters {
   id: number
@@ -38,6 +39,7 @@ export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   counts: Record<string, number>
   supplies_forming: number
+  warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
   active_pick_list: PickList | null
 }

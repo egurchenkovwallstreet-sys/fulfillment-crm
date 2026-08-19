@@ -7,6 +7,8 @@ from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order
 from apps.orders.services.sync_statuses import sync_order_statuses_for_seller
 from apps.sellers.models import Seller
+from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
+from apps.sellers.services.warehouse_filter import is_warehouse_enabled
 from apps.warehouse.models import Product
 
 
@@ -35,6 +37,12 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   token = _get_seller_token(seller)
   client = WBClient(token)
 
+  warehouse_sync_error = ""
+  try:
+    sync_seller_warehouses(seller, user=user)
+  except WarehouseSyncError as exc:
+    warehouse_sync_error = str(exc)
+
   try:
     fetch_result = client.fetch_new_orders()
   except WBApiError as exc:
@@ -51,8 +59,13 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   created = 0
   updated = 0
   skipped = 0
+  skipped_warehouse = 0
 
   for wb_order in wb_orders:
+    if not is_warehouse_enabled(seller, wb_order.warehouse_id):
+      skipped_warehouse += 1
+      continue
+
     product = _link_product(seller, wb_order.barcode)
     order, was_created = Order.objects.update_or_create(
       wb_order_id=wb_order.wb_order_id,
@@ -60,6 +73,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
         "seller": seller,
         "barcode": wb_order.barcode,
         "product": product,
+        "wb_warehouse_id": wb_order.warehouse_id,
       },
     )
     if was_created:
@@ -71,14 +85,17 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
 
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0}
   status_error = ""
-  new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders]
+  new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)]
+  enabled_new_total = sum(
+    1 for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)
+  )
   try:
     status_result = sync_order_statuses_for_seller(
       seller,
       client,
       user=user,
       new_wb_ids=new_wb_ids,
-      new_orders_total=fetch_result.raw_total,
+      new_orders_total=enabled_new_total,
     )
   except WBApiError as exc:
     status_error = str(exc)
@@ -98,6 +115,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "updated": updated,
       "without_product": skipped,
       "skipped_no_barcode": fetch_result.skipped_no_barcode,
+      "skipped_warehouse": skipped_warehouse,
+      "warehouse_sync_error": warehouse_sync_error,
       "fetched": len(wb_orders),
       "raw_total": fetch_result.raw_total,
       "pages": fetch_result.pages,
@@ -124,6 +143,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "fetched": len(wb_orders),
     "raw_total": fetch_result.raw_total,
     "skipped_no_barcode": fetch_result.skipped_no_barcode,
+    "skipped_warehouse": skipped_warehouse,
+    "warehouse_sync_error": warehouse_sync_error,
     "pages": fetch_result.pages,
     "statuses_fetched": status_result["statuses_fetched"],
     "statuses_updated": status_result["statuses_updated"],

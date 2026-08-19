@@ -11,6 +11,7 @@ import {
   type PrintOrder,
 } from '../api/assembly'
 import { syncOrders } from '../api/orders'
+import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import './AssemblyPage.css'
 
 const STAGES = [
@@ -109,6 +110,33 @@ export function AssemblySellerPage() {
       setError(err instanceof Error ? err.message : 'Ошибка начала сборки')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleSyncWarehouses() {
+    if (!id) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await syncSellerWarehouses(id)
+      setSuccess(`Склады WB обновлены: ${result.total} шт.`)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleToggleWarehouse(warehouseId: number, isEnabled: boolean) {
+    if (!id) return
+    setError('')
+    try {
+      await toggleSellerWarehouse(id, warehouseId, isEnabled)
+      setSuccess(isEnabled ? 'Склад включён — заказы будут видны' : 'Склад выключен — заказы скрыты')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка переключения склада')
     }
   }
 
@@ -252,6 +280,45 @@ export function AssemblySellerPage() {
             <span className="assembly-stage__label">{s.label}</span>
           </button>
         ))}
+      </section>
+
+      <section className="panel assembly-warehouses">
+        <div className="assembly-warehouses__header">
+          <h2 className="section-title">Точки отгрузки WB</h2>
+          <button
+            type="button"
+            className="btn btn--secondary btn--small"
+            onClick={handleSyncWarehouses}
+            disabled={loading}
+          >
+            Загрузить из WB
+          </button>
+        </div>
+        <p className="assembly-warehouses__hint">
+          Включите только те склады, которые обслуживает ваш фулфилмент. Выключенные склады полностью скрыты.
+        </p>
+        {data.warehouses.length === 0 ? (
+          <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB», чтобы получить список складов</p>
+        ) : (
+          <ul className="assembly-warehouses__list">
+            {data.warehouses.map((wh) => (
+              <li key={wh.id} className={wh.is_enabled ? '' : 'assembly-warehouses__item--off'}>
+                <label className="assembly-warehouses__toggle">
+                  <input
+                    type="checkbox"
+                    checked={wh.is_enabled}
+                    onChange={(e) => handleToggleWarehouse(wh.id, e.target.checked)}
+                    disabled={loading}
+                  />
+                  <span className="assembly-warehouses__name">
+                    {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                  </span>
+                </label>
+                {wh.address && <span className="assembly-warehouses__addr">{wh.address}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <div className="assembly-grid">

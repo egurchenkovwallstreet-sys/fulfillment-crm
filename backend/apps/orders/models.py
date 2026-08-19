@@ -20,6 +20,7 @@ class Order(models.Model):
   )
   wb_order_id = models.BigIntegerField("ID заказа WB", unique=True)
   barcode = models.CharField("Баркод заказа", max_length=100)
+  wb_warehouse_id = models.BigIntegerField("ID склада WB", null=True, blank=True, db_index=True)
   product = models.ForeignKey(
     "warehouse.Product",
     on_delete=models.PROTECT,

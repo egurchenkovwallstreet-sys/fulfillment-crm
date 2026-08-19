@@ -19,6 +19,7 @@ from apps.orders.services.wb_status import (
   save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 
 SYNC_VERSION = "delivery-v6"
 
@@ -35,7 +36,8 @@ def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
 
 def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
   updated = 0
-  for order in Order.objects.filter(seller=seller):
+  orders_qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
+  for order in orders_qs:
     data = status_map.get(order.wb_order_id)
     if not data:
       continue
@@ -117,7 +119,10 @@ def sync_order_statuses_for_seller(
   new_orders_total: int = 0,
 ) -> dict:
   wb_ids = list(
-    Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
+    filter_orders_for_seller(Order.objects.filter(seller=seller), seller).values_list(
+      "wb_order_id",
+      flat=True,
+    )
   )
   if not wb_ids:
     counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
@@ -148,7 +153,7 @@ def sync_order_statuses_for_seller(
     "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
 
-  live_counts = compute_live_wb_counts(status_map)
+  live_counts = compute_live_wb_counts(status_map, allowed_ids=set(wb_ids))
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
 

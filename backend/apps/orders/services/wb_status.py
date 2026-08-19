@@ -124,9 +124,15 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   return False
 
 
-def compute_live_wb_counts(status_map: dict[int, dict]) -> dict[str, int]:
+def compute_live_wb_counts(
+  status_map: dict[int, dict],
+  *,
+  allowed_ids: set[int] | None = None,
+) -> dict[str, int]:
   counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
-  for item in status_map.values():
+  for order_id, item in status_map.items():
+    if allowed_ids is not None and order_id not in allowed_ids:
+      continue
     supplier = (item.get("supplierStatus") or "").strip()
     wb = (item.get("wbStatus") or "").strip()
     if is_wb_cancelled(supplier, wb):

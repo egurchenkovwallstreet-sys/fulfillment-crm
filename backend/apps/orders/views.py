@@ -6,9 +6,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
-from apps.sellers.models import Seller
+from apps.sellers.models import Seller, SellerWarehouse
+from apps.sellers.serializers import SellerWarehouseSerializer
 
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW, wb_active_q, wb_in_delivery_q
+from apps.sellers.services.warehouse_filter import filter_orders_queryset
 
 from .models import Order, PickList, Supply
 from .serializers import (
@@ -59,8 +61,9 @@ def _orders_queryset_for_user(user):
   if user.role == "seller":
     if not user.seller_id:
       return qs.none()
-    return qs.filter(seller_id=user.seller_id)
-  return qs
+    qs = qs.filter(seller_id=user.seller_id)
+    return filter_orders_queryset(qs, seller=Seller.objects.filter(pk=user.seller_id).first())
+  return filter_orders_queryset(qs)
 
 
 def _pick_lists_queryset_for_user(user):
@@ -291,7 +294,10 @@ class AssemblySellerDetailView(APIView):
 
     counts = get_seller_stage_counts(seller)
     stage = request.query_params.get("stage", "")
-    orders_qs = Order.objects.filter(seller=seller).select_related("product", "product__cell")
+    orders_qs = filter_orders_queryset(
+      Order.objects.filter(seller=seller).select_related("product", "product__cell"),
+      seller=seller,
+    )
     if stage in WB_STAGE_QUERIES:
       orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())
     elif stage:
@@ -313,10 +319,13 @@ class AssemblySellerDetailView(APIView):
       status=Supply.Status.FORMING,
     ).count()
 
+    warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "counts": counts,
       "supplies_forming": supplies_forming,
+      "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
       "active_pick_list": (
         PickListSerializer(active_pick_list).data if active_pick_list else None

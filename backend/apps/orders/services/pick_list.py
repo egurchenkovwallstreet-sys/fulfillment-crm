@@ -5,6 +5,7 @@ from django.db import transaction
 from apps.orders.models import Order, PickList, PickListItem
 from apps.orders.services.wb_status import WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.warehouse.models import Cell, Product
 
 
@@ -15,10 +16,13 @@ class PickListError(Exception):
 @transaction.atomic
 def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   orders = list(
-    Order.objects.filter(
-      seller=seller,
-      status=Order.Status.NEW,
-      wb_supplier_status__in=[WB_SUPPLIER_NEW, ""],
+    filter_orders_for_seller(
+      Order.objects.filter(
+        seller=seller,
+        status=Order.Status.NEW,
+        wb_supplier_status__in=[WB_SUPPLIER_NEW, ""],
+      ),
+      seller,
     ).select_related("product", "product__cell")
   )
 

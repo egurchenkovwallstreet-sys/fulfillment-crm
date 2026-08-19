@@ -24,6 +24,15 @@ class WBApiError(Exception):
 class WBOrderData:
   wb_order_id: int
   barcode: str
+  warehouse_id: int | None = None
+
+
+@dataclass
+class WBWarehouseData:
+  wb_warehouse_id: int
+  name: str = ""
+  address: str = ""
+  office_id: int | None = None
 
 
 @dataclass
@@ -99,7 +108,13 @@ class WBClient:
           result.skipped_no_barcode += 1
           logger.warning("WB order %s without barcode, skipped", wb_id)
           continue
-        result.orders.append(WBOrderData(wb_order_id=wb_id, barcode=barcode))
+        result.orders.append(
+          WBOrderData(
+            wb_order_id=wb_id,
+            barcode=barcode,
+            warehouse_id=_extract_warehouse_id(item),
+          )
+        )
 
       next_val = payload.get("next", 0) or 0
       try:
@@ -198,6 +213,15 @@ class WBClient:
 
     return ids
 
+  def fetch_seller_warehouses(self) -> list[dict]:
+    """GET /api/v3/warehouses — склады продавца FBS."""
+    payload = self._request("GET", "/api/v3/warehouses")
+    if isinstance(payload, list):
+      return payload
+    if isinstance(payload, dict):
+      return payload.get("warehouses") or payload.get("data") or []
+    return []
+
   def bind_order_sgtin(self, order_id: int, sgtins: list[str]) -> None:
     """PUT /api/v3/orders/{orderId}/meta/sgtin — привязка кода ЧЗ к сборочному заданию."""
     if not sgtins:
@@ -225,3 +249,13 @@ def _extract_barcode(order_item: dict) -> str:
   if article:
     return str(article).strip()
   return ""
+
+
+def _extract_warehouse_id(order_item: dict) -> int | None:
+  wh_id = order_item.get("warehouseId")
+  if wh_id is None:
+    return None
+  try:
+    return int(wh_id)
+  except (TypeError, ValueError):
+    return None
