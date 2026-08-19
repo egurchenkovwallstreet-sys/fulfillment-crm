@@ -161,6 +161,16 @@ class OrderSyncView(APIView):
       return Response({"success": True, **result})
 
     payload = sync_all_active_sellers(user=user)
+    if payload.get("results"):
+      first = payload["results"][0]
+      payload.update({
+        k: first[k]
+        for k in (
+          "live_counts", "delivery_all", "delivery_recent", "reconcile",
+          "statuses_updated", "statuses_fetched", "raw_total", "fetched", "created",
+        )
+        if k in first
+      })
     return Response({"success": True, **payload})
 
 

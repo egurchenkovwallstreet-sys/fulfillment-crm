@@ -44,10 +44,14 @@ export function DashboardPage() {
       const deliveryAll = result.delivery_all ?? result.results?.[0]?.delivery_all
       let msg = `В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`
       if (inDelivery !== undefined) {
-        msg += `. В доставке (WB): ${inDelivery}`
+        msg += `. В доставке: ${inDelivery}`
         if (deliveryAll !== undefined && deliveryAll !== inDelivery) {
-          msg += ` (всего в API без фильтра: ${deliveryAll})`
+          msg += ` (в API без фильтра: ${deliveryAll})`
         }
+      }
+      const reconcile = result.reconcile ?? result.results?.[0]?.reconcile
+      if (reconcile?.shipped_stale) {
+        msg += `, архив ${reconcile.shipped_stale}`
       }
       setSyncMessage(msg)
       await loadStats()

@@ -13,13 +13,13 @@ from apps.orders.services.wb_status import (
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
-  is_wb_in_delivery,
+  wb_in_delivery_q,
   save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
 
 # Как вкладка «В доставке» в ЛК WB — только заказы за последние N дней
-DELIVERY_COUNT_DAYS = 7
+DELIVERY_COUNT_DAYS = 5
 
 
 def _count_delivery_all(status_map: dict[int, dict]) -> int:
@@ -44,6 +44,14 @@ def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> in
     if apply_wb_status_to_order(order, supplier, wb):
       updated += 1
   return updated
+
+
+def _delivery_count_from_db(seller: Seller, recent_ids: set[int]) -> int:
+  """Счёт «В доставке» из БД после reconcile — без выкупа, отмен и архива."""
+  qs = Order.objects.filter(seller=seller).filter(wb_in_delivery_q())
+  if recent_ids:
+    qs = qs.filter(wb_order_id__in=recent_ids)
+  return qs.count()
 
 
 def reconcile_wb_orders_for_seller(
@@ -159,6 +167,7 @@ def sync_order_statuses_for_seller(
 
   delivery_all = _count_delivery_all(status_map)
   live_counts = compute_live_wb_counts(status_map, delivery_wb_ids=delivery_ids)
+  live_counts["in_delivery"] = _delivery_count_from_db(seller, recent_ids)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
   save_wb_counts_to_seller(seller, live_counts)
