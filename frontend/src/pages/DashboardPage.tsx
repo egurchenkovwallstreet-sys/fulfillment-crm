@@ -38,7 +38,13 @@ export function DashboardPage() {
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const rawTotal = result.raw_total ?? result.results?.reduce((s, r) => s + (r.raw_total ?? 0), 0) ?? fetched
       const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
-      setSyncMessage(`В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`)
+      const wbCounts = result.wb_counts ?? result.results?.[0]?.wb_counts
+      const inDelivery = wbCounts?.in_delivery
+      let msg = `В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`
+      if (inDelivery !== undefined) {
+        msg += `. В доставке: ${inDelivery}`
+      }
+      setSyncMessage(msg)
       await loadStats()
     } catch (err) {
       setSyncMessage(err instanceof Error ? err.message : 'Ошибка синхронизации')

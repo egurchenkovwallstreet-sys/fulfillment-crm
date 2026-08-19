@@ -16,10 +16,20 @@ CANCEL_WB_STATUSES = frozenset({
   "cancel",
 })
 
-# Заказ уже вышел из вкладки «В доставке» в ЛК WB (завершён / выдан)
+# Активная доставка — как во вкладке «В доставке» в ЛК WB
+WB_ACTIVE_DELIVERY_WB_STATUSES = frozenset({
+  "waiting",
+  "sorted",
+  "postponed_delivery",
+  "accepted_by_carrier",
+  "sent_to_carrier",
+})
+
+# Заказ уже вышел из вкладки «В доставке» (завершён / выдан / отменён на стороне WB)
 WB_DELIVERED_WB_STATUSES = frozenset({
   "sold",
   "ready_for_pickup",
+  "defect",
 })
 
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
@@ -46,10 +56,10 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """Как вкладка «В доставке» в ЛК WB: complete, но ещё не sold/выдан."""
+  """Как вкладка «В доставке» в ЛК WB: complete + активный wbStatus."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & ~Q(wb_status__in=WB_DELIVERED_WB_STATUSES)
+    & Q(wb_status__in=WB_ACTIVE_DELIVERY_WB_STATUSES)
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 
@@ -71,7 +81,7 @@ def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
     return False
   if is_wb_cancelled(supplier_status, wb_status):
     return False
-  return wb_status not in WB_DELIVERED_WB_STATUSES
+  return wb_status in WB_ACTIVE_DELIVERY_WB_STATUSES
 
 
 def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str) -> bool:

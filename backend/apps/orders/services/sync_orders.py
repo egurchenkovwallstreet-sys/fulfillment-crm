@@ -95,6 +95,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "statuses_fetched": status_result["statuses_fetched"],
       "statuses_updated": status_result["statuses_updated"],
       "status_error": status_error,
+      "wb_counts": status_result.get("counts", {}),
+      "reconcile": status_result.get("reconcile", {}),
       "synced_at": timezone.now().isoformat(),
     },
   )
