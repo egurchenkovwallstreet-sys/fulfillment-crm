@@ -79,9 +79,35 @@ class OrderStatsView(APIView):
     in_picking = orders_qs.filter(
       status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED]
     ).count()
-    new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
-    in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
-    in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
+
+    from django.db.models import Sum
+    from apps.warehouse.models import Product
+
+    if user.role == "seller" and user.seller_id:
+      seller = Seller.objects.filter(pk=user.seller_id).first()
+      if seller and seller.wb_counts_synced_at:
+        new_orders = seller.wb_count_new
+        in_assembly = seller.wb_count_assembly
+        in_delivery = seller.wb_count_delivery
+      else:
+        new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
+        in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
+        in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
+    else:
+      sellers_qs = Seller.objects.filter(is_active=True)
+      if sellers_qs.filter(wb_counts_synced_at__isnull=False).exists():
+        agg = sellers_qs.aggregate(
+          new_orders=Sum("wb_count_new"),
+          in_assembly=Sum("wb_count_assembly"),
+          in_delivery=Sum("wb_count_delivery"),
+        )
+        new_orders = agg["new_orders"] or 0
+        in_assembly = agg["in_assembly"] or 0
+        in_delivery = agg["in_delivery"] or 0
+      else:
+        new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
+        in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
+        in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
 
     data = {
       "orders_today": orders_today,
@@ -93,8 +119,6 @@ class OrderStatsView(APIView):
 
     if user.role in ("admin", "manager"):
       data["sellers_count"] = Seller.objects.filter(is_active=True).count()
-
-    from apps.warehouse.models import Product
 
     products_qs = Product.objects.all()
     if user.role == "seller" and user.seller_id:

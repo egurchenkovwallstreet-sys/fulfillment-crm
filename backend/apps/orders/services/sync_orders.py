@@ -71,8 +71,11 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
 
   status_result = {"statuses_fetched": 0, "statuses_updated": 0}
   status_error = ""
+  new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders]
   try:
-    status_result = sync_order_statuses_for_seller(seller, client, user=user)
+    status_result = sync_order_statuses_for_seller(
+      seller, client, user=user, new_wb_ids=new_wb_ids,
+    )
   except WBApiError as exc:
     status_error = str(exc)
 
@@ -96,6 +99,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "statuses_updated": status_result["statuses_updated"],
       "status_error": status_error,
       "wb_counts": status_result.get("counts", {}),
+      "live_counts": status_result.get("live_counts", {}),
       "reconcile": status_result.get("reconcile", {}),
       "synced_at": timezone.now().isoformat(),
     },
@@ -113,6 +117,9 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "statuses_fetched": status_result["statuses_fetched"],
     "statuses_updated": status_result["statuses_updated"],
     "status_error": status_error,
+    "wb_counts": status_result.get("counts", {}),
+    "live_counts": status_result.get("live_counts", {}),
+    "reconcile": status_result.get("reconcile", {}),
   }
 
 

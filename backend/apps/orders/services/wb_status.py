@@ -119,3 +119,44 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
     order.save(update_fields=sorted(changed_fields))
     return True
   return False
+
+
+def compute_live_wb_counts(
+  status_map: dict[int, dict],
+  *,
+  active_wb_ids: set[int] | None = None,
+) -> dict[str, int]:
+  """Счётчики из ответа WB — только актуальные заказы (как вкладки ЛК)."""
+  counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
+  for wb_id, item in status_map.items():
+    if active_wb_ids is not None and wb_id not in active_wb_ids:
+      continue
+    supplier = (item.get("supplierStatus") or "").strip()
+    wb = (item.get("wbStatus") or "").strip()
+    if is_wb_cancelled(supplier, wb):
+      counts["cancelled"] += 1
+    elif supplier == WB_SUPPLIER_NEW:
+      counts["new"] += 1
+    elif supplier == WB_SUPPLIER_ASSEMBLY:
+      counts["in_picking"] += 1
+    elif is_wb_in_delivery(supplier, wb):
+      counts["in_delivery"] += 1
+  return counts
+
+
+def save_wb_counts_to_seller(seller, counts: dict[str, int]) -> None:
+  from django.utils import timezone
+
+  seller.wb_count_new = counts.get("new", 0)
+  seller.wb_count_assembly = counts.get("in_picking", 0)
+  seller.wb_count_delivery = counts.get("in_delivery", 0)
+  seller.wb_counts_synced_at = timezone.now()
+  seller.save(
+    update_fields=[
+      "wb_count_new",
+      "wb_count_assembly",
+      "wb_count_delivery",
+      "wb_counts_synced_at",
+      "updated_at",
+    ]
+  )

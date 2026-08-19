@@ -9,8 +9,23 @@ from apps.orders.services.wb_status import (
   WB_DELIVERED_WB_STATUSES,
   WB_SUPPLIER_DELIVERY,
   apply_wb_status_to_order,
+  compute_live_wb_counts,
+  save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
+
+
+def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
+  updated = 0
+  for order in Order.objects.filter(seller=seller):
+    data = status_map.get(order.wb_order_id)
+    if not data:
+      continue
+    supplier = (data.get("supplierStatus") or "").strip()
+    wb = (data.get("wbStatus") or "").strip()
+    if apply_wb_status_to_order(order, supplier, wb):
+      updated += 1
+  return updated
 
 
 def reconcile_wb_orders_for_seller(
@@ -47,7 +62,6 @@ def reconcile_wb_orders_for_seller(
     shipped_missing = Order.objects.filter(
       seller=seller,
       wb_order_id__in=missing_ids,
-      wb_supplier_status=WB_SUPPLIER_DELIVERY,
     ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
   result = {
@@ -71,18 +85,21 @@ def reconcile_wb_orders_for_seller(
   return result
 
 
-def sync_order_statuses_for_seller(seller: Seller, client: WBClient, *, user=None) -> dict:
-  """Запросить статусы WB для всех заказов селлера, обновить CRM и сверить счётчики."""
+def sync_order_statuses_for_seller(
+  seller: Seller,
+  client: WBClient,
+  *,
+  user=None,
+  new_wb_ids: list[int] | None = None,
+) -> dict:
+  """Запросить статусы WB, обновить заказы и сохранить живые счётчики как в ЛК WB."""
   wb_ids = list(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
   )
   if not wb_ids:
-    counts = get_seller_stage_counts(seller)
-    return {
-      "statuses_fetched": 0,
-      "statuses_updated": 0,
-      "counts": counts,
-    }
+    counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
+    save_wb_counts_to_seller(seller, counts)
+    return {"statuses_fetched": 0, "statuses_updated": 0, "counts": counts}
 
   try:
     wb_statuses = client.fetch_order_statuses(wb_ids)
@@ -102,24 +119,26 @@ def sync_order_statuses_for_seller(seller: Seller, client: WBClient, *, user=Non
     if item.get("id") is not None
   }
 
-  updated = 0
-  for order in Order.objects.filter(seller=seller):
-    data = status_map.get(order.wb_order_id)
-    if not data:
-      continue
-    if apply_wb_status_to_order(
-      order,
-      data.get("supplierStatus") or "",
-      data.get("wbStatus") or "",
-    ):
-      updated += 1
-
+  updated = _apply_statuses_to_orders(seller, status_map)
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
+
+  try:
+    recent_ids = client.fetch_recent_order_ids(days=30)
+  except WBApiError:
+    recent_ids = set()
+
+  active_ids = recent_ids | set(new_wb_ids or [])
+  if not active_ids:
+    active_ids = set(status_map.keys())
+
+  live_counts = compute_live_wb_counts(status_map, active_wb_ids=active_ids)
+  save_wb_counts_to_seller(seller, live_counts)
   counts = get_seller_stage_counts(seller)
 
   return {
     "statuses_fetched": len(status_map),
     "statuses_updated": updated,
+    "live_counts": live_counts,
     "reconcile": reconcile,
     "counts": counts,
   }

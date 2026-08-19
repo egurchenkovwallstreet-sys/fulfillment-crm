@@ -164,6 +164,40 @@ class WBClient:
 
     return statuses
 
+  def fetch_recent_order_ids(self, days: int = 30) -> set[int]:
+    """GET /api/v3/orders — ID заказов за последние N дней (как в ЛК WB)."""
+    date_from = int(time.time()) - days * 24 * 3600
+    ids: set[int] = set()
+    next_cursor = 0
+
+    while True:
+      payload = self._request(
+        "GET",
+        "/api/v3/orders",
+        params={"limit": PAGE_LIMIT, "next": next_cursor, "dateFrom": date_from},
+      )
+      if not isinstance(payload, dict):
+        break
+
+      orders = payload.get("orders") or []
+      for item in orders:
+        wb_id = item.get("id")
+        if wb_id is not None:
+          ids.add(int(wb_id))
+
+      next_val = payload.get("next", 0) or 0
+      try:
+        next_cursor = int(next_val)
+      except (TypeError, ValueError):
+        next_cursor = 0
+
+      if not orders or next_cursor == 0:
+        break
+
+      time.sleep(REQUEST_INTERVAL_SEC)
+
+    return ids
+
 
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []
