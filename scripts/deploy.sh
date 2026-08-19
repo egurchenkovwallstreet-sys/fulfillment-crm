@@ -8,19 +8,39 @@ git reset --hard origin/main
 git log -1 --oneline
 
 echo "=== build ==="
-docker compose build --no-cache frontend web worker
+docker compose build frontend web worker
 
-echo "=== up ==="
-docker compose up -d frontend web worker
+echo "=== up db/redis ==="
+docker compose up -d db redis
 
-echo "=== wait ==="
-sleep 8
+echo "=== up web (migrations + gunicorn) ==="
+docker compose up -d web
+
+echo "=== wait for backend health ==="
+ok=0
+for i in $(seq 1 60); do
+  if curl -fsS http://127.0.0.1:8001/api/health/ >/dev/null 2>&1; then
+    ok=1
+    break
+  fi
+  sleep 5
+done
+if [[ "$ok" -ne 1 ]]; then
+  echo "ERROR: backend did not become healthy in time"
+  docker compose ps
+  docker compose logs web --tail 80
+  exit 1
+fi
+
+echo "=== up worker + frontend ==="
+docker compose up -d worker frontend
 
 echo "=== backend version ==="
-curl -fsS http://127.0.0.1:8001/api/health/ || curl -fsS http://127.0.0.1:8080/api/health/
+curl -fsS http://127.0.0.1:8001/api/health/
 echo
 
-echo "=== frontend bundle ==="
-curl -fsS http://127.0.0.1:8080/ | head -5
+echo "=== frontend ==="
+curl -fsS -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8080/ || true
 
 echo "=== done ==="
+docker compose ps

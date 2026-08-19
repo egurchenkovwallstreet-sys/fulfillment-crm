@@ -67,12 +67,12 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import socket; s=socket.create_connection(('127.0.0.1',8000),2); s.close()\"",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)\"",
         ]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 120s
+      retries: 18
+      start_period: 180s
     restart: unless-stopped
 
   worker:
@@ -93,6 +93,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      web:
         condition: service_healthy
     command: celery -A config worker --loglevel=info --concurrency=2
     restart: unless-stopped
@@ -115,6 +117,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      web:
+        condition: service_healthy
     command: celery -A config beat --loglevel=info
     restart: unless-stopped
 
@@ -127,7 +131,7 @@ services:
       - "8080:80"
     depends_on:
       web:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 networks:

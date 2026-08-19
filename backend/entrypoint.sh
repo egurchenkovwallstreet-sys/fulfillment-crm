@@ -43,12 +43,16 @@ for i in range(30):
         time.sleep(2)
 PY
 
-echo "Applying migrations..."
-python manage.py migrate --noinput --fake-initial
-
+# Миграции только в web — worker/beat параллельно ломали sellers.0003 (duplicate sequence).
 if [[ "$1" == "celery" ]]; then
   echo "Starting Celery..."
   exec "$@"
+fi
+
+echo "Applying migrations..."
+if ! python manage.py migrate --noinput --fake-initial; then
+  echo "Migration failed. Check: docker compose exec web python manage.py showmigrations"
+  exit 1
 fi
 
 echo "Seeding warehouse cells..."
