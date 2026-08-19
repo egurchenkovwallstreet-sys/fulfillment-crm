@@ -91,7 +91,7 @@ def reconcile_wb_orders_for_seller(
       seller=seller,
       wb_supplier_status=WB_SUPPLIER_DELIVERY,
     ).exclude(wb_order_id__in=recent_ids).exclude(
-      wb_status__in=WB_TERMINAL_WB_STATUSES,
+      wb_status__in=WB_TERMINAL_WB_STATUSES | frozenset({"waiting"}),
     ).exclude(wb_status="").exclude(
       status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
     ).update(status=Order.Status.SHIPPED, updated_at=now)

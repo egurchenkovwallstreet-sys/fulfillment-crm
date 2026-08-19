@@ -29,6 +29,14 @@ WB_DELIVERED_WB_STATUSES = frozenset({
 # Все терминальные wbStatus — исключаем из вкладки «В доставке»
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
+# Реально «В доставке» в ЛК WB (без waiting — ещё не принят на склад WB)
+WB_IN_TRANSIT_WB_STATUSES = frozenset({
+  "sorted",
+  "postponed_delivery",
+  "accepted_by_carrier",
+  "sent_to_carrier",
+})
+
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
   WB_SUPPLIER_NEW,
   WB_SUPPLIER_ASSEMBLY,
@@ -53,11 +61,10 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """В доставке: complete, кроме выкупленных, отмен и отказов."""
+  """В доставке: complete + в пути, без выкупа, отмен, отказов и waiting."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & ~Q(wb_status__in=WB_TERMINAL_WB_STATUSES)
-    & ~Q(wb_status="")
+    & Q(wb_status__in=WB_IN_TRANSIT_WB_STATUSES)
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 
@@ -75,14 +82,14 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
 
 
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
-  """complete + любой активный wbStatus, кроме выкупа/отмены/отказа."""
+  """complete + в пути (sorted/carrier), без выкупа, отмен, отказов и waiting."""
   if supplier_status != WB_SUPPLIER_DELIVERY:
     return False
   if is_wb_cancelled(supplier_status, wb_status):
     return False
   if wb_status in WB_DELIVERED_WB_STATUSES:
     return False
-  return bool(wb_status)
+  return wb_status in WB_IN_TRANSIT_WB_STATUSES
 
 
 def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str) -> bool:
