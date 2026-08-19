@@ -66,7 +66,16 @@ export interface SyncResult {
   status_error?: string
   wb_counts?: { new?: number; in_picking?: number; in_delivery?: number }
   live_counts?: { new?: number; in_picking?: number; in_delivery?: number }
-  reconcile?: { shipped_delivered?: number; shipped_inactive?: number; shipped_missing?: number }
+  delivery_all?: number
+  delivery_recent?: number
+  reconcile?: {
+    cancelled_terminal?: number
+    shipped_delivered?: number
+    shipped_missing?: number
+    shipped_stale?: number
+    delivery_window_days?: number
+    recent_order_ids?: number
+  }
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]
 }
