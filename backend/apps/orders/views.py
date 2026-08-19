@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsManager
 from apps.sellers.models import Seller
 
-from apps.orders.services.wb_status import WB_STAGE_FILTERS, WB_SUPPLIER_NEW
+from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW, wb_active_q, wb_in_delivery_q
 
 from .models import Order, PickList, Supply
 from .serializers import (
@@ -81,7 +81,7 @@ class OrderStatsView(APIView):
     ).count()
     new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
     in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
-    in_delivery = orders_qs.filter(wb_supplier_status="complete").count()
+    in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
 
     data = {
       "orders_today": orders_today,
@@ -214,14 +214,12 @@ class AssemblySellerDetailView(APIView):
     counts = get_seller_stage_counts(seller)
     stage = request.query_params.get("stage", "")
     orders_qs = Order.objects.filter(seller=seller).select_related("product", "product__cell")
-    if stage in WB_STAGE_FILTERS:
-      orders_qs = orders_qs.filter(**WB_STAGE_FILTERS[stage])
+    if stage in WB_STAGE_QUERIES:
+      orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())
     elif stage:
       orders_qs = orders_qs.filter(status=stage)
     else:
-      orders_qs = orders_qs.filter(
-        wb_supplier_status__in=[WB_SUPPLIER_NEW, "confirm", "complete"]
-      ).exclude(status=Order.Status.CANCELLED)
+      orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
     orders = orders_qs.order_by("-created_at")[:300]
 

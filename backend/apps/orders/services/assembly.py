@@ -8,6 +8,7 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_LABELS,
   WB_SUPPLIER_NEW,
+  wb_in_delivery_q,
 )
 from apps.orders.models import Order, PickList
 from apps.sellers.models import Seller
@@ -154,7 +155,7 @@ def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
   return {
     "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
     "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
-    "in_delivery": active.filter(wb_supplier_status=WB_SUPPLIER_DELIVERY).count(),
+    "in_delivery": active.filter(wb_in_delivery_q()).count(),
     "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
     "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
     "marked": active.filter(status=Order.Status.MARKED).count(),
