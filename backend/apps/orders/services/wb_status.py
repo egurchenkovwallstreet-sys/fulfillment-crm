@@ -29,10 +29,12 @@ WB_DELIVERED_WB_STATUSES = frozenset({
 # Все терминальные wbStatus — исключаем из вкладки «В доставке»
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
-# Реально «В доставке» в ЛК WB (без waiting — ещё не принят на склад WB)
+# Не во вкладке «В доставке» ЛК WB
+WB_NOT_IN_DELIVERY_TAB = frozenset({"waiting", "postponed_delivery"})
+
+# Реально «В доставке» в ЛК WB
 WB_IN_TRANSIT_WB_STATUSES = frozenset({
   "sorted",
-  "postponed_delivery",
   "accepted_by_carrier",
   "sent_to_carrier",
 })

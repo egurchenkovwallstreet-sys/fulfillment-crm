@@ -9,6 +9,7 @@ from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
+  WB_NOT_IN_DELIVERY_TAB,
   WB_SUPPLIER_DELIVERY,
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
@@ -78,6 +79,14 @@ def reconcile_wb_orders_for_seller(
     wb_status__in=WB_DELIVERED_WB_STATUSES,
   ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
+  shipped_non_tab = Order.objects.filter(
+    seller=seller,
+    wb_supplier_status=WB_SUPPLIER_DELIVERY,
+    wb_status__in=WB_NOT_IN_DELIVERY_TAB,
+  ).exclude(status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED]).update(
+    status=Order.Status.SHIPPED, updated_at=now,
+  )
+
   shipped_missing = 0
   if missing_ids:
     shipped_missing = Order.objects.filter(
@@ -91,7 +100,7 @@ def reconcile_wb_orders_for_seller(
       seller=seller,
       wb_supplier_status=WB_SUPPLIER_DELIVERY,
     ).exclude(wb_order_id__in=recent_ids).exclude(
-      wb_status__in=WB_TERMINAL_WB_STATUSES | frozenset({"waiting"}),
+      wb_status__in=WB_TERMINAL_WB_STATUSES | WB_NOT_IN_DELIVERY_TAB,
     ).exclude(wb_status="").exclude(
       status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
     ).update(status=Order.Status.SHIPPED, updated_at=now)
@@ -99,6 +108,7 @@ def reconcile_wb_orders_for_seller(
   result = {
     "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
+    "shipped_non_tab": shipped_non_tab,
     "shipped_missing": shipped_missing,
     "shipped_stale": shipped_stale,
     "missing_from_api": len(missing_ids),
@@ -106,14 +116,14 @@ def reconcile_wb_orders_for_seller(
     "recent_order_ids": len(recent_ids),
   }
 
-  if any(result[k] for k in ("cancelled_terminal", "shipped_delivered", "shipped_missing", "shipped_stale")):
+  if any(result[k] for k in ("cancelled_terminal", "shipped_delivered", "shipped_non_tab", "shipped_missing", "shipped_stale")):
     AuditLog.objects.create(
       user=user,
       seller=seller,
       action_type=AuditLog.ActionType.WB_SYNC,
       message=(
         f"Сверка статусов WB: отменено {cancelled_terminal}, "
-        f"завершено {shipped_delivered + shipped_missing + shipped_stale}"
+        f"завершено {shipped_delivered + shipped_non_tab + shipped_missing + shipped_stale}"
       ),
       details=result,
     )
