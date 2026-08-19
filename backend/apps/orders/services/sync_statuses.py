@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Q
 from django.utils import timezone
 
@@ -19,9 +21,10 @@ from apps.orders.services.wb_status import (
 )
 from apps.sellers.models import Seller
 
-SYNC_VERSION = "delivery-v4"
-# Как GET /api/v3/orders в ЛК WB — заказы за последние 30 дней
+SYNC_VERSION = "delivery-v5"
 DELIVERY_WINDOW_DAYS = 30
+# Заказы старше — WB уже не показывает во вкладке «В доставке»
+DELIVERY_ORDER_MAX_AGE_DAYS = 21
 
 
 def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
@@ -34,8 +37,11 @@ def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
   return breakdown
 
 
+def _delivery_cutoff():
+  return timezone.now() - timedelta(days=DELIVERY_ORDER_MAX_AGE_DAYS)
+
+
 def _delivery_count_from_api(status_map: dict[int, dict], recent_ids: set[int]) -> int:
-  """Счёт из свежего ответа WB — complete+sorted только за окно ЛК."""
   if not recent_ids:
     return 0
   return sum(
@@ -50,10 +56,15 @@ def _delivery_count_from_api(status_map: dict[int, dict], recent_ids: set[int]) 
 
 
 def _delivery_count_from_db(seller: Seller, recent_ids: set[int]) -> int:
-  qs = Order.objects.filter(seller=seller).filter(wb_in_delivery_q())
-  if recent_ids:
-    qs = qs.filter(wb_order_id__in=recent_ids)
-  return qs.count()
+  if not recent_ids:
+    return 0
+  return (
+    Order.objects.filter(seller=seller)
+    .filter(wb_in_delivery_q())
+    .filter(wb_order_id__in=recent_ids)
+    .filter(created_at__gte=_delivery_cutoff())
+    .count()
+  )
 
 
 def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
@@ -77,6 +88,7 @@ def reconcile_wb_orders_for_seller(
   user=None,
 ) -> dict:
   now = timezone.now()
+  cutoff = _delivery_cutoff()
   wb_ids_in_db = set(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
   )
@@ -110,6 +122,15 @@ def reconcile_wb_orders_for_seller(
       status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
     ).update(status=Order.Status.SHIPPED, updated_at=now)
 
+  shipped_old = Order.objects.filter(
+    seller=seller,
+    wb_supplier_status=WB_SUPPLIER_DELIVERY,
+    wb_status=WB_DELIVERY_TAB_WB_STATUS,
+    created_at__lt=cutoff,
+  ).exclude(status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED]).update(
+    status=Order.Status.SHIPPED, updated_at=now,
+  )
+
   shipped_missing = 0
   if missing_ids:
     shipped_missing = Order.objects.filter(
@@ -122,16 +143,20 @@ def reconcile_wb_orders_for_seller(
     "shipped_delivered": shipped_delivered,
     "shipped_not_sorted": shipped_not_sorted,
     "shipped_stale": shipped_stale,
+    "shipped_old": shipped_old,
     "shipped_missing": shipped_missing,
     "missing_from_api": len(missing_ids),
     "delivery_window_days": DELIVERY_WINDOW_DAYS,
+    "delivery_max_age_days": DELIVERY_ORDER_MAX_AGE_DAYS,
     "recent_order_ids": len(recent_ids),
     "delivery_status_breakdown": _delivery_status_breakdown(status_map),
   }
 
-  reconciled = (
-    cancelled_terminal + shipped_delivered + shipped_not_sorted
-    + shipped_stale + shipped_missing
+  reconciled = sum(
+    result[k] for k in (
+      "cancelled_terminal", "shipped_delivered", "shipped_not_sorted",
+      "shipped_stale", "shipped_old", "shipped_missing",
+    )
   )
   if reconciled:
     AuditLog.objects.create(
@@ -161,13 +186,12 @@ def sync_order_statuses_for_seller(
     save_wb_counts_to_seller(seller, counts)
     return {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": counts}
 
+  recent_error = ""
   try:
     recent_ids = client.fetch_recent_order_ids(days=DELIVERY_WINDOW_DAYS)
   except WBApiError as exc:
     recent_ids = set()
     recent_error = str(exc)
-  else:
-    recent_error = ""
 
   try:
     wb_statuses = client.fetch_order_statuses(wb_ids)
@@ -193,12 +217,12 @@ def sync_order_statuses_for_seller(
     reconcile.get(k, 0)
     for k in (
       "cancelled_terminal", "shipped_delivered", "shipped_not_sorted",
-      "shipped_stale", "shipped_missing",
+      "shipped_stale", "shipped_old", "shipped_missing",
     )
   )
 
   in_delivery = _delivery_count_from_api(status_map, recent_ids)
-  if in_delivery == 0:
+  if in_delivery == 0 and recent_ids:
     in_delivery = _delivery_count_from_db(seller, recent_ids)
 
   live_counts = {

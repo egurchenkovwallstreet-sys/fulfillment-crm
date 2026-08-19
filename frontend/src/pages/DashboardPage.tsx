@@ -27,6 +27,14 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadStats()
+    fetch('/api/health/')
+      .then((r) => r.json())
+      .then((h) => {
+        if (h?.sync_version) {
+          setSyncMessage((m) => m || `Backend: ${h.sync_version}`)
+        }
+      })
+      .catch(() => {})
   }, [loadStats])
 
   async function handleSync() {
