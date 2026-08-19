@@ -2,7 +2,7 @@ type StatCardProps = {
   label: string
   value: string | number
   hint: string
-  tone?: 'blue' | 'green' | 'orange' | 'purple'
+  tone?: 'blue' | 'green' | 'orange' | 'purple' | 'red'
 }
 
 const toneClass = {
@@ -10,6 +10,7 @@ const toneClass = {
   green: 'stat-card--green',
   orange: 'stat-card--orange',
   purple: 'stat-card--purple',
+  red: 'stat-card--red',
 }
 
 export function StatCard({ label, value, hint, tone = 'blue' }: StatCardProps) {

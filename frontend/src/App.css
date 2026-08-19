@@ -244,6 +244,12 @@
 .stat-card--green { border-top: 3px solid #22c55e; }
 .stat-card--orange { border-top: 3px solid #f59e0b; }
 .stat-card--purple { border-top: 3px solid #8b5cf6; }
+.stat-card--red { border-top: 3px solid #dc2626; }
+.stat-card--red .stat-card__label,
+.stat-card--red .stat-card__value,
+.stat-card--red .stat-card__hint {
+  color: #dc2626;
+}
 
 /* Process flow */
 .process-flow {

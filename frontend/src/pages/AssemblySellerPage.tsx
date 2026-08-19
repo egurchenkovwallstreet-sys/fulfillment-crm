@@ -13,10 +13,8 @@ import './AssemblyPage.css'
 const STAGES = [
   { key: '', label: 'Все активные' },
   { key: 'new', label: 'Новые' },
-  { key: 'in_picking', label: 'На сборке' },
-  { key: 'label_printed', label: 'Этикетка' },
-  { key: 'marked', label: 'ЧЗ' },
-  { key: 'in_supply', label: 'В поставке' },
+  { key: 'confirm', label: 'На сборке' },
+  { key: 'complete', label: 'В доставке' },
 ]
 
 export function AssemblySellerPage() {
@@ -131,8 +129,7 @@ export function AssemblySellerPage() {
   }
 
   const counts = data.counts
-  const totalActive = ['new', 'in_picking', 'assembled', 'label_printed', 'marked', 'in_supply']
-    .reduce((sum, key) => sum + (counts[key] ?? 0), 0)
+  const totalActive = (counts.new ?? 0) + (counts.in_picking ?? 0) + (counts.in_delivery ?? 0)
 
   return (
     <>
@@ -167,7 +164,11 @@ export function AssemblySellerPage() {
             className={`assembly-stage${stage === s.key ? ' assembly-stage--active' : ''}`}
             onClick={() => setStage(s.key)}
           >
-            <span className="assembly-stage__count">{s.key ? (counts[s.key] ?? 0) : totalActive}</span>
+            <span className="assembly-stage__count">
+              {s.key
+                ? (counts[s.key === 'confirm' ? 'in_picking' : s.key === 'complete' ? 'in_delivery' : s.key] ?? 0)
+                : totalActive}
+            </span>
             <span className="assembly-stage__label">{s.label}</span>
           </button>
         ))}
@@ -192,7 +193,7 @@ export function AssemblySellerPage() {
                   <td>{order.wb_order_id}</td>
                   <td><code>{order.barcode}</code></td>
                   <td>{order.cell_number || '—'}</td>
-                  <td>{order.status_display}</td>
+                  <td>{order.wb_stage_display || order.status_display}</td>
                   <td>{order.has_sticker ? '✓' : '—'}</td>
                 </tr>
               ))}

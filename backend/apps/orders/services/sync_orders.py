@@ -5,6 +5,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order
+from apps.orders.services.sync_statuses import sync_order_statuses_for_seller
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product
 
@@ -68,6 +69,13 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     if not product:
       skipped += 1
 
+  status_result = {"statuses_fetched": 0, "statuses_updated": 0}
+  status_error = ""
+  try:
+    status_result = sync_order_statuses_for_seller(seller, client, user=user)
+  except WBApiError as exc:
+    status_error = str(exc)
+
   AuditLog.objects.create(
     user=user,
     seller=seller,
@@ -84,6 +92,9 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "fetched": len(wb_orders),
       "raw_total": fetch_result.raw_total,
       "pages": fetch_result.pages,
+      "statuses_fetched": status_result["statuses_fetched"],
+      "statuses_updated": status_result["statuses_updated"],
+      "status_error": status_error,
       "synced_at": timezone.now().isoformat(),
     },
   )
@@ -97,6 +108,9 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "raw_total": fetch_result.raw_total,
     "skipped_no_barcode": fetch_result.skipped_no_barcode,
     "pages": fetch_result.pages,
+    "statuses_fetched": status_result["statuses_fetched"],
+    "statuses_updated": status_result["statuses_updated"],
+    "status_error": status_error,
   }
 
 

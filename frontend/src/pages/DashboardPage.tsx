@@ -37,8 +37,8 @@ export function DashboardPage() {
       const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const rawTotal = result.raw_total ?? result.results?.reduce((s, r) => s + (r.raw_total ?? 0), 0) ?? fetched
-      const updated = result.updated ?? result.results?.reduce((s, r) => s + (r.updated ?? 0), 0) ?? 0
-      setSyncMessage(`В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, обновлено ${updated}`)
+      const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
+      setSyncMessage(`В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`)
       await loadStats()
     } catch (err) {
       setSyncMessage(err instanceof Error ? err.message : 'Ошибка синхронизации')
@@ -74,10 +74,10 @@ export function DashboardPage() {
 
       <section className="stats-grid">
         <StatCard
-          label="Заказов сегодня"
-          value={String(stats.orders_today)}
-          hint={isSeller ? 'Ваши заказы' : 'Синхронизация с WB'}
-          tone="blue"
+          label="Новые заказы"
+          value={String(stats.new_orders)}
+          hint={isSeller ? 'Ваши новые заказы' : 'Статус «Новый» в WB'}
+          tone="red"
         />
         {isAdmin && (
           <StatCard
@@ -88,12 +88,20 @@ export function DashboardPage() {
           />
         )}
         {(isAdmin || isManager) && (
-          <StatCard
-            label="На сборке"
-            value={String(stats.in_picking)}
-            hint={`Новых: ${stats.new_orders}`}
-            tone="orange"
-          />
+          <>
+            <StatCard
+              label="На сборке"
+              value={String(stats.in_assembly ?? stats.in_picking)}
+              hint="Статус «На сборке» в WB"
+              tone="orange"
+            />
+            <StatCard
+              label="В доставке"
+              value={String(stats.in_delivery ?? 0)}
+              hint="Статус «В доставке» в WB"
+              tone="blue"
+            />
+          </>
         )}
         <StatCard
           label={isSeller ? 'Мои остатки (SKU)' : 'Остатков (SKU)'}

@@ -9,6 +9,7 @@ class Order(models.Model):
     LABEL_PRINTED = "label_printed", "Этикетка напечатана"
     MARKED = "marked", "Маркировка привязана"
     IN_SUPPLY = "in_supply", "В поставке"
+    IN_DELIVERY = "in_delivery", "В доставке"
     SHIPPED = "shipped", "Отправлен"
     CANCELLED = "cancelled", "Отменён"
 
@@ -30,6 +31,17 @@ class Order(models.Model):
     max_length=20,
     choices=Status.choices,
     default=Status.NEW,
+  )
+  wb_supplier_status = models.CharField(
+    "Статус WB (supplier)",
+    max_length=30,
+    blank=True,
+    db_index=True,
+  )
+  wb_status = models.CharField(
+    "Статус WB (wb)",
+    max_length=30,
+    blank=True,
   )
   pick_list = models.ForeignKey(
     "PickList",
@@ -55,6 +67,7 @@ class Order(models.Model):
     indexes = [
       models.Index(fields=["wb_order_id"]),
       models.Index(fields=["seller", "status"]),
+      models.Index(fields=["seller", "wb_supplier_status"]),
       models.Index(fields=["barcode"]),
     ]
 

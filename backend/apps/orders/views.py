@@ -7,6 +7,8 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsManager
 from apps.sellers.models import Seller
 
+from apps.orders.services.wb_status import WB_STAGE_FILTERS, WB_SUPPLIER_NEW
+
 from .models import Order, PickList, Supply
 from .serializers import (
   OrderAssemblySerializer,
@@ -77,12 +79,16 @@ class OrderStatsView(APIView):
     in_picking = orders_qs.filter(
       status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED]
     ).count()
-    new_orders = orders_qs.filter(status=Order.Status.NEW).count()
+    new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
+    in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
+    in_delivery = orders_qs.filter(wb_supplier_status="complete").count()
 
     data = {
       "orders_today": orders_today,
       "in_picking": in_picking,
       "new_orders": new_orders,
+      "in_assembly": in_assembly,
+      "in_delivery": in_delivery,
     }
 
     if user.role in ("admin", "manager"):
@@ -186,10 +192,7 @@ class AssemblySellerListView(APIView):
     payload = []
     for seller in sellers:
       counts = get_seller_stage_counts(seller)
-      total_active = sum(
-        counts[k]
-        for k in ("new", "in_picking", "assembled", "label_printed", "marked", "in_supply")
-      )
+      total_active = counts["new"] + counts["in_picking"] + counts["in_delivery"]
       payload.append({
         "id": seller.id,
         "company_name": seller.company_name,
@@ -211,10 +214,14 @@ class AssemblySellerDetailView(APIView):
     counts = get_seller_stage_counts(seller)
     stage = request.query_params.get("stage", "")
     orders_qs = Order.objects.filter(seller=seller).select_related("product", "product__cell")
-    if stage:
+    if stage in WB_STAGE_FILTERS:
+      orders_qs = orders_qs.filter(**WB_STAGE_FILTERS[stage])
+    elif stage:
       orders_qs = orders_qs.filter(status=stage)
     else:
-      orders_qs = orders_qs.exclude(status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED])
+      orders_qs = orders_qs.filter(
+        wb_supplier_status__in=[WB_SUPPLIER_NEW, "confirm", "complete"]
+      ).exclude(status=Order.Status.CANCELLED)
 
     orders = orders_qs.order_by("-created_at")[:300]
 

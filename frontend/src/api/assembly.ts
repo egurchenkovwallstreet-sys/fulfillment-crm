@@ -6,11 +6,13 @@ export interface SellerAssemblyCounters {
   company_name: string
   new: number
   in_picking: number
+  in_delivery: number
   assembled: number
   label_printed: number
   marked: number
   in_supply: number
   shipped: number
+  cancelled?: number
   total_active: number
 }
 
@@ -21,6 +23,9 @@ export interface AssemblyOrder {
   cell_number: string
   status: string
   status_display: string
+  wb_supplier_status: string
+  wb_status: string
+  wb_stage_display: string
   has_sticker: boolean
   sticker_part_a: string
   sticker_part_b: string

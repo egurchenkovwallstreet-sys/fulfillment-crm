@@ -3,9 +3,15 @@ from django.utils import timezone
 from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
+from apps.orders.services.wb_status import (
+  WB_SUPPLIER_ASSEMBLY,
+  WB_SUPPLIER_DELIVERY,
+  WB_SUPPLIER_LABELS,
+  WB_SUPPLIER_NEW,
+)
 from apps.orders.models import Order, PickList
-from apps.orders.services.pick_list import PickListError, generate_pick_list
 from apps.sellers.models import Seller
+from apps.orders.services.pick_list import PickListError, generate_pick_list
 
 
 class AssemblyError(Exception):
@@ -143,13 +149,20 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 
 def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
-  qs = Order.objects.filter(seller=seller).exclude(status=Order.Status.CANCELLED)
+  qs = Order.objects.filter(seller=seller)
+  active = qs.exclude(status=Order.Status.CANCELLED)
   return {
-    "new": qs.filter(status=Order.Status.NEW).count(),
-    "in_picking": qs.filter(status=Order.Status.IN_PICKING).count(),
-    "assembled": qs.filter(status=Order.Status.ASSEMBLED).count(),
-    "label_printed": qs.filter(status=Order.Status.LABEL_PRINTED).count(),
-    "marked": qs.filter(status=Order.Status.MARKED).count(),
-    "in_supply": qs.filter(status=Order.Status.IN_SUPPLY).count(),
+    "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
+    "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
+    "in_delivery": active.filter(wb_supplier_status=WB_SUPPLIER_DELIVERY).count(),
+    "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
+    "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
+    "marked": active.filter(status=Order.Status.MARKED).count(),
+    "in_supply": active.filter(status=Order.Status.IN_SUPPLY).count(),
     "shipped": qs.filter(status=Order.Status.SHIPPED).count(),
+    "cancelled": qs.filter(status=Order.Status.CANCELLED).count(),
   }
+
+
+def get_wb_stage_label(wb_supplier_status: str) -> str:
+  return WB_SUPPLIER_LABELS.get(wb_supplier_status, wb_supplier_status or "—")

@@ -30,6 +30,7 @@ class OrderSerializer(serializers.ModelSerializer):
 class OrderAssemblySerializer(serializers.ModelSerializer):
   cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
   status_display = serializers.CharField(source="get_status_display", read_only=True)
+  wb_stage_display = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -40,12 +41,19 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "cell_number",
       "status",
       "status_display",
+      "wb_supplier_status",
+      "wb_status",
+      "wb_stage_display",
       "has_sticker",
       "sticker_part_a",
       "sticker_part_b",
       "marking_bound",
       "created_at",
     )
+
+  def get_wb_stage_display(self, obj):
+    from apps.orders.services.assembly import get_wb_stage_label
+    return get_wb_stage_label(obj.wb_supplier_status)
 
 
 class OrderPrintSerializer(serializers.ModelSerializer):
@@ -132,11 +140,13 @@ class SellerAssemblyCountersSerializer(serializers.Serializer):
   company_name = serializers.CharField()
   new = serializers.IntegerField()
   in_picking = serializers.IntegerField()
+  in_delivery = serializers.IntegerField()
   assembled = serializers.IntegerField()
   label_printed = serializers.IntegerField()
   marked = serializers.IntegerField()
   in_supply = serializers.IntegerField()
   shipped = serializers.IntegerField()
+  cancelled = serializers.IntegerField(required=False)
   total_active = serializers.IntegerField()
 
 

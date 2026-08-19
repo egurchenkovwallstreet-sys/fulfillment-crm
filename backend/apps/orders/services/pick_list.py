@@ -3,6 +3,7 @@ from collections import defaultdict
 from django.db import transaction
 
 from apps.orders.models import Order, PickList, PickListItem
+from apps.orders.services.wb_status import WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product
 
@@ -17,6 +18,7 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
     Order.objects.filter(
       seller=seller,
       status=Order.Status.NEW,
+      wb_supplier_status__in=[WB_SUPPLIER_NEW, ""],
     ).select_related("product", "product__cell")
   )
 

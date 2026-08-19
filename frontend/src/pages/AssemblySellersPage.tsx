@@ -32,7 +32,8 @@ export function AssemblySellersPage() {
     try {
       const result = await syncOrders()
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
-      setSyncMessage(`Синхронизация завершена. Загружено из WB: ${fetched}`)
+      const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
+      setSyncMessage(`Синхронизация завершена. Из WB: ${fetched}, статусов обновлено: ${statusesUpdated}`)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
@@ -63,16 +64,14 @@ export function AssemblySellersPage() {
               <th>Селлер</th>
               <th>Новые</th>
               <th>На сборке</th>
-              <th>Этикетка</th>
-              <th>ЧЗ</th>
-              <th>В поставке</th>
+              <th>В доставке</th>
               <th>Активных</th>
             </tr>
           </thead>
           <tbody>
             {sellers.length === 0 && (
               <tr>
-                <td colSpan={7} className="assembly-table__empty">
+                <td colSpan={5} className="assembly-table__empty">
                   Нет селлеров. Добавьте в админке.
                 </td>
               </tr>
@@ -90,9 +89,7 @@ export function AssemblySellersPage() {
                   </span>
                 </td>
                 <td>{seller.in_picking}</td>
-                <td>{seller.label_printed}</td>
-                <td>{seller.marked}</td>
-                <td>{seller.in_supply}</td>
+                <td>{seller.in_delivery}</td>
                 <td><strong>{seller.total_active}</strong></td>
               </tr>
             ))}

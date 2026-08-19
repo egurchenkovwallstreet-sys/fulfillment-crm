@@ -17,6 +17,8 @@ export interface OrderStats {
   orders_today: number
   in_picking: number
   new_orders: number
+  in_assembly?: number
+  in_delivery?: number
   sellers_count?: number
   sku_count: number
 }
@@ -59,6 +61,9 @@ export interface SyncResult {
   raw_total?: number
   skipped_no_barcode?: number
   pages?: number
+  statuses_fetched?: number
+  statuses_updated?: number
+  status_error?: string
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]
 }
