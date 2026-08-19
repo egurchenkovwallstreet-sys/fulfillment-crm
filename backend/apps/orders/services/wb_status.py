@@ -9,30 +9,25 @@ WB_SUPPLIER_ASSEMBLY = "confirm"
 WB_SUPPLIER_DELIVERY = "complete"
 
 CANCEL_SUPPLIER_STATUSES = frozenset({"cancel", "cancel_carrier"})
+
+# Отмена / отказ покупателя — не «В доставке»
 CANCEL_WB_STATUSES = frozenset({
   "canceled",
   "canceled_by_client",
   "declined_by_client",
+  "canceled_by_carrier",
   "cancel",
 })
 
-# Активная вкладка «В доставке» в ЛК WB (без postponed — там отложенные)
-WB_IN_DELIVERY_WB_STATUSES = frozenset({
-  "waiting",
-  "sorted",
-  "accepted_by_carrier",
-  "sent_to_carrier",
-})
-
-# Для reconcile — все статусы «ещё в работе»
-WB_ACTIVE_DELIVERY_WB_STATUSES = WB_IN_DELIVERY_WB_STATUSES | frozenset({"waiting"})
-
-# Заказ уже вышел из вкладки «В доставке» (завершён / выдан / отменён на стороне WB)
+# Выкуплено / выдан / брак — не «В доставке»
 WB_DELIVERED_WB_STATUSES = frozenset({
   "sold",
   "ready_for_pickup",
   "defect",
 })
+
+# Все терминальные wbStatus — исключаем из вкладки «В доставке»
+WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
   WB_SUPPLIER_NEW,
@@ -58,10 +53,11 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """Как вкладка «В доставке» в ЛК WB: complete + активный wbStatus."""
+  """В доставке: complete, кроме выкупленных, отмен и отказов."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & Q(wb_status__in=WB_IN_DELIVERY_WB_STATUSES)
+    & ~Q(wb_status__in=WB_TERMINAL_WB_STATUSES)
+    & ~Q(wb_status="")
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 
@@ -79,11 +75,14 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
 
 
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
+  """complete + любой активный wbStatus, кроме выкупа/отмены/отказа."""
   if supplier_status != WB_SUPPLIER_DELIVERY:
     return False
   if is_wb_cancelled(supplier_status, wb_status):
     return False
-  return wb_status in WB_IN_DELIVERY_WB_STATUSES
+  if wb_status in WB_DELIVERED_WB_STATUSES:
+    return False
+  return bool(wb_status)
 
 
 def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str) -> bool:

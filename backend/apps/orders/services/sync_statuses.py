@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -5,9 +6,9 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
 from apps.orders.services.wb_status import (
+  CANCEL_SUPPLIER_STATUSES,
+  CANCEL_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
-  WB_IN_DELIVERY_WB_STATUSES,
-  WB_SUPPLIER_DELIVERY,
   apply_wb_status_to_order,
   compute_live_wb_counts,
   save_wb_counts_to_seller,
@@ -34,28 +35,21 @@ def reconcile_wb_orders_for_seller(
   *,
   user=None,
 ) -> dict:
-  """Снять с «В доставке» завершённые и архивные заказы."""
+  """Снять с «В доставке» выкупленные, отменённые и отказы."""
   now = timezone.now()
   wb_ids_in_db = set(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
   )
   missing_ids = wb_ids_in_db - set(status_map.keys())
 
+  cancelled_terminal = Order.objects.filter(seller=seller).filter(
+    Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
+  ).exclude(status=Order.Status.CANCELLED).update(status=Order.Status.CANCELLED, updated_at=now)
+
   shipped_delivered = Order.objects.filter(
     seller=seller,
     wb_status__in=WB_DELIVERED_WB_STATUSES,
   ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
-
-  shipped_inactive = Order.objects.filter(
-    seller=seller,
-    wb_supplier_status=WB_SUPPLIER_DELIVERY,
-  ).exclude(
-    wb_status__in=WB_IN_DELIVERY_WB_STATUSES | frozenset({"waiting"}),
-  ).exclude(
-    wb_status="",
-  ).exclude(
-    status=Order.Status.SHIPPED,
-  ).update(status=Order.Status.SHIPPED, updated_at=now)
 
   shipped_missing = 0
   if missing_ids:
@@ -65,19 +59,20 @@ def reconcile_wb_orders_for_seller(
     ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
   result = {
+    "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
-    "shipped_inactive": shipped_inactive,
     "shipped_missing": shipped_missing,
     "missing_from_api": len(missing_ids),
   }
 
-  if any(result[k] for k in ("shipped_delivered", "shipped_inactive", "shipped_missing")):
+  if any(result[k] for k in ("cancelled_terminal", "shipped_delivered", "shipped_missing")):
     AuditLog.objects.create(
       user=user,
       seller=seller,
       action_type=AuditLog.ActionType.WB_SYNC,
       message=(
-        f"Сверка статусов WB: завершено {shipped_delivered + shipped_inactive + shipped_missing} заказов"
+        f"Сверка статусов WB: отменено {cancelled_terminal}, "
+        f"завершено {shipped_delivered + shipped_missing}"
       ),
       details=result,
     )
@@ -93,7 +88,7 @@ def sync_order_statuses_for_seller(
   new_wb_ids: list[int] | None = None,
   new_orders_total: int = 0,
 ) -> dict:
-  """Запросить статусы WB, обновить заказы и сохранить живые счётчики как в ЛК WB."""
+  """Запросить статусы WB, обновить заказы и сохранить счётчики."""
   wb_ids = list(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
   )
@@ -123,16 +118,7 @@ def sync_order_statuses_for_seller(
   updated = _apply_statuses_to_orders(seller, status_map)
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
 
-  try:
-    recent_ids = client.fetch_recent_order_ids(days=5)
-  except WBApiError:
-    recent_ids = set()
-
-  active_ids = recent_ids | set(new_wb_ids or [])
-  if not active_ids:
-    active_ids = set(status_map.keys())
-
-  live_counts = compute_live_wb_counts(status_map, active_wb_ids=active_ids)
+  live_counts = compute_live_wb_counts(status_map)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
   save_wb_counts_to_seller(seller, live_counts)
