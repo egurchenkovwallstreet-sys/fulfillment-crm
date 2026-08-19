@@ -61,7 +61,7 @@ def wb_in_delivery_q() -> Q:
   """Как вкладка «В доставке» в ЛК WB: complete + активный wbStatus."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & Q(wb_status__in=WB_ACTIVE_DELIVERY_WB_STATUSES)
+    & Q(wb_status__in=WB_IN_DELIVERY_WB_STATUSES)
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 

@@ -5,7 +5,6 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
 from apps.orders.services.wb_status import (
-  WB_ACTIVE_DELIVERY_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
   WB_IN_DELIVERY_WB_STATUSES,
   WB_SUPPLIER_DELIVERY,
