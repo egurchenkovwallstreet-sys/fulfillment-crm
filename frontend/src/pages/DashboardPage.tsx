@@ -52,7 +52,6 @@ export function DashboardPage() {
       const wbCounts = result.wb_counts ?? result.results?.[0]?.wb_counts
       const liveCounts = result.live_counts ?? result.results?.[0]?.live_counts
       const inDelivery = liveCounts?.in_delivery ?? wbCounts?.in_delivery
-      const deliveryAll = result.delivery_all ?? result.results?.[0]?.delivery_all
       const breakdown = result.delivery_breakdown ?? result.results?.[0]?.delivery_breakdown
       let msg = `[${syncVersion ?? '?'}] В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}`
       msg += `, WB-полей ${statusesUpdated}, сверка ${reconciled}`
