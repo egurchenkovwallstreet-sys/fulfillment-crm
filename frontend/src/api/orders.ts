@@ -21,6 +21,14 @@ export interface OrderStats {
   in_delivery?: number
   sellers_count?: number
   sku_count: number
+  stats_source?: 'cache' | 'database'
+  counts_synced_at?: string | null
+}
+
+export interface DashboardStats {
+  new_orders: number
+  in_assembly: number
+  in_delivery: number
 }
 
 export interface PickListItem {
@@ -80,6 +88,7 @@ export interface SyncResult {
   }
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]
+  dashboard_stats?: DashboardStats
 }
 
 export function fetchOrders(params?: { seller_id?: number; status?: string }) {
