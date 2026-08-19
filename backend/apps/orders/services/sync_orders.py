@@ -74,7 +74,11 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders]
   try:
     status_result = sync_order_statuses_for_seller(
-      seller, client, user=user, new_wb_ids=new_wb_ids,
+      seller,
+      client,
+      user=user,
+      new_wb_ids=new_wb_ids,
+      new_orders_total=fetch_result.raw_total,
     )
   except WBApiError as exc:
     status_error = str(exc)

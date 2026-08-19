@@ -7,6 +7,7 @@ from apps.orders.services.assembly import get_seller_stage_counts
 from apps.orders.services.wb_status import (
   WB_ACTIVE_DELIVERY_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
+  WB_IN_DELIVERY_WB_STATUSES,
   WB_SUPPLIER_DELIVERY,
   apply_wb_status_to_order,
   compute_live_wb_counts,
@@ -50,7 +51,7 @@ def reconcile_wb_orders_for_seller(
     seller=seller,
     wb_supplier_status=WB_SUPPLIER_DELIVERY,
   ).exclude(
-    wb_status__in=WB_ACTIVE_DELIVERY_WB_STATUSES,
+    wb_status__in=WB_IN_DELIVERY_WB_STATUSES | frozenset({"waiting"}),
   ).exclude(
     wb_status="",
   ).exclude(
@@ -91,6 +92,7 @@ def sync_order_statuses_for_seller(
   *,
   user=None,
   new_wb_ids: list[int] | None = None,
+  new_orders_total: int = 0,
 ) -> dict:
   """Запросить статусы WB, обновить заказы и сохранить живые счётчики как в ЛК WB."""
   wb_ids = list(
@@ -123,7 +125,7 @@ def sync_order_statuses_for_seller(
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
 
   try:
-    recent_ids = client.fetch_recent_order_ids(days=30)
+    recent_ids = client.fetch_recent_order_ids(days=7)
   except WBApiError:
     recent_ids = set()
 
@@ -132,6 +134,8 @@ def sync_order_statuses_for_seller(
     active_ids = set(status_map.keys())
 
   live_counts = compute_live_wb_counts(status_map, active_wb_ids=active_ids)
+  if new_orders_total > 0:
+    live_counts["new"] = new_orders_total
   save_wb_counts_to_seller(seller, live_counts)
   counts = get_seller_stage_counts(seller)
 
