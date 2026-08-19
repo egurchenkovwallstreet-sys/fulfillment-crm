@@ -63,6 +63,8 @@ export interface SyncResult {
   pages?: number
   statuses_fetched?: number
   statuses_updated?: number
+  reconciled?: number
+  sync_version?: string
   status_error?: string
   wb_counts?: { new?: number; in_picking?: number; in_delivery?: number }
   live_counts?: { new?: number; in_picking?: number; in_delivery?: number }

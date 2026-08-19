@@ -38,16 +38,21 @@ export function DashboardPage() {
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const rawTotal = result.raw_total ?? result.results?.reduce((s, r) => s + (r.raw_total ?? 0), 0) ?? fetched
       const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
+      const reconciled = result.reconciled ?? result.results?.reduce((s, r) => s + (r.reconciled ?? 0), 0) ?? 0
+      const syncVersion = result.sync_version ?? result.results?.[0]?.sync_version
+      const statusError = result.status_error ?? result.results?.[0]?.status_error
       const wbCounts = result.wb_counts ?? result.results?.[0]?.wb_counts
       const liveCounts = result.live_counts ?? result.results?.[0]?.live_counts
       const inDelivery = liveCounts?.in_delivery ?? wbCounts?.in_delivery
       const deliveryAll = result.delivery_all ?? result.results?.[0]?.delivery_all
       const breakdown = result.delivery_breakdown ?? result.results?.[0]?.delivery_breakdown
-      let msg = `В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`
+      let msg = `[${syncVersion ?? '?'}] В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}`
+      msg += `, WB-полей ${statusesUpdated}, сверка ${reconciled}`
+      if (statusError) msg += `. ОШИБКА: ${statusError}`
       if (inDelivery !== undefined) {
-        msg += `. В доставке (sorted): ${inDelivery}`
+        msg += `. В доставке (sorted/30д): ${inDelivery}`
         if (deliveryAll !== undefined && deliveryAll !== inDelivery) {
-          msg += ` — только wbStatus=sorted`
+          msg += `, всего sorted в API: ${deliveryAll}`
         }
       }
       if (breakdown && typeof breakdown === 'object') {

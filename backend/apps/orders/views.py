@@ -167,7 +167,8 @@ class OrderSyncView(APIView):
         k: first[k]
         for k in (
           "live_counts", "delivery_all", "delivery_recent", "delivery_breakdown",
-          "reconcile", "statuses_updated", "statuses_fetched", "raw_total", "fetched", "created",
+          "reconcile", "statuses_updated", "statuses_fetched", "reconciled",
+          "sync_version", "raw_total", "fetched", "created", "status_error",
         )
         if k in first
       })

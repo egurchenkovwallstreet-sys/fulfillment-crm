@@ -69,7 +69,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     if not product:
       skipped += 1
 
-  status_result = {"statuses_fetched": 0, "statuses_updated": 0}
+  status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0}
   status_error = ""
   new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders]
   try:
@@ -82,6 +82,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     )
   except WBApiError as exc:
     status_error = str(exc)
+
+  reconciled = status_result.get("reconciled", 0)
 
   AuditLog.objects.create(
     user=user,
@@ -101,12 +103,14 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "pages": fetch_result.pages,
       "statuses_fetched": status_result["statuses_fetched"],
       "statuses_updated": status_result["statuses_updated"],
+      "reconciled": reconciled,
+      "sync_version": status_result.get("sync_version"),
       "status_error": status_error,
       "wb_counts": status_result.get("counts", {}),
       "live_counts": status_result.get("live_counts", {}),
-    "delivery_all": status_result.get("delivery_all"),
-    "delivery_recent": status_result.get("delivery_recent"),
-    "delivery_breakdown": status_result.get("delivery_breakdown"),
+      "delivery_all": status_result.get("delivery_all"),
+      "delivery_recent": status_result.get("delivery_recent"),
+      "delivery_breakdown": status_result.get("delivery_breakdown"),
       "reconcile": status_result.get("reconcile", {}),
       "synced_at": timezone.now().isoformat(),
     },
@@ -123,6 +127,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "pages": fetch_result.pages,
     "statuses_fetched": status_result["statuses_fetched"],
     "statuses_updated": status_result["statuses_updated"],
+    "reconciled": reconciled,
+    "sync_version": status_result.get("sync_version"),
     "status_error": status_error,
     "wb_counts": status_result.get("counts", {}),
     "live_counts": status_result.get("live_counts", {}),
