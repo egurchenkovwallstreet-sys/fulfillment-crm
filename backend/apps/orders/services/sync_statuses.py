@@ -124,7 +124,7 @@ def sync_order_statuses_for_seller(
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
 
   try:
-    recent_ids = client.fetch_recent_order_ids(days=7)
+    recent_ids = client.fetch_recent_order_ids(days=5)
   except WBApiError:
     recent_ids = set()
 

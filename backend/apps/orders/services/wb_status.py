@@ -16,10 +16,10 @@ CANCEL_WB_STATUSES = frozenset({
   "cancel",
 })
 
-# В пути к покупателю (без waiting — это ещё не принят на склад WB)
+# Активная вкладка «В доставке» в ЛК WB (без postponed — там отложенные)
 WB_IN_DELIVERY_WB_STATUSES = frozenset({
+  "waiting",
   "sorted",
-  "postponed_delivery",
   "accepted_by_carrier",
   "sent_to_carrier",
 })
