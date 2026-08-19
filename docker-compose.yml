@@ -127,8 +127,12 @@ services:
       - "8080:80"
     depends_on:
       web:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
+
+networks:
+  default:
+    name: fulfillment_net
 
 volumes:
   fulfillment_pgdata:
