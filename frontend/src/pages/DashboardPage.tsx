@@ -14,7 +14,7 @@ export function DashboardPage() {
     sku_count: 0,
   })
   const [syncing, setSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = useState('')
+  const [syncError, setSyncError] = useState('')
 
   const loadStats = useCallback(async () => {
     try {
@@ -27,50 +27,16 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadStats()
-    fetch('/api/health/')
-      .then((r) => r.json())
-      .then((h) => {
-        if (h?.sync_version) {
-          setSyncMessage((m) => m || `Backend: ${h.sync_version}`)
-        }
-      })
-      .catch(() => {})
   }, [loadStats])
 
   async function handleSync() {
     setSyncing(true)
-    setSyncMessage('')
+    setSyncError('')
     try {
-      const result = await syncOrders()
-      const created = result.created ?? result.results?.reduce((s, r) => s + (r.created ?? 0), 0) ?? 0
-      const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
-      const rawTotal = result.raw_total ?? result.results?.reduce((s, r) => s + (r.raw_total ?? 0), 0) ?? fetched
-      const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
-      const reconciled = result.reconciled ?? result.results?.reduce((s, r) => s + (r.reconciled ?? 0), 0) ?? 0
-      const syncVersion = result.sync_version ?? result.results?.[0]?.sync_version
-      const statusError = result.status_error ?? result.results?.[0]?.status_error
-      const wbCounts = result.wb_counts ?? result.results?.[0]?.wb_counts
-      const liveCounts = result.live_counts ?? result.results?.[0]?.live_counts
-      const inDelivery = liveCounts?.in_delivery ?? wbCounts?.in_delivery
-      const breakdown = result.delivery_breakdown ?? result.results?.[0]?.delivery_breakdown
-      let msg = `[${syncVersion ?? '?'}] В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}`
-      msg += `, WB-полей ${statusesUpdated}, сверка ${reconciled}`
-      if (statusError) msg += `. ОШИБКА: ${statusError}`
-      if (inDelivery !== undefined) {
-        msg += `. В доставке (waiting): ${inDelivery}`
-      }
-      if (breakdown && typeof breakdown === 'object') {
-        const sorted = breakdown['sorted']
-        if (sorted) msg += `. Исключено sorted: ${sorted}`
-      }
-      const reconcile = result.reconcile ?? result.results?.[0]?.reconcile
-      if (reconcile?.shipped_not_waiting) {
-        msg += `, убрано ${reconcile.shipped_not_waiting}`
-      }
-      setSyncMessage(msg)
+      await syncOrders()
       await loadStats()
     } catch (err) {
-      setSyncMessage(err instanceof Error ? err.message : 'Ошибка синхронизации')
+      setSyncError(err instanceof Error ? err.message : 'Ошибка синхронизации')
     } finally {
       setSyncing(false)
     }
@@ -99,7 +65,7 @@ export function DashboardPage() {
         </button>
       </header>
 
-      {syncMessage && <div className="dashboard-sync-msg">{syncMessage}</div>}
+      {syncError && <div className="dashboard-sync-msg dashboard-sync-msg--error">{syncError}</div>}
 
       <section className="stats-grid">
         <StatCard
