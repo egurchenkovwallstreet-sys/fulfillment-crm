@@ -172,6 +172,10 @@ CELERY_TIMEZONE = TIME_ZONE
 
 # Wildberries API
 WB_API_BASE_URL = env("WB_API_BASE_URL", default="https://marketplace-api.wildberries.ru")
+WB_CONTENT_API_BASE_URL = env(
+  "WB_CONTENT_API_BASE_URL",
+  default="https://content-api.wildberries.ru",
+)
 WB_SYNC_INTERVAL_MINUTES = env.int("WB_SYNC_INTERVAL_MINUTES", default=15)
 
 # Encryption key for WB tokens (Fernet)

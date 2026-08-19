@@ -175,6 +175,33 @@
   pointer-events: none;
 }
 
+.intake-marking {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.intake-marking--required {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.intake-marking--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #6ee7b7;
+}
+
+.intake-marking--warning {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  font-weight: 500;
+}
+
 @media (max-width: 900px) {
   .intake-grid {
     grid-template-columns: 1fr;

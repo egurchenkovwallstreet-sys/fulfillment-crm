@@ -183,6 +183,53 @@
   }
 }
 
+.marking-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.marking-badge--required {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.marking-badge--ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.assembly-scan-panel--marking {
+  color: #b45309;
+}
+
+.assembly-scan-input--marking {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.assembly-pending-order {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.assembly-pending-order p {
+  margin: 0.25rem 0;
+}
+
+.assembly-scan-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
 @media print {
   .sidebar,
   .topbar,

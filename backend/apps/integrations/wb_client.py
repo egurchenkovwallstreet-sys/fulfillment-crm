@@ -198,6 +198,24 @@ class WBClient:
 
     return ids
 
+  def bind_order_sgtin(self, order_id: int, sgtins: list[str]) -> None:
+    """PUT /api/v3/orders/{orderId}/meta/sgtin — привязка кода ЧЗ к сборочному заданию."""
+    if not sgtins:
+      raise WBApiError("Не передан код ЧЗ")
+    self._request(
+      "PUT",
+      f"/api/v3/orders/{order_id}/meta/sgtin",
+      json={"sgtins": sgtins},
+    )
+
+  def delete_order_meta(self, order_id: int, *, key: str = "sgtin") -> None:
+    """DELETE /api/v3/orders/{orderId}/meta — удаление метаданных заказа."""
+    self._request(
+      "DELETE",
+      f"/api/v3/orders/{order_id}/meta",
+      params={"key": key},
+    )
+
 
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []

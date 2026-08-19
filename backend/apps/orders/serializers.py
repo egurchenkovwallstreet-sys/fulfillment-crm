@@ -31,6 +31,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   wb_stage_display = serializers.SerializerMethodField()
+  requires_marking = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -48,6 +49,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "sticker_part_a",
       "sticker_part_b",
       "marking_bound",
+      "requires_marking",
       "created_at",
     )
 
@@ -55,9 +57,15 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.orders.services.assembly import get_wb_stage_label
     return get_wb_stage_label(obj.wb_supplier_status)
 
+  def get_requires_marking(self, obj):
+    from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
 
 class OrderPrintSerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
+  requires_marking = serializers.SerializerMethodField()
+  marking_bound = serializers.BooleanField(read_only=True)
 
   class Meta:
     model = Order
@@ -71,7 +79,13 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "sticker_part_a",
       "sticker_part_b",
       "has_sticker",
+      "requires_marking",
+      "marking_bound",
     )
+
+  def get_requires_marking(self, obj):
+    from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
 
 
 class PickListItemSerializer(serializers.ModelSerializer):
@@ -172,3 +186,12 @@ class PickListGenerateSerializer(serializers.Serializer):
 
 class ScanPrintSerializer(serializers.Serializer):
   barcode = serializers.CharField(max_length=200)
+
+
+class BindMarkingSerializer(serializers.Serializer):
+  order_id = serializers.IntegerField()
+  marking_code = serializers.CharField(max_length=500)
+
+
+class ReplaceOrderSerializer(serializers.Serializer):
+  order_id = serializers.IntegerField()

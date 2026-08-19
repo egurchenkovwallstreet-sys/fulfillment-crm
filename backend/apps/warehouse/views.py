@@ -16,6 +16,7 @@ from .serializers import (
   StockOperationSerializer,
 )
 from .services.intake import IntakeError, perform_intake
+from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
 
 
 class SellerListView(APIView):
@@ -57,14 +58,31 @@ class IntakeLookupView(APIView):
     )
 
     if product:
+      marking = refresh_product_marking(product, product.seller)
       return Response({
         "exists": True,
         "product": ProductSerializer(product).data,
+        "marking": {
+          "requires_marking": product.requires_marking,
+          "wb_found": marking.wb_found,
+          "title": marking.title,
+          "warning": marking.warning,
+        },
       })
 
+    marking = lookup_marking_for_barcode(
+      Seller.objects.get(pk=seller_id),
+      barcode,
+    )
     return Response({
       "exists": False,
       "barcode": barcode,
+      "marking": {
+        "requires_marking": marking.requires_marking,
+        "wb_found": marking.wb_found,
+        "title": marking.title,
+        "warning": marking.warning,
+      },
     })
 
 

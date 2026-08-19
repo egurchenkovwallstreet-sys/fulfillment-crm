@@ -5,6 +5,7 @@ from apps.integrations.tasks import sync_wb_stocks
 from apps.sellers.models import Seller
 
 from apps.warehouse.models import Cell, Product, StockOperation
+from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 
 
 class IntakeError(Exception):
@@ -67,12 +68,15 @@ def perform_intake(
       cell.is_occupied = True
       cell.save(update_fields=["is_occupied"])
 
+    marking = lookup_marking_for_barcode(seller, barcode)
+
     product = Product.objects.create(
       seller=seller,
       barcode=barcode,
-      name=name.strip(),
+      name=name.strip() or marking.title,
       cell=cell,
       quantity=quantity,
+      requires_marking=marking.requires_marking if marking.wb_found else False,
     )
     is_new = True
 
@@ -94,6 +98,7 @@ def perform_intake(
       "quantity": quantity,
       "cell": product.cell.number,
       "is_new_product": is_new,
+      "requires_marking": product.requires_marking,
     },
   )
 

@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+  AssemblyBindMarkingView,
+  AssemblyReplaceOrderView,
   AssemblyScanPrintView,
   AssemblySellerDetailView,
   AssemblySellerListView,
@@ -35,5 +37,15 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/scan-print/",
       AssemblyScanPrintView.as_view(),
       name="assembly-scan-print",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/bind-marking/",
+      AssemblyBindMarkingView.as_view(),
+      name="assembly-bind-marking",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/replace-order/",
+      AssemblyReplaceOrderView.as_view(),
+      name="assembly-replace-order",
     ),
 ]

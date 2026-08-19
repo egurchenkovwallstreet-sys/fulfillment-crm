@@ -27,6 +27,12 @@ export type IntakeLookup = {
   exists: boolean
   barcode?: string
   product?: Product
+  marking?: {
+    requires_marking: boolean
+    wb_found: boolean
+    title?: string
+    warning?: string
+  }
 }
 
 export type IntakeHistoryItem = {

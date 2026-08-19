@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
+  bindMarking,
   fetchAssemblySeller,
-  scanPrintSticker,
+  replaceOrderItem,
+  scanOrderBarcode,
   startAssembly,
   type AssemblyOrder,
   type AssemblySellerDetail,
+  type PrintOrder,
 } from '../api/assembly'
 import { syncOrders } from '../api/orders'
 import './AssemblyPage.css'
@@ -16,10 +19,13 @@ const STAGES = [
   { key: 'complete', label: 'В доставке', tone: 'blue' },
 ] as const
 
+type ScanPhase = 'barcode' | 'marking'
+
 export function AssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
   const id = Number(sellerId)
   const scanRef = useRef<HTMLInputElement>(null)
+  const markingRef = useRef<HTMLInputElement>(null)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(null)
   const [stage, setStage] = useState('new')
@@ -27,6 +33,9 @@ export function AssemblySellerPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [scanValue, setScanValue] = useState('')
+  const [markingValue, setMarkingValue] = useState('')
+  const [scanPhase, setScanPhase] = useState<ScanPhase>('barcode')
+  const [pendingOrder, setPendingOrder] = useState<PrintOrder | null>(null)
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
 
@@ -46,6 +55,42 @@ export function AssemblySellerPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (scanPhase === 'marking') {
+      markingRef.current?.focus()
+    } else {
+      scanRef.current?.focus()
+    }
+  }, [scanPhase])
+
+  function resetScanFlow() {
+    setScanPhase('barcode')
+    setPendingOrder(null)
+    setMarkingValue('')
+    setScanValue('')
+    scanRef.current?.focus()
+  }
+
+  function printSticker(base64: string) {
+    const win = window.open('', '_blank', 'width=400,height=600')
+    if (!win) return
+    win.document.write(`
+      <html><head><title>Стикер FBS</title></head>
+      <body style="margin:0;text-align:center" onload="window.print();window.close()">
+        <img src="data:image/png;base64,${base64}" style="max-width:100%" />
+      </body></html>
+    `)
+    win.document.close()
+  }
+
+  function finishPrint(order: PrintOrder) {
+    setStickerPreview(order.sticker_file)
+    setLastPrinted(order as unknown as AssemblyOrder)
+    setSuccess(`Стикер заказа WB #${order.wb_order_id} отправлен на печать`)
+    printSticker(order.sticker_file)
+    resetScanFlow()
+  }
 
   async function handleStartAssembly() {
     if (!id) return
@@ -82,45 +127,80 @@ export function AssemblySellerPage() {
     }
   }
 
-  async function handleScanSubmit(e?: FormEvent) {
+  async function handleBarcodeSubmit(e?: FormEvent) {
     e?.preventDefault()
     if (!id || !scanValue.trim()) return
     setError('')
     setSuccess('')
     setLoading(true)
     try {
-      const result = await scanPrintSticker(id, scanValue.trim())
-      setStickerPreview(result.order.sticker_file)
-      setLastPrinted(result.order as unknown as AssemblyOrder)
-      setSuccess(`Стикер заказа WB #${result.order.wb_order_id} готов к печати`)
-      setScanValue('')
+      const result = await scanOrderBarcode(id, scanValue.trim())
+      if (result.action === 'await_marking') {
+        setPendingOrder(result.order)
+        setScanPhase('marking')
+        setScanValue('')
+        setSuccess(result.message || 'Отсканируйте код Честного знака (DataMatrix)')
+      } else {
+        finishPrint(result.order)
+      }
       await load()
-      printSticker(result.order.sticker_file)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка сканирования')
+      setError(err instanceof Error ? err.message : 'Ошибка сканирования баркода')
     } finally {
       setLoading(false)
-      scanRef.current?.focus()
+      if (scanPhase === 'barcode') {
+        scanRef.current?.focus()
+      }
+    }
+  }
+
+  async function handleMarkingSubmit(e?: FormEvent) {
+    e?.preventDefault()
+    if (!id || !pendingOrder || !markingValue.trim()) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await bindMarking(id, pendingOrder.id, markingValue.trim())
+      finishPrint(result.order)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
+      markingRef.current?.focus()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleReplaceOrder() {
+    if (!id || !pendingOrder) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await replaceOrderItem(id, pendingOrder.id)
+      setSuccess(result.message)
+      resetScanFlow()
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка замены товара')
+    } finally {
+      setLoading(false)
     }
   }
 
   function handleScanKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault()
-      handleScanSubmit()
+      handleBarcodeSubmit()
     }
   }
 
-  function printSticker(base64: string) {
-    const win = window.open('', '_blank', 'width=400,height=600')
-    if (!win) return
-    win.document.write(`
-      <html><head><title>Стикер FBS</title></head>
-      <body style="margin:0;text-align:center" onload="window.print();window.close()">
-        <img src="data:image/png;base64,${base64}" style="max-width:100%" />
-      </body></html>
-    `)
-    win.document.close()
+  function handleMarkingKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleMarkingSubmit()
+    }
   }
 
   if (!data) {
@@ -183,6 +263,7 @@ export function AssemblySellerPage() {
                 <th>WB ID</th>
                 <th>Баркод</th>
                 <th>Ячейка</th>
+                <th>ЧЗ</th>
                 <th>Статус</th>
                 <th>Стикер</th>
               </tr>
@@ -193,6 +274,17 @@ export function AssemblySellerPage() {
                   <td>{order.wb_order_id}</td>
                   <td><code>{order.barcode}</code></td>
                   <td>{order.cell_number || '—'}</td>
+                  <td>
+                    {order.requires_marking ? (
+                      order.marking_bound ? (
+                        <span className="marking-badge marking-badge--ok">✓</span>
+                      ) : (
+                        <span className="marking-badge marking-badge--required">ЧЗ</span>
+                      )
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                   <td>{order.wb_stage_display || order.status_display}</td>
                   <td>{order.has_sticker ? '✓' : '—'}</td>
                 </tr>
@@ -227,26 +319,78 @@ export function AssemblySellerPage() {
           )}
 
           <section className="panel assembly-scan-panel">
-            <h2 className="section-title">Печать по скану</h2>
-            <p className="assembly-scan-hint">Отсканируйте баркод заказа для печати стикера FBS</p>
-            <form onSubmit={handleScanSubmit}>
-              <input
-                ref={scanRef}
-                type="text"
-                className="assembly-scan-input"
-                value={scanValue}
-                onChange={(e) => setScanValue(e.target.value)}
-                onKeyDown={handleScanKeyDown}
-                placeholder="Баркод заказа..."
-                autoComplete="off"
-              />
-            </form>
-            {lastPrinted && (
+            {scanPhase === 'barcode' ? (
+              <>
+                <h2 className="section-title">Сборка: скан баркода</h2>
+                <p className="assembly-scan-hint">
+                  Отсканируйте баркод заказа. Если товар с Честным знаком — система попросит отсканировать DataMatrix.
+                </p>
+                <form onSubmit={handleBarcodeSubmit}>
+                  <input
+                    ref={scanRef}
+                    type="text"
+                    className="assembly-scan-input"
+                    value={scanValue}
+                    onChange={(e) => setScanValue(e.target.value)}
+                    onKeyDown={handleScanKeyDown}
+                    placeholder="Баркод заказа..."
+                    autoComplete="off"
+                  />
+                </form>
+              </>
+            ) : (
+              <>
+                <h2 className="section-title assembly-scan-panel--marking">
+                  Требуется Честный знак
+                </h2>
+                {pendingOrder && (
+                  <div className="assembly-pending-order">
+                    <p>Заказ WB <strong>#{pendingOrder.wb_order_id}</strong></p>
+                    <p>Баркод: <code>{pendingOrder.barcode}</code></p>
+                  </div>
+                )}
+                <p className="assembly-scan-hint">
+                  Отсканируйте DataMatrix с упаковки. После привязки в WB стикер отправится на печать автоматически.
+                </p>
+                <form onSubmit={handleMarkingSubmit}>
+                  <input
+                    ref={markingRef}
+                    type="text"
+                    className="assembly-scan-input assembly-scan-input--marking"
+                    value={markingValue}
+                    onChange={(e) => setMarkingValue(e.target.value)}
+                    onKeyDown={handleMarkingKeyDown}
+                    placeholder="Код Честного знака (DataMatrix)..."
+                    autoComplete="off"
+                  />
+                </form>
+                <div className="assembly-scan-actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleReplaceOrder}
+                    disabled={loading}
+                  >
+                    Заменить товар
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={resetScanFlow}
+                    disabled={loading}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </>
+            )}
+
+            {lastPrinted && scanPhase === 'barcode' && (
               <p className="assembly-last-print">
                 Последний: WB #{lastPrinted.wb_order_id} · {lastPrinted.barcode}
               </p>
             )}
-            {stickerPreview && (
+            {stickerPreview && scanPhase === 'barcode' && (
               <div className="assembly-sticker-preview">
                 <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
                 <button

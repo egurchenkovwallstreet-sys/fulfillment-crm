@@ -11,6 +11,7 @@ from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW, wb
 
 from .models import Order, PickList, Supply
 from .serializers import (
+  BindMarkingSerializer,
   OrderAssemblySerializer,
   OrderPrintSerializer,
   OrderSerializer,
@@ -18,13 +19,16 @@ from .serializers import (
   PickListBriefSerializer,
   PickListGenerateSerializer,
   PickListSerializer,
+  ReplaceOrderSerializer,
   ScanPrintSerializer,
   SellerAssemblyCountersSerializer,
 )
 from .services.assembly import (
   AssemblyError,
+  bind_marking_and_print,
   get_seller_stage_counts,
-  scan_and_print,
+  replace_order_item,
+  scan_order_barcode,
   start_assembly,
 )
 from .services.pick_list import PickListError, generate_pick_list
@@ -304,7 +308,7 @@ class AssemblyStartView(APIView):
 
 
 class AssemblyScanPrintView(APIView):
-  """Скан баркода → данные стикера для печати."""
+  """Скан баркода заказа: без ЧЗ — сразу печать; с ЧЗ — ожидание DataMatrix."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
@@ -316,15 +320,87 @@ class AssemblyScanPrintView(APIView):
     serializer.is_valid(raise_exception=True)
 
     try:
-      order = scan_and_print(
+      result = scan_order_barcode(
         seller,
         serializer.validated_data["barcode"],
         user=request.user,
       )
     except AssemblyError as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    order_data = OrderPrintSerializer(result["order"]).data
+    payload = {
+      "success": True,
+      "action": result["action"],
+      "requires_marking": result["requires_marking"],
+      "order": order_data,
+    }
+    if result.get("message"):
+      payload["message"] = result["message"]
+    return Response(payload)
+
+
+class AssemblyBindMarkingView(APIView):
+  """Скан DataMatrix → привязка ЧЗ в WB → печать стикера."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = BindMarkingSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      order = bind_marking_and_print(
+        seller,
+        serializer.validated_data["order_id"],
+        serializer.validated_data["marking_code"],
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
 
     return Response({
       "success": True,
+      "action": "print",
       "order": OrderPrintSerializer(order).data,
+    })
+
+
+class AssemblyReplaceOrderView(APIView):
+  """Сброс заказа для замены товара."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ReplaceOrderSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      order = replace_order_item(
+        seller,
+        serializer.validated_data["order_id"],
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    return Response({
+      "success": True,
+      "order": OrderAssemblySerializer(order).data,
+      "message": f"Заказ WB #{order.wb_order_id} сброшен — возьмите другой экземпляр товара",
     })

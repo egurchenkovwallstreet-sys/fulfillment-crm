@@ -106,7 +106,9 @@ export function IntakePage() {
         name: productName,
       })
       setSuccess(
-        `${result.message} Ячейка №${result.product.cell_number}, остаток: ${result.product.quantity} шт.`,
+        `${result.message} Ячейка №${result.product.cell_number}, остаток: ${result.product.quantity} шт.${
+          result.product.requires_marking ? ' · Товар с Честным знаком' : ''
+        }`,
       )
       setBarcode('')
       setLookup(null)
@@ -195,6 +197,11 @@ export function IntakePage() {
                 <p><strong>Ячейка:</strong> №{lookup.product.cell_number}</p>
                 <p><strong>Текущий остаток:</strong> {lookup.product.quantity} шт.</p>
                 {lookup.product.name && <p><strong>Название:</strong> {lookup.product.name}</p>}
+                {lookup.product.requires_marking && (
+                  <p className="intake-marking intake-marking--required">
+                    Требует маркировку «Честный знак»
+                  </p>
+                )}
               </div>
             )}
 
@@ -202,6 +209,19 @@ export function IntakePage() {
               <div className="intake-info intake-info--new">
                 <h3>Новый баркод</h3>
                 <p>Товар не найден — будет создан и привязан к ячейке</p>
+
+                {lookup.marking?.requires_marking && (
+                  <p className="intake-marking intake-marking--required">
+                    WB: товар подлежит обязательной маркировке «Честный знак»
+                    {lookup.marking.title ? ` — ${lookup.marking.title}` : ''}
+                  </p>
+                )}
+                {lookup.marking?.warning && (
+                  <p className="intake-marking intake-marking--warning">{lookup.marking.warning}</p>
+                )}
+                {!lookup.marking?.requires_marking && lookup.marking?.wb_found && (
+                  <p className="intake-marking intake-marking--ok">WB: маркировка ЧЗ не требуется</p>
+                )}
 
                 <label className="intake-field">
                   Название (необязательно)

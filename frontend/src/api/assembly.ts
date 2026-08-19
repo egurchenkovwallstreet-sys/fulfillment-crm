@@ -30,6 +30,7 @@ export interface AssemblyOrder {
   sticker_part_a: string
   sticker_part_b: string
   marking_bound: boolean
+  requires_marking: boolean
   created_at: string
 }
 
@@ -50,19 +51,38 @@ export interface StartAssemblyResult {
   pick_list: PickList | null
 }
 
-export interface PrintScanResult {
+export interface PrintOrder {
+  id: number
+  wb_order_id: number
+  barcode: string
+  status: string
+  status_display: string
+  sticker_file: string
+  sticker_part_a: string
+  sticker_part_b: string
+  has_sticker: boolean
+  requires_marking: boolean
+  marking_bound: boolean
+}
+
+export interface ScanBarcodeResult {
   success: boolean
-  order: {
-    id: number
-    wb_order_id: number
-    barcode: string
-    status: string
-    status_display: string
-    sticker_file: string
-    sticker_part_a: string
-    sticker_part_b: string
-    has_sticker: boolean
-  }
+  action: 'print' | 'await_marking'
+  requires_marking: boolean
+  message?: string
+  order: PrintOrder
+}
+
+export interface BindMarkingResult {
+  success: boolean
+  action: 'print'
+  order: PrintOrder
+}
+
+export interface ReplaceOrderResult {
+  success: boolean
+  message: string
+  order: AssemblyOrder
 }
 
 export function fetchAssemblySellers() {
@@ -81,9 +101,28 @@ export function startAssembly(sellerId: number) {
   })
 }
 
-export function scanPrintSticker(sellerId: number, barcode: string) {
-  return apiFetch<PrintScanResult>(`/api/orders/assembly/sellers/${sellerId}/scan-print/`, {
+export function scanOrderBarcode(sellerId: number, barcode: string) {
+  return apiFetch<ScanBarcodeResult>(`/api/orders/assembly/sellers/${sellerId}/scan-print/`, {
     method: 'POST',
     body: JSON.stringify({ barcode }),
   })
+}
+
+export function bindMarking(sellerId: number, orderId: number, markingCode: string) {
+  return apiFetch<BindMarkingResult>(`/api/orders/assembly/sellers/${sellerId}/bind-marking/`, {
+    method: 'POST',
+    body: JSON.stringify({ order_id: orderId, marking_code: markingCode }),
+  })
+}
+
+export function replaceOrderItem(sellerId: number, orderId: number) {
+  return apiFetch<ReplaceOrderResult>(`/api/orders/assembly/sellers/${sellerId}/replace-order/`, {
+    method: 'POST',
+    body: JSON.stringify({ order_id: orderId }),
+  })
+}
+
+/** @deprecated use scanOrderBarcode */
+export function scanPrintSticker(sellerId: number, barcode: string) {
+  return scanOrderBarcode(sellerId, barcode)
 }
