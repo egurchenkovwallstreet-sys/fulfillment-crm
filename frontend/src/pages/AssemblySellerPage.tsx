@@ -11,11 +11,10 @@ import { syncOrders } from '../api/orders'
 import './AssemblyPage.css'
 
 const STAGES = [
-  { key: '', label: 'Все активные' },
-  { key: 'new', label: 'Новые' },
-  { key: 'confirm', label: 'На сборке' },
-  { key: 'complete', label: 'В доставке' },
-]
+  { key: 'new', label: 'Новые', tone: 'red' },
+  { key: 'confirm', label: 'На сборке', tone: 'orange' },
+  { key: 'complete', label: 'В доставке', tone: 'blue' },
+] as const
 
 export function AssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
@@ -23,7 +22,7 @@ export function AssemblySellerPage() {
   const scanRef = useRef<HTMLInputElement>(null)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(null)
-  const [stage, setStage] = useState('')
+  const [stage, setStage] = useState('new')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -129,7 +128,12 @@ export function AssemblySellerPage() {
   }
 
   const counts = data.counts
-  const totalActive = (counts.new ?? 0) + (counts.in_picking ?? 0) + (counts.in_delivery ?? 0)
+
+  function stageCount(key: string): number {
+    if (key === 'confirm') return counts.in_picking ?? 0
+    if (key === 'complete') return counts.in_delivery ?? 0
+    return counts.new ?? 0
+  }
 
   return (
     <>
@@ -159,16 +163,12 @@ export function AssemblySellerPage() {
       <section className="assembly-pipeline">
         {STAGES.map((s) => (
           <button
-            key={s.key || 'all'}
+            key={s.key}
             type="button"
-            className={`assembly-stage${stage === s.key ? ' assembly-stage--active' : ''}`}
+            className={`assembly-stage assembly-stage--${s.tone}${stage === s.key ? ' assembly-stage--active' : ''}`}
             onClick={() => setStage(s.key)}
           >
-            <span className="assembly-stage__count">
-              {s.key
-                ? (counts[s.key === 'confirm' ? 'in_picking' : s.key === 'complete' ? 'in_delivery' : s.key] ?? 0)
-                : totalActive}
-            </span>
+            <span className="assembly-stage__count">{stageCount(s.key)}</span>
             <span className="assembly-stage__label">{s.label}</span>
           </button>
         ))}

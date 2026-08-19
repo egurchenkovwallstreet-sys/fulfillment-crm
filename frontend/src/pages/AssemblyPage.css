@@ -67,17 +67,48 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 90px;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #cbd5e1;
+  min-width: 100px;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-top-width: 3px;
   border-radius: 10px;
   background: #fff;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.assembly-stage--active {
-  border-color: #2563eb;
+.assembly-stage--red { border-top-color: #dc2626; }
+.assembly-stage--orange { border-top-color: #f59e0b; }
+.assembly-stage--blue { border-top-color: #3b82f6; }
+
+.assembly-stage--red.assembly-stage--active {
+  background: #fef2f2;
+  border-color: #fecaca;
+  border-top-color: #dc2626;
+}
+
+.assembly-stage--orange.assembly-stage--active {
+  background: #fffbeb;
+  border-color: #fde68a;
+  border-top-color: #f59e0b;
+}
+
+.assembly-stage--blue.assembly-stage--active {
   background: #eff6ff;
+  border-color: #bfdbfe;
+  border-top-color: #3b82f6;
+}
+
+.assembly-stage--active .assembly-stage__count {
+  color: #0f172a;
+}
+
+.assembly-stage--red .assembly-stage__count { color: #dc2626; }
+.assembly-stage--orange .assembly-stage__count { color: #d97706; }
+.assembly-stage--blue .assembly-stage__count { color: #2563eb; }
+
+.assembly-stage--active {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
 .assembly-stage__count {
