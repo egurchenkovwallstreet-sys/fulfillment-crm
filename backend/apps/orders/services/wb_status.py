@@ -125,13 +125,11 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
 def compute_live_wb_counts(
   status_map: dict[int, dict],
   *,
-  active_wb_ids: set[int] | None = None,
+  delivery_wb_ids: set[int] | None = None,
 ) -> dict[str, int]:
-  """Счётчики из ответа WB — только актуальные заказы (как вкладки ЛК)."""
+  """Счётчики из ответа WB. «В доставке» — только актуальные ID (как вкладка ЛК)."""
   counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
   for wb_id, item in status_map.items():
-    if active_wb_ids is not None and wb_id not in active_wb_ids:
-      continue
     supplier = (item.get("supplierStatus") or "").strip()
     wb = (item.get("wbStatus") or "").strip()
     if is_wb_cancelled(supplier, wb):
@@ -141,7 +139,8 @@ def compute_live_wb_counts(
     elif supplier == WB_SUPPLIER_ASSEMBLY:
       counts["in_picking"] += 1
     elif is_wb_in_delivery(supplier, wb):
-      counts["in_delivery"] += 1
+      if delivery_wb_ids is None or wb_id in delivery_wb_ids:
+        counts["in_delivery"] += 1
   return counts
 
 

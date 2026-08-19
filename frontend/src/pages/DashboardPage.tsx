@@ -41,9 +41,13 @@ export function DashboardPage() {
       const wbCounts = result.wb_counts ?? result.results?.[0]?.wb_counts
       const liveCounts = result.live_counts ?? result.results?.[0]?.live_counts
       const inDelivery = liveCounts?.in_delivery ?? wbCounts?.in_delivery
+      const deliveryAll = result.delivery_all ?? result.results?.[0]?.delivery_all
       let msg = `В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`
       if (inDelivery !== undefined) {
         msg += `. В доставке (WB): ${inDelivery}`
+        if (deliveryAll !== undefined && deliveryAll !== inDelivery) {
+          msg += ` (всего в API без фильтра: ${deliveryAll})`
+        }
       }
       setSyncMessage(msg)
       await loadStats()

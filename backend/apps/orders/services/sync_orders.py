@@ -104,6 +104,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "status_error": status_error,
       "wb_counts": status_result.get("counts", {}),
       "live_counts": status_result.get("live_counts", {}),
+    "delivery_all": status_result.get("delivery_all"),
+    "delivery_recent": status_result.get("delivery_recent"),
       "reconcile": status_result.get("reconcile", {}),
       "synced_at": timezone.now().isoformat(),
     },
@@ -123,6 +125,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "status_error": status_error,
     "wb_counts": status_result.get("counts", {}),
     "live_counts": status_result.get("live_counts", {}),
+    "delivery_all": status_result.get("delivery_all"),
+    "delivery_recent": status_result.get("delivery_recent"),
     "reconcile": status_result.get("reconcile", {}),
   }
 
