@@ -42,16 +42,24 @@ export function DashboardPage() {
       const liveCounts = result.live_counts ?? result.results?.[0]?.live_counts
       const inDelivery = liveCounts?.in_delivery ?? wbCounts?.in_delivery
       const deliveryAll = result.delivery_all ?? result.results?.[0]?.delivery_all
+      const breakdown = result.delivery_breakdown ?? result.results?.[0]?.delivery_breakdown
       let msg = `В WB ${rawTotal} заказов, загружено ${fetched}, новых ${created}, статусов обновлено ${statusesUpdated}`
       if (inDelivery !== undefined) {
-        msg += `. В доставке: ${inDelivery}`
+        msg += `. В доставке (sorted): ${inDelivery}`
         if (deliveryAll !== undefined && deliveryAll !== inDelivery) {
-          msg += ` (в API без фильтра: ${deliveryAll})`
+          msg += ` — только wbStatus=sorted`
         }
       }
+      if (breakdown && typeof breakdown === 'object') {
+        const extra = Object.entries(breakdown)
+          .filter(([k]) => k !== 'sorted')
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(', ')
+        if (extra) msg += `. Прочие complete: ${extra}`
+      }
       const reconcile = result.reconcile ?? result.results?.[0]?.reconcile
-      if (reconcile?.shipped_stale) {
-        msg += `, архив ${reconcile.shipped_stale}`
+      if (reconcile?.shipped_not_sorted) {
+        msg += `, убрано ${reconcile.shipped_not_sorted}`
       }
       setSyncMessage(msg)
       await loadStats()

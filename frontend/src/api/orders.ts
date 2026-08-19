@@ -68,13 +68,13 @@ export interface SyncResult {
   live_counts?: { new?: number; in_picking?: number; in_delivery?: number }
   delivery_all?: number
   delivery_recent?: number
+  delivery_breakdown?: Record<string, number>
   reconcile?: {
     cancelled_terminal?: number
     shipped_delivered?: number
+    shipped_not_sorted?: number
     shipped_missing?: number
-    shipped_stale?: number
-    delivery_window_days?: number
-    recent_order_ids?: number
+    delivery_status_breakdown?: Record<string, number>
   }
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]

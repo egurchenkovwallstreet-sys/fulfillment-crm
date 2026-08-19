@@ -166,8 +166,8 @@ class OrderSyncView(APIView):
       payload.update({
         k: first[k]
         for k in (
-          "live_counts", "delivery_all", "delivery_recent", "reconcile",
-          "statuses_updated", "statuses_fetched", "raw_total", "fetched", "created",
+          "live_counts", "delivery_all", "delivery_recent", "delivery_breakdown",
+          "reconcile", "statuses_updated", "statuses_fetched", "raw_total", "fetched", "created",
         )
         if k in first
       })

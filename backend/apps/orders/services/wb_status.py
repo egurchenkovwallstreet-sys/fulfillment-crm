@@ -10,7 +10,6 @@ WB_SUPPLIER_DELIVERY = "complete"
 
 CANCEL_SUPPLIER_STATUSES = frozenset({"cancel", "cancel_carrier"})
 
-# Отмена / отказ покупателя — не «В доставке»
 CANCEL_WB_STATUSES = frozenset({
   "canceled",
   "canceled_by_client",
@@ -19,25 +18,16 @@ CANCEL_WB_STATUSES = frozenset({
   "cancel",
 })
 
-# Выкуплено / выдан / брак — не «В доставке»
 WB_DELIVERED_WB_STATUSES = frozenset({
   "sold",
   "ready_for_pickup",
   "defect",
 })
 
-# Все терминальные wbStatus — исключаем из вкладки «В доставке»
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
-# Не во вкладке «В доставке» ЛК WB
-WB_NOT_IN_DELIVERY_TAB = frozenset({"waiting", "postponed_delivery"})
-
-# Реально «В доставке» в ЛК WB
-WB_IN_TRANSIT_WB_STATUSES = frozenset({
-  "sorted",
-  "accepted_by_carrier",
-  "sent_to_carrier",
-})
+# Вкладка «В доставке» в ЛК WB = complete + sorted (отсортирован на складе WB)
+WB_DELIVERY_TAB_WB_STATUS = "sorted"
 
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
   WB_SUPPLIER_NEW,
@@ -63,10 +53,10 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """В доставке: complete + в пути, без выкупа, отмен, отказов и waiting."""
+  """Как вкладка «В доставке» в ЛК WB: complete + wbStatus=sorted."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & Q(wb_status__in=WB_IN_TRANSIT_WB_STATUSES)
+    & Q(wb_status=WB_DELIVERY_TAB_WB_STATUS)
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 
@@ -84,18 +74,18 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
 
 
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
-  """complete + в пути (sorted/carrier), без выкупа, отмен, отказов и waiting."""
+  """Только complete + sorted — как считает ЛК WB."""
   if supplier_status != WB_SUPPLIER_DELIVERY:
     return False
   if is_wb_cancelled(supplier_status, wb_status):
     return False
   if wb_status in WB_DELIVERED_WB_STATUSES:
     return False
-  return wb_status in WB_IN_TRANSIT_WB_STATUSES
+  return wb_status == WB_DELIVERY_TAB_WB_STATUS
 
 
 def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str) -> bool:
-  """Обновить WB-поля заказа и терминальные CRM-статусы. Возвращает True, если были изменения."""
+  """Обновить WB-поля заказа и терминальные CRM-статусы."""
   supplier_status = (supplier_status or "").strip()
   wb_status = (wb_status or "").strip()
 
@@ -105,7 +95,7 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
     changed_fields.update({"wb_supplier_status"})
   if order.wb_status != wb_status:
     order.wb_status = wb_status
-    changed_fields.update({"wb_status"})
+    changed_fields.add("wb_status")
 
   if is_wb_cancelled(supplier_status, wb_status):
     if order.status != Order.Status.CANCELLED:
@@ -115,9 +105,13 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
     if order.status != Order.Status.SHIPPED:
       order.status = Order.Status.SHIPPED
       changed_fields.add("status")
-  elif supplier_status == WB_SUPPLIER_DELIVERY and is_wb_in_delivery(supplier_status, wb_status):
+  elif is_wb_in_delivery(supplier_status, wb_status):
     if order.status not in (Order.Status.CANCELLED, Order.Status.SHIPPED, Order.Status.IN_DELIVERY):
       order.status = Order.Status.IN_DELIVERY
+      changed_fields.add("status")
+  elif supplier_status == WB_SUPPLIER_DELIVERY:
+    if order.status == Order.Status.IN_DELIVERY:
+      order.status = Order.Status.SHIPPED
       changed_fields.add("status")
   elif supplier_status == WB_SUPPLIER_ASSEMBLY:
     if order.status == Order.Status.NEW:
@@ -136,7 +130,6 @@ def compute_live_wb_counts(
   *,
   delivery_wb_ids: set[int] | None = None,
 ) -> dict[str, int]:
-  """Счётчики из ответа WB. «В доставке» — только актуальные ID (как вкладка ЛК)."""
   counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
   for wb_id, item in status_map.items():
     supplier = (item.get("supplierStatus") or "").strip()

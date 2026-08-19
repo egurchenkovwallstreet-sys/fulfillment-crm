@@ -9,7 +9,7 @@ from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
-  WB_NOT_IN_DELIVERY_TAB,
+  WB_DELIVERY_TAB_WB_STATUS,
   WB_SUPPLIER_DELIVERY,
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
@@ -19,9 +19,6 @@ from apps.orders.services.wb_status import (
   save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
-
-# Как вкладка «В доставке» в ЛК WB — только заказы за последние N дней
-DELIVERY_COUNT_DAYS = 5
 
 
 def _count_delivery_all(status_map: dict[int, dict]) -> int:
@@ -33,6 +30,16 @@ def _count_delivery_all(status_map: dict[int, dict]) -> int:
       (item.get("wbStatus") or "").strip(),
     )
   )
+
+
+def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
+  breakdown: dict[str, int] = {}
+  for item in status_map.values():
+    if (item.get("supplierStatus") or "").strip() != WB_SUPPLIER_DELIVERY:
+      continue
+    wb = (item.get("wbStatus") or "").strip() or "(empty)"
+    breakdown[wb] = breakdown.get(wb, 0) + 1
+  return breakdown
 
 
 def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
@@ -48,22 +55,17 @@ def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> in
   return updated
 
 
-def _delivery_count_from_db(seller: Seller, recent_ids: set[int]) -> int:
-  """Счёт «В доставке» из БД после reconcile — без выкупа, отмен и архива."""
-  qs = Order.objects.filter(seller=seller).filter(wb_in_delivery_q())
-  if recent_ids:
-    qs = qs.filter(wb_order_id__in=recent_ids)
-  return qs.count()
+def _delivery_count_from_db(seller: Seller) -> int:
+  return Order.objects.filter(seller=seller).filter(wb_in_delivery_q()).count()
 
 
 def reconcile_wb_orders_for_seller(
   seller: Seller,
   status_map: dict[int, dict],
-  recent_ids: set[int],
   *,
   user=None,
 ) -> dict:
-  """Снять с «В доставке» выкупленные, отменённые, отказы и архивные заказы."""
+  """Снять с «В доставке» всё, кроме complete + sorted."""
   now = timezone.now()
   wb_ids_in_db = set(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
@@ -79,13 +81,14 @@ def reconcile_wb_orders_for_seller(
     wb_status__in=WB_DELIVERED_WB_STATUSES,
   ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
-  shipped_non_tab = Order.objects.filter(
+  shipped_not_sorted = Order.objects.filter(
     seller=seller,
     wb_supplier_status=WB_SUPPLIER_DELIVERY,
-    wb_status__in=WB_NOT_IN_DELIVERY_TAB,
-  ).exclude(status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED]).update(
-    status=Order.Status.SHIPPED, updated_at=now,
-  )
+  ).exclude(wb_status=WB_DELIVERY_TAB_WB_STATUS).exclude(
+    wb_status__in=WB_TERMINAL_WB_STATUSES,
+  ).exclude(wb_status="").exclude(
+    status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
+  ).update(status=Order.Status.SHIPPED, updated_at=now)
 
   shipped_missing = 0
   if missing_ids:
@@ -94,36 +97,23 @@ def reconcile_wb_orders_for_seller(
       wb_order_id__in=missing_ids,
     ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
-  shipped_stale = 0
-  if recent_ids:
-    shipped_stale = Order.objects.filter(
-      seller=seller,
-      wb_supplier_status=WB_SUPPLIER_DELIVERY,
-    ).exclude(wb_order_id__in=recent_ids).exclude(
-      wb_status__in=WB_TERMINAL_WB_STATUSES | WB_NOT_IN_DELIVERY_TAB,
-    ).exclude(wb_status="").exclude(
-      status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
-    ).update(status=Order.Status.SHIPPED, updated_at=now)
-
   result = {
     "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
-    "shipped_non_tab": shipped_non_tab,
+    "shipped_not_sorted": shipped_not_sorted,
     "shipped_missing": shipped_missing,
-    "shipped_stale": shipped_stale,
     "missing_from_api": len(missing_ids),
-    "delivery_window_days": DELIVERY_COUNT_DAYS,
-    "recent_order_ids": len(recent_ids),
+    "delivery_status_breakdown": _delivery_status_breakdown(status_map),
   }
 
-  if any(result[k] for k in ("cancelled_terminal", "shipped_delivered", "shipped_non_tab", "shipped_missing", "shipped_stale")):
+  if any(result[k] for k in ("cancelled_terminal", "shipped_delivered", "shipped_not_sorted", "shipped_missing")):
     AuditLog.objects.create(
       user=user,
       seller=seller,
       action_type=AuditLog.ActionType.WB_SYNC,
       message=(
-        f"Сверка статусов WB: отменено {cancelled_terminal}, "
-        f"завершено {shipped_delivered + shipped_non_tab + shipped_missing + shipped_stale}"
+        f"Сверка WB: отменено {cancelled_terminal}, "
+        f"убрано из доставки {shipped_not_sorted + shipped_delivered + shipped_missing}"
       ),
       details=result,
     )
@@ -139,7 +129,6 @@ def sync_order_statuses_for_seller(
   new_wb_ids: list[int] | None = None,
   new_orders_total: int = 0,
 ) -> dict:
-  """Запросить статусы WB, обновить заказы и сохранить счётчики."""
   wb_ids = list(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
   )
@@ -166,19 +155,12 @@ def sync_order_statuses_for_seller(
     if item.get("id") is not None
   }
 
-  try:
-    recent_ids = client.fetch_recent_order_ids(days=DELIVERY_COUNT_DAYS)
-  except WBApiError:
-    recent_ids = set()
-
-  delivery_ids = recent_ids | set(new_wb_ids or [])
-
   updated = _apply_statuses_to_orders(seller, status_map)
-  reconcile = reconcile_wb_orders_for_seller(seller, status_map, recent_ids, user=user)
+  reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
 
   delivery_all = _count_delivery_all(status_map)
-  live_counts = compute_live_wb_counts(status_map, delivery_wb_ids=delivery_ids)
-  live_counts["in_delivery"] = _delivery_count_from_db(seller, recent_ids)
+  live_counts = compute_live_wb_counts(status_map)
+  live_counts["in_delivery"] = _delivery_count_from_db(seller)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
   save_wb_counts_to_seller(seller, live_counts)
@@ -190,6 +172,7 @@ def sync_order_statuses_for_seller(
     "live_counts": live_counts,
     "delivery_all": delivery_all,
     "delivery_recent": live_counts["in_delivery"],
+    "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
     "reconcile": reconcile,
     "counts": counts,
   }
