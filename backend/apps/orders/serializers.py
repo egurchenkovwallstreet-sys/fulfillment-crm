@@ -32,6 +32,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   wb_stage_display = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
+  can_send_to_assembly = serializers.SerializerMethodField()
+  can_send_to_delivery = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -50,6 +52,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "sticker_part_b",
       "marking_bound",
       "requires_marking",
+      "can_send_to_assembly",
+      "can_send_to_delivery",
       "created_at",
     )
 
@@ -61,11 +65,20 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
     return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
 
+  def get_can_send_to_assembly(self, obj):
+    from apps.orders.services.supply_flow import order_can_send_to_assembly
+    return order_can_send_to_assembly(obj)
+
+  def get_can_send_to_delivery(self, obj):
+    from apps.orders.services.supply_flow import order_can_send_to_delivery
+    return order_can_send_to_delivery(obj)
+
 
 class OrderPrintSerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   requires_marking = serializers.SerializerMethodField()
   marking_bound = serializers.BooleanField(read_only=True)
+  can_send_to_delivery = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -81,11 +94,16 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "has_sticker",
       "requires_marking",
       "marking_bound",
+      "can_send_to_delivery",
     )
 
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
     return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
+  def get_can_send_to_delivery(self, obj):
+    from apps.orders.services.supply_flow import order_can_send_to_delivery
+    return order_can_send_to_delivery(obj)
 
 
 class PickListItemSerializer(serializers.ModelSerializer):
@@ -194,4 +212,8 @@ class BindMarkingSerializer(serializers.Serializer):
 
 
 class ReplaceOrderSerializer(serializers.Serializer):
+  order_id = serializers.IntegerField()
+
+
+class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()

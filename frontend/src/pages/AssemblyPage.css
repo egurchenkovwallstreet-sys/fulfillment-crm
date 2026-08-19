@@ -46,6 +46,30 @@
   border-radius: 999px;
 }
 
+.assembly-table__actions {
+  white-space: nowrap;
+}
+
+.assembly-table__actions .btn {
+  margin-right: 0.35rem;
+}
+
+.assembly-last-print {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+  color: #64748b;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.assembly-last-print p {
+  margin: 0;
+}
+
 .assembly-breadcrumb {
   margin: 0 0 0.25rem;
   font-size: 0.85rem;
@@ -153,12 +177,6 @@
 .assembly-scan-input:focus {
   outline: none;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
-}
-
-.assembly-last-print {
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: #15803d;
 }
 
 .assembly-sticker-preview {

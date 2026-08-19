@@ -15,6 +15,7 @@ from apps.sellers.services.warehouse_filter import filter_orders_queryset
 from .models import Order, PickList, Supply
 from .serializers import (
   BindMarkingSerializer,
+  OrderActionSerializer,
   OrderAssemblySerializer,
   OrderPrintSerializer,
   OrderSerializer,
@@ -35,6 +36,7 @@ from .services.assembly import (
   start_assembly,
 )
 from .services.pick_list import PickListError, generate_pick_list
+from .services.supply_flow import SupplyFlowError, send_order_to_assembly, send_order_to_delivery
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
@@ -452,3 +454,74 @@ class AssemblyReplaceOrderView(APIView):
       "order": OrderAssemblySerializer(order).data,
       "message": f"Заказ WB #{order.wb_order_id} сброшен — возьмите другой экземпляр товара",
     })
+
+
+class AssemblySendToAssemblyView(APIView):
+  """Отправить один заказ на сборку в WB (new → confirm)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = OrderActionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      result = send_order_to_assembly(
+        seller,
+        serializer.validated_data["order_id"],
+        user=request.user,
+      )
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    payload = {
+      "success": True,
+      "order": OrderAssemblySerializer(result["order"]).data,
+      "wb_supply_id": result["wb_supply_id"],
+      "stickers_fetched": result["stickers_fetched"],
+    }
+    if result.get("sticker_error"):
+      payload["sticker_error"] = result["sticker_error"]
+    return Response(payload)
+
+
+class AssemblySendToDeliveryView(APIView):
+  """Отправить один заказ в доставку в WB (confirm → complete+waiting)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = OrderActionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      result = send_order_to_delivery(
+        seller,
+        serializer.validated_data["order_id"],
+        user=request.user,
+      )
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    payload = {
+      "success": True,
+      "order": OrderAssemblySerializer(result["order"]).data,
+      "wb_supply_id": result["wb_supply_id"],
+    }
+    if result.get("supply_barcode_file"):
+      payload["supply_barcode_file"] = result["supply_barcode_file"]
+    if result.get("supply_barcode"):
+      payload["supply_barcode"] = result["supply_barcode"]
+    return Response(payload)

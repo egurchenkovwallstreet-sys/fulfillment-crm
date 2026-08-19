@@ -32,6 +32,8 @@ export interface AssemblyOrder {
   sticker_part_b: string
   marking_bound: boolean
   requires_marking: boolean
+  can_send_to_assembly: boolean
+  can_send_to_delivery: boolean
   created_at: string
 }
 
@@ -65,6 +67,7 @@ export interface PrintOrder {
   has_sticker: boolean
   requires_marking: boolean
   marking_bound: boolean
+  can_send_to_delivery: boolean
 }
 
 export interface ScanBarcodeResult {
@@ -85,6 +88,22 @@ export interface ReplaceOrderResult {
   success: boolean
   message: string
   order: AssemblyOrder
+}
+
+export interface SendToAssemblyResult {
+  success: boolean
+  order: AssemblyOrder
+  wb_supply_id: string
+  stickers_fetched: number
+  sticker_error?: string
+}
+
+export interface SendToDeliveryResult {
+  success: boolean
+  order: AssemblyOrder
+  wb_supply_id: string
+  supply_barcode_file?: string
+  supply_barcode?: string
 }
 
 export function fetchAssemblySellers() {
@@ -122,6 +141,26 @@ export function replaceOrderItem(sellerId: number, orderId: number) {
     method: 'POST',
     body: JSON.stringify({ order_id: orderId }),
   })
+}
+
+export function sendOrderToAssembly(sellerId: number, orderId: number) {
+  return apiFetch<SendToAssemblyResult>(
+    `/api/orders/assembly/sellers/${sellerId}/send-to-assembly/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId }),
+    },
+  )
+}
+
+export function sendOrderToDelivery(sellerId: number, orderId: number) {
+  return apiFetch<SendToDeliveryResult>(
+    `/api/orders/assembly/sellers/${sellerId}/send-to-delivery/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId }),
+    },
+  )
 }
 
 /** @deprecated use scanOrderBarcode */

@@ -240,6 +240,38 @@ class WBClient:
       params={"key": key},
     )
 
+  def create_supply(self, name: str) -> str:
+    """POST /api/v3/supplies — создать поставку FBS."""
+    payload = self._request("POST", "/api/v3/supplies", json={"name": name})
+    if isinstance(payload, dict):
+      supply_id = payload.get("id")
+      if supply_id is not None:
+        return str(supply_id)
+    raise WBApiError("Не удалось создать поставку WB")
+
+  def add_orders_to_supply(self, supply_id: str, order_ids: list[int]) -> None:
+    """PATCH /api/marketplace/v3/supplies/{supplyId}/orders — добавить заказы в поставку."""
+    if not order_ids:
+      raise WBApiError("Не переданы ID заказов")
+    self._request(
+      "PATCH",
+      f"/api/marketplace/v3/supplies/{supply_id}/orders",
+      json={"orders": order_ids},
+    )
+
+  def deliver_supply(self, supply_id: str) -> None:
+    """PATCH /api/v3/supplies/{supplyId}/deliver — передать поставку в доставку."""
+    self._request("PATCH", f"/api/v3/supplies/{supply_id}/deliver")
+
+  def fetch_supply_barcode(self, supply_id: str, *, barcode_type: str = "png") -> dict:
+    """GET /api/v3/supplies/{supplyId}/barcode — QR-код поставки."""
+    payload = self._request(
+      "GET",
+      f"/api/v3/supplies/{supply_id}/barcode",
+      params={"type": barcode_type},
+    )
+    return payload if isinstance(payload, dict) else {}
+
 
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []

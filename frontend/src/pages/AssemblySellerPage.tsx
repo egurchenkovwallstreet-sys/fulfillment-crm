@@ -5,6 +5,8 @@ import {
   fetchAssemblySeller,
   replaceOrderItem,
   scanOrderBarcode,
+  sendOrderToAssembly,
+  sendOrderToDelivery,
   startAssembly,
   type AssemblyOrder,
   type AssemblySellerDetail,
@@ -85,6 +87,18 @@ export function AssemblySellerPage() {
     win.document.close()
   }
 
+  function printSupplyBarcode(base64: string) {
+    const win = window.open('', '_blank', 'width=400,height=400')
+    if (!win) return
+    win.document.write(`
+      <html><head><title>QR поставки</title></head>
+      <body style="margin:0;text-align:center" onload="window.print();window.close()">
+        <img src="data:image/png;base64,${base64}" style="max-width:100%" />
+      </body></html>
+    `)
+    win.document.close()
+  }
+
   function finishPrint(order: PrintOrder) {
     setStickerPreview(order.sticker_file)
     setLastPrinted(order as unknown as AssemblyOrder)
@@ -137,6 +151,53 @@ export function AssemblySellerPage() {
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка переключения склада')
+    }
+  }
+
+  async function handleSendToAssembly(orderId: number) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await sendOrderToAssembly(id, orderId)
+      let msg = `Заказ WB #${result.order.wb_order_id} на сборке в WB`
+      if (result.stickers_fetched) {
+        msg += ', стикер загружен'
+      }
+      if (result.sticker_error) {
+        msg += `. Ошибка стикера: ${result.sticker_error}`
+      }
+      setSuccess(msg)
+      setStage('confirm')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка отправки на сборку')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSendToDelivery(orderId: number) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await sendOrderToDelivery(id, orderId)
+      let msg = `Заказ WB #${result.order.wb_order_id} передан в доставку`
+      if (result.supply_barcode_file) {
+        printSupplyBarcode(result.supply_barcode_file)
+        msg += ', QR поставки отправлен на печать'
+      }
+      setSuccess(msg)
+      setLastPrinted(null)
+      setStage('complete')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -333,6 +394,7 @@ export function AssemblySellerPage() {
                 <th>ЧЗ</th>
                 <th>Статус</th>
                 <th>Стикер</th>
+                <th>Действие</th>
               </tr>
             </thead>
             <tbody>
@@ -354,6 +416,28 @@ export function AssemblySellerPage() {
                   </td>
                   <td>{order.wb_stage_display || order.status_display}</td>
                   <td>{order.has_sticker ? '✓' : '—'}</td>
+                  <td className="assembly-table__actions">
+                    {order.can_send_to_assembly && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => handleSendToAssembly(order.id)}
+                        disabled={loading}
+                      >
+                        На сборку
+                      </button>
+                    )}
+                    {order.can_send_to_delivery && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        onClick={() => handleSendToDelivery(order.id)}
+                        disabled={loading}
+                      >
+                        В доставку
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -390,7 +474,8 @@ export function AssemblySellerPage() {
               <>
                 <h2 className="section-title">Сборка: скан баркода</h2>
                 <p className="assembly-scan-hint">
-                  Отсканируйте баркод заказа. Если товар с Честным знаком — система попросит отсканировать DataMatrix.
+                  1) «На сборку» — по одному заказу в WB. 2) Скан баркода → печать стикера.
+                  3) «В доставку» — после печати (и ЧЗ, если нужен).
                 </p>
                 <form onSubmit={handleBarcodeSubmit}>
                   <input
@@ -453,9 +538,21 @@ export function AssemblySellerPage() {
             )}
 
             {lastPrinted && scanPhase === 'barcode' && (
-              <p className="assembly-last-print">
-                Последний: WB #{lastPrinted.wb_order_id} · {lastPrinted.barcode}
-              </p>
+              <div className="assembly-last-print">
+                <p>
+                  Последний: WB #{lastPrinted.wb_order_id} · {lastPrinted.barcode}
+                </p>
+                {lastPrinted.can_send_to_delivery && (
+                  <button
+                    type="button"
+                    className="btn btn--small btn--secondary"
+                    onClick={() => handleSendToDelivery(lastPrinted.id)}
+                    disabled={loading}
+                  >
+                    В доставку
+                  </button>
+                )}
+              </div>
             )}
             {stickerPreview && scanPhase === 'barcode' && (
               <div className="assembly-sticker-preview">
