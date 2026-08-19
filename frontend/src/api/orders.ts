@@ -74,7 +74,7 @@ export interface SyncResult {
   reconcile?: {
     cancelled_terminal?: number
     shipped_delivered?: number
-    shipped_not_sorted?: number
+    shipped_not_waiting?: number
     shipped_missing?: number
     delivery_status_breakdown?: Record<string, number>
   }

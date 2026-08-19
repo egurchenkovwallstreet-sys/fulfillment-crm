@@ -58,21 +58,15 @@ export function DashboardPage() {
       msg += `, WB-полей ${statusesUpdated}, сверка ${reconciled}`
       if (statusError) msg += `. ОШИБКА: ${statusError}`
       if (inDelivery !== undefined) {
-        msg += `. В доставке (sorted/30д): ${inDelivery}`
-        if (deliveryAll !== undefined && deliveryAll !== inDelivery) {
-          msg += `, всего sorted в API: ${deliveryAll}`
-        }
+        msg += `. В доставке (waiting): ${inDelivery}`
       }
       if (breakdown && typeof breakdown === 'object') {
-        const extra = Object.entries(breakdown)
-          .filter(([k]) => k !== 'sorted')
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(', ')
-        if (extra) msg += `. Прочие complete: ${extra}`
+        const sorted = breakdown['sorted']
+        if (sorted) msg += `. Исключено sorted: ${sorted}`
       }
       const reconcile = result.reconcile ?? result.results?.[0]?.reconcile
-      if (reconcile?.shipped_not_sorted) {
-        msg += `, убрано ${reconcile.shipped_not_sorted}`
+      if (reconcile?.shipped_not_waiting) {
+        msg += `, убрано ${reconcile.shipped_not_waiting}`
       }
       setSyncMessage(msg)
       await loadStats()

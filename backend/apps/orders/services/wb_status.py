@@ -26,8 +26,8 @@ WB_DELIVERED_WB_STATUSES = frozenset({
 
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
-# Вкладка «В доставке» в ЛК WB = complete + sorted (отсортирован на складе WB)
-WB_DELIVERY_TAB_WB_STATUS = "sorted"
+# Вкладка «В доставке» в ЛК WB = complete + waiting
+WB_DELIVERY_TAB_WB_STATUS = "waiting"
 
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
   WB_SUPPLIER_NEW,
@@ -53,7 +53,7 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """Как вкладка «В доставке» в ЛК WB: complete + wbStatus=sorted."""
+  """В доставке: complete + wbStatus=waiting."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
     & Q(wb_status=WB_DELIVERY_TAB_WB_STATUS)
@@ -74,7 +74,7 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
 
 
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
-  """Только complete + sorted — как считает ЛК WB."""
+  """complete + waiting — вкладка «В доставке» в ЛК WB."""
   if supplier_status != WB_SUPPLIER_DELIVERY:
     return False
   if is_wb_cancelled(supplier_status, wb_status):
@@ -85,7 +85,6 @@ def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
 
 
 def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str) -> bool:
-  """Обновить WB-поля заказа и терминальные CRM-статусы."""
   supplier_status = (supplier_status or "").strip()
   wb_status = (wb_status or "").strip()
 
@@ -125,13 +124,9 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   return False
 
 
-def compute_live_wb_counts(
-  status_map: dict[int, dict],
-  *,
-  delivery_wb_ids: set[int] | None = None,
-) -> dict[str, int]:
+def compute_live_wb_counts(status_map: dict[int, dict]) -> dict[str, int]:
   counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
-  for wb_id, item in status_map.items():
+  for item in status_map.values():
     supplier = (item.get("supplierStatus") or "").strip()
     wb = (item.get("wbStatus") or "").strip()
     if is_wb_cancelled(supplier, wb):
@@ -141,8 +136,7 @@ def compute_live_wb_counts(
     elif supplier == WB_SUPPLIER_ASSEMBLY:
       counts["in_picking"] += 1
     elif is_wb_in_delivery(supplier, wb):
-      if delivery_wb_ids is None or wb_id in delivery_wb_ids:
-        counts["in_delivery"] += 1
+      counts["in_delivery"] += 1
   return counts
 
 
