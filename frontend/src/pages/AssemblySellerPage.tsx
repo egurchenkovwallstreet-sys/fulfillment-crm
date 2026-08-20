@@ -6,6 +6,7 @@ import {
   replaceOrderItem,
   scanOrderBarcode,
   sendOrderToAssembly,
+  sendAllOrdersToAssembly,
   sendOrderToDelivery,
   startAssembly,
   type AssemblyOrder,
@@ -169,10 +170,29 @@ export function AssemblySellerPage() {
         msg += `. Ошибка стикера: ${result.sticker_error}`
       }
       setSuccess(msg)
-      setStage('confirm')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка отправки на сборку')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSendAllToAssembly() {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await sendAllOrdersToAssembly(id)
+      let msg = `На сборку отправлено: ${result.sent} из ${result.total}, стикеров ${result.stickers_fetched}`
+      if (result.errors.length > 0) {
+        msg += `. Ошибок: ${result.errors.length}`
+      }
+      setSuccess(msg)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка массовой отправки на сборку')
     } finally {
       setLoading(false)
     }
@@ -319,8 +339,13 @@ export function AssemblySellerPage() {
             Обновить из WB
           </button>
           {(counts.new ?? 0) > 0 && (
-            <button type="button" className="btn btn--primary" onClick={handleStartAssembly} disabled={loading}>
-              Начать сборку ({counts.new})
+            <button type="button" className="btn btn--secondary" onClick={handleStartAssembly} disabled={loading}>
+              Лист подбора ({counts.new})
+            </button>
+          )}
+          {(data.assembly_eligible ?? 0) > 0 && (
+            <button type="button" className="btn btn--primary" onClick={handleSendAllToAssembly} disabled={loading}>
+              Все на сборку ({data.assembly_eligible})
             </button>
           )}
         </div>

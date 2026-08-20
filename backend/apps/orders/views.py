@@ -36,7 +36,13 @@ from .services.assembly import (
   start_assembly,
 )
 from .services.pick_list import PickListError, generate_pick_list
-from .services.supply_flow import SupplyFlowError, send_order_to_assembly, send_order_to_delivery
+from .services.supply_flow import (
+  SupplyFlowError,
+  count_orders_ready_for_assembly,
+  send_order_to_assembly,
+  send_order_to_delivery,
+  send_orders_to_assembly_bulk,
+)
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
@@ -326,6 +332,7 @@ class AssemblySellerDetailView(APIView):
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "counts": counts,
+      "assembly_eligible": count_orders_ready_for_assembly(seller),
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
@@ -525,3 +532,34 @@ class AssemblySendToDeliveryView(APIView):
     if result.get("supply_barcode"):
       payload["supply_barcode"] = result["supply_barcode"]
     return Response(payload)
+
+
+class AssemblySendAllToAssemblyView(APIView):
+  """Отправить на сборку все новые заказы селлера (по одному supply на заказ)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    order_ids = request.data.get("order_ids") if isinstance(request.data, dict) else None
+    if order_ids is not None and not isinstance(order_ids, list):
+      return Response(
+        {"detail": "order_ids должен быть списком"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    try:
+      result = send_orders_to_assembly_bulk(
+        seller,
+        order_ids=order_ids,
+        user=request.user,
+      )
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    return Response({"success": True, **result})

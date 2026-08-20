@@ -40,6 +40,7 @@ export interface AssemblyOrder {
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   counts: Record<string, number>
+  assembly_eligible: number
   supplies_forming: number
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
@@ -98,6 +99,14 @@ export interface SendToAssemblyResult {
   sticker_error?: string
 }
 
+export interface SendAllToAssemblyResult {
+  success: boolean
+  sent: number
+  total: number
+  stickers_fetched: number
+  errors: Array<{ order_id: number; wb_order_id: number; error: string }>
+}
+
 export interface SendToDeliveryResult {
   success: boolean
   order: AssemblyOrder
@@ -149,6 +158,16 @@ export function sendOrderToAssembly(sellerId: number, orderId: number) {
     {
       method: 'POST',
       body: JSON.stringify({ order_id: orderId }),
+    },
+  )
+}
+
+export function sendAllOrdersToAssembly(sellerId: number) {
+  return apiFetch<SendAllToAssemblyResult>(
+    `/api/orders/assembly/sellers/${sellerId}/send-all-to-assembly/`,
+    {
+      method: 'POST',
+      body: '{}',
     },
   )
 }

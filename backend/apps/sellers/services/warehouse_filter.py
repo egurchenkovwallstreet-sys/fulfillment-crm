@@ -33,7 +33,18 @@ def filter_orders_for_seller(qs: QuerySet, seller: Seller) -> QuerySet:
   enabled = get_enabled_wb_warehouse_ids(seller)
   if not enabled:
     return qs.none()
-  return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
+  disabled = set(
+    SellerWarehouse.objects.filter(seller=seller, is_enabled=False).values_list(
+      "wb_warehouse_id",
+      flat=True,
+    )
+  )
+  # Заказы без wb_warehouse_id (старые/ещё не синк) — показываем, пока не подтянется склад
+  visibility = Q(wb_warehouse_id__in=enabled) | Q(wb_warehouse_id__isnull=True)
+  qs = qs.filter(seller=seller).filter(visibility)
+  if disabled:
+    qs = qs.exclude(wb_warehouse_id__in=disabled)
+  return qs
 
 
 def filter_orders_queryset(qs: QuerySet, *, seller: Seller | None = None) -> QuerySet:
@@ -50,8 +61,12 @@ def filter_orders_queryset(qs: QuerySet, *, seller: Seller | None = None) -> Que
   if not enabled_pairs:
     return qs.none()
   condition = Q()
+  sellers_with_enabled: set[int] = set()
   for seller_id, wh_id in enabled_pairs:
     condition |= Q(seller_id=seller_id, wb_warehouse_id=wh_id)
+    sellers_with_enabled.add(seller_id)
+  if sellers_with_enabled:
+    condition |= Q(seller_id__in=sellers_with_enabled, wb_warehouse_id__isnull=True)
   sellers_without_config = Seller.objects.exclude(
     id__in=SellerWarehouse.objects.values_list("seller_id", flat=True),
   ).values_list("id", flat=True)

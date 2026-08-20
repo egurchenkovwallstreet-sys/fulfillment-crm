@@ -38,10 +38,15 @@ def _get_order(seller: Seller, order_id: int) -> Order:
 
 
 def order_can_send_to_assembly(order: Order) -> bool:
+  """WB new — можно отправить на сборку (независимо от CRM in_picking после листа подбора)."""
   supplier = (order.wb_supplier_status or "").strip()
-  if supplier and supplier != WB_SUPPLIER_NEW:
+  if supplier not in ("", WB_SUPPLIER_NEW):
     return False
-  return order.status in (Order.Status.NEW, Order.Status.IN_PICKING)
+  return order.status not in (
+    Order.Status.CANCELLED,
+    Order.Status.SHIPPED,
+    Order.Status.IN_DELIVERY,
+  )
 
 
 def order_can_send_to_delivery(order: Order) -> bool:
@@ -230,4 +235,71 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     "wb_supply_id": supply.wb_supply_id,
     "supply_barcode_file": supply_barcode_file,
     "supply_barcode": supply_barcode_value,
+  }
+
+
+def count_orders_ready_for_assembly(seller: Seller) -> int:
+  qs = filter_orders_for_seller(
+    Order.objects.filter(seller=seller),
+    seller,
+  )
+  return sum(1 for order in qs if order_can_send_to_assembly(order))
+
+
+def send_orders_to_assembly_bulk(
+  seller: Seller,
+  *,
+  order_ids: list[int] | None = None,
+  user=None,
+) -> dict:
+  """Отправить на сборку все подходящие заказы (или выбранные) — по одному supply на заказ."""
+  qs = filter_orders_for_seller(
+    Order.objects.filter(seller=seller).select_related("product"),
+    seller,
+  )
+  if order_ids is not None:
+    qs = qs.filter(pk__in=order_ids)
+
+  orders = [order for order in qs if order_can_send_to_assembly(order)]
+  if not orders:
+    raise SupplyFlowError(
+      "Нет заказов для отправки на сборку. Обновите заказы из WB.",
+      code="no_orders",
+    )
+
+  sent = 0
+  stickers_total = 0
+  errors: list[dict] = []
+
+  for order in orders:
+    try:
+      result = send_order_to_assembly(seller, order.id, user=user)
+      sent += 1
+      stickers_total += result.get("stickers_fetched", 0)
+    except SupplyFlowError as exc:
+      errors.append({
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "error": str(exc),
+      })
+
+  if sent == 0 and errors:
+    raise SupplyFlowError(
+      f"Не удалось отправить ни одного заказа. Пример: {errors[0]['error']}",
+      code="batch_failed",
+    )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=f"Массовая отправка на сборку: {sent} из {len(orders)}",
+    details={"sent": sent, "total": len(orders), "errors": errors},
+  )
+
+  return {
+    "sent": sent,
+    "total": len(orders),
+    "stickers_fetched": stickers_total,
+    "errors": errors,
   }

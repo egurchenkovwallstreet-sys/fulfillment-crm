@@ -4,6 +4,7 @@ from .views import (
   AssemblyBindMarkingView,
   AssemblyReplaceOrderView,
   AssemblyScanPrintView,
+  AssemblySendAllToAssemblyView,
   AssemblySendToAssemblyView,
   AssemblySendToDeliveryView,
   AssemblySellerDetailView,
@@ -54,6 +55,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/send-to-assembly/",
       AssemblySendToAssemblyView.as_view(),
       name="assembly-send-to-assembly",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/send-all-to-assembly/",
+      AssemblySendAllToAssemblyView.as_view(),
+      name="assembly-send-all-to-assembly",
     ),
     path(
       "assembly/sellers/<int:seller_id>/send-to-delivery/",
