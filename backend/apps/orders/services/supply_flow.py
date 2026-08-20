@@ -38,15 +38,15 @@ def _get_order(seller: Seller, order_id: int) -> Order:
 
 
 def order_can_send_to_assembly(order: Order) -> bool:
-  """WB new — можно отправить на сборку (независимо от CRM in_picking после листа подбора)."""
-  supplier = (order.wb_supplier_status or "").strip()
-  if supplier not in ("", WB_SUPPLIER_NEW):
-    return False
-  return order.status not in (
+  """WB new — можно отправить на сборку (CRM-статус не блокирует, кроме финальных)."""
+  if order.status in (
     Order.Status.CANCELLED,
     Order.Status.SHIPPED,
     Order.Status.IN_DELIVERY,
-  )
+  ):
+    return False
+  supplier = (order.wb_supplier_status or "").strip()
+  return supplier in ("", WB_SUPPLIER_NEW)
 
 
 def order_can_send_to_delivery(order: Order) -> bool:

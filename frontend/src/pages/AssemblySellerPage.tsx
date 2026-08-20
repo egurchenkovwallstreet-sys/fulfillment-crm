@@ -25,6 +25,25 @@ const STAGES = [
 
 type ScanPhase = 'barcode' | 'marking'
 
+function isWbNew(order: AssemblyOrder): boolean {
+  const wb = (order.wb_supplier_status || '').trim()
+  return wb === '' || wb === 'new'
+}
+
+function showAssemblyButton(order: AssemblyOrder, currentStage: string): boolean {
+  if (currentStage === 'new') return isWbNew(order)
+  return order.can_send_to_assembly ?? false
+}
+
+function showDeliveryButton(order: AssemblyOrder, currentStage: string): boolean {
+  if (order.can_send_to_delivery) return true
+  if (currentStage !== 'confirm') return false
+  if ((order.wb_supplier_status || '').trim() !== 'confirm') return false
+  if (order.status === 'label_printed') return true
+  if (order.status === 'marked' && order.marking_bound) return true
+  return false
+}
+
 export function AssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
   const id = Number(sellerId)
@@ -324,6 +343,12 @@ export function AssemblySellerPage() {
     return counts.new ?? 0
   }
 
+  const newTabOrdersCount =
+    stage === 'new'
+      ? data.orders.filter((order) => isWbNew(order)).length
+      : 0
+  const bulkAssemblyCount = data.assembly_eligible ?? newTabOrdersCount
+
   return (
     <>
       <header className="topbar">
@@ -343,9 +368,9 @@ export function AssemblySellerPage() {
               Лист подбора ({counts.new})
             </button>
           )}
-          {(data.assembly_eligible ?? 0) > 0 && (
+          {stage === 'new' && bulkAssemblyCount > 0 && (
             <button type="button" className="btn btn--primary" onClick={handleSendAllToAssembly} disabled={loading}>
-              Все на сборку ({data.assembly_eligible})
+              Все на сборку ({bulkAssemblyCount})
             </button>
           )}
         </div>
@@ -442,7 +467,7 @@ export function AssemblySellerPage() {
                   <td>{order.wb_stage_display || order.status_display}</td>
                   <td>{order.has_sticker ? '✓' : '—'}</td>
                   <td className="assembly-table__actions">
-                    {order.can_send_to_assembly && (
+                    {showAssemblyButton(order, stage) && (
                       <button
                         type="button"
                         className="btn btn--small btn--primary"
@@ -452,7 +477,7 @@ export function AssemblySellerPage() {
                         На сборку
                       </button>
                     )}
-                    {order.can_send_to_delivery && (
+                    {showDeliveryButton(order, stage) && (
                       <button
                         type="button"
                         className="btn btn--small btn--secondary"
@@ -567,7 +592,7 @@ export function AssemblySellerPage() {
                 <p>
                   Последний: WB #{lastPrinted.wb_order_id} · {lastPrinted.barcode}
                 </p>
-                {lastPrinted.can_send_to_delivery && (
+                {lastPrinted && (lastPrinted.can_send_to_delivery || showDeliveryButton(lastPrinted, 'confirm')) && (
                   <button
                     type="button"
                     className="btn btn--small btn--secondary"
