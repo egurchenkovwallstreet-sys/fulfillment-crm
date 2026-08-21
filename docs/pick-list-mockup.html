@@ -183,38 +183,69 @@
       height: 8mm;
     }
 
-    /* Вариант B — 25 строк: компактнее */
+    /* Вариант B — 25 строк: максимальный шрифт на A4 */
+    .sheet--25 {
+      padding: 10mm 10mm 8mm;
+    }
+
+    .sheet--25 .sheet-header {
+      padding-bottom: 3.5mm;
+      margin-bottom: 2.5mm;
+    }
+
+    .sheet--25 .seller-name {
+      font-size: 16pt;
+      margin-bottom: 2mm;
+    }
+
+    .sheet--25 .sheet-meta {
+      font-size: 10.5pt;
+    }
+
+    .sheet--25 .pick-table thead th {
+      font-size: 7.5pt;
+      padding: 0 1.5mm 1.5mm;
+    }
+
     .sheet--25 .pick-table td {
-      padding: 1.6mm 1.2mm;
+      padding: 2mm 1.5mm;
       vertical-align: middle;
       line-height: 1.15;
+      height: 10.1mm;
     }
 
     .sheet--25 .cell-number {
-      font-size: 18pt;
+      font-size: 21pt;
       font-weight: 900;
       line-height: 1;
     }
 
     .sheet--25 .qty-value {
-      font-size: 11pt;
+      font-size: 13pt;
       font-weight: 800;
     }
 
     .sheet--25 .barcode-value {
       font-family: Consolas, 'Courier New', monospace;
-      font-size: 7pt;
+      font-size: 8.5pt;
       font-weight: 600;
       word-break: break-all;
+      line-height: 1.1;
     }
 
     .sheet--25 .product-name {
-      font-size: 7.5pt;
+      font-size: 8.5pt;
+      line-height: 1.15;
     }
 
     .sheet--25 .check-box {
-      width: 7mm;
-      height: 7mm;
+      width: 8mm;
+      height: 8mm;
+    }
+
+    .sheet--25 .sheet-footer {
+      padding-top: 2mm;
+      font-size: 6.5pt;
     }
 
     .check-box {
@@ -270,8 +301,8 @@
 <body>
   <h1 class="page-title">Макет листа подбора — сравнение плотности</h1>
   <p class="hint">
-    Название ИП — <strong>обычным</strong> начертанием (не жирным).
-    Слева — <strong>20 строк</strong>, справа — <strong>25 строк</strong> на одном листе A4.
+    <strong>Вариант B</strong> — 25 строк, шрифты увеличены до максимума на A4.
+    Слева — прежний вариант A (20 строк) для сравнения.
   </p>
 
   <div class="controls">
@@ -355,8 +386,8 @@
 
     function render() {
       document.getElementById('variants').innerHTML =
-        buildSheet(20, 'sheet--20', 'Вариант A — 20 строк на листе') +
-        buildSheet(25, 'sheet--25', 'Вариант B — 25 строк на листе');
+        buildSheet(25, 'sheet--25', 'Вариант B — 25 строк, макс. шрифт') +
+        buildSheet(20, 'sheet--20', 'Вариант A — 20 строк (для сравнения)');
 
       const seller = document.getElementById('seller').value || '—';
       const date = document.getElementById('date').value || '—';
