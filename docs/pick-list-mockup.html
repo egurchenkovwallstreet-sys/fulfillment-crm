@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Макет листа подбора — A4 книжная</title>
+  <title>Макет листа подбора — 20 и 25 строк</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -25,7 +25,7 @@
     }
 
     .hint {
-      max-width: 520px;
+      max-width: 640px;
       text-align: center;
       font-size: 13px;
       color: #475569;
@@ -53,36 +53,62 @@
       border-radius: 6px;
     }
 
-    /* Лист A4, книжная ориентация */
+    .variants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .variant-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .variant-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
+      background: #f1f5f9;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #94a3b8;
+    }
+
     .sheet {
       width: 210mm;
-      min-height: 297mm;
+      height: 297mm;
       background: #fff;
       color: #0f172a;
       box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
-      padding: 14mm 12mm 16mm;
+      padding: 12mm 10mm 10mm;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
     .sheet-header {
       border-bottom: 2px solid #0f172a;
-      padding-bottom: 8mm;
-      margin-bottom: 6mm;
+      padding-bottom: 5mm;
+      margin-bottom: 4mm;
+      flex-shrink: 0;
     }
 
-    .sheet-header h1 {
-      font-size: 22pt;
-      font-weight: 800;
-      line-height: 1.15;
-      margin-bottom: 4mm;
+    .seller-name {
+      font-size: 16pt;
+      font-weight: 400;
+      line-height: 1.2;
+      margin-bottom: 3mm;
     }
 
     .sheet-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 6mm 14mm;
-      font-size: 11pt;
+      gap: 4mm 12mm;
+      font-size: 10pt;
       color: #334155;
     }
 
@@ -95,16 +121,16 @@
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      font-size: 10pt;
+      flex: 1;
     }
 
     .pick-table thead th {
       text-align: left;
-      font-size: 8pt;
+      font-size: 7pt;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: #64748b;
-      padding: 0 2mm 3mm;
+      padding: 0 1.5mm 2mm;
       border-bottom: 1px solid #cbd5e1;
       vertical-align: bottom;
     }
@@ -117,54 +143,91 @@
       border-bottom: none;
     }
 
-    .pick-table td {
-      padding: 4mm 2mm;
-      vertical-align: middle;
-      line-height: 1.25;
-    }
-
-    .col-cell { width: 18%; }
-    .col-qty { width: 10%; text-align: center; }
+    .col-cell { width: 16%; }
+    .col-qty { width: 9%; text-align: center; }
     .col-barcode { width: 22%; }
-    .col-name { width: 38%; }
+    .col-name { width: 41%; }
     .col-check { width: 12%; text-align: center; }
 
-    .cell-number {
-      font-size: 28pt;
-      font-weight: 900;
-      line-height: 1;
-      letter-spacing: -0.02em;
+    /* Вариант A — 20 строк: просторнее */
+    .sheet--20 .pick-table td {
+      padding: 2.8mm 1.5mm;
+      vertical-align: middle;
+      line-height: 1.2;
     }
 
-    .qty-value {
-      font-size: 16pt;
+    .sheet--20 .cell-number {
+      font-size: 22pt;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .sheet--20 .qty-value {
+      font-size: 13pt;
       font-weight: 800;
     }
 
-    .barcode-value {
+    .sheet--20 .barcode-value {
       font-family: Consolas, 'Courier New', monospace;
-      font-size: 9.5pt;
-      font-weight: 700;
+      font-size: 8pt;
+      font-weight: 600;
       word-break: break-all;
     }
 
-    .product-name {
-      font-size: 10pt;
+    .sheet--20 .product-name {
+      font-size: 8.5pt;
+    }
+
+    .sheet--20 .check-box {
+      width: 8mm;
+      height: 8mm;
+    }
+
+    /* Вариант B — 25 строк: компактнее */
+    .sheet--25 .pick-table td {
+      padding: 1.6mm 1.2mm;
+      vertical-align: middle;
+      line-height: 1.15;
+    }
+
+    .sheet--25 .cell-number {
+      font-size: 18pt;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .sheet--25 .qty-value {
+      font-size: 11pt;
+      font-weight: 800;
+    }
+
+    .sheet--25 .barcode-value {
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 7pt;
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    .sheet--25 .product-name {
+      font-size: 7.5pt;
+    }
+
+    .sheet--25 .check-box {
+      width: 7mm;
+      height: 7mm;
     }
 
     .check-box {
       display: inline-block;
-      width: 10mm;
-      height: 10mm;
-      border: 2px solid #0f172a;
-      border-radius: 1mm;
+      border: 1.5px solid #0f172a;
+      border-radius: 0.8mm;
       vertical-align: middle;
     }
 
     .sheet-footer {
-      margin-top: auto;
-      padding-top: 6mm;
-      font-size: 8pt;
+      flex-shrink: 0;
+      padding-top: 3mm;
+      font-size: 7pt;
       color: #94a3b8;
       text-align: center;
     }
@@ -177,31 +240,38 @@
 
       .page-title,
       .hint,
-      .controls {
+      .controls,
+      .variant-label {
         display: none;
+      }
+
+      .variants {
+        display: block;
+      }
+
+      .variant-wrap {
+        page-break-after: always;
       }
 
       .sheet {
         box-shadow: none;
         width: 100%;
-        min-height: auto;
-        page-break-after: always;
+        height: auto;
+        min-height: 297mm;
       }
 
       @page {
         size: A4 portrait;
-        margin: 10mm 10mm 12mm;
+        margin: 10mm;
       }
     }
   </style>
 </head>
 <body>
-  <h1 class="page-title">Макет листа подбора (PDF / печать)</h1>
+  <h1 class="page-title">Макет листа подбора — сравнение плотности</h1>
   <p class="hint">
-    Формат <strong>A4, книжная ориентация</strong>.
-    Шапка: ИП, дата, общее число заказов.
-    Строки сгруппированы по ячейкам; номер ячейки — крупно.
-    Квадрат справа — для ручной отметки при обходе склада.
+    Название ИП — <strong>обычным</strong> начертанием (не жирным).
+    Слева — <strong>20 строк</strong>, справа — <strong>25 строк</strong> на одном листе A4.
   </p>
 
   <div class="controls">
@@ -211,95 +281,99 @@
     <label>№ листа: <input id="listId" type="number" value="12" /></label>
   </div>
 
-  <article class="sheet" id="sheet">
-    <header class="sheet-header">
-      <h1 id="sellerText">ИП Мазирка</h1>
-      <div class="sheet-meta">
-        <span>Лист подбора № <strong id="listIdText">12</strong></span>
-        <span>Дата: <strong id="dateText">22.08.2026</strong></span>
-        <span>Заказов: <strong id="ordersText">38</strong></span>
-      </div>
-    </header>
-
-    <table class="pick-table">
-      <thead>
-        <tr>
-          <th class="col-cell">Ячейка</th>
-          <th class="col-qty">Кол-во</th>
-          <th class="col-barcode">Баркод</th>
-          <th class="col-name">Название</th>
-          <th class="col-check">Собрано</th>
-        </tr>
-      </thead>
-      <tbody id="rows">
-        <tr>
-          <td class="col-cell"><div class="cell-number">2</div></td>
-          <td class="col-qty"><div class="qty-value">1</div></td>
-          <td class="col-barcode"><div class="barcode-value">2042493787134</div></td>
-          <td class="col-name"><div class="product-name">Кардиган для девочки на пуговицах с цветами</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-        <tr>
-          <td class="col-cell"><div class="cell-number">3</div></td>
-          <td class="col-qty"><div class="qty-value">1</div></td>
-          <td class="col-barcode"><div class="barcode-value">2054638604244</div></td>
-          <td class="col-name"><div class="product-name">Костюм школьный твидовый с юбкой для девочки</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-        <tr>
-          <td class="col-cell"><div class="cell-number">4</div></td>
-          <td class="col-qty"><div class="qty-value">3</div></td>
-          <td class="col-barcode"><div class="barcode-value">2041336069369</div></td>
-          <td class="col-name"><div class="product-name">Пижама хлопковая детская со штанами</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-        <tr>
-          <td class="col-cell"><div class="cell-number">11</div></td>
-          <td class="col-qty"><div class="qty-value">5</div></td>
-          <td class="col-barcode"><div class="barcode-value">2041336192417</div></td>
-          <td class="col-name"><div class="product-name">Пижама хлопковая детская со штанами</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-        <tr>
-          <td class="col-cell"><div class="cell-number">12</div></td>
-          <td class="col-qty"><div class="qty-value">1</div></td>
-          <td class="col-barcode"><div class="barcode-value">2041336535841</div></td>
-          <td class="col-name"><div class="product-name">Пижама хлопковая детская со штанами</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-        <tr>
-          <td class="col-cell"><div class="cell-number">13</div></td>
-          <td class="col-qty"><div class="qty-value">3</div></td>
-          <td class="col-barcode"><div class="barcode-value">2041336535841</div></td>
-          <td class="col-name"><div class="product-name">Пижама хлопковая детская со штанами</div></td>
-          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <footer class="sheet-footer">
-      Fulfillment CRM · лист подбора для обхода склада по ячейкам
-    </footer>
-  </article>
+  <div class="variants" id="variants"></div>
 
   <script>
-    const sellerInput = document.getElementById('seller');
-    const dateInput = document.getElementById('date');
-    const ordersInput = document.getElementById('orders');
-    const listIdInput = document.getElementById('listId');
+    const SAMPLE = [
+      { cell: 2, qty: 1, barcode: '2042493787134', name: 'Кардиган для девочки на пуговицах с цветами' },
+      { cell: 3, qty: 1, barcode: '2054638604244', name: 'Костюм школьный твидовый с юбкой для девочки' },
+      { cell: 4, qty: 2, barcode: '2041336069369', name: 'Пижама хлопковая детская со штанами' },
+      { cell: 5, qty: 1, barcode: '2041336123456', name: 'Футболка хлопковая детская с принтом' },
+      { cell: 6, qty: 3, barcode: '2041336234567', name: 'Шорты детские хлопковые' },
+      { cell: 7, qty: 1, barcode: '2041336345678', name: 'Платье летнее для девочки' },
+      { cell: 8, qty: 2, barcode: '2041336456789', name: 'Брюки школьные для мальчика' },
+      { cell: 9, qty: 1, barcode: '2041336567890', name: 'Свитшот детский с капюшоном' },
+      { cell: 10, qty: 4, barcode: '2041336678901', name: 'Пижама хлопковая детская со штанами' },
+      { cell: 11, qty: 2, barcode: '2041336192417', name: 'Пижама хлопковая детская со штанами' },
+      { cell: 12, qty: 1, barcode: '2041336535841', name: 'Пижама хлопковая детская со штанами' },
+      { cell: 13, qty: 3, barcode: '2041336535842', name: 'Пижама хлопковая детская со штанами' },
+      { cell: 14, qty: 1, barcode: '2041336535843', name: 'Костюм спортивный детский' },
+      { cell: 15, qty: 2, barcode: '2041336535844', name: 'Куртка демисезонная детская' },
+      { cell: 16, qty: 1, barcode: '2041336535845', name: 'Джинсы детские прямые' },
+      { cell: 17, qty: 2, barcode: '2041336535846', name: 'Рубашка школьная белая' },
+      { cell: 18, qty: 1, barcode: '2041336535847', name: 'Толстовка детская на молнии' },
+      { cell: 19, qty: 3, barcode: '2041336535848', name: 'Комплект белья детский хлопок' },
+      { cell: 20, qty: 1, barcode: '2041336535849', name: 'Ветровка детская лёгкая' },
+      { cell: 21, qty: 2, barcode: '2041336535850', name: 'Юбка школьная серая' },
+      { cell: 22, qty: 1, barcode: '2041336535851', name: 'Жилет утеплённый детский' },
+      { cell: 23, qty: 2, barcode: '2041336535852', name: 'Легgings детские хлопковые' },
+      { cell: 24, qty: 1, barcode: '2041336535853', name: 'Пolo детская с воротником' },
+      { cell: 25, qty: 3, barcode: '2041336535854', name: 'Комбинезон детский тёплый' },
+    ];
 
-    function updateHeader() {
-      document.getElementById('sellerText').textContent = sellerInput.value || '—';
-      document.getElementById('dateText').textContent = dateInput.value || '—';
-      document.getElementById('ordersText').textContent = ordersInput.value || '0';
-      document.getElementById('listIdText').textContent = listIdInput.value || '—';
+    function rowHtml(item) {
+      return `
+        <tr>
+          <td class="col-cell"><div class="cell-number">${item.cell}</div></td>
+          <td class="col-qty"><div class="qty-value">${item.qty}</div></td>
+          <td class="col-barcode"><div class="barcode-value">${item.barcode}</div></td>
+          <td class="col-name"><div class="product-name">${item.name}</div></td>
+          <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
+        </tr>`;
     }
 
-    [sellerInput, dateInput, ordersInput, listIdInput].forEach((el) => {
-      el.addEventListener('input', updateHeader);
+    function buildSheet(rowCount, cssClass, label) {
+      const items = SAMPLE.slice(0, rowCount);
+      return `
+        <div class="variant-wrap">
+          <div class="variant-label">${label}</div>
+          <article class="sheet ${cssClass}">
+            <header class="sheet-header">
+              <div class="seller-name sheet-seller">${document.getElementById('seller')?.value || 'ИП Мазирка'}</div>
+              <div class="sheet-meta">
+                <span>Лист подбора № <strong class="sheet-list-id">12</strong></span>
+                <span>Дата: <strong class="sheet-date">22.08.2026</strong></span>
+                <span>Заказов: <strong class="sheet-orders">38</strong></span>
+              </div>
+            </header>
+            <table class="pick-table">
+              <thead>
+                <tr>
+                  <th class="col-cell">Ячейка</th>
+                  <th class="col-qty">Кол-во</th>
+                  <th class="col-barcode">Баркод</th>
+                  <th class="col-name">Название</th>
+                  <th class="col-check">Собрано</th>
+                </tr>
+              </thead>
+              <tbody>${items.map(rowHtml).join('')}</tbody>
+            </table>
+            <footer class="sheet-footer">Fulfillment CRM · лист подбора</footer>
+          </article>
+        </div>`;
+    }
+
+    function render() {
+      document.getElementById('variants').innerHTML =
+        buildSheet(20, 'sheet--20', 'Вариант A — 20 строк на листе') +
+        buildSheet(25, 'sheet--25', 'Вариант B — 25 строк на листе');
+
+      const seller = document.getElementById('seller').value || '—';
+      const date = document.getElementById('date').value || '—';
+      const orders = document.getElementById('orders').value || '0';
+      const listId = document.getElementById('listId').value || '—';
+
+      document.querySelectorAll('.sheet-seller').forEach((el) => { el.textContent = seller; });
+      document.querySelectorAll('.sheet-date').forEach((el) => { el.textContent = date; });
+      document.querySelectorAll('.sheet-orders').forEach((el) => { el.textContent = orders; });
+      document.querySelectorAll('.sheet-list-id').forEach((el) => { el.textContent = listId; });
+    }
+
+    ['seller', 'date', 'orders', 'listId'].forEach((id) => {
+      document.getElementById(id).addEventListener('input', render);
     });
 
-    updateHeader();
+    render();
   </script>
 </body>
 </html>
