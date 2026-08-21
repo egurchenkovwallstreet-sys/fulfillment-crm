@@ -48,8 +48,8 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   <title>Ячейка №${cellNumber}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    @page { size: 58mm 80mm; margin: 0; }
-    html, body { width: 58mm; height: 80mm; }
+    @page { size: 75mm 120mm; margin: 0; }
+    html, body { width: 75mm; height: 120mm; }
     body {
       font-family: Arial, Helvetica, sans-serif;
       background: #fff;
@@ -57,8 +57,8 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
       print-color-adjust: exact;
     }
     .label {
-      width: 58mm;
-      height: 80mm;
+      width: 75mm;
+      height: 120mm;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -99,7 +99,7 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
       padding: 0 3mm;
       gap: 1mm;
     }
-    .barcode-svg svg { width: 100%; max-width: 48mm; height: 8mm; }
+    .barcode-svg svg { width: 100%; max-width: 65mm; height: 10mm; }
     .barcode-text {
       font-size: 5.5mm;
       font-weight: 700;
