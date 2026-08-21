@@ -67,3 +67,12 @@ class IntakeSerializer(serializers.Serializer):
     if not Seller.objects.filter(pk=value, is_active=True).exists():
       raise serializers.ValidationError("Селлер не найден или неактивен")
     return value
+
+
+class MoveCellSerializer(serializers.Serializer):
+  cell_id = serializers.IntegerField()
+
+  def validate_cell_id(self, value):
+    if not Cell.objects.filter(pk=value).exists():
+      raise serializers.ValidationError("Ячейка не найдена")
+    return value

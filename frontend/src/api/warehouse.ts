@@ -55,12 +55,54 @@ export type IntakePayload = {
   name?: string
 }
 
+export type CellLabelData = {
+  product_id?: number
+  seller_name: string
+  cell_number: string
+  barcode: string
+}
+
+export type IntakeResponse = {
+  success: boolean
+  message: string
+  product: Product
+  print_cell_label?: boolean
+  cell_label?: CellLabelData | null
+}
+
+export type MoveCellResponse = {
+  success: boolean
+  message: string
+  product: Product
+  print_cell_label: boolean
+  cell_label: CellLabelData
+}
+
 export function fetchSellers() {
   return apiFetch<Seller[]>('/api/warehouse/sellers/')
 }
 
 export function fetchFreeCells() {
   return apiFetch<Cell[]>('/api/warehouse/cells/?free=1')
+}
+
+export function fetchAllCells() {
+  return apiFetch<Cell[]>('/api/warehouse/cells/')
+}
+
+export function fetchSellerProducts(sellerId: number) {
+  return apiFetch<Product[]>(`/api/warehouse/sellers/${sellerId}/products/`)
+}
+
+export function fetchProductCellLabel(productId: number) {
+  return apiFetch<CellLabelData>(`/api/warehouse/products/${productId}/cell-label/`)
+}
+
+export function moveProductToCell(productId: number, cellId: number) {
+  return apiFetch<MoveCellResponse>(`/api/warehouse/products/${productId}/move-cell/`, {
+    method: 'POST',
+    body: JSON.stringify({ cell_id: cellId }),
+  })
 }
 
 export function lookupBarcode(sellerId: number, barcode: string) {
@@ -72,7 +114,7 @@ export function lookupBarcode(sellerId: number, barcode: string) {
 }
 
 export function submitIntake(payload: IntakePayload) {
-  return apiFetch<{ success: boolean; message: string; product: Product }>(
+  return apiFetch<IntakeResponse>(
     '/api/warehouse/intake/',
     {
       method: 'POST',

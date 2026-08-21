@@ -30,6 +30,11 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
+            <NavLink to="/cells" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Ячейки
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/assembly" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Сборка FBS
             </NavLink>

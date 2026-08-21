@@ -18,3 +18,11 @@ def first_free_cell() -> Cell | None:
     .select_for_update()
     .first()
   )
+
+
+def refresh_cell_occupied(cell: Cell) -> None:
+  """Синхронизировать флаг is_occupied с фактическими товарами в ячейке."""
+  occupied = cell.products.exists()
+  if cell.is_occupied != occupied:
+    cell.is_occupied = occupied
+    cell.save(update_fields=["is_occupied"])

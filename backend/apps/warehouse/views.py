@@ -11,10 +11,13 @@ from .models import Cell, Product, StockOperation
 from .serializers import (
   CellSerializer,
   IntakeSerializer,
+  MoveCellSerializer,
   ProductSerializer,
   SellerBriefSerializer,
   StockOperationSerializer,
 )
+from .services.cell_label import build_cell_label_data
+from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
 from .services.intake import IntakeError, perform_intake
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
@@ -37,6 +40,60 @@ class CellListView(APIView):
     if free_only:
       cells = cells.filter(is_occupied=False)
     return Response(CellSerializer(cells, many=True).data)
+
+
+class SellerProductsView(APIView):
+  """Товары селлера по ячейкам — для печати этикеток и переноса."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    products = (
+      Product.objects.filter(seller=seller)
+      .select_related("cell", "seller")
+      .order_by("cell__number")
+    )
+    products = sorted(products, key=lambda p: int(p.cell.number) if p.cell.number.isdigit() else p.cell.number)
+    return Response(ProductSerializer(products, many=True).data)
+
+
+class ProductCellLabelView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, product_id):
+    product = get_object_or_404(
+      Product.objects.select_related("cell", "seller"),
+      pk=product_id,
+    )
+    return Response(build_cell_label_data(product))
+
+
+class ProductMoveCellView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, product_id):
+    serializer = MoveCellSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    product = get_object_or_404(
+      Product.objects.select_related("cell", "seller"),
+      pk=product_id,
+    )
+    try:
+      product = move_product_to_cell(
+        product=product,
+        new_cell_id=serializer.validated_data["cell_id"],
+        user=request.user,
+      )
+    except CellMoveError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({
+      "success": True,
+      "message": f"Товар перенесён в ячейку №{product.cell.number}",
+      "product": ProductSerializer(product).data,
+      "print_cell_label": True,
+      "cell_label": build_cell_label_data(product),
+    })
 
 
 class IntakeLookupView(APIView):
@@ -98,7 +155,7 @@ class IntakeView(APIView):
     seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
 
     try:
-      product = perform_intake(
+      result = perform_intake(
         seller=seller,
         barcode=data["barcode"],
         quantity=data["quantity"],
@@ -114,7 +171,9 @@ class IntakeView(APIView):
       {
         "success": True,
         "message": f"Принято {data['quantity']} шт.",
-        "product": ProductSerializer(product).data,
+        "product": ProductSerializer(result.product).data,
+        "print_cell_label": result.print_cell_label,
+        "cell_label": result.cell_label,
       },
       status=status.HTTP_201_CREATED,
     )

@@ -6,6 +6,7 @@ import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { IntakePage } from './pages/IntakePage'
+import { CellInventoryPage } from './pages/CellInventoryPage'
 import { LoginPage } from './pages/LoginPage'
 
 function AppRoutes() {
@@ -28,6 +29,7 @@ function AppRoutes() {
           <Route path="/" element={<DashboardPage />} />
           <Route element={<ManagerRoute />}>
             <Route path="/intake" element={<IntakePage />} />
+            <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />
             <Route path="/orders" element={<AssemblySellersPage />} />

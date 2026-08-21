@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.db import transaction
 
 from apps.integrations.models import AuditLog
@@ -5,12 +7,20 @@ from apps.integrations.tasks import sync_wb_stocks
 from apps.sellers.models import Seller
 
 from apps.warehouse.models import Cell, Product, StockOperation
-from apps.warehouse.services.cells import first_free_cell
+from apps.warehouse.services.cell_label import build_cell_label_data
+from apps.warehouse.services.cells import first_free_cell, refresh_cell_occupied
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 
 
 class IntakeError(Exception):
   pass
+
+
+@dataclass
+class IntakeResult:
+  product: Product
+  print_cell_label: bool
+  cell_label: dict[str, str] | None
 
 
 def _assign_cell(cell_mode: str, cell_id: int | None) -> Cell:
@@ -39,7 +49,7 @@ def perform_intake(
   cell_mode: str = "auto",
   cell_id: int | None = None,
   name: str = "",
-) -> Product:
+) -> IntakeResult:
   if quantity <= 0:
     raise IntakeError("Количество должно быть больше 0")
 
@@ -60,10 +70,6 @@ def perform_intake(
     is_new = False
   else:
     cell = _assign_cell(cell_mode, cell_id)
-    if not cell.is_occupied:
-      cell.is_occupied = True
-      cell.save(update_fields=["is_occupied"])
-
     marking = lookup_marking_for_barcode(seller, barcode)
 
     product = Product.objects.create(
@@ -74,6 +80,7 @@ def perform_intake(
       quantity=quantity,
       requires_marking=marking.requires_marking if marking.wb_found else False,
     )
+    refresh_cell_occupied(cell)
     is_new = True
 
   StockOperation.objects.create(
@@ -100,4 +107,9 @@ def perform_intake(
 
   transaction.on_commit(lambda: sync_wb_stocks.delay(seller.id))
 
-  return product
+  cell_label = build_cell_label_data(product) if is_new else None
+  return IntakeResult(
+    product=product,
+    print_cell_label=is_new,
+    cell_label=cell_label,
+  )

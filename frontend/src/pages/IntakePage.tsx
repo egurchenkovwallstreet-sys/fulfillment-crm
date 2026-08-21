@@ -6,10 +6,12 @@ import {
   lookupBarcode,
   submitIntake,
   type Cell,
+  type CellLabelData,
   type IntakeHistoryItem,
   type IntakeLookup,
   type Seller,
 } from '../api/warehouse'
+import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import './IntakePage.css'
 
 export function IntakePage() {
@@ -24,6 +26,7 @@ export function IntakePage() {
   const [cellMode, setCellMode] = useState<'auto' | 'manual'>('auto')
   const [cellId, setCellId] = useState<number | ''>('')
   const [lookup, setLookup] = useState<IntakeLookup | null>(null)
+  const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
@@ -116,6 +119,9 @@ export function IntakePage() {
           result.product.requires_marking ? ' · Товар с Честным знаком' : ''
         }`,
       )
+      if (result.print_cell_label && result.cell_label) {
+        setLabelPrompt(result.cell_label)
+      }
       setBarcode('')
       setLookup(null)
       setQuantityInput('1')
@@ -330,6 +336,10 @@ export function IntakePage() {
           )}
         </section>
       </div>
+
+      {labelPrompt && (
+        <CellLabelPrompt label={labelPrompt} onClose={() => setLabelPrompt(null)} />
+      )}
     </>
   )
 }
