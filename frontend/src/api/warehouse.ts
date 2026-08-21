@@ -78,6 +78,16 @@ export type MoveCellResponse = {
   cell_label: CellLabelData
 }
 
+export type RefreshFromWbResponse = {
+  success: boolean
+  message: string
+  total: number
+  updated: number
+  not_found: number
+  products: Product[]
+  detail?: string
+}
+
 export function fetchSellers() {
   return apiFetch<Seller[]>('/api/warehouse/sellers/')
 }
@@ -92,6 +102,13 @@ export function fetchAllCells() {
 
 export function fetchSellerProducts(sellerId: number) {
   return apiFetch<Product[]>(`/api/warehouse/sellers/${sellerId}/products/`)
+}
+
+export function refreshSellerProductsFromWb(sellerId: number) {
+  return apiFetch<RefreshFromWbResponse>(
+    `/api/warehouse/sellers/${sellerId}/products/refresh-from-wb/`,
+    { method: 'POST' },
+  )
 }
 
 export function fetchProductCellLabel(productId: number) {

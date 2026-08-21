@@ -63,9 +63,13 @@ def resolve_product_requires_marking(product: Product | None, barcode: str, sell
 
 
 def refresh_product_marking(product: Product, seller: Seller) -> MarkingLookupResult:
-  """Обновить requires_marking у товара из WB."""
+  """Обновить название и requires_marking у товара из WB."""
   result = lookup_marking_for_barcode(seller, product.barcode)
   if result.wb_found:
+    update_fields = ["requires_marking", "updated_at"]
     product.requires_marking = result.requires_marking
-    product.save(update_fields=["requires_marking", "updated_at"])
+    if result.title:
+      product.name = result.title
+      update_fields.append("name")
+    product.save(update_fields=update_fields)
   return result

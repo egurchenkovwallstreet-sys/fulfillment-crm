@@ -5,6 +5,7 @@ import {
   fetchSellerProducts,
   fetchSellers,
   moveProductToCell,
+  refreshSellerProductsFromWb,
   type Cell,
   type CellLabelData,
   type Product,
@@ -25,6 +26,7 @@ export function CellInventoryPage() {
   const [moveProductId, setMoveProductId] = useState<number | null>(null)
   const [moveCellId, setMoveCellId] = useState<number | ''>('')
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     fetchSellers()
@@ -55,6 +57,22 @@ export function CellInventoryPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
+
+  async function handleRefreshFromWb() {
+    if (!sellerId) return
+    setRefreshing(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await refreshSellerProductsFromWb(Number(sellerId))
+      setProducts(result.products)
+      setSuccess(result.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка обновления из WB')
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   async function handlePrint(productId: number) {
     setError('')
@@ -120,9 +138,21 @@ export function CellInventoryPage() {
       </section>
 
       <section className="panel">
-        <h2 className="section-title">
-          Товары {sellerId ? `(${products.length})` : ''}
-        </h2>
+        <div className="cell-inventory-section-head">
+          <h2 className="section-title">
+            Товары {sellerId ? `(${products.length})` : ''}
+          </h2>
+          {sellerId && products.length > 0 && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={refreshing || loading}
+              onClick={handleRefreshFromWb}
+            >
+              {refreshing ? 'Обновление из WB…' : 'Обновить из WB'}
+            </button>
+          )}
+        </div>
         {!sellerId ? (
           <p className="cell-inventory-empty">Выберите селлера</p>
         ) : loading && products.length === 0 ? (

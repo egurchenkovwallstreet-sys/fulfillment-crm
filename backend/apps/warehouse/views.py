@@ -21,6 +21,7 @@ from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
 from .services.intake import IntakeError, perform_intake
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
+from .services.wb_product_sync import refresh_seller_products_from_wb
 
 
 class SellerListView(APIView):
@@ -55,6 +56,50 @@ class SellerProductsView(APIView):
     )
     products = sorted(products, key=lambda p: int(p.cell.number) if p.cell.number.isdigit() else p.cell.number)
     return Response(ProductSerializer(products, many=True).data)
+
+
+class SellerProductsRefreshView(APIView):
+  """Подтянуть названия и маркировку всех товаров селлера из WB."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    result = refresh_seller_products_from_wb(seller)
+
+    if result.error:
+      return Response(
+        {
+          "success": False,
+          "detail": result.error,
+          "total": result.total,
+          "updated": result.updated,
+          "not_found": result.not_found,
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    message = f"Обновлено {result.updated} из {result.total} товаров"
+    if result.not_found:
+      message += f", не найдено на WB: {result.not_found}"
+
+    products = (
+      Product.objects.filter(seller=seller)
+      .select_related("cell", "seller")
+      .order_by("cell__number")
+    )
+    products = sorted(
+      products,
+      key=lambda p: int(p.cell.number) if p.cell.number.isdigit() else p.cell.number,
+    )
+
+    return Response({
+      "success": True,
+      "message": message,
+      "total": result.total,
+      "updated": result.updated,
+      "not_found": result.not_found,
+      "products": ProductSerializer(products, many=True).data,
+    })
 
 
 class ProductCellLabelView(APIView):

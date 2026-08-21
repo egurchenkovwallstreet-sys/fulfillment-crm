@@ -22,3 +22,15 @@ def sync_wb_stocks(seller_id: int):
   """Push stock quantities to WB for a seller."""
   # TODO: implement WB FBS stocks API
   logger.info("WB stock sync queued for seller %s", seller_id)
+
+
+@shared_task
+def sync_wb_product_cards():
+  """Ежедневное обновление названий и маркировки товаров из WB Content API."""
+  from apps.warehouse.services.wb_product_sync import refresh_all_sellers_products_from_wb
+
+  result = refresh_all_sellers_products_from_wb()
+  if result["errors"]:
+    logger.warning("WB product cards sync errors: %s", result["errors"])
+  logger.info("WB product cards sync done: %s", result["results"])
+  return result

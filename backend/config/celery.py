@@ -15,4 +15,8 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.sync_wb_orders",
         "schedule": crontab(minute="*/15"),
     },
+    "sync-wb-product-cards": {
+        "task": "apps.integrations.tasks.sync_wb_product_cards",
+        "schedule": crontab(hour=3, minute=0),
+    },
 }

@@ -1,5 +1,22 @@
 .cell-inventory-toolbar {
   margin-bottom: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.cell-inventory-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.cell-inventory-section-head .section-title {
+  margin: 0;
 }
 
 .cell-inventory-field {
