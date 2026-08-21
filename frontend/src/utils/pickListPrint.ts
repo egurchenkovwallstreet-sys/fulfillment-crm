@@ -92,10 +92,10 @@ const PRINT_STYLES = `
   }
   .sheet {
     width: 210mm;
+    min-height: 297mm;
     height: 297mm;
     padding: 8mm 10mm 6mm;
-    display: grid;
-    grid-template-rows: auto 1fr;
+    --pick-row-h: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
     overflow: hidden;
     page-break-after: always;
   }
@@ -132,7 +132,7 @@ const PRINT_STYLES = `
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    height: 100%;
+    height: auto;
   }
   .pick-table thead th {
     text-align: left;
@@ -148,7 +148,9 @@ const PRINT_STYLES = `
   }
   .pick-table tbody tr {
     border-bottom: 1px solid #e2e8f0;
-    height: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
+    height: var(--pick-row-h);
+    max-height: var(--pick-row-h);
+    min-height: var(--pick-row-h);
   }
   .pick-table tbody tr:last-child { border-bottom: none; }
   .pick-table td {

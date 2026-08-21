@@ -60,6 +60,14 @@
       gap: 10px;
     }
 
+    .variants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
     .variant-label {
       font-size: 14px;
       font-weight: 700;
@@ -70,16 +78,16 @@
       border: 1px solid #94a3b8;
     }
 
-    /* A4 книжная — ровно 25 строк */
+    /* A4 книжная — фиксированная высота строк (25 max, меньше — без растягивания) */
     .sheet {
       width: 210mm;
+      min-height: 297mm;
       height: 297mm;
       background: #fff;
       color: #0f172a;
       box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
       padding: 8mm 10mm 6mm;
-      display: grid;
-      grid-template-rows: auto auto 1fr;
+      --pick-row-h: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
       overflow: hidden;
     }
 
@@ -114,7 +122,7 @@
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      height: 100%;
+      height: auto;
     }
 
     .pick-table thead th {
@@ -132,7 +140,9 @@
 
     .pick-table tbody tr {
       border-bottom: 1px solid #e2e8f0;
-      height: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
+      height: var(--pick-row-h);
+      max-height: var(--pick-row-h);
+      min-height: var(--pick-row-h);
     }
 
     .pick-table tbody tr:last-child {
@@ -205,9 +215,7 @@
 <body>
   <h1 class="page-title">Макет листа подбора</h1>
   <p class="hint">
-    A4, книжная ориентация, <strong>25 строк</strong> на листе.
-    Ячейка, кол-во, баркод и название — <strong>11pt</strong>, межстрочный интервал минимальный.
-    Номер ячейки — <strong>14pt жирный</strong>.
+    A4, книжная ориентация. Строки <strong>фиксированной высоты</strong> — при 2 или 25 позициях формат не меняется.
   </p>
 
   <div class="controls">
@@ -258,15 +266,14 @@
         </tr>`;
     }
 
-    function render() {
+    function buildSheet(items, label, ordersOverride) {
       const seller = document.getElementById('seller').value || '—';
       const date = document.getElementById('date').value || '—';
-      const orders = document.getElementById('orders').value || '0';
+      const orders = ordersOverride ?? document.getElementById('orders').value || '0';
       const listId = document.getElementById('listId').value || '—';
-
-      document.getElementById('sheet-root').innerHTML = `
+      return `
         <div class="variant-wrap">
-          <div class="variant-label">25 строк на листе A4</div>
+          <div class="variant-label">${label}</div>
           <article class="sheet">
             <header class="sheet-header">
               <div class="seller-name">${seller}</div>
@@ -286,10 +293,19 @@
                   <th class="col-check">Собрано</th>
                 </tr>
               </thead>
-              <tbody>${SAMPLE.map(rowHtml).join('')}</tbody>
+              <tbody>${items.map(rowHtml).join('')}</tbody>
             </table>
           </article>
         </div>`;
+    }
+
+    function render() {
+      const shortSample = [
+        { cell: 12, qty: 1, barcode: '2041336019241', name: 'Пижама детская со штанами хлопковая' },
+        { cell: 13, qty: 3, barcode: '2042693753604', name: 'Кардиган для девочек на пуговицах шерстяной' },
+      ];
+      document.getElementById('sheet-root').innerHTML =
+        `<div class="variants">${buildSheet(shortSample, '2 строки — формат не меняется', 4)}${buildSheet(SAMPLE, '25 строк на листе A4')}</div>`;
     }
 
     ['seller', 'date', 'orders', 'listId'].forEach((id) => {
