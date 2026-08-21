@@ -181,9 +181,14 @@ class WBClient:
 
   def fetch_recent_order_ids(self, days: int = 30) -> set[int]:
     """GET /api/v3/orders — ID заказов за последние N дней (как в ЛК WB)."""
+    return {order.wb_order_id for order in self.fetch_recent_orders(days=days).orders}
+
+  def fetch_recent_orders(self, days: int = 45) -> WBFetchResult:
+    """GET /api/v3/orders — архив заказов за N дней (в т.ч. уже в доставке)."""
+    result = WBFetchResult()
     date_from = int(time.time()) - days * 24 * 3600
-    ids: set[int] = set()
     next_cursor = 0
+    seen_ids: set[int] = set()
 
     while True:
       payload = self._request(
@@ -195,10 +200,29 @@ class WBClient:
         break
 
       orders = payload.get("orders") or []
+      result.pages += 1
+      result.raw_total += len(orders)
+
       for item in orders:
         wb_id = item.get("id")
-        if wb_id is not None:
-          ids.add(int(wb_id))
+        if wb_id is None:
+          continue
+        wb_id = int(wb_id)
+        if wb_id in seen_ids:
+          continue
+        seen_ids.add(wb_id)
+
+        barcode = _extract_barcode(item)
+        if not barcode:
+          result.skipped_no_barcode += 1
+          continue
+        result.orders.append(
+          WBOrderData(
+            wb_order_id=wb_id,
+            barcode=barcode,
+            warehouse_id=_extract_warehouse_id(item),
+          )
+        )
 
       next_val = payload.get("next", 0) or 0
       try:
@@ -211,7 +235,7 @@ class WBClient:
 
       time.sleep(REQUEST_INTERVAL_SEC)
 
-    return ids
+    return result
 
   def fetch_seller_warehouses(self) -> list[dict]:
     """GET /api/v3/warehouses — склады продавца FBS."""

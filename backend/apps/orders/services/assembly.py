@@ -11,7 +11,7 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.orders.models import Order, PickList
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller, seller_has_warehouse_config
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
 from apps.orders.services.pick_list import PickListError, generate_pick_list
@@ -349,34 +349,9 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 
 def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
+  """Единый источник счётчиков: БД + фильтр включённых складов WB."""
   qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
   active = qs.exclude(status=Order.Status.CANCELLED)
-
-  if seller_has_warehouse_config(seller):
-    return {
-      "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
-      "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
-      "in_delivery": active.filter(wb_in_delivery_q()).count(),
-      "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
-      "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
-      "marked": active.filter(status=Order.Status.MARKED).count(),
-      "in_supply": active.filter(status=Order.Status.IN_SUPPLY).count(),
-      "shipped": qs.filter(status=Order.Status.SHIPPED).count(),
-      "cancelled": qs.filter(status=Order.Status.CANCELLED).count(),
-    }
-
-  if seller.wb_counts_synced_at:
-    return {
-      "new": seller.wb_count_new,
-      "in_picking": seller.wb_count_assembly,
-      "in_delivery": seller.wb_count_delivery,
-      "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
-      "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
-      "marked": active.filter(status=Order.Status.MARKED).count(),
-      "in_supply": active.filter(status=Order.Status.IN_SUPPLY).count(),
-      "shipped": qs.filter(status=Order.Status.SHIPPED).count(),
-      "cancelled": qs.filter(status=Order.Status.CANCELLED).count(),
-    }
 
   return {
     "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),

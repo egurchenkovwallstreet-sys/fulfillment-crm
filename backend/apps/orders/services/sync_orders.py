@@ -29,33 +29,7 @@ def _link_product(seller: Seller, barcode: str) -> Product | None:
   return Product.objects.filter(seller=seller, barcode=barcode).first()
 
 
-@transaction.atomic
-def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
-  if not seller.is_active:
-    raise SyncError("Селлер неактивен")
-
-  token = _get_seller_token(seller)
-  client = WBClient(token)
-
-  warehouse_sync_error = ""
-  try:
-    sync_seller_warehouses(seller, user=user)
-  except WarehouseSyncError as exc:
-    warehouse_sync_error = str(exc)
-
-  try:
-    fetch_result = client.fetch_new_orders()
-  except WBApiError as exc:
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message=f"Ошибка синхронизации заказов WB: {exc}",
-      details={"status_code": exc.status_code},
-    )
-    raise SyncError(str(exc)) from exc
-
-  wb_orders = fetch_result.orders
+def _import_wb_orders(seller: Seller, wb_orders: list, *, user=None) -> dict:
   created = 0
   updated = 0
   skipped = 0
@@ -83,7 +57,60 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     if not product:
       skipped += 1
 
-  status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0}
+  return {
+    "created": created,
+    "updated": updated,
+    "without_product": skipped,
+    "skipped_warehouse": skipped_warehouse,
+  }
+
+
+@transaction.atomic
+def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
+  if not seller.is_active:
+    raise SyncError("Селлер неактивен")
+
+  token = _get_seller_token(seller)
+  client = WBClient(token)
+
+  warehouse_sync_error = ""
+  try:
+    sync_seller_warehouses(seller, user=user)
+  except WarehouseSyncError as exc:
+    warehouse_sync_error = str(exc)
+
+  try:
+    fetch_result = client.fetch_new_orders()
+  except WBApiError as exc:
+    AuditLog.objects.create(
+      user=user,
+      seller=seller,
+      action_type=AuditLog.ActionType.API_ERROR,
+      message=f"Ошибка синхронизации заказов WB: {exc}",
+      details={"status_code": exc.status_code},
+    )
+    raise SyncError(str(exc)) from exc
+
+  new_import = _import_wb_orders(seller, fetch_result.orders, user=user)
+  created = new_import["created"]
+  updated = new_import["updated"]
+  skipped = new_import["without_product"]
+  skipped_warehouse = new_import["skipped_warehouse"]
+
+  archive_import = {"created": 0, "updated": 0, "skipped_warehouse": 0, "raw_total": 0}
+  try:
+    archive_result = client.fetch_recent_orders(days=45)
+    archive_import = _import_wb_orders(seller, archive_result.orders, user=user)
+    archive_import["raw_total"] = archive_result.raw_total
+    created += archive_import["created"]
+    updated += archive_import["updated"]
+    skipped += archive_import["without_product"]
+    skipped_warehouse += archive_import["skipped_warehouse"]
+  except WBApiError:
+    pass
+
+  wb_orders = fetch_result.orders
+  status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
   status_error = ""
   new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)]
   enabled_new_total = sum(
@@ -116,6 +143,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "without_product": skipped,
       "skipped_no_barcode": fetch_result.skipped_no_barcode,
       "skipped_warehouse": skipped_warehouse,
+      "archive_backfill": archive_import,
       "warehouse_sync_error": warehouse_sync_error,
       "fetched": len(wb_orders),
       "raw_total": fetch_result.raw_total,
@@ -144,6 +172,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     "raw_total": fetch_result.raw_total,
     "skipped_no_barcode": fetch_result.skipped_no_barcode,
     "skipped_warehouse": skipped_warehouse,
+    "archive_backfill": archive_import,
     "warehouse_sync_error": warehouse_sync_error,
     "pages": fetch_result.pages,
     "statuses_fetched": status_result["statuses_fetched"],

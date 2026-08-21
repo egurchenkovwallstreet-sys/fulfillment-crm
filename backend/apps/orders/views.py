@@ -1,4 +1,3 @@
-from django.db.models import Max, Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -9,7 +8,7 @@ from apps.accounts.permissions import IsManager
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
-from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW, wb_active_q, wb_in_delivery_q
+from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from apps.sellers.services.warehouse_filter import filter_orders_queryset
 
 from .models import Order, PickList, Supply
@@ -57,11 +56,26 @@ def _dashboard_stats_from_counts(counts: dict) -> dict:
 def _aggregate_sync_dashboard_stats(results: list[dict]) -> dict:
   totals = {"new": 0, "in_picking": 0, "in_delivery": 0}
   for item in results:
-    src = item.get("live_counts") or item.get("wb_counts") or {}
+    src = item.get("wb_counts") or item.get("live_counts") or {}
     totals["new"] += int(src.get("new", 0) or 0)
     totals["in_picking"] += int(src.get("in_picking", 0) or 0)
     totals["in_delivery"] += int(src.get("in_delivery", 0) or 0)
   return _dashboard_stats_from_counts(totals)
+
+
+def _stage_totals_for_sellers(sellers) -> tuple[dict[str, int], object | None]:
+  totals = {"new": 0, "in_picking": 0, "in_delivery": 0}
+  latest_sync = None
+  for seller in sellers:
+    counts = get_seller_stage_counts(seller)
+    totals["new"] += counts["new"]
+    totals["in_picking"] += counts["in_picking"]
+    totals["in_delivery"] += counts["in_delivery"]
+    if seller.wb_counts_synced_at and (
+      latest_sync is None or seller.wb_counts_synced_at > latest_sync
+    ):
+      latest_sync = seller.wb_counts_synced_at
+  return totals, latest_sync
 
 
 def _orders_queryset_for_user(user):
@@ -121,34 +135,21 @@ class OrderStatsView(APIView):
 
     if user.role == "seller" and user.seller_id:
       seller = Seller.objects.filter(pk=user.seller_id).first()
-      if seller and seller.wb_counts_synced_at:
-        new_orders = seller.wb_count_new
-        in_assembly = seller.wb_count_assembly
-        in_delivery = seller.wb_count_delivery
-        counts_synced_at = seller.wb_counts_synced_at
-        stats_source = "cache"
+      if seller:
+        counts, latest_sync = _stage_totals_for_sellers([seller])
+        new_orders = counts["new"]
+        in_assembly = counts["in_picking"]
+        in_delivery = counts["in_delivery"]
+        counts_synced_at = latest_sync
       else:
-        new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
-        in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
-        in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
+        new_orders = in_assembly = in_delivery = 0
     else:
       sellers_qs = Seller.objects.filter(is_active=True)
-      sync_meta = sellers_qs.aggregate(
-        new_orders=Sum("wb_count_new"),
-        in_assembly=Sum("wb_count_assembly"),
-        in_delivery=Sum("wb_count_delivery"),
-        counts_synced_at=Max("wb_counts_synced_at"),
-      )
-      if sync_meta["counts_synced_at"]:
-        new_orders = sync_meta["new_orders"] or 0
-        in_assembly = sync_meta["in_assembly"] or 0
-        in_delivery = sync_meta["in_delivery"] or 0
-        counts_synced_at = sync_meta["counts_synced_at"]
-        stats_source = "cache"
-      else:
-        new_orders = orders_qs.filter(wb_supplier_status=WB_SUPPLIER_NEW).count()
-        in_assembly = orders_qs.filter(wb_supplier_status="confirm").count()
-        in_delivery = orders_qs.filter(wb_in_delivery_q()).count()
+      counts, latest_sync = _stage_totals_for_sellers(sellers_qs)
+      new_orders = counts["new"]
+      in_assembly = counts["in_picking"]
+      in_delivery = counts["in_delivery"]
+      counts_synced_at = latest_sync
 
     data = {
       "orders_today": orders_today,
@@ -193,7 +194,7 @@ class OrderSyncView(APIView):
       except SyncError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       dashboard_stats = _dashboard_stats_from_counts(
-        result.get("live_counts") or result.get("wb_counts") or {},
+        result.get("wb_counts") or result.get("live_counts") or {},
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
 
@@ -207,7 +208,7 @@ class OrderSyncView(APIView):
       except SyncError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       dashboard_stats = _dashboard_stats_from_counts(
-        result.get("live_counts") or result.get("wb_counts") or {},
+        result.get("wb_counts") or result.get("live_counts") or {},
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
 

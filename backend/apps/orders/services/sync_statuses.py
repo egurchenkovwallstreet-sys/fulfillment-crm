@@ -21,7 +21,7 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 
-SYNC_VERSION = "delivery-v6"
+SYNC_VERSION = "delivery-v7"
 
 
 def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
@@ -157,8 +157,8 @@ def sync_order_statuses_for_seller(
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
 
-  save_wb_counts_to_seller(seller, live_counts)
   counts = get_seller_stage_counts(seller)
+  save_wb_counts_to_seller(seller, counts)
 
   return {
     "sync_version": SYNC_VERSION,
