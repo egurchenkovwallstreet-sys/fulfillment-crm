@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Макет листа подбора — 20 и 25 строк</title>
+  <title>Макет листа подбора — 25 строк</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -25,7 +25,7 @@
     }
 
     .hint {
-      max-width: 640px;
+      max-width: 560px;
       text-align: center;
       font-size: 13px;
       color: #475569;
@@ -53,14 +53,6 @@
       border-radius: 6px;
     }
 
-    .variants {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 28px;
-      justify-content: center;
-      align-items: flex-start;
-    }
-
     .variant-wrap {
       display: flex;
       flex-direction: column;
@@ -78,189 +70,103 @@
       border: 1px solid #94a3b8;
     }
 
+    /* A4 книжная — ровно 25 строк */
     .sheet {
       width: 210mm;
       height: 297mm;
       background: #fff;
       color: #0f172a;
       box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
-      padding: 12mm 10mm 10mm;
-      display: flex;
-      flex-direction: column;
+      padding: 8mm 10mm 6mm;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
       overflow: hidden;
     }
 
     .sheet-header {
-      border-bottom: 2px solid #0f172a;
-      padding-bottom: 5mm;
-      margin-bottom: 4mm;
-      flex-shrink: 0;
+      border-bottom: 1.5px solid #0f172a;
+      padding-bottom: 3mm;
+      margin-bottom: 2mm;
     }
 
     .seller-name {
-      font-size: 16pt;
+      font-size: 14pt;
       font-weight: 400;
       line-height: 1.2;
-      margin-bottom: 3mm;
+      margin-bottom: 2mm;
     }
 
     .sheet-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 4mm 12mm;
+      gap: 3mm 10mm;
       font-size: 10pt;
+      font-weight: 400;
       color: #334155;
     }
 
     .sheet-meta strong {
+      font-weight: 400;
       color: #0f172a;
-      font-weight: 700;
     }
 
     .pick-table {
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      flex: 1;
+      height: 100%;
     }
 
     .pick-table thead th {
       text-align: left;
       font-size: 7pt;
+      font-weight: 400;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: #64748b;
-      padding: 0 1.5mm 2mm;
+      padding: 0 1.5mm 1.5mm;
       border-bottom: 1px solid #cbd5e1;
       vertical-align: bottom;
+      height: 5mm;
     }
 
     .pick-table tbody tr {
       border-bottom: 1px solid #e2e8f0;
+      height: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
     }
 
     .pick-table tbody tr:last-child {
       border-bottom: none;
     }
 
-    .col-cell { width: 16%; }
-    .col-qty { width: 9%; text-align: center; }
-    .col-barcode { width: 22%; }
-    .col-name { width: 41%; }
+    .pick-table td {
+      padding: 0 1.5mm;
+      vertical-align: middle;
+      overflow: hidden;
+    }
+
+    .col-cell { width: 11%; }
+    .col-qty { width: 8%; text-align: center; }
+    .col-barcode { width: 24%; }
+    .col-name { width: 45%; }
     .col-check { width: 12%; text-align: center; }
 
-    /* Вариант A — 20 строк: просторнее */
-    .sheet--20 .pick-table td {
-      padding: 2.8mm 1.5mm;
-      vertical-align: middle;
-      line-height: 1.2;
-    }
-
-    .sheet--20 .cell-number {
-      font-size: 22pt;
-      font-weight: 900;
-      line-height: 1;
-    }
-
-    .sheet--20 .qty-value {
-      font-size: 13pt;
-      font-weight: 800;
-    }
-
-    .sheet--20 .barcode-value {
-      font-family: Consolas, 'Courier New', monospace;
-      font-size: 8pt;
-      font-weight: 600;
-      word-break: break-all;
-    }
-
-    .sheet--20 .product-name {
-      font-size: 8.5pt;
-    }
-
-    .sheet--20 .check-box {
-      width: 8mm;
-      height: 8mm;
-    }
-
-    /* Вариант B — 25 строк: максимальный шрифт на A4 */
-    .sheet--25 {
-      padding: 10mm 10mm 8mm;
-    }
-
-    .sheet--25 .sheet-header {
-      padding-bottom: 3.5mm;
-      margin-bottom: 2.5mm;
-    }
-
-    .sheet--25 .seller-name {
-      font-size: 16pt;
-      margin-bottom: 2mm;
-    }
-
-    .sheet--25 .sheet-meta {
-      font-size: 10.5pt;
-    }
-
-    .sheet--25 .pick-table thead th {
-      font-size: 7.5pt;
-      padding: 0 1.5mm 1.5mm;
-    }
-
-    .sheet--25 .pick-table td {
-      padding: 2mm 1.5mm;
-      vertical-align: middle;
-      line-height: 1.15;
-      height: 10.1mm;
-    }
-
-    .sheet--25 .cell-number {
-      font-size: 21pt;
-      font-weight: 900;
-      line-height: 1;
-    }
-
-    .sheet--25 .qty-value {
-      font-size: 13pt;
-      font-weight: 800;
-    }
-
-    .sheet--25 .barcode-value {
-      font-family: Consolas, 'Courier New', monospace;
-      font-size: 8.5pt;
-      font-weight: 600;
-      word-break: break-all;
-      line-height: 1.1;
-    }
-
-    .sheet--25 .product-name {
-      font-size: 8.5pt;
-      line-height: 1.15;
-    }
-
-    .sheet--25 .check-box {
-      width: 8mm;
-      height: 8mm;
-    }
-
-    .sheet--25 .sheet-footer {
-      padding-top: 2mm;
-      font-size: 6.5pt;
+    /* Единый шрифт во всех колонках — обычный, не жирный */
+    .row-text {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      font-weight: 400;
+      line-height: 1.12;
+      word-break: break-word;
     }
 
     .check-box {
       display: inline-block;
+      width: 7mm;
+      height: 7mm;
       border: 1.5px solid #0f172a;
       border-radius: 0.8mm;
       vertical-align: middle;
-    }
-
-    .sheet-footer {
-      flex-shrink: 0;
-      padding-top: 3mm;
-      font-size: 7pt;
-      color: #94a3b8;
-      text-align: center;
     }
 
     @media print {
@@ -276,33 +182,25 @@
         display: none;
       }
 
-      .variants {
-        display: block;
-      }
-
-      .variant-wrap {
-        page-break-after: always;
-      }
-
       .sheet {
         box-shadow: none;
         width: 100%;
-        height: auto;
-        min-height: 297mm;
+        height: 297mm;
+        page-break-after: always;
       }
 
       @page {
         size: A4 portrait;
-        margin: 10mm;
+        margin: 0;
       }
     }
   </style>
 </head>
 <body>
-  <h1 class="page-title">Макет листа подбора — сравнение плотности</h1>
+  <h1 class="page-title">Макет листа подбора</h1>
   <p class="hint">
-    <strong>Вариант B</strong> — 25 строк, шрифты увеличены до максимума на A4.
-    Слева — прежний вариант A (20 строк) для сравнения.
+    A4, книжная ориентация, <strong>25 строк</strong> на листе.
+    Ячейка, кол-во, баркод и название — <strong>один шрифт 10pt</strong>, без жирного.
   </p>
 
   <div class="controls">
@@ -312,7 +210,7 @@
     <label>№ листа: <input id="listId" type="number" value="12" /></label>
   </div>
 
-  <div class="variants" id="variants"></div>
+  <div id="sheet-root"></div>
 
   <script>
     const SAMPLE = [
@@ -337,7 +235,7 @@
       { cell: 20, qty: 1, barcode: '2041336535849', name: 'Ветровка детская лёгкая' },
       { cell: 21, qty: 2, barcode: '2041336535850', name: 'Юбка школьная серая' },
       { cell: 22, qty: 1, barcode: '2041336535851', name: 'Жилет утеплённый детский' },
-      { cell: 23, qty: 2, barcode: '2041336535852', name: 'Легgings детские хлопковые' },
+      { cell: 23, qty: 2, barcode: '2041336535852', name: 'Легинсы детские хлопковые' },
       { cell: 24, qty: 1, barcode: '2041336535853', name: 'Пolo детская с воротником' },
       { cell: 25, qty: 3, barcode: '2041336535854', name: 'Комбинезон детский тёплый' },
     ];
@@ -345,26 +243,30 @@
     function rowHtml(item) {
       return `
         <tr>
-          <td class="col-cell"><div class="cell-number">${item.cell}</div></td>
-          <td class="col-qty"><div class="qty-value">${item.qty}</div></td>
-          <td class="col-barcode"><div class="barcode-value">${item.barcode}</div></td>
-          <td class="col-name"><div class="product-name">${item.name}</div></td>
+          <td class="col-cell"><div class="row-text">${item.cell}</div></td>
+          <td class="col-qty"><div class="row-text">${item.qty}</div></td>
+          <td class="col-barcode"><div class="row-text">${item.barcode}</div></td>
+          <td class="col-name"><div class="row-text">${item.name}</div></td>
           <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
         </tr>`;
     }
 
-    function buildSheet(rowCount, cssClass, label) {
-      const items = SAMPLE.slice(0, rowCount);
-      return `
+    function render() {
+      const seller = document.getElementById('seller').value || '—';
+      const date = document.getElementById('date').value || '—';
+      const orders = document.getElementById('orders').value || '0';
+      const listId = document.getElementById('listId').value || '—';
+
+      document.getElementById('sheet-root').innerHTML = `
         <div class="variant-wrap">
-          <div class="variant-label">${label}</div>
-          <article class="sheet ${cssClass}">
+          <div class="variant-label">25 строк на листе A4</div>
+          <article class="sheet">
             <header class="sheet-header">
-              <div class="seller-name sheet-seller">${document.getElementById('seller')?.value || 'ИП Мазирка'}</div>
+              <div class="seller-name">${seller}</div>
               <div class="sheet-meta">
-                <span>Лист подбора № <strong class="sheet-list-id">12</strong></span>
-                <span>Дата: <strong class="sheet-date">22.08.2026</strong></span>
-                <span>Заказов: <strong class="sheet-orders">38</strong></span>
+                <span>Лист подбора № <strong>${listId}</strong></span>
+                <span>Дата: <strong>${date}</strong></span>
+                <span>Заказов: <strong>${orders}</strong></span>
               </div>
             </header>
             <table class="pick-table">
@@ -377,27 +279,10 @@
                   <th class="col-check">Собрано</th>
                 </tr>
               </thead>
-              <tbody>${items.map(rowHtml).join('')}</tbody>
+              <tbody>${SAMPLE.map(rowHtml).join('')}</tbody>
             </table>
-            <footer class="sheet-footer">Fulfillment CRM · лист подбора</footer>
           </article>
         </div>`;
-    }
-
-    function render() {
-      document.getElementById('variants').innerHTML =
-        buildSheet(25, 'sheet--25', 'Вариант B — 25 строк, макс. шрифт') +
-        buildSheet(20, 'sheet--20', 'Вариант A — 20 строк (для сравнения)');
-
-      const seller = document.getElementById('seller').value || '—';
-      const date = document.getElementById('date').value || '—';
-      const orders = document.getElementById('orders').value || '0';
-      const listId = document.getElementById('listId').value || '—';
-
-      document.querySelectorAll('.sheet-seller').forEach((el) => { el.textContent = seller; });
-      document.querySelectorAll('.sheet-date').forEach((el) => { el.textContent = date; });
-      document.querySelectorAll('.sheet-orders').forEach((el) => { el.textContent = orders; });
-      document.querySelectorAll('.sheet-list-id').forEach((el) => { el.textContent = listId; });
     }
 
     ['seller', 'date', 'orders', 'listId'].forEach((id) => {
