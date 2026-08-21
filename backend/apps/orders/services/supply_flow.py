@@ -9,7 +9,7 @@ from apps.integrations.wb_client import WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
 from apps.orders.services.wb_status import (
-  WB_DELIVERY_TAB_WB_STATUS,
+  WB_STATUS_AFTER_DELIVER,
   WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
@@ -209,7 +209,7 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
 
   order.status = Order.Status.IN_DELIVERY
   order.wb_supplier_status = WB_SUPPLIER_DELIVERY
-  order.wb_status = WB_DELIVERY_TAB_WB_STATUS
+  order.wb_status = WB_STATUS_AFTER_DELIVER
   order.save(
     update_fields=["status", "wb_supplier_status", "wb_status", "updated_at"],
   )

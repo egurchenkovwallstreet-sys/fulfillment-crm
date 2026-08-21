@@ -147,14 +147,13 @@
 |---------------|------------------|
 | **Новые заказы** | `supplierStatus = new` (число из `GET /api/v3/orders/new`) |
 | **На сборке** | `supplierStatus = confirm` |
-| **В доставке** | `supplierStatus = complete` **и** `wbStatus = waiting` |
+| **В доставке** | `supplierStatus = complete` **и** `wbStatus` ∈ {`waiting`, `sorted`, `postponed_delivery`, `accepted_by_carrier`, `sent_to_carrier`} |
 
-**Не входят в «В доставке»** (исключаются из счётчика и помечаются завершёнными при синке):
-- `wbStatus = sold` (выкуплено)
-- отмены: `canceled`, `canceled_by_client`, `canceled_by_carrier`, `cancel`
-- отказ покупателя: `declined_by_client`
-- `ready_for_pickup`, `defect`
-- **`wbStatus = sorted`** и прочие статусы доставки, кроме `waiting`
+**Не входят в «В доставке»** (выкуплено / отменено / выдано):
+- `wbStatus = sold`, `ready_for_pickup`, `defect`
+- отмены: `canceled`, `canceled_by_client`, `canceled_by_carrier`, `cancel`, `declined_by_client`
+
+В поставке WB статус **«Ждёт сортировки»** соответствует `wbStatus = waiting` (передано в доставку); после приёмки на СЦ — `sorted`.
 
 Ручная и автоматическая синхронизация обновляет счётчики и сохраняет их в карточке селлера для быстрого отображения на дашборде.
 
@@ -269,7 +268,7 @@
 ### 13.1. Дашборд администратора / менеджера (главный экран)
 - **Новые заказы** — красная карточка, статус «Новый» в WB.
 - **На сборке** — оранжевая карточка, статус «На сборке» в WB.
-- **В доставке** — синяя карточка, `complete + waiting` (см. §6.3).
+- **В доставке** — синяя карточка, `complete` + активный `wbStatus` (см. §6.3).
 - **Селлеров** — число подключённых к API (только admin).
 - **Остатков (SKU)** — по ячейкам склада.
 - Кнопка **«Обновить данные WB»** — ручная синхронизация заказов и статусов.
