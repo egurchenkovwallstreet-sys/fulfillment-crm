@@ -153,6 +153,19 @@
   align-items: start;
 }
 
+.assembly-picklist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.assembly-picklist-head .section-title {
+  margin: 0;
+}
+
 .assembly-side {
   display: flex;
   flex-direction: column;

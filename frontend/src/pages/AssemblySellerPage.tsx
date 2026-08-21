@@ -15,6 +15,7 @@ import {
 } from '../api/assembly'
 import { syncOrders } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
+import { printPickList } from '../utils/pickListPrint'
 import './AssemblyPage.css'
 
 const STAGES = [
@@ -140,10 +141,20 @@ export function AssemblySellerPage() {
       }
       setSuccess(msg)
       await load()
+      if (result.pick_list) {
+        printPickList(result.pick_list)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка начала сборки')
     } finally {
       setLoading(false)
+    }
+  }
+
+  function handlePrintPickList() {
+    if (!data?.active_pick_list) return
+    if (!printPickList(data.active_pick_list)) {
+      setError('Не удалось открыть окно печати')
     }
   }
 
@@ -368,6 +379,11 @@ export function AssemblySellerPage() {
               Лист подбора ({counts.new})
             </button>
           )}
+          {data.active_pick_list && (
+            <button type="button" className="btn btn--secondary" onClick={handlePrintPickList} disabled={loading}>
+              Печать листа
+            </button>
+          )}
           {stage === 'new' && bulkAssemblyCount > 0 && (
             <button type="button" className="btn btn--primary" onClick={handleSendAllToAssembly} disabled={loading}>
               Все на сборку ({bulkAssemblyCount})
@@ -502,7 +518,17 @@ export function AssemblySellerPage() {
         <div className="assembly-side">
           {data.active_pick_list && (
             <section className="panel">
-              <h2 className="section-title">Лист подбора #{data.active_pick_list.id}</h2>
+              <div className="assembly-picklist-head">
+                <h2 className="section-title">Лист подбора #{data.active_pick_list.id}</h2>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--small"
+                  onClick={handlePrintPickList}
+                  disabled={loading}
+                >
+                  Печать PDF
+                </button>
+              </div>
               <table className="assembly-table pick-list-table">
                 <thead>
                   <tr>
