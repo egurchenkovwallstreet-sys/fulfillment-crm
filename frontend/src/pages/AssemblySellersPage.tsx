@@ -65,13 +65,12 @@ export function AssemblySellersPage() {
               <th>Новые</th>
               <th>На сборке</th>
               <th>В доставке</th>
-              <th>Активных</th>
             </tr>
           </thead>
           <tbody>
             {sellers.length === 0 && (
               <tr>
-                <td colSpan={5} className="assembly-table__empty">
+                <td colSpan={4} className="assembly-table__empty">
                   Нет селлеров. Добавьте в админке.
                 </td>
               </tr>
@@ -90,7 +89,6 @@ export function AssemblySellersPage() {
                 </td>
                 <td>{seller.in_picking}</td>
                 <td>{seller.in_delivery}</td>
-                <td><strong>{seller.total_active}</strong></td>
               </tr>
             ))}
           </tbody>
