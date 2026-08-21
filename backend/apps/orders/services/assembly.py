@@ -349,7 +349,7 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 
 def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
-  """Единый источник счётчиков: БД + фильтр включённых складов WB."""
+  """Счётчики по БД + фильтр складов (для списков заказов в сборке)."""
   qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
   active = qs.exclude(status=Order.Status.CANCELLED)
 
@@ -363,6 +363,22 @@ def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
     "in_supply": active.filter(status=Order.Status.IN_SUPPLY).count(),
     "shipped": qs.filter(status=Order.Status.SHIPPED).count(),
     "cancelled": qs.filter(status=Order.Status.CANCELLED).count(),
+  }
+
+
+def get_seller_wb_tab_counts(seller: Seller) -> dict[str, int]:
+  """Счётчики вкладок как в ЛК WB — из live API после синка."""
+  if seller.wb_counts_synced_at:
+    return {
+      "new": seller.wb_count_new,
+      "in_picking": seller.wb_count_assembly,
+      "in_delivery": seller.wb_count_delivery,
+    }
+  stage = get_seller_stage_counts(seller)
+  return {
+    "new": stage["new"],
+    "in_picking": stage["in_picking"],
+    "in_delivery": stage["in_delivery"],
   }
 
 

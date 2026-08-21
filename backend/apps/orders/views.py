@@ -30,6 +30,7 @@ from .services.assembly import (
   AssemblyError,
   bind_marking_and_print,
   get_seller_stage_counts,
+  get_seller_wb_tab_counts,
   replace_order_item,
   scan_order_barcode,
   start_assembly,
@@ -67,7 +68,7 @@ def _stage_totals_for_sellers(sellers) -> tuple[dict[str, int], object | None]:
   totals = {"new": 0, "in_picking": 0, "in_delivery": 0}
   latest_sync = None
   for seller in sellers:
-    counts = get_seller_stage_counts(seller)
+    counts = get_seller_wb_tab_counts(seller)
     totals["new"] += counts["new"]
     totals["in_picking"] += counts["in_picking"]
     totals["in_delivery"] += counts["in_delivery"]
@@ -131,7 +132,7 @@ class OrderStatsView(APIView):
     from apps.warehouse.models import Product
 
     counts_synced_at = None
-    stats_source = "database"
+    stats_source = "wb_api_cache"
 
     if user.role == "seller" and user.seller_id:
       seller = Seller.objects.filter(pk=user.seller_id).first()
@@ -281,12 +282,16 @@ class AssemblySellerListView(APIView):
     sellers = Seller.objects.filter(is_active=True).order_by("company_name")
     payload = []
     for seller in sellers:
-      counts = get_seller_stage_counts(seller)
-      total_active = counts["new"] + counts["in_picking"] + counts["in_delivery"]
+      tab_counts = get_seller_wb_tab_counts(seller)
+      stage_counts = get_seller_stage_counts(seller)
+      total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
       payload.append({
         "id": seller.id,
         "company_name": seller.company_name,
-        **counts,
+        **stage_counts,
+        "new": tab_counts["new"],
+        "in_picking": tab_counts["in_picking"],
+        "in_delivery": tab_counts["in_delivery"],
         "total_active": total_active,
       })
     return Response(SellerAssemblyCountersSerializer(payload, many=True).data)
@@ -301,7 +306,9 @@ class AssemblySellerDetailView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
-    counts = get_seller_stage_counts(seller)
+    stage_counts = get_seller_stage_counts(seller)
+    tab_counts = get_seller_wb_tab_counts(seller)
+    counts = {**stage_counts, **tab_counts}
     stage = request.query_params.get("stage", "")
     orders_qs = filter_orders_queryset(
       Order.objects.filter(seller=seller).select_related("product", "product__cell"),

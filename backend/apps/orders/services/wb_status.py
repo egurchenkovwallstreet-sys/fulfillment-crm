@@ -26,16 +26,11 @@ WB_DELIVERED_WB_STATUSES = frozenset({
 
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
-# wbStatus сразу после передачи поставки в доставку (PATCH .../deliver).
+# wbStatus сразу после PATCH .../deliver; в ЛК поставки — «Ждёт сортировки».
 WB_STATUS_AFTER_DELIVER = "waiting"
-# В поставке «Ждёт сортировки» — это waiting (передано) и sorted (принято на СЦ WB).
-WB_IN_DELIVERY_WB_STATUSES = frozenset({
-  "waiting",
-  "sorted",
-  "postponed_delivery",
-  "accepted_by_carrier",
-  "sent_to_carrier",
-})
+
+# Вкладка «В доставке» в ЛК WB = complete + waiting (не sorted — уже на СЦ WB).
+WB_DELIVERY_TAB_WB_STATUS = WB_STATUS_AFTER_DELIVER
 
 WB_ACTIVE_SUPPLIER_STATUSES = frozenset({
   WB_SUPPLIER_NEW,
@@ -75,10 +70,10 @@ WB_STAGE_QUERIES = {
 
 
 def wb_in_delivery_q() -> Q:
-  """В доставке: complete + wbStatus в активных статусах доставки."""
+  """В доставке: complete + waiting — как вкладка «В доставке» в ЛК WB."""
   return (
     Q(wb_supplier_status=WB_SUPPLIER_DELIVERY)
-    & Q(wb_status__in=WB_IN_DELIVERY_WB_STATUSES)
+    & Q(wb_status=WB_DELIVERY_TAB_WB_STATUS)
     & ~Q(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED])
   )
 
@@ -96,7 +91,7 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
 
 
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
-  """complete + активный wbStatus — как вкладка «В доставке» в ЛК WB."""
+  """complete + waiting — вкладка «В доставке» в ЛК WB."""
   supplier_status = (supplier_status or "").strip()
   wb_status = (wb_status or "").strip()
   if supplier_status != WB_SUPPLIER_DELIVERY:
@@ -105,7 +100,7 @@ def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
     return False
   if wb_status in WB_DELIVERED_WB_STATUSES:
     return False
-  return wb_status in WB_IN_DELIVERY_WB_STATUSES
+  return wb_status == WB_DELIVERY_TAB_WB_STATUS
 
 
 def get_wb_status_label(wb_status: str) -> str:
@@ -136,6 +131,10 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   elif is_wb_in_delivery(supplier_status, wb_status):
     if order.status != Order.Status.IN_DELIVERY:
       order.status = Order.Status.IN_DELIVERY
+      changed_fields.add("status")
+  elif supplier_status == WB_SUPPLIER_DELIVERY:
+    if order.status == Order.Status.IN_DELIVERY:
+      order.status = Order.Status.SHIPPED
       changed_fields.add("status")
   elif supplier_status == WB_SUPPLIER_ASSEMBLY:
     if order.status == Order.Status.NEW:

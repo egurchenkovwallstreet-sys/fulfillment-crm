@@ -9,18 +9,17 @@ from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
-  WB_IN_DELIVERY_WB_STATUSES,
+  WB_DELIVERY_TAB_WB_STATUS,
   WB_SUPPLIER_DELIVERY,
+  WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
-  is_wb_in_delivery,
-  wb_in_delivery_q,
   save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 
-SYNC_VERSION = "delivery-v8"
+SYNC_VERSION = "delivery-v9"
 
 
 def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
@@ -53,7 +52,7 @@ def reconcile_wb_orders_for_seller(
   *,
   user=None,
 ) -> dict:
-  """Сверка: отмены и выкуп — в SHIPPED/CANCELLED; sorted/waiting остаются в доставке."""
+  """Сверка: отмены/выкуп → SHIPPED/CANCELLED; sorted и пр. — не «В доставке»."""
   now = timezone.now()
   wb_ids_in_db = set(
     Order.objects.filter(seller=seller).values_list("wb_order_id", flat=True)
@@ -69,12 +68,14 @@ def reconcile_wb_orders_for_seller(
     wb_status__in=WB_DELIVERED_WB_STATUSES,
   ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
-  restored_in_delivery = Order.objects.filter(
+  shipped_not_waiting = Order.objects.filter(
     seller=seller,
     wb_supplier_status=WB_SUPPLIER_DELIVERY,
-    wb_status__in=WB_IN_DELIVERY_WB_STATUSES,
-    status=Order.Status.SHIPPED,
-  ).update(status=Order.Status.IN_DELIVERY, updated_at=now)
+  ).exclude(wb_status=WB_DELIVERY_TAB_WB_STATUS).exclude(
+    wb_status__in=WB_TERMINAL_WB_STATUSES,
+  ).exclude(wb_status="").exclude(
+    status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
+  ).update(status=Order.Status.SHIPPED, updated_at=now)
 
   shipped_missing = 0
   if missing_ids:
@@ -86,14 +87,14 @@ def reconcile_wb_orders_for_seller(
   result = {
     "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
-    "restored_in_delivery": restored_in_delivery,
+    "shipped_not_waiting": shipped_not_waiting,
     "shipped_missing": shipped_missing,
     "missing_from_api": len(missing_ids),
     "delivery_status_breakdown": _delivery_status_breakdown(status_map),
   }
 
   reconciled = sum(result[k] for k in (
-    "cancelled_terminal", "shipped_delivered", "restored_in_delivery", "shipped_missing",
+    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
   if reconciled:
     AuditLog.objects.create(
@@ -147,15 +148,15 @@ def sync_order_statuses_for_seller(
   updated = _apply_statuses_to_orders(seller, status_map)
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
   reconciled = sum(reconcile.get(k, 0) for k in (
-    "cancelled_terminal", "shipped_delivered", "restored_in_delivery", "shipped_missing",
+    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
 
   live_counts = compute_live_wb_counts(status_map, allowed_ids=set(wb_ids))
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
 
-  counts = get_seller_stage_counts(seller)
-  save_wb_counts_to_seller(seller, counts)
+  save_wb_counts_to_seller(seller, live_counts)
+  db_counts = get_seller_stage_counts(seller)
 
   return {
     "sync_version": SYNC_VERSION,
@@ -165,5 +166,6 @@ def sync_order_statuses_for_seller(
     "live_counts": live_counts,
     "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
     "reconcile": reconcile,
-    "counts": counts,
+    "counts": live_counts,
+    "db_counts": db_counts,
   }

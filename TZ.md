@@ -147,13 +147,14 @@
 |---------------|------------------|
 | **Новые заказы** | `supplierStatus = new` (число из `GET /api/v3/orders/new`) |
 | **На сборке** | `supplierStatus = confirm` |
-| **В доставке** | `supplierStatus = complete` **и** `wbStatus` ∈ {`waiting`, `sorted`, `postponed_delivery`, `accepted_by_carrier`, `sent_to_carrier`} |
+| **В доставке** | `supplierStatus = complete` **и** `wbStatus = waiting` |
 
-**Не входят в «В доставке»** (выкуплено / отменено / выдано):
+**Не входят в «В доставке»** (исключаются из счётчика):
+- `wbStatus = sorted` — уже принят на СЦ WB (в поставке был «Ждёт сортировки» = `waiting`)
 - `wbStatus = sold`, `ready_for_pickup`, `defect`
 - отмены: `canceled`, `canceled_by_client`, `canceled_by_carrier`, `cancel`, `declined_by_client`
 
-В поставке WB статус **«Ждёт сортировки»** соответствует `wbStatus = waiting` (передано в доставку); после приёмки на СЦ — `sorted`.
+Счётчики на дашборде берутся из **live API** (`POST /orders/status`) при синке, не из полной истории БД.
 
 Ручная и автоматическая синхронизация обновляет счётчики и сохраняет их в карточке селлера для быстрого отображения на дашборде.
 

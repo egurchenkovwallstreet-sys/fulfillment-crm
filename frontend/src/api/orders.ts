@@ -82,7 +82,7 @@ export interface SyncResult {
   reconcile?: {
     cancelled_terminal?: number
     shipped_delivered?: number
-    restored_in_delivery?: number
+    shipped_not_waiting?: number
     shipped_missing?: number
     delivery_status_breakdown?: Record<string, number>
   }
