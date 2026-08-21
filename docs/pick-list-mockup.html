@@ -151,13 +151,19 @@
     .col-name { width: 45%; }
     .col-check { width: 12%; text-align: center; }
 
-    /* Единый шрифт во всех колонках — обычный, не жирный */
+    /* Единый шрифт в колонках; номер ячейки — жирнее и крупнее */
     .row-text {
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 10pt;
+      font-size: 11pt;
       font-weight: 400;
-      line-height: 1.12;
+      line-height: 1;
       word-break: break-word;
+    }
+
+    .row-text--cell {
+      font-size: 14pt;
+      font-weight: 700;
+      line-height: 1;
     }
 
     .check-box {
@@ -200,7 +206,8 @@
   <h1 class="page-title">Макет листа подбора</h1>
   <p class="hint">
     A4, книжная ориентация, <strong>25 строк</strong> на листе.
-    Ячейка, кол-во, баркод и название — <strong>один шрифт 10pt</strong>, без жирного.
+    Ячейка, кол-во, баркод и название — <strong>11pt</strong>, межстрочный интервал минимальный.
+    Номер ячейки — <strong>14pt жирный</strong>.
   </p>
 
   <div class="controls">
@@ -243,7 +250,7 @@
     function rowHtml(item) {
       return `
         <tr>
-          <td class="col-cell"><div class="row-text">${item.cell}</div></td>
+          <td class="col-cell"><div class="row-text row-text--cell">${item.cell}</div></td>
           <td class="col-qty"><div class="row-text">${item.qty}</div></td>
           <td class="col-barcode"><div class="row-text">${item.barcode}</div></td>
           <td class="col-name"><div class="row-text">${item.name}</div></td>
