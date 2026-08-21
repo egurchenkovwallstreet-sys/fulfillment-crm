@@ -12,9 +12,9 @@
 ---
 
 ## Текущий статус проекта
-**Дата последнего обновления:** 20.08.2026  
-**Общий статус:** 📦 MVP + синхронизация статусов WB + Честный знак (приёмка + сборка)  
-**Стадия:** Следующий шаг — поставки (§9)
+**Дата последнего обновления:** 22.08.2026  
+**Общий статус:** 📦 MVP + **полная синхронизация счётчиков с ЛК WB** + Честный знак + поштучные поставки + **§5 приёмка закрыта**  
+**Стадия:** Следующий шаг — полный модуль поставок (§9 UI), Xprinter, списание остатков (§10)
 
 **Выбранный стек:**
 - Backend: Python 3.12 + Django 5 + Django REST Framework
@@ -25,7 +25,14 @@
 - Деплой: Docker Compose **только на сервере** (на ПК Docker не нужен)
 - Статика: WhiteNoise (админка Django)
 
-**Версия синхронизации статусов:** `delivery-v6` (проверка: `GET /api/health/` → `"sync_version":"delivery-v6"`)
+**Версия синхронизации статусов:** `delivery-v10` (проверка: `GET /api/health/` → `"sync_version":"delivery-v10"`)
+
+### ✅ Сверка с ЛК Wildberries (21.08.2026, ИП Мазирка)
+| Вкладка | ЛК WB | CRM | Статус |
+|---------|-------|-----|--------|
+| Новые | 31 | 31 | ✅ |
+| На сборке | 0 | 0 | ✅ |
+| В доставке | 147 | 147 | ✅ |
 
 ---
 
@@ -53,9 +60,7 @@
 3. На сервере:
    ```bash
    cd /opt/fulfillment-crm
-   git fetch origin main && git reset --hard origin/main
-   docker compose build --no-cache frontend web worker
-   docker compose up -d frontend web worker
+   git pull && bash scripts/deploy.sh
    ```
 4. Python на ПК **не установлен** — это нормально
 
@@ -71,20 +76,20 @@
 |-----------|--------|-------------|
 | §2 Архитектура и стек | ✅ | Django + PostgreSQL + React, Docker на сервере |
 | §3 Роли (admin / manager / seller) | 🟡 | JWT + RBAC, разграничение на API; кабинет селлера неполный |
-| §4 Управление селлерами | 🟡 | Модель Seller, админка; нет генерации логина/пароля, токен вручную |
-| §5 Модуль приёмки | ✅ | API + UI, авто-проверка needKiz (Content API), флаг requires_marking |
-| §6 Заказы FBS, синхронизация | ✅ | Sync `/orders/new` с пагинацией, ручное + Celery 15 мин, статусы WB §6.3 |
-| §6.3 Счётчики как в ЛК WB | ✅ | new / confirm / complete+waiting; кэш на Seller |
+| §4 Управление селлерами | 🟡 | Модель Seller, админка; склады WB (SellerWarehouse), фильтр; токен вручную |
+| §5 Модуль приёмки | ✅ | API + UI, needKiz, этикетки ячеек 75×120, раздел «Ячейки», перенос, **обновление названий из WB** (кнопка + Celery 03:00) |
+| §6 Заказы FBS, синхронизация | ✅ | Sync new + архив 30 дн. + статусы, Celery 15 мин |
+| §6.3 Счётчики как в ЛК WB | ✅ | **31/0/147 совпадает**; live API + кэш Seller; delivery-v10 |
 | §6 Лист подбора | ✅ | Группировка по ячейкам, UI, печать |
-| §7 Сборка и печать этикеток FBS | 🟡 | ЧЗ перед печатью, bind sgtin, замена товара; Xprinter bridge — нет |
+| §7 Сборка и печать этикеток FBS | 🟡 | ЧЗ, bind sgtin, **поштучная сборка/доставка**; Xprinter bridge — нет |
 | §8 Честный знак (DataMatrix) | 🟡 | Приёмка (needKiz) + сборка (bind + print); блокировка поставок — в §9 |
-| §9 Поставки и ШК | ❌ | Модель Supply, API/UI нет |
+| §9 Поставки и ШК | 🟡 | Модель Supply, supply_flow (create/add/deliver/barcode); UI раздела — нет |
 | §10 Списание остатков | ❌ | Не реализовано |
 | §11 Возвраты | ❌ | Не реализовано |
-| §12 Цены и финансы | 🟡 | Модели PriceGroup, individual_price; UI/API нет, менеджер не видит цены |
-| §13 Дашборды и отчёты | 🟡 | KPI по стадиям WB (красный/оранжевый/синий); отчёты и финансы — нет |
-| §14 Нефункциональные требования | 🟡 | Логи AuditLog, health endpoint; нагрузка, бэкапы, HTTPS — нет |
-| §15 API Wildberries (полный набор) | 🟡 | Заказы new ✅; статусы ✅; стикеры ✅; остатки, ЧЗ, поставки — нет |
+| §12 Цены и финансы | 🟡 | Модели PriceGroup, individual_price; UI/API нет |
+| §13 Дашборды и отчёты | 🟡 | KPI по стадиям WB **синхронизированы**; отчёты и финансы — нет |
+| §14 Нефункциональные требования | 🟡 | Логи AuditLog, health endpoint; HTTPS, бэкапы — нет |
+| §15 API Wildberries (полный набор) | 🟡 | Заказы, статусы, стикеры, ЧЗ, поставки ✅; остатки — нет |
 
 **Легенда:** ✅ готово · 🟡 частично · ❌ не начато
 
@@ -104,10 +109,17 @@
 | 18.08.2026 | Модуль сборки FBS (кабинет менеджера) | ✅ | API assembly, стикеры WB, UI /assembly |
 | 19.08.2026 | Синхронизация статусов WB | ✅ | `wb_supplier_status`, `wb_status`, POST /orders/status |
 | 19.08.2026 | Дашборд: карточки по стадиям WB | ✅ | Новые (красный), На сборке, В доставке |
-| 19.08.2026 | Исправление счётчика «В доставке» | ✅ | `complete + waiting` (не sorted); сверка с ЛК WB (~108) |
+| 19.08.2026 | Исправление счётчика «В доставке» | ✅ | `complete + waiting` (не sorted) |
 | 19.08.2026 | Кэш счётчиков на Seller | ✅ | `wb_count_new/assembly/delivery`, reconcile при sync |
 | 19.08.2026 | Инфра: nginx 502/404, deploy.sh | ✅ | no-cache index.html, скрипт деплоя |
 | 20.08.2026 | Честный знак: приёмка needKiz + сборка bind/print | ✅ | Content API, sgtin, замена товара |
+| 21.08.2026 | Поштучная сборка/доставка через WB supplies | ✅ | «На сборку», «Все на сборку», «В доставку» |
+| 21.08.2026 | Фильтр складов WB (SellerWarehouse) | ✅ | Включение/выключение точек отгрузки в UI сборки |
+| 21.08.2026 | Синхронизация счётчиков delivery-v7…v10 | ✅ | Исправлены расхождения 139/147/490; **полное совпадение с ЛК** |
+| 21.08.2026 | Деплой: migrate только в web, frontend build fix | ✅ | IntegrityError, stageCount TS fix |
+| 22.08.2026 | §5.3 Этикетки ячеек + раздел «Ячейки» | ✅ | Печать 75×120 мм, перенос, CellLabelPrompt |
+| 22.08.2026 | §5 Обновление данных товаров из WB | ✅ | Кнопка «Обновить из WB», daily sync 03:00, точный поиск по SKU |
+| 22.08.2026 | **§5 Модуль приёмки — этап закрыт** | ✅ | Подтверждено заказчиком |
 
 ---
 
@@ -115,45 +127,43 @@
 
 ### Backend (Django apps)
 - **accounts** — User (admin/manager/seller), JWT, `/api/auth/me/`
-- **sellers** — Seller, WB-токен, кэш счётчиков `wb_count_*`
-- **warehouse** — Cell, Product, PriceGroup, StockOperation, приёмка
-- **orders** — Order (`wb_supplier_status`, `wb_status`), PickList; sync, статусы, лист подбора, сборка, стикеры, scan-print
-  - `services/wb_status.py` — правила «В доставке» (`waiting`), фильтры исключений
-  - `services/sync_statuses.py` — sync статусов, reconcile, `SYNC_VERSION = delivery-v6`
-- **integrations** — AuditLog, `wb_client.py`, Celery `sync_wb_orders`
+- **sellers** — Seller, SellerWarehouse (склады WB, is_enabled), WB-токен, кэш счётчиков `wb_count_*`
+- **warehouse** — Cell, Product, PriceGroup, StockOperation, приёмка, этикетки ячеек, перенос, sync названий из WB
+- **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
+  - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
+  - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v10`
+  - `services/supply_flow.py` — поштучная отправка на сборку/в доставку
+  - `services/assembly.py` — `get_seller_wb_tab_counts()` (кэш live API)
+- **integrations** — AuditLog, `wb_client.py` (orders, statuses, supplies, stickers), Celery
 
 ### API endpoints (работают)
 | Метод | URL | Описание |
 |-------|-----|----------|
 | POST | `/api/auth/login/` | Вход |
 | GET | `/api/auth/me/` | Текущий пользователь |
-| POST | `/api/auth/token/refresh/` | Обновление токена |
 | GET | `/api/health/` | Health + `sync_version` |
-| GET | `/api/warehouse/sellers/` | Список селлеров |
-| GET | `/api/warehouse/cells/` | Ячейки |
-| GET/POST | `/api/warehouse/intake/*` | Приёмка |
-| GET | `/api/orders/` | Заказы FBS |
-| GET | `/api/orders/stats/` | KPI дашборда (из кэша Seller) |
+| GET | `/api/orders/stats/` | KPI дашборда (кэш WB live API) |
 | POST | `/api/orders/sync/` | Синхронизация WB (заказы + статусы + reconcile) |
-| GET/POST | `/api/orders/pick-lists/*` | Лист подбора |
 | GET | `/api/orders/assembly/sellers/` | Селлеры со счётчиками стадий |
-| GET | `/api/orders/assembly/sellers/<id>/` | Кабинет сборки селлера |
-| POST | `/api/orders/assembly/sellers/<id>/start/` | Начать сборку (лист + стикеры) |
-| POST | `/api/orders/assembly/sellers/<id>/scan-print/` | Скан → печать стикера |
+| GET | `/api/orders/assembly/sellers/<id>/` | Кабинет сборки (вкладки, склады, заказы) |
+| POST | `/api/orders/assembly/sellers/<id>/send-to-assembly/` | Один заказ → сборка WB |
+| POST | `/api/orders/assembly/sellers/<id>/send-all-to-assembly/` | Массовая отправка на сборку |
+| POST | `/api/orders/assembly/sellers/<id>/send-to-delivery/` | Один заказ → доставка WB |
+| POST | `/api/orders/assembly/sellers/<id>/start/` | Лист подбора + стикеры |
+| POST | `/api/orders/assembly/sellers/<id>/scan-print/` | Скан → печать / ЧЗ |
+| GET/POST | `/api/warehouse/intake/*` | Приёмка |
+| GET | `/api/warehouse/sellers/<id>/products/` | Товары селлера по ячейкам |
+| POST | `/api/warehouse/sellers/<id>/products/refresh-from-wb/` | Обновить названия/маркировку из WB |
+| POST | `/api/warehouse/products/<id>/move-cell/` | Перенос товара в другую ячейку |
+| GET | `/api/warehouse/products/<id>/cell-label/` | Данные для этикетки ячейки |
+| GET/POST | `/api/orders/pick-lists/*` | Лист подбора |
 
 ### Frontend (React)
+- `/` — дашборд: **Новые / На сборке / В доставке** — совпадает с ЛК WB
+- `/assembly/:sellerId` — вкладки стадий, склады WB, «На сборку», «Все на сборку», «В доставку»
+- `/intake` — приёмка
+- `/cells` — ячейки: список товаров, печать этикеток, перенос, «Обновить из WB»
 - `/login` — вход
-- `/` — дашборд: **Новые заказы** (красный), **На сборке**, **В доставке**, «Обновить данные WB»
-- `/intake` — приёмка (admin + manager)
-- `/assembly` — сборка FBS: список селлеров, счётчики, sync WB
-- `/assembly/:sellerId` — кабинет сборки: вкладки **Новые / На сборке / В доставке** (цвета как дашборд), «Начать сборку», лист подбора, печать по скану
-- `/orders` — редирект на `/assembly`
-
-### Management commands
-- `seed_cells` — ячейки 1..50
-
-### Скрипты
-- `scripts/deploy.sh` — обновление с сервера (fetch, build, up)
 
 ---
 
@@ -161,48 +171,45 @@
 
 | Статус | Входит в «В доставке»? |
 |--------|------------------------|
-| `complete` + `waiting` | ✅ Да |
-| `complete` + `sorted` | ❌ Нет |
-| `sold`, отмены, `declined_by_client` | ❌ Нет (reconcile → shipped) |
+| `complete` + `waiting` | ✅ Да («Ждёт сортировки» в поставке WB) |
+| `complete` + `sorted` | ❌ Нет (уже на СЦ WB) |
+| `sold`, отмены, `ready_for_pickup`, `defect` | ❌ Нет (reconcile → shipped/cancelled) |
 
-Сверка с ЛК WB: при ~108 заказах во вкладке «В доставке» CRM показывает то же число после sync.
+**Источник счётчика:** live API при sync (не полная история БД). Опрос ID: БД + архив 30 дн. + заказы из поставок `done=true`.
+
+**Проверено 21.08.2026:** CRM = ЛК WB (147 в доставке, 31 новых, 0 на сборке).
 
 ---
 
 ## Ближайшие задачи (очередь по ТЗ)
 
 ### Следующий спринт (приоритет 1)
-1. [ ] **§9 Поставки** — формирование, блокировка без ЧЗ, ШК поставки (QR)
-2. [ ] **§7 Xprinter** — print-bridge для прямой печати (< 2 сек), поддержка 365 и 370
+1. [ ] **§9 Поставки (UI)** — раздел «Поставки», массовые поставки, блокировка без ЧЗ
+2. [ ] **§7 Xprinter** — print-bridge для прямой печати (< 2 сек)
 
-### Спринт 2 (после поставок)
-4. [ ] **§10 Списание остатков** — автоматически после подтверждения поставки WB
-5. [ ] **§15 WB API — остатки** — реализовать `sync_wb_stocks` (сейчас заглушка)
-6. [ ] **§4 Селлеры** — удобный ввод/шифрование токена WB, генерация логина/пароля селлера
+### Спринт 2
+3. [ ] **§10 Списание остатков** — после подтверждения поставки WB
+4. [ ] **§15 WB API — остатки** — `sync_wb_stocks`
+5. [ ] **§4 Селлеры** — генерация логина/пароля, UI токена WB
 
-### Спринт 3 (кабинеты и финансы)
-7. [ ] **§11 Возвраты** — кнопка «Возврат», как приёмка
-8. [ ] **§12 Финансы** — ценовые группы, отчёты (только admin)
-9. [ ] **§13 Дашборды** — отчёты за день/неделю/месяц, кабинет селлера
-10. [ ] **§3 Кабинет селлера** — остатки, заказы, «Обновить данные»
+### Спринт 3
+6. [ ] **§11 Возвраты**
+7. [ ] **§12–13 Финансы и отчёты**
+8. [ ] **§3 Кабинет селлера**
 
-### Техдолг и продакшен
-11. [ ] Тесты для `wb_status.py` и sync reconcile
-12. [ ] Цветовые вкладки на `/assembly` (список селлеров) — по желанию
-13. [ ] **§14 Нагрузка** — тест 10 000 заказов/день, индексы
-14. [ ] **§14 Продакшен** — домен, HTTPS, бэкап БД, `WB_TOKEN_ENCRYPTION_KEY` в `.env`
+### Техдолг
+9. [ ] Тесты для `wb_status.py` и sync reconcile
+10. [ ] **§14 Продакшен** — HTTPS, бэкап БД, `WB_TOKEN_ENCRYPTION_KEY`
 
 ### Уже сделано ✅
 - [x] Стек, БД, Docker, деплой
-- [x] JWT + роли
-- [x] Приёмка
-- [x] Админка (миграции, CSRF, :8080/admin)
-- [x] Заказы FBS + лист подбора + пагинация WB
-- [x] Сборка FBS: кабинет менеджера, стикеры WB, печать по скану
-- [x] Синхронизация статусов WB + счётчики как в ЛК
-- [x] Дашборд KPI (Новые / На сборке / В доставке)
-- [x] Кэш счётчиков на Seller, health endpoint
-- [x] Честный знак: авто needKiz при приёмке, bind ЧЗ на сборке, замена товара
+- [x] **§5 Модуль приёмки** (приёмка, ячейки, этикетки, перенос, sync названий WB)
+- [x] Сборка FBS: кабинет, стикеры, ЧЗ, scan-print
+- [x] **Счётчики WB = ЛК WB (delivery-v10)**
+- [x] Поштучная отправка на сборку и в доставку (WB supplies API)
+- [x] Фильтр складов SellerWarehouse
+- [x] Массовая «Все на сборку»
+- [x] Архив заказов + опрос поставок в доставке для точного счётчика
 
 ---
 
@@ -210,12 +217,12 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
+| Расхождение счётчиков CRM vs WB | ✅ **Решено** | delivery-v10, проверено 21.08.2026 |
 | Админка без порта → 404 | ℹ️ | Только `:8080/admin` или `:8001/admin` |
 | Заказы без ячейки (—) | ℹ️ | Сначала приёмка товара с тем же баркодом |
-| WB_TOKEN_ENCRYPTION_KEY пустой | ⚠️ | Задать в `.env` на сервере для шифрования токенов |
+| WB_TOKEN_ENCRYPTION_KEY пустой | ⚠️ | Задать в `.env` на сервере |
 | Печать Xprinter из браузера | ⚠️ | Нужен print-bridge (следующий спринт) |
-| Старый UI после деплоя | ℹ️ | `git reset --hard origin/main`, `build --no-cache frontend` |
-| `git pull` конфликт docker-compose | ⚠️ | `git checkout -- docker-compose.yml` или `reset --hard` |
+| Старый UI после деплоя | ℹ️ | `git pull && bash scripts/deploy.sh` |
 
 ---
 
@@ -224,26 +231,24 @@
 | Дата | Изменение | Автор |
 |------|-----------|-------|
 | 16.08.2026 | TZ.md, инициализация, Docker | Ассистент |
-| 16.08.2026 | JWT, дашборд, WhiteNoise | Ассистент |
-| 17.08.2026 | Модуль приёмки | Ассистент |
-| 18.08.2026 | Фикс деплоя, миграции, админка, CSRF | Ассистент |
-| 18.08.2026 | Заказы FBS, лист подбора, пагинация WB | Ассистент |
-| 18.08.2026 | Сверка с TZ, обновление PROGRESS | Ассистент |
-| 18.08.2026 | Модуль сборки FBS (кабинет менеджера) | Ассистент |
-| 19–20.08.2026 | Статусы WB, счётчики дашборда, delivery-v6, UI сборки | Ассистент |
-| 20.08.2026 | Обновление TZ §6.3, §7, §13, §15 и PROGRESS | Ассистент |
+| 16–18.08.2026 | JWT, приёмка, заказы, сборка | Ассистент |
+| 19–20.08.2026 | Статусы WB, счётчики, ЧЗ | Ассистент |
+| **21.08.2026** | **Полная синхронизация с ЛК WB, supply_flow, delivery-v10** | Ассистент |
+| **22.08.2026** | **§5 приёмка закрыта: ячейки, этикетки, sync WB** | Заказчик + Ассистент |
 
 ---
 
-## Git-коммиты (основные)
-- `7e542d4` — Intake module
-- `7fe7ca5` — Orders FBS + pick list
-- `92c0a10` — WB pagination fix
-- `ab6a103` — Assembly module (stickers, start_assembly, scan-print)
-- `0ce1962` — Sync fallback fix (recent_ids)
-- `b7d12d0` — Delivery count: complete + waiting only
-- `7976b98` — Remove dashboard sync debug line
-- `aba7743` — Assembly UI: colored stage tabs, remove «Все активные»
+## Git-коммиты (основные, август 2026)
+- `4c4cf1c` — Per-order send to assembly/delivery via WB supplies
+- `c1fb424` — Warehouse filter, bulk «Все на сборку»
+- `d9bbef2` — Unify counters, archive backfill, delivery-v7
+- `92a3271` — delivery-v8 (sorted — откат)
+- `d47cde5` — delivery-v9: waiting only, live API cache
+- `0e8a6dc` — delivery-v10: poll archive + supply orders
+- `93845ef` — Fix frontend build (stageCount conflict)
+- `45fbae5` — WB product refresh + fix barcode lookup
+- `6c8e96c` — Cell label printing, /cells page
+- `8f0d7de` — Label 75×120 mm
 
 ---
 
