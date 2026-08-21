@@ -41,6 +41,8 @@ function stageCount(counts: AssemblySellerDetail['counts'], stageKey: string): n
   if (stageKey === 'complete') return counts.in_delivery ?? 0
   return 0
 }
+
+function showDeliveryButton(order: AssemblyOrder, currentStage: string): boolean {
   if (order.can_send_to_delivery) return true
   if (currentStage !== 'confirm') return false
   if ((order.wb_supplier_status || '').trim() !== 'confirm') return false
