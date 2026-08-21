@@ -183,8 +183,8 @@ class WBClient:
     """GET /api/v3/orders — ID заказов за последние N дней (как в ЛК WB)."""
     return {order.wb_order_id for order in self.fetch_recent_orders(days=days).orders}
 
-  def fetch_recent_orders(self, days: int = 45) -> WBFetchResult:
-    """GET /api/v3/orders — архив заказов за N дней (в т.ч. уже в доставке)."""
+  def fetch_recent_orders(self, days: int = 30) -> WBFetchResult:
+    """GET /api/v3/orders — архив заказов (макс. 30 дней за запрос по документации WB)."""
     result = WBFetchResult()
     date_from = int(time.time()) - days * 24 * 3600
     next_cursor = 0
@@ -236,6 +236,65 @@ class WBClient:
       time.sleep(REQUEST_INTERVAL_SEC)
 
     return result
+
+  def fetch_supplies(self) -> list[dict]:
+    """GET /api/v3/supplies — список поставок FBS."""
+    supplies: list[dict] = []
+    next_cursor = 0
+
+    while True:
+      payload = self._request(
+        "GET",
+        "/api/v3/supplies",
+        params={"limit": PAGE_LIMIT, "next": next_cursor},
+      )
+      if not isinstance(payload, dict):
+        break
+
+      batch = payload.get("supplies") or []
+      supplies.extend(batch)
+
+      next_val = payload.get("next", 0) or 0
+      try:
+        next_cursor = int(next_val)
+      except (TypeError, ValueError):
+        next_cursor = 0
+
+      if not batch or next_cursor == 0:
+        break
+
+      time.sleep(REQUEST_INTERVAL_SEC)
+
+    return supplies
+
+  def fetch_supply_order_ids(self, supply_id: str) -> list[int]:
+    """GET /api/marketplace/v3/supplies/{id}/order-ids — ID заказов в поставке."""
+    payload = self._request(
+      "GET",
+      f"/api/marketplace/v3/supplies/{supply_id}/order-ids",
+    )
+    if not isinstance(payload, dict):
+      return []
+    ids: list[int] = []
+    for raw_id in payload.get("orderIds") or []:
+      try:
+        ids.append(int(raw_id))
+      except (TypeError, ValueError):
+        continue
+    return ids
+
+  def fetch_delivery_order_ids(self) -> set[int]:
+    """ID заказов из поставок, переданных в доставку (done=true)."""
+    order_ids: set[int] = set()
+    for supply in self.fetch_supplies():
+      if not supply.get("done"):
+        continue
+      supply_id = supply.get("id")
+      if not supply_id:
+        continue
+      order_ids.update(self.fetch_supply_order_ids(str(supply_id)))
+      time.sleep(REQUEST_INTERVAL_SEC)
+    return order_ids
 
   def fetch_seller_warehouses(self) -> list[dict]:
     """GET /api/v3/warehouses — склады продавца FBS."""

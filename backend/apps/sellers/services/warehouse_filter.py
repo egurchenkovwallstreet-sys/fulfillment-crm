@@ -23,7 +23,7 @@ def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
   if not seller_has_warehouse_config(seller):
     return True
   if wb_warehouse_id is None:
-    return False
+    return True
   return wb_warehouse_id in get_enabled_wb_warehouse_ids(seller)
 
 

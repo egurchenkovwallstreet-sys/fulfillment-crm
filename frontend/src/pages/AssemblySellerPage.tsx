@@ -35,7 +35,12 @@ function showAssemblyButton(order: AssemblyOrder, currentStage: string): boolean
   return order.can_send_to_assembly ?? false
 }
 
-function showDeliveryButton(order: AssemblyOrder, currentStage: string): boolean {
+function stageCount(counts: AssemblySellerDetail['counts'], stageKey: string): number {
+  if (stageKey === 'new') return counts.new ?? 0
+  if (stageKey === 'confirm') return counts.in_picking ?? 0
+  if (stageKey === 'complete') return counts.in_delivery ?? 0
+  return 0
+}
   if (order.can_send_to_delivery) return true
   if (currentStage !== 'confirm') return false
   if ((order.wb_supplier_status || '').trim() !== 'confirm') return false
@@ -434,7 +439,12 @@ export function AssemblySellerPage() {
 
       <div className="assembly-grid">
         <section className="panel">
-          <h2 className="section-title">Заказы ({data.orders.length})</h2>
+          <h2 className="section-title">
+            Заказы ({stageCount(data.counts, stage)}
+            {data.orders.length !== stageCount(data.counts, stage) &&
+              ` · в списке: ${data.orders.length}`}
+            )
+          </h2>
           <table className="assembly-table">
             <thead>
               <tr>

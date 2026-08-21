@@ -98,14 +98,22 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   skipped_warehouse = new_import["skipped_warehouse"]
 
   archive_import = {"created": 0, "updated": 0, "skipped_warehouse": 0, "raw_total": 0}
+  archive_orders = []
+  delivery_supply_ids: set[int] = set()
   try:
-    archive_result = client.fetch_recent_orders(days=45)
-    archive_import = _import_wb_orders(seller, archive_result.orders, user=user)
+    archive_result = client.fetch_recent_orders(days=30)
+    archive_orders = archive_result.orders
+    archive_import = _import_wb_orders(seller, archive_orders, user=user)
     archive_import["raw_total"] = archive_result.raw_total
     created += archive_import["created"]
     updated += archive_import["updated"]
     skipped += archive_import["without_product"]
     skipped_warehouse += archive_import["skipped_warehouse"]
+  except WBApiError:
+    pass
+
+  try:
+    delivery_supply_ids = client.fetch_delivery_order_ids()
   except WBApiError:
     pass
 
@@ -123,6 +131,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       user=user,
       new_wb_ids=new_wb_ids,
       new_orders_total=enabled_new_total,
+      archive_orders=archive_orders,
+      delivery_supply_ids=delivery_supply_ids,
     )
   except WBApiError as exc:
     status_error = str(exc)
@@ -144,6 +154,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "skipped_no_barcode": fetch_result.skipped_no_barcode,
       "skipped_warehouse": skipped_warehouse,
       "archive_backfill": archive_import,
+      "delivery_supply_orders": len(delivery_supply_ids),
       "warehouse_sync_error": warehouse_sync_error,
       "fetched": len(wb_orders),
       "raw_total": fetch_result.raw_total,

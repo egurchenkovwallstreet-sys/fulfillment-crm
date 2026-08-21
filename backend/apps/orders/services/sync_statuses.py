@@ -2,7 +2,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
-from apps.integrations.wb_client import WBApiError, WBClient
+from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
 from apps.orders.services.wb_status import (
@@ -14,12 +14,19 @@ from apps.orders.services.wb_status import (
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
+  is_wb_in_delivery,
   save_wb_counts_to_seller,
 )
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import (
+  filter_orders_for_seller,
+  is_warehouse_enabled,
+)
 
-SYNC_VERSION = "delivery-v9"
+SYNC_VERSION = "delivery-v10"
+
+# warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
+WarehouseMap = dict[int, int | None]
 
 
 def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
@@ -30,6 +37,49 @@ def _delivery_status_breakdown(status_map: dict[int, dict]) -> dict[str, int]:
     wb = (item.get("wbStatus") or "").strip() or "(empty)"
     breakdown[wb] = breakdown.get(wb, 0) + 1
   return breakdown
+
+
+def _build_warehouse_map(
+  seller: Seller,
+  archive_orders: list[WBOrderData] | None,
+) -> WarehouseMap:
+  warehouse_map: WarehouseMap = {}
+  for row in Order.objects.filter(seller=seller).values("wb_order_id", "wb_warehouse_id"):
+    warehouse_map[int(row["wb_order_id"])] = row["wb_warehouse_id"]
+  if archive_orders:
+    for order in archive_orders:
+      warehouse_map.setdefault(order.wb_order_id, order.warehouse_id)
+  return warehouse_map
+
+
+def _collect_poll_order_ids(
+  seller: Seller,
+  *,
+  archive_orders: list[WBOrderData] | None = None,
+  delivery_supply_ids: set[int] | None = None,
+) -> set[int]:
+  """Все ID для POST /orders/status — БД + архив WB + поставки в доставке."""
+  poll_ids = set(
+    filter_orders_for_seller(Order.objects.filter(seller=seller), seller).values_list(
+      "wb_order_id",
+      flat=True,
+    )
+  )
+  if archive_orders:
+    for order in archive_orders:
+      if is_warehouse_enabled(seller, order.warehouse_id):
+        poll_ids.add(order.wb_order_id)
+  if delivery_supply_ids:
+    poll_ids.update(delivery_supply_ids)
+  return poll_ids
+
+
+def _scoped_order_ids(poll_ids: set[int], warehouse_map: WarehouseMap, seller: Seller) -> set[int]:
+  scoped: set[int] = set()
+  for order_id in poll_ids:
+    if is_warehouse_enabled(seller, warehouse_map.get(order_id)):
+      scoped.add(order_id)
+  return scoped
 
 
 def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
@@ -84,12 +134,22 @@ def reconcile_wb_orders_for_seller(
       wb_order_id__in=missing_ids,
     ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
+  delivery_waiting = sum(
+    1
+    for item in status_map.values()
+    if is_wb_in_delivery(
+      (item.get("supplierStatus") or "").strip(),
+      (item.get("wbStatus") or "").strip(),
+    )
+  )
+
   result = {
     "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
     "shipped_not_waiting": shipped_not_waiting,
     "shipped_missing": shipped_missing,
     "missing_from_api": len(missing_ids),
+    "delivery_waiting_in_status_map": delivery_waiting,
     "delivery_status_breakdown": _delivery_status_breakdown(status_map),
   }
 
@@ -115,20 +175,24 @@ def sync_order_statuses_for_seller(
   user=None,
   new_wb_ids: list[int] | None = None,
   new_orders_total: int = 0,
+  archive_orders: list[WBOrderData] | None = None,
+  delivery_supply_ids: set[int] | None = None,
 ) -> dict:
-  wb_ids = list(
-    filter_orders_for_seller(Order.objects.filter(seller=seller), seller).values_list(
-      "wb_order_id",
-      flat=True,
-    )
+  warehouse_map = _build_warehouse_map(seller, archive_orders)
+  poll_ids = _collect_poll_order_ids(
+    seller,
+    archive_orders=archive_orders,
+    delivery_supply_ids=delivery_supply_ids,
   )
-  if not wb_ids:
+  scoped_ids = _scoped_order_ids(poll_ids, warehouse_map, seller)
+
+  if not poll_ids:
     counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
     save_wb_counts_to_seller(seller, counts)
     return {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": counts}
 
   try:
-    wb_statuses = client.fetch_order_statuses(wb_ids)
+    wb_statuses = client.fetch_order_statuses(list(poll_ids))
   except WBApiError as exc:
     AuditLog.objects.create(
       user=user,
@@ -151,7 +215,7 @@ def sync_order_statuses_for_seller(
     "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
 
-  live_counts = compute_live_wb_counts(status_map, allowed_ids=set(wb_ids))
+  live_counts = compute_live_wb_counts(status_map, allowed_ids=scoped_ids)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
 
@@ -161,10 +225,13 @@ def sync_order_statuses_for_seller(
   return {
     "sync_version": SYNC_VERSION,
     "statuses_fetched": len(status_map),
+    "statuses_polled": len(poll_ids),
+    "statuses_scoped": len(scoped_ids),
     "statuses_updated": updated,
     "reconciled": reconciled,
     "live_counts": live_counts,
     "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
+    "delivery_waiting_raw": reconcile.get("delivery_waiting_in_status_map"),
     "reconcile": reconcile,
     "counts": live_counts,
     "db_counts": db_counts,
