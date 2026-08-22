@@ -15,6 +15,7 @@ import {
 } from '../api/assembly'
 import { syncOrders } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
+import { printFbsSticker, printSupplySticker } from '../utils/browserPrint'
 import { printPickList } from '../utils/pickListPrint'
 import './AssemblyPage.css'
 
@@ -128,27 +129,11 @@ export function AssemblySellerPage() {
   }
 
   function printSticker(base64: string) {
-    const win = window.open('', '_blank', 'width=400,height=600')
-    if (!win) return
-    win.document.write(`
-      <html><head><title>Стикер FBS</title></head>
-      <body style="margin:0;text-align:center" onload="window.print();window.close()">
-        <img src="data:image/png;base64,${base64}" style="max-width:100%" />
-      </body></html>
-    `)
-    win.document.close()
+    printFbsSticker(base64)
   }
 
   function printSupplyBarcode(base64: string) {
-    const win = window.open('', '_blank', 'width=400,height=400')
-    if (!win) return
-    win.document.write(`
-      <html><head><title>QR поставки</title></head>
-      <body style="margin:0;text-align:center" onload="window.print();window.close()">
-        <img src="data:image/png;base64,${base64}" style="max-width:100%" />
-      </body></html>
-    `)
-    win.document.close()
+    printSupplySticker(base64)
   }
 
   function finishPrint(order: PrintOrder) {

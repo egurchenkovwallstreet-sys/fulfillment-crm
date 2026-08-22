@@ -45,7 +45,7 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Ячейка №${cellNumber}</title>
+  <title></title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: 75mm 120mm; margin: 0; }

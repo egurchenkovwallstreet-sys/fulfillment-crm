@@ -83,7 +83,7 @@ function sheetHtml(pickList: PickList, pageItems: PickList['items'], pageIndex: 
 const PRINT_STYLES = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4 portrait; margin: 0; }
-  html, body { background: #fff; }
+  html, body { background: #fff; margin: 0; padding: 0; }
   body {
     font-family: Arial, Helvetica, sans-serif;
     color: #0f172a;
@@ -204,7 +204,7 @@ export function printPickList(pickList: PickList, autoPrint = true): boolean {
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Лист подбора №${escapeHtml(String(pickList.id))}</title>
+  <title></title>
   <style>${PRINT_STYLES}</style>
 </head>
 <body>
