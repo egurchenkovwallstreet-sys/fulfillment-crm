@@ -23,11 +23,8 @@ from apps.sellers.services.invite import (
   get_invite_by_token,
   issue_seller_invite,
 )
-from apps.sellers.services.seller_analytics import (
-  build_barcode_analytics,
-  build_barcode_detail,
-  build_seller_summary,
-)
+from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
+from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 
 User = get_user_model()
 
@@ -139,11 +136,15 @@ class SellerCabinetView(APIView):
     seller = request.user.seller
     if not seller:
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
-    return Response({
-      "seller": {"id": seller.id, "company_name": seller.company_name},
-      "summary": SellerCabinetSummarySerializer(build_seller_summary(seller)).data,
-      "items": SellerBarcodeAnalyticsSerializer(build_barcode_analytics(seller), many=True).data,
-    })
+    try:
+      summary, items, _, _ = build_seller_cabinet_payload(seller)
+      return Response({
+        "seller": {"id": seller.id, "company_name": seller.company_name},
+        "summary": SellerCabinetSummarySerializer(summary).data,
+        "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
+      })
+    except SellerAnalyticsError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SellerCabinetBarcodeView(APIView):
@@ -153,7 +154,10 @@ class SellerCabinetBarcodeView(APIView):
     seller = request.user.seller
     if not seller:
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
-    detail = build_barcode_detail(seller, barcode)
+    try:
+      detail = build_barcode_detail(seller, barcode)
+    except SellerAnalyticsError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     if not detail:
       return Response(status=status.HTTP_404_NOT_FOUND)
     return Response(SellerBarcodeDetailSerializer(detail).data)

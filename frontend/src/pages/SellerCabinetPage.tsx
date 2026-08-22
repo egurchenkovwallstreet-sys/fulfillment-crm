@@ -52,7 +52,7 @@ export function SellerCabinetPage() {
       <header className="topbar">
         <div>
           <h1>Кабинет селлера</h1>
-          <p>{data?.seller.company_name ?? 'Аналитика по вашим товарам на складе'}</p>
+          <p>{data?.seller.company_name ?? 'FBS-заказы с обслуживаемых складов · остатки на фулфилменте'}</p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
           {loading ? 'Обновление…' : 'Обновить'}
@@ -63,9 +63,9 @@ export function SellerCabinetPage() {
 
       {summary && (
         <section className="stats-grid">
-          <StatCard label="Заказы сегодня" value={summary.orders_day} hint="Все ваши заказы" tone="blue" />
-          <StatCard label="За неделю" value={summary.orders_week} hint="Последние 7 дней" tone="purple" />
-          <StatCard label="За месяц" value={summary.orders_month} hint="С 1-го числа" tone="orange" />
+          <StatCard label="Заказы сегодня" value={summary.orders_day} hint="FBS с ваших складов" tone="blue" />
+          <StatCard label="За неделю" value={summary.orders_week} hint="FBS · последние 7 дней" tone="purple" />
+          <StatCard label="За месяц" value={summary.orders_month} hint="FBS · с 1-го числа" tone="orange" />
           <StatCard label="Остаток (шт.)" value={summary.total_stock} hint={`${summary.sku_count} SKU на складе`} tone="green" />
         </section>
       )}

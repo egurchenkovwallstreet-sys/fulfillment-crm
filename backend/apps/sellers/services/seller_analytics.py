@@ -3,66 +3,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.db.models import Count
-from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
-from apps.orders.models import Order
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller_cabinet
+from apps.sellers.services.wb_order_stats import (
+  SALES_LOOKBACK_DAYS,
+  load_wb_fbs_stats,
+)
 from apps.warehouse.models import Product
-
-SALES_LOOKBACK_DAYS = 7
-
-
-def _period_bounds():
-  now = timezone.now()
-  today = timezone.localdate()
-  week_start = today - timedelta(days=6)
-  month_start = today.replace(day=1)
-  sales_start = now - timedelta(days=SALES_LOOKBACK_DAYS)
-  return today, week_start, month_start, sales_start
-
-
-def _active_orders_qs(seller: Seller):
-  qs = filter_orders_for_seller_cabinet(
-    Order.objects.exclude(status=Order.Status.CANCELLED),
-    seller,
-  )
-  return qs.annotate(order_day=TruncDate(Coalesce("wb_created_at", "created_at")))
-
-
-def _order_counts_by_barcode(seller: Seller) -> dict[str, dict[str, int]]:
-  today, week_start, month_start, _ = _period_bounds()
-  qs = _active_orders_qs(seller)
-  result: dict[str, dict[str, int]] = {}
-
-  def bump(barcode: str, key: str, value: int = 1) -> None:
-    if not barcode:
-      return
-    result.setdefault(barcode, {"day": 0, "week": 0, "month": 0})
-    result[barcode][key] += value
-
-  for row in qs.filter(order_day=today).values("barcode").annotate(c=Count("id")):
-    bump(row["barcode"], "day", row["c"])
-
-  for row in qs.filter(order_day__gte=week_start).values("barcode").annotate(c=Count("id")):
-    bump(row["barcode"], "week", row["c"])
-
-  for row in qs.filter(order_day__gte=month_start).values("barcode").annotate(c=Count("id")):
-    bump(row["barcode"], "month", row["c"])
-
-  return result
-
-
-def _avg_daily_sales(seller: Seller, barcode: str, sales_start) -> float:
-  sales_start_date = timezone.localdate(sales_start)
-  count = (
-    _active_orders_qs(seller)
-    .filter(barcode=barcode, order_day__gte=sales_start_date)
-    .count()
-  )
-  return round(count / SALES_LOOKBACK_DAYS, 2)
 
 
 def _stock_level(days_remaining: float | None, quantity: int) -> str:
@@ -85,22 +33,13 @@ def _days_remaining(quantity: int, avg_daily: float) -> float | None:
   return round(quantity / avg_daily, 1)
 
 
-def build_seller_summary(seller: Seller) -> dict:
-  today, week_start, month_start, _ = _period_bounds()
-  qs = _active_orders_qs(seller)
-  return {
-    "orders_day": qs.filter(order_day=today).count(),
-    "orders_week": qs.filter(order_day__gte=week_start).count(),
-    "orders_month": qs.filter(order_day__gte=month_start).count(),
-    "sku_count": Product.objects.filter(seller=seller, quantity__gt=0).count(),
-    "total_stock": sum(
-      Product.objects.filter(seller=seller).values_list("quantity", flat=True)
-    ),
-  }
-
-
-def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[dict]:
-  order_counts = _order_counts_by_barcode(seller)
+def _build_items(
+  seller: Seller,
+  order_counts: dict[str, dict[str, int]],
+  daily_by_barcode: dict,
+  *,
+  barcode: str | None = None,
+) -> list[dict]:
   products = Product.objects.filter(seller=seller)
   if barcode:
     products = products.filter(barcode=barcode)
@@ -108,8 +47,8 @@ def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[
   items: list[dict] = []
   for product in products.order_by("name", "barcode"):
     counts = order_counts.get(product.barcode, {"day": 0, "week": 0, "month": 0})
-    _, _, _, sales_start = _period_bounds()
-    avg_daily = _avg_daily_sales(seller, product.barcode, sales_start)
+    week_orders = sum(daily_by_barcode.get(product.barcode, {}).values())
+    avg_daily = round(week_orders / SALES_LOOKBACK_DAYS, 2)
     days = _days_remaining(product.quantity, avg_daily)
     level = _stock_level(days, product.quantity)
     items.append({
@@ -129,20 +68,40 @@ def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[
   return items
 
 
+def build_seller_cabinet_payload(seller: Seller) -> tuple[dict, list[dict], dict, dict]:
+  order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
+  summary = {
+    **order_summary,
+    "sku_count": Product.objects.filter(seller=seller, quantity__gt=0).count(),
+    "total_stock": sum(
+      Product.objects.filter(seller=seller).values_list("quantity", flat=True)
+    ),
+  }
+  items = _build_items(seller, order_counts, daily_by_barcode)
+  return summary, items, order_counts, daily_by_barcode
+
+
+def build_seller_summary(seller: Seller) -> dict:
+  summary, _, _, _ = build_seller_cabinet_payload(seller)
+  return summary
+
+
+def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[dict]:
+  _, _, order_counts, daily_by_barcode = build_seller_cabinet_payload(seller)
+  return _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
+
+
 def build_barcode_detail(seller: Seller, barcode: str) -> dict | None:
-  items = build_barcode_analytics(seller, barcode=barcode)
+  _, _, order_counts, daily_by_barcode = build_seller_cabinet_payload(seller)
+  items = _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
   if not items:
     return None
   item = items[0]
+  daily_map = daily_by_barcode.get(barcode, {})
   daily: list[dict] = []
   for offset in range(SALES_LOOKBACK_DAYS - 1, -1, -1):
     day = timezone.localdate() - timedelta(days=offset)
-    count = (
-      _active_orders_qs(seller)
-      .filter(barcode=barcode, order_day=day)
-      .count()
-    )
-    daily.append({"date": day.isoformat(), "orders": count})
+    daily.append({"date": day.isoformat(), "orders": daily_map.get(day, 0)})
   item["daily_orders"] = daily
   item["sales_lookback_days"] = SALES_LOOKBACK_DAYS
   return item
