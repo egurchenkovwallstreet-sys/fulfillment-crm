@@ -1,0 +1,57 @@
+name: Build Print Agent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'print-bridge/**'
+      - '.github/workflows/build-print-agent.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: print-bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            print-bridge/requirements.txt
+            print-bridge/requirements-build.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Create icon
+        run: python create_icon.py
+
+      - name: Build .exe (PyInstaller)
+        run: pyinstaller build.spec --noconfirm --clean
+
+      - name: Verify output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/FulfillmentCRM-PrintAgent.exe")) {
+            throw "FulfillmentCRM-PrintAgent.exe not found"
+          }
+          $size = (Get-Item "dist/FulfillmentCRM-PrintAgent.exe").Length
+          Write-Host "Built exe size: $size bytes"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FulfillmentCRM-PrintAgent
+          path: print-bridge/dist/FulfillmentCRM-PrintAgent.exe
+          retention-days: 90
+          if-no-files-found: error

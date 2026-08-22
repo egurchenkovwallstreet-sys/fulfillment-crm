@@ -56,9 +56,18 @@ CRM (браузер)  --HTTP POST-->  localhost:9123  --GDI-->  Xprinter USB
 | 1 | Прототип API (`print-bridge/`) | ✅ |
 | 2 | Интеграция CRM (`printService.ts`, индикатор в сборке) | ✅ |
 | 3 | Сборка `.exe` (PyInstaller), `build.bat` | ✅ |
+| 3b | **CI GitHub Actions** — сборка без Python на ПК разработчика | ✅ |
 | 4 | Трей, автозапуск, config в AppData | ✅ |
 | 5 | Страница «Агент печати» в CRM + скачивание | ✅ |
 | 6 | Подпись кода (опционально, для доверия Windows SmartScreen) | ⬜ |
+
+## Сборка без Python на вашем ПК
+
+Workflow: `.github/workflows/build-print-agent.yml`
+
+1. GitHub → **Actions** → **Build Print Agent** → **Run workflow**
+2. Скачать артефакт `FulfillmentCRM-PrintAgent`
+3. Положить на сервер: `frontend/public/downloads/FulfillmentCRM-PrintAgent.exe` → `deploy.sh`
 
 ## Не в scope агента
 

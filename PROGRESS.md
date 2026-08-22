@@ -186,7 +186,7 @@
 ## Ближайшие задачи (очередь по ТЗ)
 
 ### Следующий спринт (приоритет 1)
-1. [ ] **§7 Xprinter** — брендированный агент `.exe` (см. `docs/print-agent.md`) — **сборка на Windows: `print-bridge\build.bat`**
+1. [ ] **§7 Xprinter** — брендированный агент `.exe` — **CI: Actions → Build Print Agent**
 2. [ ] **Сборка FBS: фильтр складов** — ✅ строгий фильтр `wb_warehouse_id__in=enabled`
 
 ### Спринт 2

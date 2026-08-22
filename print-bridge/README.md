@@ -15,7 +15,22 @@
 
 ## Для разработчика — сборка .exe
 
-Требуется **Windows** + Python 3.11+.
+### Вариант A: GitHub Actions (Python на вашем ПК не нужен)
+
+1. Откройте репозиторий на GitHub → вкладка **Actions**.
+2. Запустите workflow **Build Print Agent** (кнопка **Run workflow**) или дождитесь запуска после push в `print-bridge/`.
+3. Откройте успешный run → внизу **Artifacts** → скачайте `FulfillmentCRM-PrintAgent.zip`.
+4. Распакуйте `FulfillmentCRM-PrintAgent.exe` на сервер CRM:
+
+```bash
+# на сервере, после scp или загрузки файла
+cp FulfillmentCRM-PrintAgent.exe /opt/fulfillment-crm/frontend/public/downloads/
+cd /opt/fulfillment-crm && bash scripts/deploy.sh
+```
+
+После деплоя ссылка «Скачать агент» в CRM заработает.
+
+### Вариант B: локально (нужен Python 3.11+ на Windows)
 
 ```bat
 cd print-bridge
