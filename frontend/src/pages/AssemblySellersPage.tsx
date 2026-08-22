@@ -10,7 +10,7 @@ export function AssemblySellersPage() {
   const [error, setError] = useState('')
   const [syncMessage, setSyncMessage] = useState('')
 
-  const [syncing, setSyncing] = useState(true)
+  const [syncing, setSyncing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -25,12 +25,15 @@ export function AssemblySellersPage() {
   }, [])
 
   useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
     let cancelled = false
 
-    async function init() {
+    async function backgroundSync() {
       setSyncing(true)
       setSyncMessage('')
-      setError('')
       try {
         const result = await syncOrders()
         if (!cancelled) {
@@ -41,6 +44,7 @@ export function AssemblySellersPage() {
         }
       } catch (err) {
         if (!cancelled) {
+          setSyncMessage('')
           setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
         }
       } finally {
@@ -50,7 +54,7 @@ export function AssemblySellersPage() {
       }
     }
 
-    init()
+    backgroundSync()
     return () => {
       cancelled = true
     }
@@ -98,10 +102,17 @@ export function AssemblySellersPage() {
             </tr>
           </thead>
           <tbody>
-            {sellers.length === 0 && (
+            {sellers.length === 0 && !loading && !syncing && (
               <tr>
                 <td colSpan={4} className="assembly-table__empty">
                   Нет селлеров. Добавьте в админке.
+                </td>
+              </tr>
+            )}
+            {loading && sellers.length === 0 && (
+              <tr>
+                <td colSpan={4} className="assembly-table__empty">
+                  Загрузка…
                 </td>
               </tr>
             )}

@@ -144,7 +144,6 @@ def reconcile_stale_new_orders(
       pass
 
   cleared = 0
-  now = timezone.now()
   for order in stale_orders:
     data = status_map.get(order.wb_order_id)
     if data:
@@ -158,7 +157,7 @@ def reconcile_stale_new_orders(
     order.wb_supplier_status = WB_SUPPLIER_DELIVERY
     order.wb_status = "sorted"
     order.status = Order.Status.SHIPPED
-    order.save(update_fields=["wb_supplier_status", "status", "updated_at"])
+    order.save(update_fields=["wb_supplier_status", "wb_status", "status", "updated_at"])
     cleared += 1
 
   new_marked = _mark_confirmed_new_orders(seller, new_wb_ids)

@@ -63,7 +63,7 @@ export function AssemblySellerPage() {
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
 
-  const [syncing, setSyncing] = useState(true)
+  const [syncing, setSyncing] = useState(false)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -84,13 +84,20 @@ export function AssemblySellerPage() {
 
   useEffect(() => {
     if (!id) return
+    load()
+  }, [id, stage, load])
+
+  useEffect(() => {
+    if (!id) return
     let cancelled = false
 
-    async function init() {
+    async function backgroundSync() {
       setSyncing(true)
-      setError('')
       try {
         await syncOrders(id)
+        if (!cancelled) {
+          await load()
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
@@ -102,16 +109,11 @@ export function AssemblySellerPage() {
       }
     }
 
-    init()
+    backgroundSync()
     return () => {
       cancelled = true
     }
-  }, [id])
-
-  useEffect(() => {
-    if (!id || syncing) return
-    load()
-  }, [id, stage, load, syncing])
+  }, [id, load])
 
   useEffect(() => {
     if (scanPhase === 'marking') {
