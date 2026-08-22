@@ -63,6 +63,8 @@ export function AssemblySellerPage() {
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
 
+  const [syncing, setSyncing] = useState(true)
+
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -77,8 +79,39 @@ export function AssemblySellerPage() {
   }, [id, stage])
 
   useEffect(() => {
+    setData(null)
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+
+    async function init() {
+      setSyncing(true)
+      setError('')
+      try {
+        await syncOrders(id)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+        }
+      } finally {
+        if (!cancelled) {
+          setSyncing(false)
+        }
+      }
+    }
+
+    init()
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (!id || syncing) return
     load()
-  }, [load])
+  }, [id, stage, load, syncing])
 
   useEffect(() => {
     if (scanPhase === 'marking') {
@@ -343,7 +376,12 @@ export function AssemblySellerPage() {
   }
 
   if (!data) {
-    return <div className="loading-screen"><div className="loading-screen__spinner" /></div>
+    return (
+      <div className="loading-screen">
+        <div className="loading-screen__spinner" />
+        <p>{syncing ? 'Синхронизация с WB…' : 'Загрузка…'}</p>
+      </div>
+    )
   }
 
   const counts = data.counts
@@ -371,7 +409,7 @@ export function AssemblySellerPage() {
           <p>Кабинет сборки · поставок в работе: {data.supplies_forming}</p>
         </div>
         <div className="topbar__actions">
-          <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading}>
+          <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing}>
             Обновить из WB
           </button>
           {(counts.new ?? 0) > 0 && (
@@ -451,10 +489,7 @@ export function AssemblySellerPage() {
       <div className="assembly-grid">
         <section className="panel">
           <h2 className="section-title">
-            Заказы ({stageCount(stage)}
-            {data.orders.length !== stageCount(stage) &&
-              ` · в списке: ${data.orders.length}`}
-            )
+            Заказы ({stageCount(stage)})
           </h2>
           <table className="assembly-table">
             <thead>

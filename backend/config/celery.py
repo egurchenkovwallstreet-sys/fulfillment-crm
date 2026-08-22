@@ -9,11 +9,11 @@ app = Celery("fulfillment")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
-# Синхронизация WB каждые 10–20 мин (TZ п. 6.1) — по умолчанию 15 мин
+# Синхронизация WB каждые ~1 мин (сборка FBS — актуальные «Новые»)
 app.conf.beat_schedule = {
     "sync-wb-orders": {
         "task": "apps.integrations.tasks.sync_wb_orders",
-        "schedule": crontab(minute="*/15"),
+        "schedule": 60.0,
     },
     "sync-wb-product-cards": {
         "task": "apps.integrations.tasks.sync_wb_product_cards",

@@ -10,6 +10,8 @@ export function AssemblySellersPage() {
   const [error, setError] = useState('')
   const [syncMessage, setSyncMessage] = useState('')
 
+  const [syncing, setSyncing] = useState(true)
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -23,7 +25,35 @@ export function AssemblySellersPage() {
   }, [])
 
   useEffect(() => {
-    load()
+    let cancelled = false
+
+    async function init() {
+      setSyncing(true)
+      setSyncMessage('')
+      setError('')
+      try {
+        const result = await syncOrders()
+        if (!cancelled) {
+          const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
+          const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
+          setSyncMessage(`Синхронизация с WB: заказов ${fetched}, статусов обновлено ${statusesUpdated}`)
+          await load()
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+        }
+      } finally {
+        if (!cancelled) {
+          setSyncing(false)
+        }
+      }
+    }
+
+    init()
+    return () => {
+      cancelled = true
+    }
   }, [load])
 
   async function handleSyncAll() {
@@ -49,8 +79,8 @@ export function AssemblySellersPage() {
           <h1>Сборка FBS</h1>
           <p>Выберите селлера для подготовки и сборки заказов</p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={handleSyncAll} disabled={loading}>
-          Обновить из WB
+        <button type="button" className="btn btn--primary" onClick={handleSyncAll} disabled={loading || syncing}>
+          {syncing ? 'Синхронизация WB…' : 'Обновить из WB'}
         </button>
       </header>
 

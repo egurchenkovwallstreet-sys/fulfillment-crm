@@ -25,7 +25,7 @@
 - Деплой: Docker Compose **только на сервере** (на ПК Docker не нужен)
 - Статика: WhiteNoise (админка Django)
 
-**Версия синхронизации статусов:** `delivery-v10` (проверка: `GET /api/health/` → `"sync_version":"delivery-v10"`)
+**Версия синхронизации статусов:** `delivery-v11` (проверка: `GET /api/health/` → `"sync_version":"delivery-v11"`)
 
 ### ✅ Сверка с ЛК Wildberries (21.08.2026, ИП Мазирка)
 | Вкладка | ЛК WB | CRM | Статус |
@@ -121,6 +121,7 @@
 | 22.08.2026 | §5 Обновление данных товаров из WB | ✅ | Кнопка «Обновить из WB», daily sync 03:00, точный поиск по SKU |
 | 22.08.2026 | **§5 Модуль приёмки — этап закрыт** | ✅ | Подтверждено заказчиком |
 | 22.08.2026 | §6.2 Печать листа подбора (PDF A4) | ✅ | Макет утверждён, кнопка в сборке |
+| 22.08.2026 | **Сборка FBS: синхронизация вкладки «Новые»** | ✅ | delivery-v11: reconcile stale new, sync при входе, Celery 1 мин |
 
 ---
 
@@ -132,7 +133,7 @@
 - **warehouse** — Cell, Product, PriceGroup, StockOperation, приёмка, этикетки ячеек, перенос, sync названий из WB
 - **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
   - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
-  - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v10`
+  - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v11`
   - `services/supply_flow.py` — поштучная отправка на сборку/в доставку
   - `services/assembly.py` — `get_seller_wb_tab_counts()` (кэш live API)
 - **integrations** — AuditLog, `wb_client.py` (orders, statuses, supplies, stickers), Celery
@@ -206,7 +207,8 @@
 - [x] Стек, БД, Docker, деплой
 - [x] **§5 Модуль приёмки** (приёмка, ячейки, этикетки, перенос, sync названий WB)
 - [x] Сборка FBS: кабинет, стикеры, ЧЗ, scan-print
-- [x] **Счётчики WB = ЛК WB (delivery-v10)**
+- [x] **Счётчики WB = ЛК WB (delivery-v11)**
+- [x] **Сборка FBS: список «Новые» = ЛК WB** (reconcile stale, sync при входе)
 - [x] Поштучная отправка на сборку и в доставку (WB supplies API)
 - [x] Фильтр складов SellerWarehouse
 - [x] Массовая «Все на сборку»
@@ -218,7 +220,8 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Расхождение счётчиков CRM vs WB | ✅ **Решено** | delivery-v10, проверено 21.08.2026 |
+| Расхождение счётчиков CRM vs WB | ✅ **Решено** | delivery-v11 |
+| Список «Новые» в сборке ≠ счётчик WB | ✅ **Решено** | reconcile_stale_new_orders + sync при входе |
 | Админка без порта → 404 | ℹ️ | Только `:8080/admin` или `:8001/admin` |
 | Заказы без ячейки (—) | ℹ️ | Сначала приёмка товара с тем же баркодом |
 | WB_TOKEN_ENCRYPTION_KEY пустой | ⚠️ | Задать в `.env` на сервере |

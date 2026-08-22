@@ -6,6 +6,7 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order
 from apps.orders.services.sync_statuses import sync_order_statuses_for_seller
+from apps.orders.services.wb_status import WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.sellers.services.warehouse_filter import is_warehouse_enabled
@@ -29,7 +30,13 @@ def _link_product(seller: Seller, barcode: str) -> Product | None:
   return Product.objects.filter(seller=seller, barcode=barcode).first()
 
 
-def _import_wb_orders(seller: Seller, wb_orders: list, *, user=None) -> dict:
+def _import_wb_orders(
+  seller: Seller,
+  wb_orders: list,
+  *,
+  mark_as_new: bool = False,
+  user=None,
+) -> dict:
   created = 0
   updated = 0
   skipped = 0
@@ -41,14 +48,17 @@ def _import_wb_orders(seller: Seller, wb_orders: list, *, user=None) -> dict:
       continue
 
     product = _link_product(seller, wb_order.barcode)
+    defaults = {
+      "seller": seller,
+      "barcode": wb_order.barcode,
+      "product": product,
+      "wb_warehouse_id": wb_order.warehouse_id,
+    }
+    if mark_as_new:
+      defaults["wb_supplier_status"] = WB_SUPPLIER_NEW
     order, was_created = Order.objects.update_or_create(
       wb_order_id=wb_order.wb_order_id,
-      defaults={
-        "seller": seller,
-        "barcode": wb_order.barcode,
-        "product": product,
-        "wb_warehouse_id": wb_order.warehouse_id,
-      },
+      defaults=defaults,
     )
     if was_created:
       created += 1
@@ -91,7 +101,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     )
     raise SyncError(str(exc)) from exc
 
-  new_import = _import_wb_orders(seller, fetch_result.orders, user=user)
+  new_import = _import_wb_orders(seller, fetch_result.orders, mark_as_new=True, user=user)
   created = new_import["created"]
   updated = new_import["updated"]
   skipped = new_import["without_product"]

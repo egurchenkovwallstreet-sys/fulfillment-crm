@@ -11,6 +11,7 @@ from apps.orders.services.wb_status import (
   WB_DELIVERED_WB_STATUSES,
   WB_DELIVERY_TAB_WB_STATUS,
   WB_SUPPLIER_DELIVERY,
+  WB_SUPPLIER_NEW,
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
@@ -23,7 +24,7 @@ from apps.sellers.services.warehouse_filter import (
   is_warehouse_enabled,
 )
 
-SYNC_VERSION = "delivery-v10"
+SYNC_VERSION = "delivery-v11"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]
@@ -94,6 +95,74 @@ def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> in
     if apply_wb_status_to_order(order, supplier, wb):
       updated += 1
   return updated
+
+
+def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
+  """Заказы из GET /orders/new — supplierStatus new в CRM."""
+  if not new_wb_ids:
+    return 0
+  now = timezone.now()
+  return (
+    filter_orders_for_seller(
+      Order.objects.filter(seller=seller, wb_order_id__in=new_wb_ids),
+      seller,
+    )
+    .exclude(wb_supplier_status=WB_SUPPLIER_NEW)
+    .update(wb_supplier_status=WB_SUPPLIER_NEW, updated_at=now)
+  )
+
+
+def reconcile_stale_new_orders(
+  seller: Seller,
+  client: WBClient,
+  new_wb_ids: set[int],
+  status_map: dict[int, dict],
+) -> dict:
+  """
+  Снять «новый» с заказов, которых нет в GET /api/v3/orders/new.
+  Именно из-за рассинхрона здесь список сборки показывал больше строк, чем счётчик WB.
+  """
+  stale_qs = filter_orders_for_seller(
+    Order.objects.filter(seller=seller)
+    .filter(Q(wb_supplier_status=WB_SUPPLIER_NEW) | Q(wb_supplier_status=""))
+    .exclude(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED]),
+    seller,
+  ).exclude(wb_order_id__in=new_wb_ids)
+
+  stale_orders = list(stale_qs)
+  if not stale_orders:
+    return {"stale_new_cleared": 0, "new_marked": 0}
+
+  missing_ids = [order.wb_order_id for order in stale_orders if order.wb_order_id not in status_map]
+  if missing_ids:
+    try:
+      for item in client.fetch_order_statuses(missing_ids):
+        oid = item.get("id")
+        if oid is not None:
+          status_map[int(oid)] = item
+    except WBApiError:
+      pass
+
+  cleared = 0
+  now = timezone.now()
+  for order in stale_orders:
+    data = status_map.get(order.wb_order_id)
+    if data:
+      supplier = (data.get("supplierStatus") or "").strip()
+      wb = (data.get("wbStatus") or "").strip()
+      if supplier != WB_SUPPLIER_NEW:
+        if apply_wb_status_to_order(order, supplier, wb):
+          cleared += 1
+      continue
+
+    order.wb_supplier_status = WB_SUPPLIER_DELIVERY
+    order.wb_status = "sorted"
+    order.status = Order.Status.SHIPPED
+    order.save(update_fields=["wb_supplier_status", "status", "updated_at"])
+    cleared += 1
+
+  new_marked = _mark_confirmed_new_orders(seller, new_wb_ids)
+  return {"stale_new_cleared": cleared, "new_marked": new_marked}
 
 
 def reconcile_wb_orders_for_seller(
@@ -215,9 +284,15 @@ def sync_order_statuses_for_seller(
     "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
 
+  new_ids_set = set(new_wb_ids or [])
+  stale_new = reconcile_stale_new_orders(seller, client, new_ids_set, status_map)
+  reconciled += stale_new.get("stale_new_cleared", 0)
+
   live_counts = compute_live_wb_counts(status_map, allowed_ids=scoped_ids)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
+  elif new_wb_ids is not None:
+    live_counts["new"] = len(new_ids_set & scoped_ids)
 
   save_wb_counts_to_seller(seller, live_counts)
   db_counts = get_seller_stage_counts(seller)
@@ -229,6 +304,7 @@ def sync_order_statuses_for_seller(
     "statuses_scoped": len(scoped_ids),
     "statuses_updated": updated,
     "reconciled": reconciled,
+    "stale_new": stale_new,
     "live_counts": live_counts,
     "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
     "delivery_waiting_raw": reconcile.get("delivery_waiting_in_status_map"),
