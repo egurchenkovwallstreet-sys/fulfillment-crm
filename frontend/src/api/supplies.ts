@@ -55,10 +55,23 @@ export interface SupplyBarcodeResult {
   supply_barcode: string
 }
 
-export function fetchSupplies(sellerId: number, status?: SupplyStatus | '') {
+export interface SuppliesListResponse {
+  supplies: Supply[]
+  sync?: {
+    created: number
+    updated: number
+    linked_orders: number
+    skipped: number
+    api_order_fetches: number
+    wb_supplies_total: number
+  }
+}
+
+export function fetchSupplies(sellerId: number, status?: SupplyStatus | '', sync = true) {
   const params = new URLSearchParams({ seller_id: String(sellerId) })
   if (status) params.set('status', status)
-  return apiFetch<Supply[]>(`/api/orders/supplies/?${params}`)
+  if (!sync) params.set('sync', '0')
+  return apiFetch<SuppliesListResponse | Supply[]>(`/api/orders/supplies/?${params}`)
 }
 
 export function deliverSupply(supplyId: number) {

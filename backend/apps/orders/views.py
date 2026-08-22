@@ -8,7 +8,9 @@ from apps.accounts.permissions import IsManager
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
+from apps.orders.services.assembly import AssemblyError
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
+from .services.supply_sync import sync_supplies_from_wb
 from apps.sellers.services.warehouse_filter import filter_orders_queryset
 
 from .models import Order, PickList, Supply
@@ -643,6 +645,22 @@ class SupplyListView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     status_filter = request.query_params.get("status", "").strip()
+    sync_wb = request.query_params.get("sync", "1") != "0"
+    include_closed = (
+      status_filter == Supply.Status.CONFIRMED
+      or not status_filter
+    )
+
+    sync_stats = None
+    if sync_wb:
+      try:
+        sync_stats = sync_supplies_from_wb(
+          seller,
+          include_closed=include_closed,
+        )
+      except AssemblyError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
     qs = (
       Supply.objects.filter(seller=seller)
       .select_related("seller")
@@ -660,11 +678,17 @@ class SupplyListView(APIView):
         ),
       )
 
-    supplies = list(qs[:200])
+    supplies = list(qs[:500])
     for supply in supplies:
       refresh_supply_readiness(supply)
 
-    return Response(SupplySerializer(supplies, many=True).data)
+    payload = SupplySerializer(supplies, many=True).data
+    if sync_stats is not None:
+      return Response({
+        "supplies": payload,
+        "sync": sync_stats,
+      })
+    return Response(payload)
 
 
 class SupplyDetailView(APIView):

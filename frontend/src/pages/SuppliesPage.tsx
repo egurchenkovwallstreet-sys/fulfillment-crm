@@ -57,8 +57,17 @@ export function SuppliesPage() {
         : tab === 'ready' ? 'ready'
         : tab === 'confirmed' ? 'confirmed'
         : ''
-      const data = await fetchSupplies(Number(sellerId), statusFilter)
+      const response = await fetchSupplies(Number(sellerId), statusFilter)
+      const data = Array.isArray(response) ? response : response.supplies
       setSupplies(data)
+      if (!Array.isArray(response) && response.sync) {
+        const { created, updated, linked_orders } = response.sync
+        if (created + updated > 0) {
+          setSuccess(
+            `Синхронизация WB: ${created} новых, ${updated} обновлено, заказов ${linked_orders}`,
+          )
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки поставок')
     } finally {
