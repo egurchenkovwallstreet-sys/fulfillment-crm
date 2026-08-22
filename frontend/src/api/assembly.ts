@@ -124,6 +124,16 @@ export function fetchAssemblySeller(sellerId: number, stage?: string) {
   return apiFetch<AssemblySellerDetail>(`/api/orders/assembly/sellers/${sellerId}/${qs}`)
 }
 
+export function reprintOrderSticker(sellerId: number, orderId: number) {
+  return apiFetch<ScanBarcodeResult>(
+    `/api/orders/assembly/sellers/${sellerId}/reprint-sticker/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId }),
+    },
+  )
+}
+
 export function startAssembly(sellerId: number) {
   return apiFetch<StartAssemblyResult>(`/api/orders/assembly/sellers/${sellerId}/start/`, {
     method: 'POST',

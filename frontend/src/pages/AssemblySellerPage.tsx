@@ -4,6 +4,7 @@ import {
   bindMarking,
   fetchAssemblySeller,
   replaceOrderItem,
+  reprintOrderSticker,
   scanOrderBarcode,
   sendOrderToAssembly,
   sendAllOrdersToAssembly,
@@ -267,6 +268,22 @@ export function AssemblySellerPage() {
     }
   }
 
+  async function handleReprintSticker(orderId: number) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await reprintOrderSticker(id, orderId)
+      printSticker(result.order.sticker_file)
+      setSuccess(`Стикер заказа WB #${result.order.wb_order_id} отправлен на печать`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось распечатать стикер')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleSync() {
     if (!id) return
     setLoading(true)
@@ -508,7 +525,20 @@ export function AssemblySellerPage() {
                     )}
                   </td>
                   <td>{order.wb_stage_display || order.status_display}</td>
-                  <td>{order.has_sticker ? '✓' : '—'}</td>
+                  <td>
+                    {order.has_sticker ? (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        onClick={() => handleReprintSticker(order.id)}
+                        disabled={loading || syncing}
+                      >
+                        Распечатать
+                      </button>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                   <td className="assembly-table__actions">
                     {showAssemblyButton(order, stage) && (
                       <button

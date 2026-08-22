@@ -29,6 +29,7 @@ from .serializers import (
 from .services.assembly import (
   AssemblyError,
   bind_marking_and_print,
+  fetch_stickers_for_orders,
   get_seller_stage_counts,
   get_seller_wb_tab_counts,
   replace_order_item,
@@ -469,6 +470,51 @@ class AssemblyReplaceOrderView(APIView):
       "success": True,
       "order": OrderAssemblySerializer(order).data,
       "message": f"Заказ WB #{order.wb_order_id} сброшен — возьмите другой экземпляр товара",
+    })
+
+
+class AssemblyReprintStickerView(APIView):
+  """Повторная печать стикера FBS (если повреждён)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = OrderActionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    order = Order.objects.filter(
+      pk=serializer.validated_data["order_id"],
+      seller=seller,
+    ).first()
+    if not order:
+      return Response({"detail": "Заказ не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+    if not order.sticker_file:
+      try:
+        fetch_stickers_for_orders(seller, [order], user=request.user)
+      except AssemblyError as exc:
+        return Response(
+          {"detail": str(exc), "code": exc.code},
+          status=status.HTTP_400_BAD_REQUEST,
+        )
+      order.refresh_from_db()
+
+    if not order.sticker_file:
+      return Response(
+        {
+          "detail": "Стикер не загружен. Нажмите «Лист подбора» или обновите заказы из WB.",
+          "code": "no_sticker",
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    return Response({
+      "success": True,
+      "action": "print",
+      "order": OrderPrintSerializer(order).data,
     })
 
 
