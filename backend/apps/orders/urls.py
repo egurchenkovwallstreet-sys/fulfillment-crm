@@ -17,6 +17,11 @@ from .views import (
   PickListDetailView,
   PickListGenerateView,
   PickListListView,
+  SupplyBarcodeView,
+  SupplyBulkDeliverView,
+  SupplyDeliverView,
+  SupplyDetailView,
+  SupplyListView,
 )
 
 urlpatterns = [
@@ -72,4 +77,9 @@ urlpatterns = [
       AssemblySendToDeliveryView.as_view(),
       name="assembly-send-to-delivery",
     ),
+    path("supplies/", SupplyListView.as_view(), name="supply-list"),
+    path("supplies/bulk-deliver/", SupplyBulkDeliverView.as_view(), name="supply-bulk-deliver"),
+    path("supplies/<int:supply_id>/", SupplyDetailView.as_view(), name="supply-detail"),
+    path("supplies/<int:supply_id>/deliver/", SupplyDeliverView.as_view(), name="supply-deliver"),
+    path("supplies/<int:supply_id>/barcode/", SupplyBarcodeView.as_view(), name="supply-barcode"),
 ]

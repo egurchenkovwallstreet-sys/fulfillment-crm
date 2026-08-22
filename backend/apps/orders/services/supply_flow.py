@@ -303,3 +303,164 @@ def send_orders_to_assembly_bulk(
     "stickers_fetched": stickers_total,
     "errors": errors,
   }
+
+
+def order_delivery_block_reason(order: Order) -> str | None:
+  if order_can_send_to_delivery(order):
+    return None
+  if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
+    return "Не на сборке WB"
+  if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
+    return "Нет стикера FBS — отсканируйте в сборке"
+  if resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    if not order.marking_bound:
+      return "Нужен Честный знак"
+  return "Не готов к доставке"
+
+
+def _supply_orders(supply: Supply) -> list[Order]:
+  return list(
+    supply.orders.select_related("product", "seller").all(),
+  )
+
+
+def refresh_supply_readiness(supply: Supply) -> Supply:
+  if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
+    return supply
+  orders = _supply_orders(supply)
+  if not orders:
+    return supply
+  all_ready = all(order_can_send_to_delivery(order) for order in orders)
+  new_status = Supply.Status.READY if all_ready else Supply.Status.FORMING
+  if supply.status != new_status:
+    supply.status = new_status
+    supply.save(update_fields=["status", "updated_at"])
+  return supply
+
+
+def supply_can_deliver(supply: Supply) -> bool:
+  if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
+    return False
+  if not supply.wb_supply_id:
+    return False
+  orders = _supply_orders(supply)
+  return bool(orders) and all(order_can_send_to_delivery(order) for order in orders)
+
+
+@transaction.atomic
+def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dict:
+  supply = (
+    Supply.objects.filter(pk=supply_id, seller=seller)
+    .prefetch_related("orders__product", "orders__seller")
+    .first()
+  )
+  if not supply:
+    raise SupplyFlowError("Поставка не найдена", code="not_found")
+
+  refresh_supply_readiness(supply)
+  if not supply_can_deliver(supply):
+    reasons = [
+      reason
+      for order in _supply_orders(supply)
+      if (reason := order_delivery_block_reason(order))
+    ]
+    raise SupplyFlowError(
+      "Поставка не готова: " + (reasons[0] if reasons else "проверьте заказы"),
+      code="not_ready",
+    )
+
+  last_result: dict = {}
+  for order in _supply_orders(supply):
+    last_result = send_order_to_delivery(seller, order.id, user=user)
+  return last_result
+
+
+def send_supplies_to_delivery_bulk(
+  seller: Seller,
+  *,
+  supply_ids: list[int] | None = None,
+  user=None,
+) -> dict:
+  qs = Supply.objects.filter(
+    seller=seller,
+    status__in=(Supply.Status.FORMING, Supply.Status.READY),
+  ).prefetch_related("orders__product", "orders__seller")
+  if supply_ids is not None:
+    qs = qs.filter(pk__in=supply_ids)
+
+  delivered = 0
+  errors: list[dict] = []
+  barcode_files: list[str] = []
+
+  for supply in qs:
+    refresh_supply_readiness(supply)
+    if not supply_can_deliver(supply):
+      continue
+    try:
+      result = send_supply_to_delivery(seller, supply.id, user=user)
+      delivered += 1
+      if result.get("supply_barcode_file"):
+        barcode_files.append(result["supply_barcode_file"])
+    except SupplyFlowError as exc:
+      errors.append({
+        "supply_id": supply.id,
+        "wb_supply_id": supply.wb_supply_id,
+        "error": str(exc),
+      })
+
+  if delivered == 0 and errors:
+    raise SupplyFlowError(
+      f"Не удалось передать ни одной поставки. Пример: {errors[0]['error']}",
+      code="batch_failed",
+    )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.SUPPLY,
+    message=f"Массовая передача в доставку: {delivered} поставок",
+    details={"delivered": delivered, "errors": errors},
+  )
+
+  return {
+    "delivered": delivered,
+    "errors": errors,
+    "supply_barcode_files": barcode_files,
+  }
+
+
+def fetch_supply_barcode(seller: Seller, supply_id: int) -> dict:
+  supply = Supply.objects.filter(pk=supply_id, seller=seller).first()
+  if not supply:
+    raise SupplyFlowError("Поставка не найдена", code="not_found")
+  if supply.status != Supply.Status.CONFIRMED:
+    raise SupplyFlowError(
+      "ШК поставки доступен только после передачи в доставку",
+      code="not_confirmed",
+    )
+  if not supply.wb_supply_id:
+    raise SupplyFlowError("У поставки нет ID WB", code="no_wb_id")
+
+  client = _get_client(seller)
+  try:
+    barcode_payload = client.fetch_supply_barcode(supply.wb_supply_id)
+  except WBApiError as exc:
+    raise SupplyFlowError(str(exc), code="wb_barcode_failed") from exc
+
+  supply_barcode_file = ""
+  supply_barcode_value = ""
+  if isinstance(barcode_payload, dict):
+    supply_barcode_file = barcode_payload.get("file") or ""
+    supply_barcode_value = str(barcode_payload.get("barcode") or "")
+
+  if not supply_barcode_file:
+    raise SupplyFlowError("WB не вернул изображение ШК поставки", code="empty_barcode")
+
+  supply.supply_barcode_printed = True
+  supply.save(update_fields=["supply_barcode_printed", "updated_at"])
+
+  return {
+    "wb_supply_id": supply.wb_supply_id,
+    "supply_barcode_file": supply_barcode_file,
+    "supply_barcode": supply_barcode_value,
+  }

@@ -25,6 +25,8 @@ from .serializers import (
   ReplaceOrderSerializer,
   ScanPrintSerializer,
   SellerAssemblyCountersSerializer,
+  SupplyBulkDeliverSerializer,
+  SupplySerializer,
 )
 from .services.assembly import (
   AssemblyError,
@@ -40,9 +42,13 @@ from .services.pick_list import PickListError, generate_pick_list
 from .services.supply_flow import (
   SupplyFlowError,
   count_orders_ready_for_assembly,
+  fetch_supply_barcode,
+  refresh_supply_readiness,
   send_order_to_assembly,
   send_order_to_delivery,
   send_orders_to_assembly_bulk,
+  send_supplies_to_delivery_bulk,
+  send_supply_to_delivery,
 )
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
@@ -611,6 +617,142 @@ class AssemblySendAllToAssemblyView(APIView):
         order_ids=order_ids,
         user=request.user,
       )
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    return Response({"success": True, **result})
+
+
+class SupplyListView(APIView):
+  """Список поставок селлера."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request):
+    seller_id = request.query_params.get("seller_id")
+    if not seller_id:
+      return Response(
+        {"detail": "Укажите seller_id"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    status_filter = request.query_params.get("status", "").strip()
+    qs = (
+      Supply.objects.filter(seller=seller)
+      .select_related("seller")
+      .prefetch_related("orders__product", "orders__seller")
+      .order_by("-created_at")
+    )
+    if status_filter:
+      qs = qs.filter(status=status_filter)
+    else:
+      qs = qs.filter(
+        status__in=(
+          Supply.Status.FORMING,
+          Supply.Status.READY,
+          Supply.Status.CONFIRMED,
+        ),
+      )
+
+    supplies = list(qs[:200])
+    for supply in supplies:
+      refresh_supply_readiness(supply)
+
+    return Response(SupplySerializer(supplies, many=True).data)
+
+
+class SupplyDetailView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, supply_id):
+    supply = (
+      Supply.objects.filter(pk=supply_id)
+      .select_related("seller")
+      .prefetch_related("orders__product", "orders__seller")
+      .first()
+    )
+    if not supply:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    refresh_supply_readiness(supply)
+    return Response(SupplySerializer(supply).data)
+
+
+class SupplyDeliverView(APIView):
+  """Передать поставку в доставку WB (все заказы должны быть готовы, включая ЧЗ)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, supply_id):
+    supply = Supply.objects.filter(pk=supply_id).select_related("seller").first()
+    if not supply:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      result = send_supply_to_delivery(supply.seller, supply.id, user=request.user)
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    payload = {
+      "success": True,
+      "message": "Поставка передана в доставку",
+      "wb_supply_id": result.get("wb_supply_id", ""),
+    }
+    if result.get("supply_barcode_file"):
+      payload["supply_barcode_file"] = result["supply_barcode_file"]
+    if result.get("supply_barcode"):
+      payload["supply_barcode"] = result["supply_barcode"]
+    return Response(payload)
+
+
+class SupplyBulkDeliverView(APIView):
+  """Массовая передача готовых поставок в доставку."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    serializer = SupplyBulkDeliverSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = Seller.objects.get(pk=data["seller_id"])
+
+    supply_ids = data.get("supply_ids") or None
+    try:
+      result = send_supplies_to_delivery_bulk(
+        seller,
+        supply_ids=supply_ids,
+        user=request.user,
+      )
+    except SupplyFlowError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    return Response({
+      "success": True,
+      "message": f"Передано в доставку: {result['delivered']} поставок",
+      **result,
+    })
+
+
+class SupplyBarcodeView(APIView):
+  """Повторная печать QR/ШК поставки."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, supply_id):
+    supply = Supply.objects.filter(pk=supply_id).select_related("seller").first()
+    if not supply:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      result = fetch_supply_barcode(supply.seller, supply.id)
     except SupplyFlowError as exc:
       return Response(
         {"detail": str(exc), "code": exc.code},

@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from apps.sellers.models import Seller
 
-from .models import Order, PickList, PickListItem
+from .models import Order, PickList, PickListItem, Supply
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -218,3 +218,85 @@ class ReplaceOrderSerializer(serializers.Serializer):
 
 class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
+
+
+class SupplyOrderSerializer(serializers.ModelSerializer):
+  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
+  status_display = serializers.CharField(source="get_status_display", read_only=True)
+  requires_marking = serializers.SerializerMethodField()
+  can_send_to_delivery = serializers.SerializerMethodField()
+  block_reason = serializers.SerializerMethodField()
+
+  class Meta:
+    model = Order
+    fields = (
+      "id",
+      "wb_order_id",
+      "barcode",
+      "cell_number",
+      "status",
+      "status_display",
+      "has_sticker",
+      "marking_bound",
+      "requires_marking",
+      "can_send_to_delivery",
+      "block_reason",
+    )
+
+  def get_requires_marking(self, obj):
+    from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
+  def get_can_send_to_delivery(self, obj):
+    from apps.orders.services.supply_flow import order_can_send_to_delivery
+    return order_can_send_to_delivery(obj)
+
+  def get_block_reason(self, obj):
+    from apps.orders.services.supply_flow import order_delivery_block_reason
+    return order_delivery_block_reason(obj)
+
+
+class SupplySerializer(serializers.ModelSerializer):
+  seller_name = serializers.CharField(source="seller.company_name", read_only=True)
+  status_display = serializers.CharField(source="get_status_display", read_only=True)
+  orders = SupplyOrderSerializer(many=True, read_only=True)
+  orders_count = serializers.SerializerMethodField()
+  can_deliver = serializers.SerializerMethodField()
+
+  class Meta:
+    model = Supply
+    fields = (
+      "id",
+      "seller",
+      "seller_name",
+      "wb_supply_id",
+      "status",
+      "status_display",
+      "orders_count",
+      "orders",
+      "can_deliver",
+      "supply_barcode_printed",
+      "created_at",
+      "updated_at",
+    )
+
+  def get_orders_count(self, obj):
+    return obj.orders.count()
+
+  def get_can_deliver(self, obj):
+    from apps.orders.services.supply_flow import supply_can_deliver
+    return supply_can_deliver(obj)
+
+
+class SupplyBulkDeliverSerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  supply_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=True,
+  )
+
+  def validate_seller_id(self, value):
+    if not Seller.objects.filter(pk=value, is_active=True).exists():
+      raise serializers.ValidationError("Селлер не найден или неактивен")
+    return value
