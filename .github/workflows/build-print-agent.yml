@@ -8,6 +8,9 @@ on:
       - '.github/workflows/build-print-agent.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -55,3 +58,13 @@ jobs:
           path: print-bridge/dist/FulfillmentCRM-PrintAgent.exe
           retention-days: 90
           if-no-files-found: error
+
+      - name: Publish GitHub Release (прямая ссылка для сервера)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release view print-agent 2>/dev/null || gh release create print-agent \
+            --title "Fulfillment CRM — Агент печати" \
+            --notes "Последняя сборка с GitHub Actions. SHA256 в списке артефактов Actions."
+          gh release upload print-agent dist/FulfillmentCRM-PrintAgent.exe --clobber
