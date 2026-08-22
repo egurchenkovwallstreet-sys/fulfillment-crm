@@ -7,7 +7,7 @@ import './LoginPage.css'
 
 export function SellerRegisterPage() {
   const { token } = useParams<{ token: string }>()
-  const { user, setUserFromLogin } = useAuth()
+  const { user, isSeller, logout, setUserFromLogin } = useAuth()
   const [companyName, setCompanyName] = useState('')
   const [hasAccount, setHasAccount] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -33,8 +33,29 @@ export function SellerRegisterPage() {
       .finally(() => setLoading(false))
   }, [token])
 
-  if (user) {
+  if (user && isSeller) {
     return <Navigate to="/cabinet" replace />
+  }
+
+  if (user && !isSeller) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <h1>Регистрация селлера</h1>
+          <p>
+            Вы вошли как <strong>{user.username}</strong> ({user.role_display ?? user.role}).
+            Чтобы зарегистрировать селлера по этой ссылке, выйдите из текущего аккаунта
+            или откройте ссылку в режиме инкогнито / другом браузере.
+          </p>
+          <button type="button" className="btn btn--primary btn--full" onClick={logout}>
+            Выйти и продолжить
+          </button>
+          <Link to="/" className="btn btn--ghost btn--full" style={{ marginTop: '0.5rem' }}>
+            Вернуться в CRM
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   async function handleSubmit(e: FormEvent) {
