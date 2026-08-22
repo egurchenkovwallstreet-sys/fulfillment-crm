@@ -5,6 +5,7 @@ import {
   fetchSellersManage,
   type SellerManageItem,
 } from '../api/sellerAdmin'
+import { copyToClipboard } from '../utils/copyToClipboard'
 import './SellersManagePage.css'
 
 function inviteUrl(token: string | null): string {
@@ -65,7 +66,7 @@ export function SellersManagePage() {
         await load()
       }
       const url = inviteUrl(token)
-      await navigator.clipboard.writeText(url)
+      await copyToClipboard(url)
       setCopiedId(seller.id)
       setMessage(`Ссылка скопирована для «${seller.company_name}»`)
       window.setTimeout(() => setCopiedId(null), 2000)
