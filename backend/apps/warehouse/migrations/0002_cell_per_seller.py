@@ -12,6 +12,9 @@ def _cell_sort_key(number: str) -> tuple:
 def migrate_cells_per_seller(apps, schema_editor):
   Cell = apps.get_model("warehouse", "Cell")
   Product = apps.get_model("warehouse", "Product")
+  PickListItem = apps.get_model("orders", "PickListItem")
+
+  old_to_new: dict[int, int] = {}
 
   seller_cell_ids: dict[int, set[int]] = {}
   for row in Product.objects.values_list("seller_id", "cell_id"):
@@ -27,10 +30,20 @@ def migrate_cells_per_seller(apps, schema_editor):
         number=str(idx),
         is_occupied=True,
       )
+      old_to_new[old_cell.id] = new_cell.id
       Product.objects.filter(seller_id=seller_id, cell_id=old_cell.id).update(
         cell_id=new_cell.id,
       )
 
+  for old_id, new_id in old_to_new.items():
+    PickListItem.objects.filter(cell_id=old_id).update(cell_id=new_id)
+
+  for item in PickListItem.objects.filter(cell__seller__isnull=True).iterator():
+    product = Product.objects.filter(pk=item.product_id).first()
+    if product and product.cell_id:
+      PickListItem.objects.filter(pk=item.pk).update(cell_id=product.cell_id)
+
+  PickListItem.objects.filter(cell__seller__isnull=True).delete()
   Cell.objects.filter(seller__isnull=True).delete()
 
 
@@ -39,6 +52,7 @@ class Migration(migrations.Migration):
   dependencies = [
     ("sellers", "0001_initial"),
     ("warehouse", "0001_initial"),
+    ("orders", "0001_initial"),
   ]
 
   operations = [
