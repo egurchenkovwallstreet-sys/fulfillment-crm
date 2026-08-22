@@ -11,7 +11,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 PAGE_LIMIT = 1000
-REQUEST_INTERVAL_SEC = 0.25
+REQUEST_INTERVAL_SEC = 0.1
 
 
 class WBApiError(Exception):

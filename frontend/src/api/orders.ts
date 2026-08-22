@@ -103,10 +103,12 @@ export function fetchOrderStats() {
   return apiFetch<OrderStats>('/api/orders/stats/')
 }
 
-export function syncOrders(sellerId?: number) {
+export function syncOrders(sellerId?: number, mode: 'full' | 'quick' = 'full') {
+  const body: { seller_id?: number; mode: 'full' | 'quick' } = { mode }
+  if (sellerId) body.seller_id = sellerId
   return apiFetch<SyncResult>('/api/orders/sync/', {
     method: 'POST',
-    body: JSON.stringify(sellerId ? { seller_id: sellerId } : {}),
+    body: JSON.stringify(body),
   })
 }
 

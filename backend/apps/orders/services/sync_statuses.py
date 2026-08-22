@@ -10,6 +10,7 @@ from apps.orders.services.wb_status import (
   CANCEL_WB_STATUSES,
   WB_DELIVERED_WB_STATUSES,
   WB_DELIVERY_TAB_WB_STATUS,
+  WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
   WB_TERMINAL_WB_STATUSES,
@@ -17,6 +18,7 @@ from apps.orders.services.wb_status import (
   compute_live_wb_counts,
   is_wb_in_delivery,
   save_wb_counts_to_seller,
+  wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import (
@@ -51,6 +53,29 @@ def _build_warehouse_map(
     for order in archive_orders:
       warehouse_map.setdefault(order.wb_order_id, order.warehouse_id)
   return warehouse_map
+
+
+def _collect_quick_poll_order_ids(
+  seller: Seller,
+  *,
+  new_wb_ids: set[int] | None = None,
+  delivery_supply_ids: set[int] | None = None,
+) -> set[int]:
+  """Быстрый опрос: только активные стадии + новые из WB + поставки в доставке."""
+  poll_ids: set[int] = set(new_wb_ids or [])
+  active_ids = filter_orders_for_seller(
+    Order.objects.filter(seller=seller)
+    .filter(
+      Q(wb_supplier_status__in=[WB_SUPPLIER_NEW, "", WB_SUPPLIER_ASSEMBLY])
+      | wb_in_delivery_q()
+    )
+    .exclude(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED]),
+    seller,
+  ).values_list("wb_order_id", flat=True)
+  poll_ids.update(active_ids)
+  if delivery_supply_ids:
+    poll_ids.update(delivery_supply_ids)
+  return poll_ids
 
 
 def _collect_poll_order_ids(
@@ -245,13 +270,22 @@ def sync_order_statuses_for_seller(
   new_orders_total: int = 0,
   archive_orders: list[WBOrderData] | None = None,
   delivery_supply_ids: set[int] | None = None,
+  quick: bool = False,
 ) -> dict:
-  warehouse_map = _build_warehouse_map(seller, archive_orders)
-  poll_ids = _collect_poll_order_ids(
-    seller,
-    archive_orders=archive_orders,
-    delivery_supply_ids=delivery_supply_ids,
-  )
+  new_ids_set = set(new_wb_ids or [])
+  warehouse_map = _build_warehouse_map(seller, None if quick else archive_orders)
+  if quick:
+    poll_ids = _collect_quick_poll_order_ids(
+      seller,
+      new_wb_ids=new_ids_set,
+      delivery_supply_ids=delivery_supply_ids,
+    )
+  else:
+    poll_ids = _collect_poll_order_ids(
+      seller,
+      archive_orders=archive_orders,
+      delivery_supply_ids=delivery_supply_ids,
+    )
   scoped_ids = _scoped_order_ids(poll_ids, warehouse_map, seller)
 
   if not poll_ids:
@@ -283,7 +317,6 @@ def sync_order_statuses_for_seller(
     "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
   ))
 
-  new_ids_set = set(new_wb_ids or [])
   stale_new = reconcile_stale_new_orders(seller, client, new_ids_set, status_map)
   reconciled += stale_new.get("stale_new_cleared", 0)
 
@@ -292,6 +325,9 @@ def sync_order_statuses_for_seller(
     live_counts["new"] = new_orders_total
   elif new_wb_ids is not None:
     live_counts["new"] = len(new_ids_set & scoped_ids)
+
+  if quick and seller.wb_counts_synced_at and live_counts["in_delivery"] < seller.wb_count_delivery:
+    live_counts["in_delivery"] = seller.wb_count_delivery
 
   save_wb_counts_to_seller(seller, live_counts)
   db_counts = get_seller_stage_counts(seller)

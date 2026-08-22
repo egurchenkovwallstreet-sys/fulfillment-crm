@@ -9,11 +9,17 @@ app = Celery("fulfillment")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
-# Синхронизация WB каждые ~1 мин (сборка FBS — актуальные «Новые»)
+# Быстрый sync каждую минуту; полный — раз в 15 мин (архив 30 дн. для счётчика «В доставке»)
 app.conf.beat_schedule = {
-    "sync-wb-orders": {
+    "sync-wb-orders-quick": {
         "task": "apps.integrations.tasks.sync_wb_orders",
         "schedule": 60.0,
+        "kwargs": {"quick": True},
+    },
+    "sync-wb-orders-full": {
+        "task": "apps.integrations.tasks.sync_wb_orders",
+        "schedule": crontab(minute="*/15"),
+        "kwargs": {"quick": False},
     },
     "sync-wb-product-cards": {
         "task": "apps.integrations.tasks.sync_wb_product_cards",

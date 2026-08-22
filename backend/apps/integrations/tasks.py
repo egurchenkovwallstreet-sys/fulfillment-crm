@@ -7,11 +7,12 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task
-def sync_wb_orders():
+def sync_wb_orders(quick: bool = True):
   """Sync new orders and statuses from WB API for all active sellers."""
   from apps.orders.services.sync_orders import sync_all_active_sellers
 
-  result = sync_all_active_sellers()
+  mode = "quick" if quick else "full"
+  result = sync_all_active_sellers(mode=mode)
   if result["errors"]:
     logger.warning("WB order sync errors: %s", result["errors"])
   logger.info("WB order sync done: %s", result["results"])

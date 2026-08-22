@@ -79,10 +79,6 @@ export function AssemblySellerPage() {
   }, [id, stage])
 
   useEffect(() => {
-    setData(null)
-  }, [id])
-
-  useEffect(() => {
     if (!id) return
     load()
   }, [id, stage, load])
@@ -94,7 +90,7 @@ export function AssemblySellerPage() {
     async function backgroundSync() {
       setSyncing(true)
       try {
-        await syncOrders(id)
+        await syncOrders(id, 'quick')
         if (!cancelled) {
           await load()
         }
@@ -291,7 +287,7 @@ export function AssemblySellerPage() {
     setLoading(true)
     setError('')
     try {
-      await syncOrders(id)
+      await syncOrders(id, 'quick')
       await load()
       setSuccess('Заказы обновлены из WB')
     } catch (err) {
@@ -377,13 +373,17 @@ export function AssemblySellerPage() {
     }
   }
 
-  if (!data) {
+  if (!data && loading) {
     return (
       <div className="loading-screen">
         <div className="loading-screen__spinner" />
-        <p>{syncing ? 'Синхронизация с WB…' : 'Загрузка…'}</p>
+        <p>Загрузка…</p>
       </div>
     )
+  }
+
+  if (!data) {
+    return null
   }
 
   const counts = data.counts
@@ -408,7 +408,7 @@ export function AssemblySellerPage() {
             <Link to="/assembly">Сборка FBS</Link> / {data.seller.company_name}
           </p>
           <h1>{data.seller.company_name}</h1>
-          <p>Кабинет сборки · поставок в работе: {data.supplies_forming}</p>
+          <p>Кабинет сборки · поставок в работе: {data.supplies_forming}{syncing ? ' · обновление WB…' : ''}</p>
         </div>
         <div className="topbar__actions">
           <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing}>

@@ -76,18 +76,24 @@ def _import_wb_orders(
 
 
 @transaction.atomic
-def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
+def _import_wb_orders_atomic(seller, wb_orders, *, mark_as_new=False, user=None):
+  return _import_wb_orders(seller, wb_orders, mark_as_new=mark_as_new, user=user)
+
+
+def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> dict:
   if not seller.is_active:
     raise SyncError("Селлер неактивен")
 
+  quick = mode == "quick"
   token = _get_seller_token(seller)
   client = WBClient(token)
 
   warehouse_sync_error = ""
-  try:
-    sync_seller_warehouses(seller, user=user)
-  except WarehouseSyncError as exc:
-    warehouse_sync_error = str(exc)
+  if not quick:
+    try:
+      sync_seller_warehouses(seller, user=user)
+    except WarehouseSyncError as exc:
+      warehouse_sync_error = str(exc)
 
   try:
     fetch_result = client.fetch_new_orders()
@@ -101,7 +107,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
     )
     raise SyncError(str(exc)) from exc
 
-  new_import = _import_wb_orders(seller, fetch_result.orders, mark_as_new=True, user=user)
+  new_import = _import_wb_orders_atomic(seller, fetch_result.orders, mark_as_new=True, user=user)
   created = new_import["created"]
   updated = new_import["updated"]
   skipped = new_import["without_product"]
@@ -110,17 +116,18 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   archive_import = {"created": 0, "updated": 0, "skipped_warehouse": 0, "raw_total": 0}
   archive_orders = []
   delivery_supply_ids: set[int] = set()
-  try:
-    archive_result = client.fetch_recent_orders(days=30)
-    archive_orders = archive_result.orders
-    archive_import = _import_wb_orders(seller, archive_orders, user=user)
-    archive_import["raw_total"] = archive_result.raw_total
-    created += archive_import["created"]
-    updated += archive_import["updated"]
-    skipped += archive_import["without_product"]
-    skipped_warehouse += archive_import["skipped_warehouse"]
-  except WBApiError:
-    pass
+  if not quick:
+    try:
+      archive_result = client.fetch_recent_orders(days=30)
+      archive_orders = archive_result.orders
+      archive_import = _import_wb_orders_atomic(seller, archive_orders, user=user)
+      archive_import["raw_total"] = archive_result.raw_total
+      created += archive_import["created"]
+      updated += archive_import["updated"]
+      skipped += archive_import["without_product"]
+      skipped_warehouse += archive_import["skipped_warehouse"]
+    except WBApiError:
+      pass
 
   try:
     delivery_supply_ids = client.fetch_delivery_order_ids()
@@ -143,6 +150,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       new_orders_total=enabled_new_total,
       archive_orders=archive_orders,
       delivery_supply_ids=delivery_supply_ids,
+      quick=quick,
     )
   except WBApiError as exc:
     status_error = str(exc)
@@ -181,11 +189,13 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
       "delivery_breakdown": status_result.get("delivery_breakdown"),
       "reconcile": status_result.get("reconcile", {}),
       "synced_at": timezone.now().isoformat(),
+      "sync_mode": mode,
     },
   )
 
   return {
     "seller_id": seller.id,
+    "sync_mode": mode,
     "created": created,
     "updated": updated,
     "without_product": skipped,
@@ -210,12 +220,12 @@ def sync_orders_for_seller(seller: Seller, *, user=None) -> dict:
   }
 
 
-def sync_all_active_sellers(*, user=None) -> list[dict]:
+def sync_all_active_sellers(*, user=None, mode: str = "full") -> list[dict]:
   results = []
   errors = []
   for seller in Seller.objects.filter(is_active=True):
     try:
-      results.append(sync_orders_for_seller(seller, user=user))
+      results.append(sync_orders_for_seller(seller, user=user, mode=mode))
     except SyncError as exc:
       errors.append({"seller_id": seller.id, "error": str(exc)})
   return {"results": results, "errors": errors}

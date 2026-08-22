@@ -184,6 +184,7 @@ class SellerAssemblyCountersSerializer(serializers.Serializer):
 
 class OrderSyncSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField(required=False, allow_null=True)
+  mode = serializers.ChoiceField(choices=["full", "quick"], default="full", required=False)
 
   def validate_seller_id(self, value):
     if value is None:

@@ -183,6 +183,7 @@ class OrderSyncView(APIView):
     serializer = OrderSyncSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     seller_id = serializer.validated_data.get("seller_id")
+    sync_mode = serializer.validated_data.get("mode", "full")
 
     if user.role == "seller":
       if not user.seller_id:
@@ -191,7 +192,7 @@ class OrderSyncView(APIView):
           status=status.HTTP_400_BAD_REQUEST,
         )
       try:
-        result = sync_orders_for_seller(user.seller, user=user)
+        result = sync_orders_for_seller(user.seller, user=user, mode=sync_mode)
       except SyncError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       dashboard_stats = _dashboard_stats_from_counts(
@@ -205,7 +206,7 @@ class OrderSyncView(APIView):
     if seller_id:
       seller = Seller.objects.get(pk=seller_id, is_active=True)
       try:
-        result = sync_orders_for_seller(seller, user=user)
+        result = sync_orders_for_seller(seller, user=user, mode=sync_mode)
       except SyncError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       dashboard_stats = _dashboard_stats_from_counts(
@@ -213,7 +214,7 @@ class OrderSyncView(APIView):
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
 
-    payload = sync_all_active_sellers(user=user)
+    payload = sync_all_active_sellers(user=user, mode=sync_mode)
     results = payload.get("results") or []
     if results:
       payload["dashboard_stats"] = _aggregate_sync_dashboard_stats(results)
