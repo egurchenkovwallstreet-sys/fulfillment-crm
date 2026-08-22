@@ -285,6 +285,23 @@
   color: #64748b;
 }
 
+.assembly-orders-panel {
+  position: relative;
+}
+
+.assembly-orders-panel--busy {
+  opacity: 0.72;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.assembly-orders-panel__status {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
 .marking-badge {
   display: inline-block;
   font-size: 0.75rem;

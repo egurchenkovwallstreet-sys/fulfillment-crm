@@ -65,21 +65,49 @@ export function AssemblySellerPage() {
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [togglingWarehouseId, setTogglingWarehouseId] = useState<number | null>(null)
+  const initialLoadDoneRef = useRef(false)
+  const syncInFlightRef = useRef(false)
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
-    setLoading(true)
+    const silent = opts?.silent ?? false
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     setError('')
     try {
       setData(await fetchAssemblySeller(id, stage || undefined))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
-      setLoading(false)
+      if (silent) {
+        setRefreshing(false)
+      } else {
+        setLoading(false)
+      }
     }
   }, [id, stage])
+
+  const runBackgroundSync = useCallback(async () => {
+    if (!id || syncInFlightRef.current) return
+    syncInFlightRef.current = true
+    setSyncing(true)
+    try {
+      await syncOrders(id, 'quick')
+      await load({ silent: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+    } finally {
+      syncInFlightRef.current = false
+      setSyncing(false)
+    }
+  }, [id, load])
 
   useEffect(() => {
     refreshPrintBridgeStatus()
@@ -92,30 +120,14 @@ export function AssemblySellerPage() {
 
   useEffect(() => {
     if (!id) return
-    load()
+    void load({ silent: initialLoadDoneRef.current })
+    initialLoadDoneRef.current = true
   }, [id, stage, load])
 
   useEffect(() => {
     if (!id) return
-    let cancelled = false
-
-    async function backgroundSync() {
-      setSyncing(true)
-      try {
-        await syncOrders(id, 'quick')
-        if (!cancelled) await load()
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
-        }
-      } finally {
-        if (!cancelled) setSyncing(false)
-      }
-    }
-
-    backgroundSync()
-    return () => { cancelled = true }
-  }, [id, load])
+    void runBackgroundSync()
+  }, [id, runBackgroundSync])
 
   useEffect(() => {
     if (scanPhase === 'marking') {
@@ -185,29 +197,43 @@ export function AssemblySellerPage() {
 
   async function handleSyncWarehouses() {
     if (!id) return
-    setLoading(true)
+    setRefreshing(true)
     setError('')
     try {
       const result = await syncSellerWarehouses(id)
       setSuccess(`Склады WB обновлены: ${result.total} шт.`)
-      await load()
+      await load({ silent: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
     } finally {
-      setLoading(false)
+      setRefreshing(false)
     }
   }
 
   async function handleToggleWarehouse(warehouseId: number, isEnabled: boolean) {
-    if (!id) return
+    if (!id || !data) return
+    const previousWarehouses = data.warehouses
+    setData({
+      ...data,
+      warehouses: data.warehouses.map((wh) => (
+        wh.id === warehouseId ? { ...wh, is_enabled: isEnabled } : wh
+      )),
+    })
+    setTogglingWarehouseId(warehouseId)
     setError('')
+    setSuccess(isEnabled ? 'Склад включён — обновляем список…' : 'Склад выключен — обновляем список…')
     try {
       await toggleSellerWarehouse(id, warehouseId, isEnabled)
+      await load({ silent: true })
       setSuccess(isEnabled ? 'Склад включён' : 'Склад выключен')
-      await syncOrders(id, 'quick')
-      await load()
+      void runBackgroundSync()
     } catch (err) {
+      setData((current) => (
+        current ? { ...current, warehouses: previousWarehouses } : current
+      ))
       setError(err instanceof Error ? err.message : 'Ошибка переключения склада')
+    } finally {
+      setTogglingWarehouseId(null)
     }
   }
 
@@ -343,17 +369,10 @@ export function AssemblySellerPage() {
 
   async function handleSync() {
     if (!id) return
-    setLoading(true)
     setError('')
-    try {
-      await syncOrders(id, 'quick')
-      await load()
-      setSuccess('Заказы обновлены из WB')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
-    } finally {
-      setLoading(false)
-    }
+    setSuccess('Синхронизация с WB…')
+    await runBackgroundSync()
+    setSuccess('Заказы обновлены из WB')
   }
 
   async function handleBarcodeSubmit(e?: FormEvent) {
@@ -467,6 +486,7 @@ export function AssemblySellerPage() {
     return counts.new ?? 0
   }
 
+  const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const newTabOrdersCount = stage === 'new'
     ? data.orders.filter((order) => isWbNew(order)).length
     : 0
@@ -488,7 +508,8 @@ export function AssemblySellerPage() {
           <h1>{data.seller.company_name}</h1>
           <p>
             Полный цикл: лист подбора → скан → стикер → ЧЗ → доставка
-            {syncing ? ' · обновление WB…' : ''}
+            {syncing ? ' · синхронизация с WB…' : ''}
+            {refreshing && !syncing ? ' · обновление списка…' : ''}
             {bridgeOk === true && (
               <span className="assembly-bridge assembly-bridge--ok">
                 {' '}· Печать: {bridgePrinter || 'Xprinter'}
@@ -504,7 +525,7 @@ export function AssemblySellerPage() {
           </p>
         </div>
         <div className="topbar__actions">
-          <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing}>
+          <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing || refreshing}>
             Обновить из WB
           </button>
           {stage === 'new' && (counts.new ?? 0) > 0 && (
@@ -589,12 +610,13 @@ export function AssemblySellerPage() {
       <section className="panel assembly-warehouses">
         <div className="assembly-warehouses__header">
           <h2 className="section-title">Точки отгрузки WB</h2>
-          <button type="button" className="btn btn--secondary btn--small" onClick={handleSyncWarehouses} disabled={loading}>
+          <button type="button" className="btn btn--secondary btn--small" onClick={handleSyncWarehouses} disabled={refreshing || syncing}>
             Загрузить из WB
           </button>
         </div>
         <p className="assembly-warehouses__hint">
           Включите только склады вашего фулфилмента. Выключенные склады скрыты из списка заказов.
+          {togglingWarehouseId !== null ? ' Сохранение…' : ''}
         </p>
         {data.warehouses.length === 0 ? (
           <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB»</p>
@@ -606,8 +628,8 @@ export function AssemblySellerPage() {
                   <input
                     type="checkbox"
                     checked={wh.is_enabled}
-                    onChange={(e) => handleToggleWarehouse(wh.id, e.target.checked)}
-                    disabled={loading}
+                    onChange={(e) => void handleToggleWarehouse(wh.id, e.target.checked)}
+                    disabled={togglingWarehouseId === wh.id}
                   />
                   <span className="assembly-warehouses__name">{wh.name || `Склад #${wh.wb_warehouse_id}`}</span>
                 </label>
@@ -619,8 +641,11 @@ export function AssemblySellerPage() {
       </section>
 
       <div className="assembly-grid">
-        <section className="panel">
-          <h2 className="section-title">Заказы ({stageCount(stage)})</h2>
+        <section className={`panel assembly-orders-panel${ordersBusy ? ' assembly-orders-panel--busy' : ''}`}>
+          <h2 className="section-title">
+            Заказы ({stageCount(stage)})
+            {ordersBusy && <span className="assembly-orders-panel__status">обновление…</span>}
+          </h2>
           <table className="assembly-table">
             <thead>
               <tr>
