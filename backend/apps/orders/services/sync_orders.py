@@ -31,11 +31,29 @@ def _link_product(seller: Seller, barcode: str) -> Product | None:
 
 
 def _touch_order_warehouse(seller: Seller, wb_order) -> None:
-  if wb_order.warehouse_id is None:
+  updates: dict = {}
+  if wb_order.warehouse_id is not None:
+    updates["wb_warehouse_id"] = wb_order.warehouse_id
+  if wb_order.created_at is not None:
+    updates["wb_created_at"] = wb_order.created_at
+  if not updates:
     return
-  Order.objects.filter(seller=seller, wb_order_id=wb_order.wb_order_id).update(
-    wb_warehouse_id=wb_order.warehouse_id,
-  )
+  Order.objects.filter(seller=seller, wb_order_id=wb_order.wb_order_id).update(**updates)
+
+
+def _backfill_orders_meta(seller: Seller, wb_orders: list) -> int:
+  updated = 0
+  for wb_order in wb_orders:
+    updates: dict = {}
+    if wb_order.warehouse_id is not None:
+      updates["wb_warehouse_id"] = wb_order.warehouse_id
+    if wb_order.created_at is not None:
+      updates["wb_created_at"] = wb_order.created_at
+    if not updates:
+      continue
+    count = Order.objects.filter(seller=seller, wb_order_id=wb_order.wb_order_id).update(**updates)
+    updated += count
+  return updated
 
 
 def _import_wb_orders(
@@ -63,6 +81,8 @@ def _import_wb_orders(
       "product": product,
       "wb_warehouse_id": wb_order.warehouse_id,
     }
+    if wb_order.created_at is not None:
+      defaults["wb_created_at"] = wb_order.created_at
     if mark_as_new:
       defaults["wb_supplier_status"] = WB_SUPPLIER_NEW
     order, was_created = Order.objects.update_or_create(
@@ -122,21 +142,22 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   skipped = new_import["without_product"]
   skipped_warehouse = new_import["skipped_warehouse"]
 
-  archive_import = {"created": 0, "updated": 0, "skipped_warehouse": 0, "raw_total": 0}
+  archive_import = {"created": 0, "updated": 0, "skipped_warehouse": 0, "raw_total": 0, "meta_backfill": 0}
   archive_orders = []
   delivery_supply_ids: set[int] = set()
-  if not quick:
-    try:
-      archive_result = client.fetch_recent_orders(days=30)
-      archive_orders = archive_result.orders
-      archive_import = _import_wb_orders_atomic(seller, archive_orders, user=user)
-      archive_import["raw_total"] = archive_result.raw_total
-      created += archive_import["created"]
-      updated += archive_import["updated"]
-      skipped += archive_import["without_product"]
-      skipped_warehouse += archive_import["skipped_warehouse"]
-    except WBApiError:
-      pass
+  archive_days = 7 if quick else 30
+  try:
+    archive_result = client.fetch_recent_orders(days=archive_days)
+    archive_orders = archive_result.orders
+    archive_import = _import_wb_orders_atomic(seller, archive_orders, user=user)
+    archive_import["raw_total"] = archive_result.raw_total
+    archive_import["meta_backfill"] = _backfill_orders_meta(seller, archive_orders)
+    created += archive_import["created"]
+    updated += archive_import["updated"]
+    skipped += archive_import["without_product"]
+    skipped_warehouse += archive_import["skipped_warehouse"]
+  except WBApiError:
+    pass
 
   try:
     delivery_supply_ids = client.fetch_delivery_order_ids()

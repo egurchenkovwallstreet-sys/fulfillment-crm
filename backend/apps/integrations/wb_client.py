@@ -4,9 +4,11 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone as dt_timezone
 
 import httpx
 from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ class WBOrderData:
   wb_order_id: int
   barcode: str
   warehouse_id: int | None = None
+  created_at: datetime | None = None
 
 
 @dataclass
@@ -113,6 +116,7 @@ class WBClient:
             wb_order_id=wb_id,
             barcode=barcode,
             warehouse_id=_extract_warehouse_id(item),
+            created_at=_extract_created_at(item),
           )
         )
 
@@ -221,6 +225,7 @@ class WBClient:
             wb_order_id=wb_id,
             barcode=barcode,
             warehouse_id=_extract_warehouse_id(item),
+            created_at=_extract_created_at(item),
           )
         )
 
@@ -418,4 +423,40 @@ def _extract_warehouse_id(order_item: dict) -> int | None:
         return int(wh_id)
       except (TypeError, ValueError):
         pass
+  return None
+
+
+def _parse_wb_datetime(value) -> datetime | None:
+  if not value:
+    return None
+  if isinstance(value, datetime):
+    if timezone.is_naive(value):
+      return timezone.make_aware(value, dt_timezone.utc)
+    return value
+  if isinstance(value, (int, float)):
+    try:
+      ts = float(value)
+      if ts > 1e12:
+        ts /= 1000
+      return timezone.make_aware(datetime.utcfromtimestamp(ts), dt_timezone.utc)
+    except (ValueError, OSError):
+      return None
+  text = str(value).strip()
+  if not text:
+    return None
+  text = text.replace("Z", "+00:00")
+  try:
+    parsed = datetime.fromisoformat(text)
+  except ValueError:
+    return None
+  if timezone.is_naive(parsed):
+    return timezone.make_aware(parsed, dt_timezone.utc)
+  return parsed
+
+
+def _extract_created_at(order_item: dict) -> datetime | None:
+  for key in ("createdAt", "created_at", "dateCreated"):
+    parsed = _parse_wb_datetime(order_item.get(key))
+    if parsed:
+      return parsed
   return None
