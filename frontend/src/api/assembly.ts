@@ -34,6 +34,7 @@ export interface AssemblyOrder {
   requires_marking: boolean
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
+  warehouse_quantity: number | null
   created_at: string
 }
 
@@ -113,6 +114,13 @@ export interface SendToDeliveryResult {
   wb_supply_id: string
   supply_barcode_file?: string
   supply_barcode?: string
+  stock?: {
+    deducted: boolean
+    already_deducted: boolean
+    quantity: number
+    cell_number: string
+    barcode: string
+  }
 }
 
 export function fetchAssemblySellers() {

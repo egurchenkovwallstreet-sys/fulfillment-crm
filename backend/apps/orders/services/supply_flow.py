@@ -17,6 +17,11 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+from apps.warehouse.services.stock_deduction import (
+  StockDeductionError,
+  check_stock_for_delivery,
+  deduct_stock_for_delivery,
+)
 
 
 class SupplyFlowError(Exception):
@@ -180,6 +185,11 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
       code="no_supply",
     )
 
+  try:
+    check_stock_for_delivery(order)
+  except StockDeductionError as exc:
+    raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
+
   client = _get_client(seller)
   try:
     client.deliver_supply(supply.wb_supply_id)
@@ -218,6 +228,8 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   supply.supply_barcode_printed = bool(supply_barcode_file)
   supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
 
+  stock_info = deduct_stock_for_delivery(order=order, supply=supply, user=user)
+
   AuditLog.objects.create(
     user=user,
     seller=seller,
@@ -235,6 +247,7 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     "wb_supply_id": supply.wb_supply_id,
     "supply_barcode_file": supply_barcode_file,
     "supply_barcode": supply_barcode_value,
+    "stock": stock_info,
   }
 
 

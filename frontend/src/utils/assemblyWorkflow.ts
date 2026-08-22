@@ -39,15 +39,12 @@ export function orderStickerPrinted(order: AssemblyOrder): boolean {
 }
 
 export function orderCanDeliver(order: AssemblyOrder): boolean {
-  if (order.can_send_to_delivery) return true
-  if ((order.wb_supplier_status || '').trim() !== 'confirm') return false
-  if (order.status === 'label_printed') return true
-  if (order.status === 'marked' && order.marking_bound) return true
-  return false
+  if (!order.can_send_to_delivery) return false
+  if (order.warehouse_quantity != null && order.warehouse_quantity < 1) return false
+  return true
 }
 
 export function orderBlockReason(order: AssemblyOrder): string | null {
-  if (orderCanDeliver(order)) return null
   if ((order.wb_supplier_status || '').trim() !== 'confirm') {
     return 'Сначала отправьте заказ на сборку в WB'
   }
@@ -57,7 +54,16 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
   if (order.requires_marking && !order.marking_bound) {
     return 'Привяжите Честный знак (DataMatrix)'
   }
-  return 'Заказ не готов к доставке'
+  if (order.warehouse_quantity == null) {
+    return 'Товар не принят на склад — выполните приёмку'
+  }
+  if (order.warehouse_quantity < 1) {
+    return `Нет остатка на складе (яч. ${order.cell_number || '—'})`
+  }
+  if (!order.can_send_to_delivery) {
+    return 'Заказ не готов к доставке'
+  }
+  return null
 }
 
 export function resolveWorkflowStep(

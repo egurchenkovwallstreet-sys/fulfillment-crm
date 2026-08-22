@@ -35,6 +35,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   can_send_to_assembly = serializers.SerializerMethodField()
   can_send_to_delivery = serializers.SerializerMethodField()
 
+  warehouse_quantity = serializers.SerializerMethodField()
+
   class Meta:
     model = Order
     fields = (
@@ -54,6 +56,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "requires_marking",
       "can_send_to_assembly",
       "can_send_to_delivery",
+      "warehouse_quantity",
       "created_at",
     )
 
@@ -72,6 +75,11 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   def get_can_send_to_delivery(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_delivery
     return order_can_send_to_delivery(obj)
+
+  def get_warehouse_quantity(self, obj):
+    from apps.warehouse.services.stock_deduction import resolve_order_product
+    product = resolve_order_product(obj)
+    return product.quantity if product else None
 
 
 class OrderPrintSerializer(serializers.ModelSerializer):

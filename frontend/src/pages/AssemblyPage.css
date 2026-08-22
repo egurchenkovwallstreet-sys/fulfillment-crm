@@ -424,6 +424,11 @@
   margin-top: 0.2rem;
 }
 
+.assembly-stock--low {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .assembly-last-print--ready {
   background: #eff6ff;
   border: 1px solid #bfdbfe;

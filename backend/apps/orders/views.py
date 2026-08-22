@@ -594,6 +594,8 @@ class AssemblySendToDeliveryView(APIView):
       payload["supply_barcode_file"] = result["supply_barcode_file"]
     if result.get("supply_barcode"):
       payload["supply_barcode"] = result["supply_barcode"]
+    if result.get("stock"):
+      payload["stock"] = result["stock"]
     return Response(payload)
 
 
