@@ -7,6 +7,7 @@ import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { IntakePage } from './pages/IntakePage'
 import { CellInventoryPage } from './pages/CellInventoryPage'
+import { LoginPage } from './pages/LoginPage'
 import { SuppliesPage } from './pages/SuppliesPage'
 
 function AppRoutes() {
