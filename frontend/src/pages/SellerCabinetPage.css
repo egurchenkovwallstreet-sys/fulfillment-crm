@@ -1,0 +1,159 @@
+.seller-cabinet-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0 0 1rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.stock-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.stock-badge--critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.stock-badge--sufficient {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.stock-badge--excess {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.seller-cabinet-table-wrap {
+  margin-top: 0.5rem;
+}
+
+.seller-cabinet-table-scroll {
+  overflow-x: auto;
+}
+
+.seller-cabinet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.seller-cabinet-table th,
+.seller-cabinet-table td {
+  padding: 0.75rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.seller-cabinet-table th {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.seller-cabinet-row--critical {
+  background: rgba(254, 226, 226, 0.35);
+}
+
+.seller-cabinet-row--excess {
+  background: rgba(254, 249, 195, 0.35);
+}
+
+.seller-cabinet-link {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.seller-cabinet-link:hover {
+  text-decoration: underline;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.seller-cabinet-empty {
+  color: #64748b;
+}
+
+.seller-detail-back {
+  margin: 0 0 0.35rem;
+}
+
+.seller-detail-back a {
+  color: #64748b;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.seller-detail-back a:hover {
+  color: #1d4ed8;
+}
+
+.seller-detail-stats {
+  margin-bottom: 1rem;
+}
+
+.seller-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  min-height: 180px;
+  padding-top: 1rem;
+}
+
+.seller-chart__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 48px;
+}
+
+.seller-chart__bar {
+  width: 100%;
+  max-width: 40px;
+  min-height: 4px;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  border-radius: 6px 6px 2px 2px;
+  transition: height 0.2s;
+}
+
+.seller-chart__label {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.seller-chart__value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.form-optional {
+  color: #94a3b8;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.dashboard-sync-msg--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}

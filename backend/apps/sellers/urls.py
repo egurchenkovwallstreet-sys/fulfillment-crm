@@ -5,8 +5,26 @@ from .views import (
   SellerWarehouseSyncView,
   SellerWarehouseToggleView,
 )
+from .views_cabinet import (
+  SellerCabinetBarcodeView,
+  SellerCabinetView,
+  SellerInviteView,
+  SellerManageListCreateView,
+)
 
 urlpatterns = [
+  path("manage/", SellerManageListCreateView.as_view(), name="seller-manage-list"),
+  path(
+    "manage/<int:seller_id>/invite/",
+    SellerInviteView.as_view(),
+    name="seller-invite",
+  ),
+  path("cabinet/", SellerCabinetView.as_view(), name="seller-cabinet"),
+  path(
+    "cabinet/barcode/<str:barcode>/",
+    SellerCabinetBarcodeView.as_view(),
+    name="seller-cabinet-barcode",
+  ),
   path(
     "<int:seller_id>/warehouses/",
     SellerWarehouseListView.as_view(),

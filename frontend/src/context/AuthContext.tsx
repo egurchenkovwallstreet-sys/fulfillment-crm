@@ -14,6 +14,7 @@ type AuthContextValue = {
   user: User | null
   loading: boolean
   login: (username: string, password: string) => Promise<void>
+  setUserFromLogin: (user: User) => void
   logout: () => void
   isAdmin: boolean
   isManager: boolean
@@ -52,6 +53,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user)
   }, [])
 
+  const setUserFromLogin = useCallback((nextUser: User) => {
+    setUser(nextUser)
+  }, [])
+
   const logout = useCallback(() => {
     authApi.logout()
     setUser(null)
@@ -62,12 +67,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       login,
+      setUserFromLogin,
       logout,
       isAdmin: user?.role === 'admin',
       isManager: user?.role === 'manager',
       isSeller: user?.role === 'seller',
     }),
-    [user, loading, login, logout],
+    [user, loading, login, setUserFromLogin, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

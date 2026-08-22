@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 
@@ -56,3 +58,25 @@ class SellerWarehouse(models.Model):
   def __str__(self):
     label = self.name or f"Склад #{self.wb_warehouse_id}"
     return f"{self.seller} · {label}"
+
+
+class SellerInvite(models.Model):
+  """Одноразовая ссылка для регистрации селлера в CRM."""
+
+  seller = models.OneToOneField(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="invite",
+  )
+  token = models.UUIDField("Токен", default=uuid.uuid4, unique=True, editable=False)
+  is_active = models.BooleanField("Активна", default=True)
+  used_at = models.DateTimeField("Использована", null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "Приглашение селлера"
+    verbose_name_plural = "Приглашения селлеров"
+
+  def __str__(self):
+    return f"Invite {self.seller.company_name}"

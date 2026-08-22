@@ -1,0 +1,70 @@
+.sellers-create-panel {
+  margin-bottom: 1rem;
+}
+
+.sellers-create-form {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sellers-create-form input {
+  flex: 1;
+  min-width: 220px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.sellers-table-scroll {
+  overflow-x: auto;
+}
+
+.sellers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.sellers-table th,
+.sellers-table td {
+  padding: 0.75rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.sellers-table th {
+  color: #64748b;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.sellers-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sellers-tag--ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.sellers-tag--warn {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.sellers-tag--muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.btn--sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+}

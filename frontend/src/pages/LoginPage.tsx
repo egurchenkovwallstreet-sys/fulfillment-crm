@@ -4,14 +4,14 @@ import { useAuth } from '../context/AuthContext'
 import './LoginPage.css'
 
 export function LoginPage() {
-  const { user, login } = useAuth()
+  const { user, login, isSeller } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   if (user) {
-    return <Navigate to="/" replace />
+    return <Navigate to={isSeller ? '/cabinet' : '/'} replace />
   }
 
   async function handleSubmit(e: FormEvent) {

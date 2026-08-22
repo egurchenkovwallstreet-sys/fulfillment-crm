@@ -44,8 +44,16 @@ export function AppLayout() {
               Агент печати
             </NavLink>
           )}
-          {isAdmin && <span className="sidebar__link sidebar__link--disabled">Селлеры</span>}
-          {isSeller && <span className="sidebar__link sidebar__link--disabled">Мои остатки</span>}
+          {isAdmin && (
+            <NavLink to="/sellers" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Селлеры
+            </NavLink>
+          )}
+          {isSeller && (
+            <NavLink to="/cabinet" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Мой кабинет
+            </NavLink>
+          )}
         </nav>
         <div className="sidebar__footer">
           <div className="sidebar__user">

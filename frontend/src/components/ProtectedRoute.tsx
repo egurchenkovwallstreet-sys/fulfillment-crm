@@ -28,6 +28,34 @@ export function ManagerRoute() {
   }
 
   if (!isAdmin && !isManager) {
+    return <Navigate to={user.role === 'seller' ? '/cabinet' : '/'} replace />
+  }
+
+  return <Outlet />
+}
+
+export function AdminRoute() {
+  const { user, isAdmin } = useAuth()
+
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (!isAdmin) {
+    return <Navigate to={user.role === 'seller' ? '/cabinet' : '/'} replace />
+  }
+
+  return <Outlet />
+}
+
+export function SellerRoute() {
+  const { user, isSeller } = useAuth()
+
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (!isSeller) {
     return <Navigate to="/" replace />
   }
 
