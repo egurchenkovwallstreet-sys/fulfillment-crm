@@ -55,9 +55,6 @@ if ! python manage.py migrate --noinput --fake-initial; then
   exit 1
 fi
 
-echo "Seeding warehouse cells..."
-python manage.py seed_cells || true
-
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 

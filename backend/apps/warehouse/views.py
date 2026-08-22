@@ -37,8 +37,15 @@ class CellListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
+    seller_id = request.query_params.get("seller_id")
+    if not seller_id:
+      return Response(
+        {"detail": "Укажите seller_id"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
     free_only = request.query_params.get("free") == "1"
-    cells = cells_queryset_ordered(Cell.objects.all())
+    cells = cells_queryset_ordered(Cell.objects.filter(seller_id=seller_id))
     if free_only:
       cells = cells.filter(is_occupied=False)
     return Response(CellSerializer(cells, many=True).data)

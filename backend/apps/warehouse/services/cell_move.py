@@ -18,9 +18,9 @@ def move_product_to_cell(*, product: Product, new_cell_id: int, user) -> Product
     raise CellMoveError("Товар уже в этой ячейке")
 
   try:
-    new_cell = Cell.objects.select_for_update().get(pk=new_cell_id)
+    new_cell = Cell.objects.select_for_update().get(pk=new_cell_id, seller_id=product.seller_id)
   except Cell.DoesNotExist as exc:
-    raise CellMoveError("Ячейка не найдена") from exc
+    raise CellMoveError("Ячейка не найдена у этого селлера") from exc
 
   other_in_cell = (
     Product.objects.select_for_update()

@@ -10,8 +10,9 @@ class PriceGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Cell)
 class CellAdmin(admin.ModelAdmin):
-  list_display = ("number", "is_occupied", "created_at")
-  search_fields = ("number",)
+  list_display = ("seller", "number", "is_occupied", "created_at")
+  list_filter = ("seller", "is_occupied")
+  search_fields = ("number", "seller__company_name")
 
 
 @admin.register(Product)

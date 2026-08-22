@@ -52,13 +52,11 @@ export function IntakePage() {
 
   const loadInitial = useCallback(async () => {
     try {
-      const [sellersData, cellsData, historyData] = await Promise.all([
+      const [sellersData, historyData] = await Promise.all([
         fetchSellers(),
-        fetchFreeCells(),
         fetchIntakeHistory(),
       ])
       setSellers(sellersData)
-      setCells(cellsData)
       setHistory(historyData)
       if (sellersData.length === 1) {
         setSellerId(sellersData[0].id)
@@ -78,9 +76,13 @@ export function IntakePage() {
     if (!sellerId) {
       setWarehouses([])
       setWarehouseId('')
+      setCells([])
       return
     }
     loadWarehouses(Number(sellerId))
+    fetchFreeCells(Number(sellerId))
+      .then(setCells)
+      .catch(() => setCells([]))
   }, [sellerId, loadWarehouses])
 
   async function handleSyncWarehouses() {
@@ -187,7 +189,7 @@ export function IntakePage() {
       setCellId('')
       setVerifiedStockMatch(false)
       const [cellsData, historyData] = await Promise.all([
-        fetchFreeCells(),
+        fetchFreeCells(Number(sellerId)),
         fetchIntakeHistory(),
       ])
       setCells(cellsData)

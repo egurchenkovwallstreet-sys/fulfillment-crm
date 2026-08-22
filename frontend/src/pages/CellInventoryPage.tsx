@@ -35,8 +35,17 @@ export function CellInventoryPage() {
         if (data.length === 1) setSellerId(data[0].id)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
-    fetchAllCells().then(setCells).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!sellerId) {
+      setCells([])
+      return
+    }
+    fetchAllCells(Number(sellerId))
+      .then(setCells)
+      .catch(() => setCells([]))
+  }, [sellerId])
 
   const loadProducts = useCallback(async () => {
     if (!sellerId) {
@@ -96,8 +105,10 @@ export function CellInventoryPage() {
       setMoveProductId(null)
       setMoveCellId('')
       await loadProducts()
-      const [cellsData] = await Promise.all([fetchAllCells()])
-      setCells(cellsData)
+      if (sellerId) {
+        const cellsData = await fetchAllCells(Number(sellerId))
+        setCells(cellsData)
+      }
       if (result.print_cell_label && result.cell_label) {
         setLabelPrompt(result.cell_label)
       }

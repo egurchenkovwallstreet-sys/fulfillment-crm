@@ -32,20 +32,17 @@ class IntakeResult:
   wb_sync: dict | None = None
 
 
-def _assign_cell(cell_mode: str, cell_id: int | None) -> Cell:
+def _assign_cell(seller: Seller, cell_mode: str, cell_id: int | None) -> Cell:
   if cell_mode == "manual":
     if not cell_id:
       raise IntakeError("Укажите ячейку для нового товара")
     try:
-      cell = Cell.objects.select_for_update().get(pk=cell_id)
+      cell = Cell.objects.select_for_update().get(pk=cell_id, seller=seller)
     except Cell.DoesNotExist as exc:
-      raise IntakeError("Ячейка не найдена") from exc
+      raise IntakeError("Ячейка не найдена у этого селлера") from exc
     return cell
 
-  cell = first_free_cell()
-  if not cell:
-    raise IntakeError("Нет свободных ячеек")
-  return cell
+  return first_free_cell(seller)
 
 
 @transaction.atomic
@@ -108,7 +105,7 @@ def perform_intake(
       product.save(update_fields=["quantity", "updated_at"])
       is_new = False
     else:
-      cell = _assign_cell(cell_mode, cell_id)
+      cell = _assign_cell(seller, cell_mode, cell_id)
       marking = lookup_marking_for_barcode(seller, barcode)
       product = Product.objects.create(
         seller=seller,
@@ -125,7 +122,7 @@ def perform_intake(
     product.save(update_fields=["quantity", "updated_at"])
     is_new = False
   else:
-    cell = _assign_cell(cell_mode, cell_id)
+    cell = _assign_cell(seller, cell_mode, cell_id)
     marking = lookup_marking_for_barcode(seller, barcode)
 
     product = Product.objects.create(

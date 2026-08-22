@@ -23,7 +23,13 @@ class PriceGroup(models.Model):
 
 
 class Cell(models.Model):
-  number = models.CharField("Номер ячейки", max_length=50, unique=True)
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="cells",
+    verbose_name="Селлер",
+  )
+  number = models.CharField("Номер ячейки", max_length=50)
   is_occupied = models.BooleanField("Занята", default=False)
   created_at = models.DateTimeField(auto_now_add=True)
 
@@ -31,9 +37,10 @@ class Cell(models.Model):
     verbose_name = "Ячейка"
     verbose_name_plural = "Ячейки"
     ordering = ["number"]
+    unique_together = [("seller", "number")]
 
   def __str__(self):
-    return self.number
+    return f"{self.seller_id}: №{self.number}"
 
 
 class Product(models.Model):

@@ -109,12 +109,12 @@ export function fetchSellers() {
   return apiFetch<Seller[]>('/api/warehouse/sellers/')
 }
 
-export function fetchFreeCells() {
-  return apiFetch<Cell[]>('/api/warehouse/cells/?free=1')
+export function fetchFreeCells(sellerId: number) {
+  return apiFetch<Cell[]>(`/api/warehouse/cells/?seller_id=${sellerId}&free=1`)
 }
 
-export function fetchAllCells() {
-  return apiFetch<Cell[]>('/api/warehouse/cells/')
+export function fetchAllCells(sellerId: number) {
+  return apiFetch<Cell[]>(`/api/warehouse/cells/?seller_id=${sellerId}`)
 }
 
 export function fetchSellerProducts(sellerId: number) {
