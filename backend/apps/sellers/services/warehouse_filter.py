@@ -19,6 +19,36 @@ def get_enabled_wb_warehouse_ids(seller: Seller) -> set[int]:
   )
 
 
+def get_enabled_warehouse_match_ids(seller: Seller) -> set[int]:
+  """ID складов и офисов WB для сопоставления с заказом."""
+  match_ids: set[int] = set()
+  for wh_id, office_id in SellerWarehouse.objects.filter(
+    seller=seller,
+    is_enabled=True,
+  ).values_list("wb_warehouse_id", "office_id"):
+    match_ids.add(wh_id)
+    if office_id:
+      match_ids.add(office_id)
+  return match_ids
+
+
+def order_matches_enabled_warehouse(
+  seller: Seller,
+  warehouse_id: int | None,
+  office_id: int | None,
+  *,
+  match_ids: set[int] | None = None,
+) -> bool:
+  match_ids = match_ids if match_ids is not None else get_enabled_warehouse_match_ids(seller)
+  if not match_ids:
+    return False
+  if warehouse_id is not None and warehouse_id in match_ids:
+    return True
+  if office_id is not None and office_id in match_ids:
+    return True
+  return False
+
+
 def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
   if not seller_has_warehouse_config(seller):
     return True

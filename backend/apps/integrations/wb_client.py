@@ -27,6 +27,8 @@ class WBOrderData:
   wb_order_id: int
   barcode: str
   warehouse_id: int | None = None
+  office_id: int | None = None
+  delivery_type: str = ""
   created_at: datetime | None = None
 
 
@@ -106,19 +108,12 @@ class WBClient:
           continue
         seen_ids.add(wb_id)
 
-        barcode = _extract_barcode(item)
-        if not barcode:
-          result.skipped_no_barcode += 1
-          logger.warning("WB order %s without barcode, skipped", wb_id)
+        parsed = _parse_order_item(item, result)
+        if parsed is None:
+          if not _extract_barcode(item):
+            logger.warning("WB order %s without barcode, skipped", wb_id)
           continue
-        result.orders.append(
-          WBOrderData(
-            wb_order_id=wb_id,
-            barcode=barcode,
-            warehouse_id=_extract_warehouse_id(item),
-            created_at=_extract_created_at(item),
-          )
-        )
+        result.orders.append(parsed)
 
       next_val = payload.get("next", 0) or 0
       try:
@@ -131,6 +126,31 @@ class WBClient:
 
       time.sleep(REQUEST_INTERVAL_SEC)
 
+    return result
+
+  def fetch_fbs_orders_for_period(self, days: int = 30) -> WBFetchResult:
+    """Новые + архив FBS за период (без дублей по ID)."""
+    merged: dict[int, WBOrderData] = {}
+    for source in (self.fetch_new_orders(), self.fetch_recent_orders(days=days)):
+      for order in source.orders:
+        existing = merged.get(order.wb_order_id)
+        if existing is None:
+          merged[order.wb_order_id] = order
+          continue
+        if existing.warehouse_id is None and order.warehouse_id is not None:
+          existing.warehouse_id = order.warehouse_id
+        if existing.office_id is None and order.office_id is not None:
+          existing.office_id = order.office_id
+        if not existing.delivery_type and order.delivery_type:
+          existing.delivery_type = order.delivery_type
+        if existing.created_at is None and order.created_at is not None:
+          existing.created_at = order.created_at
+        if not existing.barcode and order.barcode:
+          existing.barcode = order.barcode
+
+    result = WBFetchResult()
+    result.orders = list(merged.values())
+    result.raw_total = len(result.orders)
     return result
 
   def fetch_order_stickers(
@@ -216,18 +236,10 @@ class WBClient:
           continue
         seen_ids.add(wb_id)
 
-        barcode = _extract_barcode(item)
-        if not barcode:
-          result.skipped_no_barcode += 1
+        parsed = _parse_order_item(item, result)
+        if parsed is None:
           continue
-        result.orders.append(
-          WBOrderData(
-            wb_order_id=wb_id,
-            barcode=barcode,
-            warehouse_id=_extract_warehouse_id(item),
-            created_at=_extract_created_at(item),
-          )
-        )
+        result.orders.append(parsed)
 
       next_val = payload.get("next", 0) or 0
       try:
@@ -405,6 +417,25 @@ class WBClient:
       time.sleep(REQUEST_INTERVAL_SEC)
 
 
+def _parse_order_item(item: dict, result: WBFetchResult) -> WBOrderData | None:
+  wb_id = item.get("id")
+  if wb_id is None:
+    return None
+  wb_id = int(wb_id)
+  barcode = _extract_barcode(item)
+  if not barcode:
+    result.skipped_no_barcode += 1
+    return None
+  return WBOrderData(
+    wb_order_id=wb_id,
+    barcode=barcode,
+    warehouse_id=_extract_warehouse_id(item),
+    office_id=_extract_office_id(item),
+    delivery_type=_extract_delivery_type(item),
+    created_at=_extract_created_at(item),
+  )
+
+
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []
   if skus:
@@ -424,6 +455,22 @@ def _extract_warehouse_id(order_item: dict) -> int | None:
       except (TypeError, ValueError):
         pass
   return None
+
+
+def _extract_office_id(order_item: dict) -> int | None:
+  for key in ("officeId", "office_id"):
+    office_id = order_item.get(key)
+    if office_id is not None:
+      try:
+        return int(office_id)
+      except (TypeError, ValueError):
+        pass
+  return None
+
+
+def _extract_delivery_type(order_item: dict) -> str:
+  value = order_item.get("deliveryType") or order_item.get("delivery_type") or ""
+  return str(value).strip().lower()
 
 
 def _parse_wb_datetime(value) -> datetime | None:

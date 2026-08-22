@@ -24,7 +24,7 @@ from apps.sellers.services.invite import (
   issue_seller_invite,
 )
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
-from apps.sellers.services.wb_order_stats import SellerAnalyticsError
+from apps.sellers.services.wb_order_stats import SellerAnalyticsError, get_enabled_warehouses_meta, load_wb_fbs_stats
 
 User = get_user_model()
 
@@ -142,6 +142,10 @@ class SellerCabinetView(APIView):
         "seller": {"id": seller.id, "company_name": seller.company_name},
         "summary": SellerCabinetSummarySerializer(summary).data,
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
+        "meta": {
+          "enabled_warehouses": get_enabled_warehouses_meta(seller),
+          "source": "wb_api",
+        },
       })
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
