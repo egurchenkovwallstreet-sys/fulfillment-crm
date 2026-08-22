@@ -10,14 +10,6 @@ export const PRINT_SIZES = {
   fbsSticker: '58mm 40mm',
 } as const
 
-function openPrintDocument(html: string): Window | null {
-  const win = window.open('', '_blank')
-  if (!win) return null
-  win.document.write(html)
-  win.document.close()
-  return win
-}
-
 function autoPrintScript(): string {
   return `
     function doPrint() {
