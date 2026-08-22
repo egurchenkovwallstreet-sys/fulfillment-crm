@@ -37,6 +37,14 @@ def filter_orders_for_seller(qs: QuerySet, seller: Seller) -> QuerySet:
   return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
 
 
+def filter_orders_for_seller_cabinet(qs: QuerySet, seller: Seller) -> QuerySet:
+  """Кабинет селлера: только обслуживаемые FBS-склады, без fallback на все заказы."""
+  enabled = get_enabled_wb_warehouse_ids(seller)
+  if not enabled:
+    return qs.none()
+  return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
+
+
 def filter_orders_queryset(qs: QuerySet, *, seller: Seller | None = None) -> QuerySet:
   if seller is not None:
     return filter_orders_for_seller(qs, seller)

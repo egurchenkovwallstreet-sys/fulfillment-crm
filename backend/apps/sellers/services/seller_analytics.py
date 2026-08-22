@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.orders.models import Order
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller_cabinet
 from apps.warehouse.models import Product
 
 SALES_LOOKBACK_DAYS = 7
@@ -23,11 +23,19 @@ def _period_bounds():
   return today, week_start, month_start, sales_start
 
 
+def _fulfillment_barcodes(seller: Seller) -> set[str]:
+  return set(Product.objects.filter(seller=seller).values_list("barcode", flat=True))
+
+
 def _active_orders_qs(seller: Seller):
-  return filter_orders_for_seller(
+  qs = filter_orders_for_seller_cabinet(
     Order.objects.exclude(status=Order.Status.CANCELLED),
     seller,
   )
+  barcodes = _fulfillment_barcodes(seller)
+  if not barcodes:
+    return qs.none()
+  return qs.filter(barcode__in=barcodes)
 
 
 def _order_counts_by_barcode(seller: Seller) -> dict[str, dict[str, int]]:
