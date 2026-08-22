@@ -19,12 +19,21 @@ function openPrintDocument(html: string): Window | null {
 }
 
 function autoPrintScript(): string {
-  return `window.onload = function () { window.print(); window.close(); };`
+  return `
+    function doPrint() {
+      window.focus();
+      window.print();
+      window.onafterprint = function () { window.close(); };
+    }
+    var img = document.querySelector('img');
+    if (img && img.complete) doPrint();
+    else if (img) img.onload = doPrint;
+    else window.onload = doPrint;
+  `
 }
 
-/** Стикер FBS 58×40 мм (PNG base64 от WB API). */
-export function printFbsSticker(base64: string, autoPrint = true): boolean {
-  const win = openPrintDocument(`<!DOCTYPE html>
+function fbsStickerHtml(base64: string, autoPrint: boolean): string {
+  return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
@@ -52,8 +61,32 @@ export function printFbsSticker(base64: string, autoPrint = true): boolean {
   <img src="data:image/png;base64,${base64}" alt="" />
   ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
-</html>`)
-  return win !== null
+</html>`
+}
+
+/** Открыть окно печати в момент нажатия Enter (до async), чтобы Chrome не блокировал диалог. */
+export function openFbsStickerPrintWindow(): Window | null {
+  return window.open('', '_blank')
+}
+
+export function printFbsStickerToWindow(win: Window, base64: string, autoPrint = true): boolean {
+  win.document.open()
+  win.document.write(fbsStickerHtml(base64, autoPrint))
+  win.document.close()
+  if (autoPrint) {
+    win.focus()
+  }
+  return true
+}
+
+/** Стикер FBS 58×40 мм (PNG base64 от WB API). */
+export function printFbsSticker(base64: string, autoPrint = true, printWindow?: Window | null): boolean {
+  if (printWindow) {
+    return printFbsStickerToWindow(printWindow, base64, autoPrint)
+  }
+  const win = openFbsStickerPrintWindow()
+  if (!win) return false
+  return printFbsStickerToWindow(win, base64, autoPrint)
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */

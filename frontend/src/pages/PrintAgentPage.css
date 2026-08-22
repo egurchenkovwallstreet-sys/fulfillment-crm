@@ -1,0 +1,57 @@
+.print-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 720px;
+}
+
+.print-agent__status {
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.print-agent__status--ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.print-agent__status--off {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.print-agent__card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.print-agent__card p,
+.print-agent__card li {
+  color: #475569;
+  line-height: 1.55;
+}
+
+.print-agent__steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.print-agent__code {
+  margin: 0.75rem 0 0;
+  padding: 1rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+.print-agent__hint {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}

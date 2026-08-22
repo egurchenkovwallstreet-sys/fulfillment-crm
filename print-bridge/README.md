@@ -1,39 +1,53 @@
-# Print Bridge — Xprinter 365/370
+# Fulfillment CRM — Агент печати
 
-Локальный сервис на **ПК склада** (Windows). CRM шлёт стикер FBS / QR поставки напрямую на принтер **без диалога Chrome** (< 2 сек).
+Локальная программа для **Windows** на ПК склада. Печать стикеров FBS на Xprinter 365/370 **без диалога Chrome** (< 2 сек).
 
-## Установка (один раз)
+## Для пользователя склада
 
-1. На ПК склада установите [Python 3.11+](https://www.python.org/downloads/) (галочка «Add to PATH»).
-2. Подключите Xprinter 365 или 370 по USB, установите драйвер из комплекта.
-3. В Windows назначьте Xprinter **принтером по умолчанию** (или укажите имя в `config.json`).
-4. Скопируйте папку `print-bridge` с репозитория на ПК (или `git pull` в `C:\fulfillment-crm\print-bridge`).
-5. Запустите **`install.bat`** — создаст venv и поднимет сервис на `http://127.0.0.1:9123`.
+1. В CRM откройте **«Агент печати»** в меню → **Скачать агент (.exe)**.
+2. Запустите `FulfillmentCRM-PrintAgent.exe` — иконка **FF** в трее Windows.
+3. В меню трея включите **«Автозапуск Windows»**.
+4. В **Сборке FBS** в шапке: **«Печать: Xprinter»**.
 
-## Автозапуск
+Настройки: `%APPDATA%\FulfillmentCRM\PrintAgent\config.json`
 
-Создайте ярлык на `install.bat` в папке автозагрузки Windows:
-`Win+R` → `shell:startup`
+Проверка: http://127.0.0.1:9123/health
 
-## Проверка
+## Для разработчика — сборка .exe
 
-Откройте в браузере: http://127.0.0.1:9123/health
+Требуется **Windows** + Python 3.11+.
 
-Должно быть: `{"ok": true, "printer": "Xprinter ..."}`
-
-## CRM
-
-Откройте сборку FBS с этого же ПК. В шапке:
-- **«Печать: Xprinter»** — мост работает
-- **«Печать: Chrome»** — запустите `install.bat`
-
-## config.json
-
-```json
-{
-  "default_printer": "Xprinter XP-365B",
-  "port": 9123
-}
+```bat
+cd print-bridge
+build.bat
 ```
 
-Список принтеров: `GET http://127.0.0.1:9123/printers`
+Результат:
+- `print-bridge\dist\FulfillmentCRM-PrintAgent.exe`
+- копия в `frontend\public\downloads\` для скачивания из CRM
+
+После сборки на сервере: `git pull && bash scripts/deploy.sh` (если exe залит на сервер вручную).
+
+## Разработка без сборки
+
+```bat
+cd print-bridge
+python -m venv venv
+venv\Scripts\pip install -r requirements.txt
+venv\Scripts\python agent_main.py
+```
+
+Или консольный режим API: `venv\Scripts\python server.py`
+
+## API
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| GET | `/health` | Статус, имя принтера |
+| GET | `/printers` | Список принтеров Windows |
+| POST | `/print` | `{ "job_type": "fbs_sticker", "image_base64": "..." }` |
+| GET/POST | `/config` | Настройки |
+
+Типы заданий: `fbs_sticker` (58×40), `supply_sticker` (58×40), `cell_label` (75×120).
+
+Подробнее: `docs/print-agent.md`

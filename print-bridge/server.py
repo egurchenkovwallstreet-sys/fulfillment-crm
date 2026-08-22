@@ -8,9 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
-import os
 import sys
-from pathlib import Path
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -26,9 +24,10 @@ try:
 except ImportError:
   HAS_WIN32 = False
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT / "config.json"
-EXAMPLE_CONFIG = ROOT / "config.example.json"
+from paths import get_config_path, get_example_config_path
+
+CONFIG_PATH = get_config_path()
+EXAMPLE_CONFIG = get_example_config_path()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -181,6 +180,10 @@ def print_job():
   return jsonify({"ok": True, **meta})
 
 
+def run_server(host: str, port: int) -> None:
+  app.run(host=host, port=port, threaded=True, use_reloader=False)
+
+
 def main():
   cfg = load_config()
   host = cfg.get("host", "127.0.0.1")
@@ -191,7 +194,7 @@ def main():
       print(f"Printer: {resolve_printer(None)}")
     except Exception as exc:
       print(f"Printer: not set ({exc})")
-  app.run(host=host, port=port, threaded=True)
+  run_server(host, port)
 
 
 if __name__ == "__main__":

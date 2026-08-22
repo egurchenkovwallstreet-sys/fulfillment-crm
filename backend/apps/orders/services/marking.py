@@ -10,17 +10,55 @@ MARKING_MAX_LEN = 135
 
 _GS = "\u001d"
 
+_GS_ALIASES = (
+  "\\u001D",
+  "\\u001d",
+  "\\x1D",
+  "\\x1d",
+  "{GS}",
+  "{gs}",
+  "[GS]",
+  "[gs]",
+  "<GS>",
+  "<gs>",
+)
+
+# AIM-префикс сканера: ]d2 (DataMatrix), ]C1 (GS1-128) и т.п.
+_AIM_PREFIX = re.compile(r"^\][A-Za-z][0-9]")
+_CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+# Криптохвост ЧЗ: 91 + 4 символа ключа + 92 + подпись
+_CRYPTO_TAIL = re.compile(r"(91[A-Za-z0-9]{4})(92)")
+
+
+def _restore_group_separators(code: str) -> str:
+  """Вернуть GS перед AI 91 и 92, если сканер их выкинул."""
+  if _GS in code:
+    return code
+  if "|" in code and code.count("|") <= 2:
+    return code.replace("|", _GS)
+  restored, n = _CRYPTO_TAIL.subn(_GS + r"\1" + _GS + r"\2", code, count=1)
+  return restored if n else code
+
 
 def normalize_marking_code(raw: str) -> str:
-  """Нормализация DataMatrix: GS-разделители, пробелы."""
+  """Нормализация DataMatrix: GS-разделители, AIM-префикс, пробелы."""
   code = raw.strip()
-  code = code.replace("\\u001D", _GS).replace("\\u001d", _GS)
+  for alias in _GS_ALIASES:
+    code = code.replace(alias, _GS)
+  code = _AIM_PREFIX.sub("", code)
+  code = code.lstrip(_GS)
   code = re.sub(r"\s+", "", code)
-  return code
+  return _restore_group_separators(code)
 
 
 def validate_marking_code(raw: str) -> tuple[str, str | None]:
   """Вернуть (нормализованный код, текст ошибки или None)."""
+  if _CYRILLIC.search(raw):
+    return raw.strip(), (
+      "Сканер печатает русскими буквами. "
+      "Переключите раскладку Windows на ENG и отсканируйте код заново."
+    )
+
   code = normalize_marking_code(raw)
   if not code:
     return "", "Код Честного знака пустой — отсканируйте DataMatrix с упаковки"

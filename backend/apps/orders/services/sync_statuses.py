@@ -23,7 +23,9 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import (
   filter_orders_for_seller,
+  get_enabled_wb_warehouse_ids,
   is_warehouse_enabled,
+  seller_has_warehouse_config,
 )
 
 SYNC_VERSION = "delivery-v11"
@@ -53,6 +55,23 @@ def _build_warehouse_map(
     for order in archive_orders:
       warehouse_map.setdefault(order.wb_order_id, order.warehouse_id)
   return warehouse_map
+
+
+def _backfill_order_warehouse_ids(seller: Seller, warehouse_map: WarehouseMap) -> int:
+  """Подтянуть wb_warehouse_id из карты WB для старых заказов без склада."""
+  if not seller_has_warehouse_config(seller):
+    return 0
+  enabled = get_enabled_wb_warehouse_ids(seller)
+  if not enabled:
+    return 0
+  updated = 0
+  for order in Order.objects.filter(seller=seller, wb_warehouse_id__isnull=True):
+    wh_id = warehouse_map.get(order.wb_order_id)
+    if wh_id and wh_id in enabled:
+      order.wb_warehouse_id = wh_id
+      order.save(update_fields=["wb_warehouse_id", "updated_at"])
+      updated += 1
+  return updated
 
 
 def _collect_quick_poll_order_ids(
@@ -274,6 +293,7 @@ def sync_order_statuses_for_seller(
 ) -> dict:
   new_ids_set = set(new_wb_ids or [])
   warehouse_map = _build_warehouse_map(seller, None if quick else archive_orders)
+  warehouse_backfilled = _backfill_order_warehouse_ids(seller, warehouse_map)
   if quick:
     poll_ids = _collect_quick_poll_order_ids(
       seller,
@@ -346,4 +366,5 @@ def sync_order_statuses_for_seller(
     "reconcile": reconcile,
     "counts": live_counts,
     "db_counts": db_counts,
+    "warehouse_backfilled": warehouse_backfilled,
   }

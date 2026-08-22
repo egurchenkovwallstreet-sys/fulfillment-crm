@@ -29,6 +29,7 @@ import {
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
+  openFbsStickerPrintWindow,
 } from '../utils/printService'
 import { printPickList } from '../utils/pickListPrint'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
@@ -135,20 +136,23 @@ export function AssemblySellerPage() {
     scanRef.current?.focus()
   }
 
-  async function printSticker(base64: string) {
-    const channel = await printFbsSticker(base64)
+  async function printSticker(base64: string, printWindow?: Window | null) {
+    const channel = await printFbsSticker(base64, true, printWindow)
     if (channel === 'bridge') {
       setBridgeOk(true)
     }
     return channel
   }
 
-  async function finishPrint(order: PrintOrder) {
+  async function finishPrint(order: PrintOrder, printWindow?: Window | null) {
     setStickerPreview(order.sticker_file)
     setLastPrinted(order as unknown as AssemblyOrder)
-    const channel = await printSticker(order.sticker_file)
+    const channel = await printSticker(order.sticker_file, printWindow)
     const via = channel === 'bridge' ? 'Xprinter (мост)' : 'Chrome'
-    setSuccess(`Шаг 2: стикер WB #${order.wb_order_id} → ${via}. Передайте в доставку (шаг 4).`)
+    const printHint = channel === 'browser' ? ' Нажмите Enter в диалоге печати.' : ''
+    setSuccess(
+      `Шаг 2: стикер WB #${order.wb_order_id} → ${via}.${printHint} Передайте в доставку (шаг 4).`,
+    )
     resetScanFlow()
     setStage('confirm')
   }
@@ -354,21 +358,24 @@ export function AssemblySellerPage() {
   async function handleBarcodeSubmit(e?: FormEvent) {
     e?.preventDefault()
     if (!id || !scanValue.trim()) return
+    const printWindow = openFbsStickerPrintWindow()
     setError('')
     setSuccess('')
     setLoading(true)
     try {
       const result = await scanOrderBarcode(id, scanValue.trim())
       if (result.action === 'await_marking') {
+        printWindow?.close()
         setPendingOrder(result.order)
         setScanPhase('marking')
         setScanValue('')
         setSuccess('Шаг 3: отсканируйте код Честного знака (DataMatrix)')
       } else {
-        await finishPrint(result.order)
+        await finishPrint(result.order, printWindow)
       }
       await load()
     } catch (err) {
+      printWindow?.close()
       setError(err instanceof Error ? err.message : 'Ошибка сканирования баркода')
     } finally {
       setLoading(false)
@@ -380,14 +387,20 @@ export function AssemblySellerPage() {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
     if (!id || !pendingOrder || !code) return
-    setError('')
+    const printWindow = openFbsStickerPrintWindow()
     setSuccess('')
+    if (!printWindow) {
+      setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
+    } else {
+      setError('')
+    }
     setLoading(true)
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
-      await finishPrint(result.order)
+      await finishPrint(result.order, printWindow)
       await load()
     } catch (err) {
+      printWindow?.close()
       setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
       markingRef.current?.focus()
     } finally {
@@ -481,7 +494,11 @@ export function AssemblySellerPage() {
               </span>
             )}
             {bridgeOk === false && (
-              <span className="assembly-bridge assembly-bridge--off"> · Печать: Chrome (запустите print-bridge)</span>
+              <span className="assembly-bridge assembly-bridge--off">
+                {' '}
+                · Печать: Chrome (
+                <Link to="/print-agent">установите агент</Link>)
+              </span>
             )}
           </p>
         </div>
@@ -752,7 +769,7 @@ export function AssemblySellerPage() {
                     </div>
                   )}
                   <p className="assembly-scan-hint">
-                    Отсканируйте DataMatrix. После привязки в WB стикер FBS напечатается автоматически.
+                    Отсканируйте DataMatrix. После привязки в WB откроется печать стикера — нажмите Enter.
                   </p>
                   <form onSubmit={handleMarkingSubmit}>
                     <input
@@ -800,7 +817,7 @@ export function AssemblySellerPage() {
                 </div>
               )}
 
-              {stickerPreview && scanPhase === 'barcode' && (
+              {stickerPreview && (
                 <div className="assembly-sticker-preview">
                   <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
                   <button type="button" className="btn btn--secondary" onClick={() => void printSticker(stickerPreview)}>

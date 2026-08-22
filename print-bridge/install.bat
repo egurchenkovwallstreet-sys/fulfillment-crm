@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
+echo Fulfillment CRM - Print Agent (dev mode)
+echo For production .exe run build.bat
+echo.
+
 if not exist venv\Scripts\python.exe (
   echo Creating virtual environment...
   python -m venv venv
@@ -12,18 +16,13 @@ if not exist venv\Scripts\python.exe (
   )
 )
 
-echo Installing dependencies...
-venv\Scripts\pip install -r requirements.txt
+venv\Scripts\pip install -q -r requirements.txt
 if errorlevel 1 pause & exit /b 1
 
-if not exist config.json (
-  copy config.example.json config.json >nul
-  echo Created config.json — set default_printer to your Xprinter name.
+if not exist "%APPDATA%\FulfillmentCRM\PrintAgent\config.json" (
+  if not exist config.json copy config.example.json config.json >nul
 )
 
-echo.
-echo Starting print bridge on http://127.0.0.1:9123
-echo Set this printer as default in Windows or edit config.json
-echo.
-venv\Scripts\python server.py
+echo Starting agent with tray icon...
+venv\Scripts\python agent_main.py --tray
 pause
