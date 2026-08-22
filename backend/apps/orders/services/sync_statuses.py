@@ -23,9 +23,7 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import (
   filter_orders_for_seller,
-  get_enabled_wb_warehouse_ids,
   is_warehouse_enabled,
-  seller_has_warehouse_config,
 )
 
 SYNC_VERSION = "delivery-v11"
@@ -58,19 +56,15 @@ def _build_warehouse_map(
 
 
 def _backfill_order_warehouse_ids(seller: Seller, warehouse_map: WarehouseMap) -> int:
-  """Подтянуть wb_warehouse_id из карты WB для старых заказов без склада."""
-  if not seller_has_warehouse_config(seller):
-    return 0
-  enabled = get_enabled_wb_warehouse_ids(seller)
-  if not enabled:
-    return 0
+  """Подтянуть wb_warehouse_id из карты WB для заказов без склада."""
   updated = 0
   for order in Order.objects.filter(seller=seller, wb_warehouse_id__isnull=True):
     wh_id = warehouse_map.get(order.wb_order_id)
-    if wh_id and wh_id in enabled:
-      order.wb_warehouse_id = wh_id
-      order.save(update_fields=["wb_warehouse_id", "updated_at"])
-      updated += 1
+    if wh_id is None:
+      continue
+    order.wb_warehouse_id = wh_id
+    order.save(update_fields=["wb_warehouse_id", "updated_at"])
+    updated += 1
   return updated
 
 
@@ -193,9 +187,10 @@ def reconcile_stale_new_orders(
     if data:
       supplier = (data.get("supplierStatus") or "").strip()
       wb = (data.get("wbStatus") or "").strip()
-      if supplier != WB_SUPPLIER_NEW:
-        if apply_wb_status_to_order(order, supplier, wb):
-          cleared += 1
+      if supplier == WB_SUPPLIER_NEW:
+        supplier = WB_SUPPLIER_ASSEMBLY
+      if apply_wb_status_to_order(order, supplier, wb):
+        cleared += 1
       continue
 
     order.wb_supplier_status = WB_SUPPLIER_DELIVERY
@@ -310,7 +305,7 @@ def sync_order_statuses_for_seller(
 
   if not poll_ids:
     counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
-    save_wb_counts_to_seller(seller, counts)
+    save_wb_counts_to_seller(seller, counts, new_order_ids=[])
     return {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": counts}
 
   try:
@@ -349,7 +344,8 @@ def sync_order_statuses_for_seller(
   if quick and seller.wb_counts_synced_at and live_counts["in_delivery"] < seller.wb_count_delivery:
     live_counts["in_delivery"] = seller.wb_count_delivery
 
-  save_wb_counts_to_seller(seller, live_counts)
+  scoped_new_ids = sorted(new_ids_set & scoped_ids)
+  save_wb_counts_to_seller(seller, live_counts, new_order_ids=scoped_new_ids)
   db_counts = get_seller_stage_counts(seller)
 
   return {

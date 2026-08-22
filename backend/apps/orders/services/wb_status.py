@@ -170,19 +170,26 @@ def compute_live_wb_counts(
   return counts
 
 
-def save_wb_counts_to_seller(seller, counts: dict[str, int]) -> None:
+def save_wb_counts_to_seller(
+  seller,
+  counts: dict[str, int],
+  *,
+  new_order_ids: list[int] | None = None,
+) -> None:
   from django.utils import timezone
 
   seller.wb_count_new = counts.get("new", 0)
   seller.wb_count_assembly = counts.get("in_picking", 0)
   seller.wb_count_delivery = counts.get("in_delivery", 0)
   seller.wb_counts_synced_at = timezone.now()
-  seller.save(
-    update_fields=[
-      "wb_count_new",
-      "wb_count_assembly",
-      "wb_count_delivery",
-      "wb_counts_synced_at",
-      "updated_at",
-    ]
-  )
+  update_fields = [
+    "wb_count_new",
+    "wb_count_assembly",
+    "wb_count_delivery",
+    "wb_counts_synced_at",
+    "updated_at",
+  ]
+  if new_order_ids is not None:
+    seller.wb_new_order_ids = new_order_ids
+    update_fields.append("wb_new_order_ids")
+  seller.save(update_fields=update_fields)

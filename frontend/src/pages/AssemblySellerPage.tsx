@@ -204,6 +204,7 @@ export function AssemblySellerPage() {
     try {
       await toggleSellerWarehouse(id, warehouseId, isEnabled)
       setSuccess(isEnabled ? 'Склад включён' : 'Склад выключен')
+      await syncOrders(id, 'quick')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка переключения склада')

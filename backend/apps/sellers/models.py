@@ -9,6 +9,11 @@ class Seller(models.Model):
   wb_count_assembly = models.PositiveIntegerField("WB: на сборке", default=0)
   wb_count_delivery = models.PositiveIntegerField("WB: в доставке", default=0)
   wb_counts_synced_at = models.DateTimeField("WB: счётчики обновлены", null=True, blank=True)
+  wb_new_order_ids = models.JSONField(
+    "WB: ID новых заказов (последний sync)",
+    default=list,
+    blank=True,
+  )
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 

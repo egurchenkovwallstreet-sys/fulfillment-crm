@@ -326,6 +326,8 @@ class AssemblySellerDetailView(APIView):
     )
     if stage in WB_STAGE_QUERIES:
       orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())
+      if stage == "new" and seller.wb_new_order_ids:
+        orders_qs = orders_qs.filter(wb_order_id__in=seller.wb_new_order_ids)
     elif stage:
       orders_qs = orders_qs.filter(status=stage)
     else:

@@ -30,6 +30,14 @@ def _link_product(seller: Seller, barcode: str) -> Product | None:
   return Product.objects.filter(seller=seller, barcode=barcode).first()
 
 
+def _touch_order_warehouse(seller: Seller, wb_order) -> None:
+  if wb_order.warehouse_id is None:
+    return
+  Order.objects.filter(seller=seller, wb_order_id=wb_order.wb_order_id).update(
+    wb_warehouse_id=wb_order.warehouse_id,
+  )
+
+
 def _import_wb_orders(
   seller: Seller,
   wb_orders: list,
@@ -43,6 +51,7 @@ def _import_wb_orders(
   skipped_warehouse = 0
 
   for wb_order in wb_orders:
+    _touch_order_warehouse(seller, wb_order)
     if not is_warehouse_enabled(seller, wb_order.warehouse_id):
       skipped_warehouse += 1
       continue

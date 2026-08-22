@@ -411,10 +411,11 @@ def _extract_barcode(order_item: dict) -> str:
 
 
 def _extract_warehouse_id(order_item: dict) -> int | None:
-  wh_id = order_item.get("warehouseId")
-  if wh_id is None:
-    return None
-  try:
-    return int(wh_id)
-  except (TypeError, ValueError):
-    return None
+  for key in ("warehouseId", "warehouse_id"):
+    wh_id = order_item.get(key)
+    if wh_id is not None:
+      try:
+        return int(wh_id)
+      except (TypeError, ValueError):
+        pass
+  return None
