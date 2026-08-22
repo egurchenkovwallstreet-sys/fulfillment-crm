@@ -355,6 +355,50 @@ class WBClient:
     )
     return payload if isinstance(payload, dict) else {}
 
+  def fetch_warehouse_stocks_by_skus(
+    self,
+    warehouse_id: int,
+    skus: list[str],
+  ) -> list[dict]:
+    """POST /api/v3/stocks/{warehouseId} — остатки по баркодам (SKU)."""
+    if not skus:
+      return []
+
+    stocks: list[dict] = []
+    batch_size = 1000
+    for i in range(0, len(skus), batch_size):
+      batch = skus[i : i + batch_size]
+      payload = self._request(
+        "POST",
+        f"/api/v3/stocks/{warehouse_id}",
+        json={"skus": batch},
+      )
+      if isinstance(payload, dict):
+        stocks.extend(payload.get("stocks") or [])
+      elif isinstance(payload, list):
+        stocks.extend(payload)
+      time.sleep(REQUEST_INTERVAL_SEC)
+    return stocks
+
+  def update_warehouse_stocks(
+    self,
+    warehouse_id: int,
+    stocks: list[dict],
+  ) -> None:
+    """PUT /api/v3/stocks/{warehouseId} — установить остатки."""
+    if not stocks:
+      return
+
+    batch_size = 1000
+    for i in range(0, len(stocks), batch_size):
+      batch = stocks[i : i + batch_size]
+      self._request(
+        "PUT",
+        f"/api/v3/stocks/{warehouse_id}",
+        json={"stocks": batch},
+      )
+      time.sleep(REQUEST_INTERVAL_SEC)
+
 
 def _extract_barcode(order_item: dict) -> str:
   skus = order_item.get("skus") or []

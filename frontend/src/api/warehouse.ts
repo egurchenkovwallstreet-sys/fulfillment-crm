@@ -23,10 +23,14 @@ export type Product = {
   requires_marking: boolean
 }
 
+export type StockMode = 'intake' | 'sync_from_wb'
+
 export type IntakeLookup = {
   exists: boolean
   barcode?: string
   product?: Product
+  wb_stock?: number | null
+  warehouse_name?: string
   marking?: {
     requires_marking: boolean
     wb_found: boolean
@@ -48,8 +52,11 @@ export type IntakeHistoryItem = {
 
 export type IntakePayload = {
   seller_id: number
+  wb_warehouse_id: number
   barcode: string
   quantity: number
+  stock_mode: StockMode
+  verified_stock_match?: boolean
   cell_mode: 'auto' | 'manual'
   cell_id?: number | null
   name?: string
@@ -68,6 +75,16 @@ export type IntakeResponse = {
   product: Product
   print_cell_label?: boolean
   cell_label?: CellLabelData | null
+  stock_mode?: StockMode
+  wb_sync?: {
+    wb_warehouse_id?: number
+    warehouse_name?: string
+    previous_wb_amount?: number
+    new_wb_amount?: number
+    added?: number
+    wb_amount?: number
+    mode?: string
+  } | null
 }
 
 export type MoveCellResponse = {
@@ -122,11 +139,14 @@ export function moveProductToCell(productId: number, cellId: number) {
   })
 }
 
-export function lookupBarcode(sellerId: number, barcode: string) {
+export function lookupBarcode(sellerId: number, barcode: string, warehouseId?: number) {
   const params = new URLSearchParams({
     seller_id: String(sellerId),
     barcode,
   })
+  if (warehouseId) {
+    params.set('wb_warehouse_id', String(warehouseId))
+  }
   return apiFetch<IntakeLookup>(`/api/warehouse/intake/lookup/?${params}`)
 }
 

@@ -57,8 +57,14 @@ class StockOperationSerializer(serializers.ModelSerializer):
 
 class IntakeSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField()
+  wb_warehouse_id = serializers.IntegerField()
   barcode = serializers.CharField(max_length=100)
-  quantity = serializers.IntegerField(min_value=1)
+  quantity = serializers.IntegerField(min_value=0, default=0)
+  stock_mode = serializers.ChoiceField(
+    choices=["intake", "sync_from_wb"],
+    default="intake",
+  )
+  verified_stock_match = serializers.BooleanField(default=False)
   cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
   cell_id = serializers.IntegerField(required=False, allow_null=True)
   name = serializers.CharField(required=False, allow_blank=True, max_length=500)
@@ -67,6 +73,27 @@ class IntakeSerializer(serializers.Serializer):
     if not Seller.objects.filter(pk=value, is_active=True).exists():
       raise serializers.ValidationError("Селлер не найден или неактивен")
     return value
+
+  def validate(self, attrs):
+    from apps.sellers.models import SellerWarehouse
+
+    seller_id = attrs["seller_id"]
+    wh_id = attrs["wb_warehouse_id"]
+    if not SellerWarehouse.objects.filter(pk=wh_id, seller_id=seller_id).exists():
+      raise serializers.ValidationError({"wb_warehouse_id": "Склад WB не найден у этого селлера"})
+
+    stock_mode = attrs.get("stock_mode", "intake")
+    if stock_mode == "sync_from_wb":
+      if not attrs.get("verified_stock_match"):
+        raise serializers.ValidationError({
+          "verified_stock_match": (
+            "Подтвердите, что на фулфилменте пересчитали остатки и они совпадают с ЛК WB"
+          ),
+        })
+    elif attrs.get("quantity", 0) < 1:
+      raise serializers.ValidationError({"quantity": "Укажите количество от 1"})
+
+    return attrs
 
 
 class MoveCellSerializer(serializers.Serializer):
