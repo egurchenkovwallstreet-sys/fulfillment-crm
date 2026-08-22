@@ -25,7 +25,11 @@ import {
   resolveWorkflowStep,
   type ScanPhase,
 } from '../utils/assemblyWorkflow'
-import { printFbsSticker, printSupplySticker } from '../utils/browserPrint'
+import {
+  printFbsSticker,
+  printSupplySticker,
+  refreshPrintBridgeStatus,
+} from '../utils/printService'
 import { printPickList } from '../utils/pickListPrint'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import './AssemblyPage.css'
@@ -60,6 +64,8 @@ export function AssemblySellerPage() {
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
+  const [bridgePrinter, setBridgePrinter] = useState('')
 
   const load = useCallback(async () => {
     if (!id) return
@@ -73,6 +79,15 @@ export function AssemblySellerPage() {
       setLoading(false)
     }
   }, [id, stage])
+
+  useEffect(() => {
+    refreshPrintBridgeStatus()
+      .then((health) => {
+        setBridgeOk(health.ok)
+        setBridgePrinter(health.printer || '')
+      })
+      .catch(() => setBridgeOk(false))
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -120,15 +135,20 @@ export function AssemblySellerPage() {
     scanRef.current?.focus()
   }
 
-  function printSticker(base64: string) {
-    printFbsSticker(base64)
+  async function printSticker(base64: string) {
+    const channel = await printFbsSticker(base64)
+    if (channel === 'bridge') {
+      setBridgeOk(true)
+    }
+    return channel
   }
 
-  function finishPrint(order: PrintOrder) {
+  async function finishPrint(order: PrintOrder) {
     setStickerPreview(order.sticker_file)
     setLastPrinted(order as unknown as AssemblyOrder)
-    setSuccess(`Шаг 2 выполнен: стикер заказа WB #${order.wb_order_id} отправлен на печать. Передайте в доставку (шаг 4).`)
-    printSticker(order.sticker_file)
+    const channel = await printSticker(order.sticker_file)
+    const via = channel === 'bridge' ? 'Xprinter (мост)' : 'Chrome'
+    setSuccess(`Шаг 2: стикер WB #${order.wb_order_id} → ${via}. Передайте в доставку (шаг 4).`)
     resetScanFlow()
     setStage('confirm')
   }
@@ -246,8 +266,8 @@ export function AssemblySellerPage() {
         msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
       }
       if (result.supply_barcode_file) {
-        printSupplySticker(result.supply_barcode_file)
-        msg += ', QR поставки отправлен на печать'
+        const channel = await printSupplySticker(result.supply_barcode_file)
+        msg += channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
       }
       setSuccess(msg)
       setLastPrinted(null)
@@ -283,7 +303,7 @@ export function AssemblySellerPage() {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
         if (result.supply_barcode_file) {
-          printSupplySticker(result.supply_barcode_file)
+          await printSupplySticker(result.supply_barcode_file)
         }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
@@ -307,7 +327,7 @@ export function AssemblySellerPage() {
     setError('')
     try {
       const result = await reprintOrderSticker(id, orderId)
-      printSticker(result.order.sticker_file)
+      await printSticker(result.order.sticker_file)
       setSuccess(`Стикер заказа WB #${result.order.wb_order_id} отправлен на печать`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось распечатать стикер')
@@ -345,7 +365,7 @@ export function AssemblySellerPage() {
         setScanValue('')
         setSuccess('Шаг 3: отсканируйте код Честного знака (DataMatrix)')
       } else {
-        finishPrint(result.order)
+        await finishPrint(result.order)
       }
       await load()
     } catch (err) {
@@ -365,7 +385,7 @@ export function AssemblySellerPage() {
     setLoading(true)
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
-      finishPrint(result.order)
+      await finishPrint(result.order)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
@@ -452,7 +472,18 @@ export function AssemblySellerPage() {
             <Link to="/assembly">Сборка FBS</Link> / {data.seller.company_name}
           </p>
           <h1>{data.seller.company_name}</h1>
-          <p>Полный цикл: лист подбора → скан → стикер → ЧЗ → доставка{syncing ? ' · обновление WB…' : ''}</p>
+          <p>
+            Полный цикл: лист подбора → скан → стикер → ЧЗ → доставка
+            {syncing ? ' · обновление WB…' : ''}
+            {bridgeOk === true && (
+              <span className="assembly-bridge assembly-bridge--ok">
+                {' '}· Печать: {bridgePrinter || 'Xprinter'}
+              </span>
+            )}
+            {bridgeOk === false && (
+              <span className="assembly-bridge assembly-bridge--off"> · Печать: Chrome (запустите print-bridge)</span>
+            )}
+          </p>
         </div>
         <div className="topbar__actions">
           <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing}>
@@ -772,7 +803,7 @@ export function AssemblySellerPage() {
               {stickerPreview && scanPhase === 'barcode' && (
                 <div className="assembly-sticker-preview">
                   <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
-                  <button type="button" className="btn btn--secondary" onClick={() => printSticker(stickerPreview)}>
+                  <button type="button" className="btn btn--secondary" onClick={() => void printSticker(stickerPreview)}>
                     Печать ещё раз
                   </button>
                 </div>
