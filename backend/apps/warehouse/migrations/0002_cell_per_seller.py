@@ -49,6 +49,8 @@ def migrate_cells_per_seller(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+  atomic = False
+
   dependencies = [
     ("sellers", "0001_initial"),
     ("warehouse", "0001_initial"),
