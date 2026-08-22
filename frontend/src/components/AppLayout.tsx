@@ -39,11 +39,6 @@ export function AppLayout() {
               Сборка FBS
             </NavLink>
           )}
-          {(isAdmin || isManager) && (
-            <NavLink to="/supplies" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
-              Поставки
-            </NavLink>
-          )}
           {isAdmin && <span className="sidebar__link sidebar__link--disabled">Селлеры</span>}
           {isSeller && <span className="sidebar__link sidebar__link--disabled">Мои остатки</span>}
         </nav>
