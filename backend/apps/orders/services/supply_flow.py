@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -9,6 +10,7 @@ from apps.integrations.wb_client import WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
 from apps.orders.services.wb_status import (
+  WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
   WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
@@ -252,12 +254,26 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   }
 
 
-def count_orders_ready_for_assembly(seller: Seller) -> int:
+def new_stage_orders_queryset(seller: Seller) -> QuerySet:
+  """Заказы вкладки «Новые» на странице сборки — как в ЛК WB + готовые к отправке."""
   qs = filter_orders_for_seller(
     Order.objects.filter(seller=seller),
     seller,
   )
-  return sum(1 for order in qs if order_can_send_to_assembly(order))
+  qs = qs.filter(WB_STAGE_QUERIES["new"]())
+  if seller.wb_new_order_ids:
+    qs = qs.filter(wb_order_id__in=seller.wb_new_order_ids)
+  return qs.exclude(
+    status__in=[
+      Order.Status.CANCELLED,
+      Order.Status.SHIPPED,
+      Order.Status.IN_DELIVERY,
+    ],
+  )
+
+
+def count_orders_ready_for_assembly(seller: Seller) -> int:
+  return new_stage_orders_queryset(seller).count()
 
 
 def send_orders_to_assembly_bulk(
@@ -267,10 +283,7 @@ def send_orders_to_assembly_bulk(
   user=None,
 ) -> dict:
   """Отправить на сборку все подходящие заказы (или выбранные) — по одному supply на заказ."""
-  qs = filter_orders_for_seller(
-    Order.objects.filter(seller=seller).select_related("product"),
-    seller,
-  )
+  qs = new_stage_orders_queryset(seller).select_related("product")
   if order_ids is not None:
     qs = qs.filter(pk__in=order_ids)
 

@@ -9,6 +9,7 @@ from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
 from apps.orders.services.assembly import AssemblyError
+from apps.orders.services.supply_flow import new_stage_orders_queryset
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from .services.supply_sync import sync_supplies_from_wb
 from apps.sellers.services.warehouse_filter import filter_orders_queryset
@@ -321,18 +322,21 @@ class AssemblySellerDetailView(APIView):
     tab_counts = get_seller_wb_tab_counts(seller)
     counts = {**stage_counts, **tab_counts}
     stage = request.query_params.get("stage", "")
-    orders_qs = filter_orders_queryset(
-      Order.objects.filter(seller=seller).select_related("product", "product__cell"),
-      seller=seller,
-    )
-    if stage in WB_STAGE_QUERIES:
-      orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())
-      if stage == "new" and seller.wb_new_order_ids:
-        orders_qs = orders_qs.filter(wb_order_id__in=seller.wb_new_order_ids)
-    elif stage:
-      orders_qs = orders_qs.filter(status=stage)
+    if stage == "new":
+      orders_qs = new_stage_orders_queryset(seller).select_related(
+        "product", "product__cell",
+      )
     else:
-      orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
+      orders_qs = filter_orders_queryset(
+        Order.objects.filter(seller=seller).select_related("product", "product__cell"),
+        seller=seller,
+      )
+      if stage in WB_STAGE_QUERIES:
+        orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())
+      elif stage:
+        orders_qs = orders_qs.filter(status=stage)
+      else:
+        orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
     orders = orders_qs.order_by("-created_at")[:300]
 

@@ -20,7 +20,6 @@ import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
   buildDeliveryConfirmMessage,
-  isWbNew,
   orderBlockReason,
   orderCanDeliver,
   resolveWorkflowStep,
@@ -43,7 +42,6 @@ const STAGES = [
 ] as const
 
 function showAssemblyButton(order: AssemblyOrder, currentStage: string): boolean {
-  if (currentStage === 'new') return isWbNew(order)
   return order.can_send_to_assembly ?? false
 }
 
@@ -569,14 +567,14 @@ export function AssemblySellerPage() {
   function stageCount(key: string): number {
     if (key === 'confirm') return counts.in_picking ?? 0
     if (key === 'complete') return counts.in_delivery ?? 0
+    if (key === 'new') return data.assembly_eligible ?? counts.new ?? 0
     return counts.new ?? 0
   }
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
-  const newTabOrdersCount = stage === 'new'
-    ? data.orders.filter((order) => isWbNew(order)).length
+  const bulkAssemblyCount = stage === 'new'
+    ? (data.assembly_eligible ?? data.orders.length)
     : 0
-  const bulkAssemblyCount = data.assembly_eligible ?? newTabOrdersCount
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -614,9 +612,9 @@ export function AssemblySellerPage() {
           <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing || refreshing}>
             Обновить из WB
           </button>
-          {stage === 'new' && (counts.new ?? 0) > 0 && (
+          {stage === 'new' && bulkAssemblyCount > 0 && (
             <button type="button" className="btn btn--secondary" onClick={handleStartAssembly} disabled={loading}>
-              Лист подбора ({counts.new})
+              Лист подбора ({bulkAssemblyCount})
             </button>
           )}
           {data.active_pick_list && (
