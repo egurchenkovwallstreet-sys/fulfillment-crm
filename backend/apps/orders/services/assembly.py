@@ -209,8 +209,8 @@ def bind_marking_and_print(
   marking_code: str,
   *,
   user=None,
-) -> Order:
-  """Шаг 2: скан ЧЗ → привязка в WB → MARKED → печать стикера."""
+) -> dict:
+  """Шаг 2: скан ЧЗ → привязка в WB → ожидание проверки WB."""
   try:
     order = Order.objects.select_related("product").get(
       pk=order_id,
@@ -242,10 +242,12 @@ def bind_marking_and_print(
   if validation_error:
     raise AssemblyError(validation_error, code="invalid_marking_code")
 
-  duplicate = Order.objects.filter(
-    marking_code=normalized,
-    marking_bound=True,
-  ).exclude(pk=order.pk).exists()
+  duplicate = (
+    Order.objects.filter(marking_code=normalized)
+    .exclude(pk=order.pk)
+    .exclude(marking_verify_status="error")
+    .exists()
+  )
   if duplicate:
     raise AssemblyError(
       "Этот код ЧЗ уже использован для другого заказа в CRM. "
@@ -267,27 +269,37 @@ def bind_marking_and_print(
     raise AssemblyError(parse_wb_marking_error(exc), code="wb_bind_failed") from exc
 
   order.marking_code = normalized
-  order.marking_bound = True
-  order.status = Order.Status.MARKED
-  order.save(update_fields=["marking_code", "marking_bound", "status", "updated_at"])
+  order.marking_bound = False
+  order.marking_verify_status = "pending"
+  order.marking_verify_error = ""
+  order.status = Order.Status.ASSEMBLED
+  order.save(
+    update_fields=[
+      "marking_code",
+      "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
+      "status",
+      "updated_at",
+    ]
+  )
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ привязан к заказу WB #{order.wb_order_id}",
+    message=f"ЧЗ отправлен в WB, ожидание проверки — заказ #{order.wb_order_id}",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
-  AuditLog.objects.create(
-    user=user,
-    seller=seller,
-    action_type=AuditLog.ActionType.LABEL_PRINT,
-    message=f"Печать стикера после ЧЗ, заказ WB #{order.wb_order_id}",
-    details={"order_id": order.id, "barcode": order.barcode},
-  )
-
-  return order
+  return {
+    "action": "await_verification",
+    "order": order,
+    "message": (
+      f"Код ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
+      "Ожидайте проверку в «Честном знаке»…"
+    ),
+  }
 
 
 def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
@@ -301,6 +313,7 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
     Order.Status.IN_PICKING,
     Order.Status.ASSEMBLED,
     Order.Status.LABEL_PRINTED,
+    Order.Status.MARKED,
   ):
     raise AssemblyError(
       f"Заказ WB #{order.wb_order_id} нельзя сбросить "
@@ -308,7 +321,7 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
       code="invalid_status",
     )
 
-  if order.marking_bound and order.marking_code:
+  if order.marking_code:
     client = _get_client(seller)
     try:
       client.delete_order_meta(order.wb_order_id, key="sgtin")
@@ -321,9 +334,18 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
 
   order.marking_code = ""
   order.marking_bound = False
+  order.marking_verify_status = ""
+  order.marking_verify_error = ""
   order.status = Order.Status.IN_PICKING
   order.save(
-    update_fields=["marking_code", "marking_bound", "status", "updated_at"],
+    update_fields=[
+      "marking_code",
+      "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
+      "status",
+      "updated_at",
+    ],
   )
 
   AuditLog.objects.create(

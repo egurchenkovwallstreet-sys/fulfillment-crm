@@ -16,6 +16,7 @@ from apps.orders.services.wb_status import (
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.orders.services.marking_verification import order_marking_ready
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 from apps.warehouse.services.stock_deduction import (
   StockDeductionError,
@@ -60,7 +61,7 @@ def order_can_send_to_delivery(order: Order) -> bool:
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
     return False
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    return order.marking_bound
+    return order_marking_ready(order)
   return True
 
 
@@ -326,7 +327,12 @@ def order_delivery_block_reason(order: Order) -> str | None:
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
     return "Нет стикера FBS — отсканируйте в сборке"
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    if not order.marking_bound:
+    verify_status = (order.marking_verify_status or "").strip()
+    if verify_status == "pending":
+      return "Проверка ЧЗ в WB…"
+    if verify_status == "error":
+      return order.marking_verify_error or "ЧЗ отклонён WB — замените товар"
+    if not order_marking_ready(order):
       return "Нужен Честный знак"
   return "Не готов к доставке"
 

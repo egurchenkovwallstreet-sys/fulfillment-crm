@@ -29,6 +29,7 @@ from .serializers import (
   SellerAssemblyCountersSerializer,
   SupplyBulkDeliverSerializer,
   SupplySerializer,
+  VerifyMarkingSerializer,
 )
 from .services.assembly import (
   AssemblyError,
@@ -40,7 +41,7 @@ from .services.assembly import (
   scan_order_barcode,
   start_assembly,
 )
-from .services.pick_list import PickListError, generate_pick_list
+from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
   count_orders_ready_for_assembly,
@@ -421,7 +422,7 @@ class AssemblyScanPrintView(APIView):
 
 
 class AssemblyBindMarkingView(APIView):
-  """Скан DataMatrix → привязка ЧЗ в WB → печать стикера."""
+  """Скан DataMatrix → привязка ЧЗ в WB → ожидание проверки."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
@@ -433,22 +434,66 @@ class AssemblyBindMarkingView(APIView):
     serializer.is_valid(raise_exception=True)
 
     try:
-      order = bind_marking_and_print(
+      result = bind_marking_and_print(
         seller,
         serializer.validated_data["order_id"],
         serializer.validated_data["marking_code"],
         user=request.user,
       )
+      verify_marking_orders(
+        seller,
+        [serializer.validated_data["order_id"]],
+        user=request.user,
+      )
+      result["order"] = Order.objects.get(pk=serializer.validated_data["order_id"])
     except AssemblyError as exc:
       return Response(
         {"detail": str(exc), "code": exc.code},
         status=status.HTTP_400_BAD_REQUEST,
       )
 
+    order_data = OrderPrintSerializer(result["order"]).data
+    payload = {
+      "success": True,
+      "action": result["action"],
+      "order": order_data,
+    }
+    if result.get("message"):
+      payload["message"] = result["message"]
+    return Response(payload)
+
+
+class AssemblyVerifyMarkingView(APIView):
+  """Опрос статуса проверки ЧЗ в WB."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = VerifyMarkingSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    order_ids = serializer.validated_data.get("order_ids") or []
+
+    try:
+      results = verify_marking_orders(seller, order_ids or None, user=request.user)
+    except AssemblyError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    orders_by_id = {
+      order.id: OrderPrintSerializer(order).data
+      for order in Order.objects.filter(seller=seller, pk__in=[r["order_id"] for r in results])
+    }
+    for item in results:
+      item["order"] = orders_by_id.get(item["order_id"])
+
     return Response({
       "success": True,
-      "action": "print",
-      "order": OrderPrintSerializer(order).data,
+      "results": results,
     })
 
 

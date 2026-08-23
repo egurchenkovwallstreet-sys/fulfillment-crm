@@ -31,6 +31,8 @@ export interface AssemblyOrder {
   sticker_part_a: string
   sticker_part_b: string
   marking_bound: boolean
+  marking_verify_status?: string
+  marking_verify_error?: string
   requires_marking: boolean
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
@@ -69,6 +71,9 @@ export interface PrintOrder {
   has_sticker: boolean
   requires_marking: boolean
   marking_bound: boolean
+  marking_verify_status?: string
+  marking_verify_error?: string
+  cell_number?: string
   can_send_to_delivery: boolean
 }
 
@@ -82,8 +87,24 @@ export interface ScanBarcodeResult {
 
 export interface BindMarkingResult {
   success: boolean
-  action: 'print'
+  action: 'await_verification' | 'print'
+  message?: string
   order: PrintOrder
+}
+
+export interface MarkingVerifyItem {
+  order_id: number
+  wb_order_id: number
+  status: 'pending' | 'verified' | 'error'
+  decision: string
+  error: string
+  marking_bound: boolean
+  order?: PrintOrder
+}
+
+export interface VerifyMarkingResult {
+  success: boolean
+  results: MarkingVerifyItem[]
 }
 
 export interface ReplaceOrderResult {
@@ -160,6 +181,13 @@ export function bindMarking(sellerId: number, orderId: number, markingCode: stri
   return apiFetch<BindMarkingResult>(`/api/orders/assembly/sellers/${sellerId}/bind-marking/`, {
     method: 'POST',
     body: JSON.stringify({ order_id: orderId, marking_code: markingCode }),
+  })
+}
+
+export function verifyMarking(sellerId: number, orderIds?: number[]) {
+  return apiFetch<VerifyMarkingResult>(`/api/orders/assembly/sellers/${sellerId}/verify-marking/`, {
+    method: 'POST',
+    body: JSON.stringify({ order_ids: orderIds ?? [] }),
   })
 }
 

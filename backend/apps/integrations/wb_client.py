@@ -340,6 +340,21 @@ class WBClient:
       params={"key": key},
     )
 
+  def fetch_orders_meta(self, order_ids: list[int]) -> list[dict]:
+    """POST /api/marketplace/v3/orders/meta — метаданные и статусы проверки ЧЗ."""
+    if not order_ids:
+      return []
+    payload = self._request(
+      "POST",
+      "/api/marketplace/v3/orders/meta",
+      json={"orders": order_ids[:100]},
+    )
+    if isinstance(payload, dict):
+      return payload.get("orders") or []
+    if isinstance(payload, list):
+      return payload
+    return []
+
   def create_supply(self, name: str) -> str:
     """POST /api/v3/supplies — создать поставку FBS."""
     payload = self._request("POST", "/api/v3/supplies", json={"name": name})

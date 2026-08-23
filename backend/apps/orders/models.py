@@ -58,6 +58,13 @@ class Order(models.Model):
   sticker_fetched_at = models.DateTimeField(null=True, blank=True)
   marking_code = models.CharField("Код Честного знака", max_length=500, blank=True)
   marking_bound = models.BooleanField("Маркировка привязана", default=False)
+  marking_verify_status = models.CharField(
+    "Статус проверки ЧЗ в WB",
+    max_length=20,
+    blank=True,
+    db_index=True,
+  )
+  marking_verify_error = models.TextField("Ошибка проверки ЧЗ", blank=True)
   wb_created_at = models.DateTimeField("Дата заказа WB", null=True, blank=True, db_index=True)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)

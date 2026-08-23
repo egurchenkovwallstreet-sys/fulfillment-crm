@@ -10,6 +10,7 @@ import {
   sendAllOrdersToAssembly,
   sendOrderToDelivery,
   startAssembly,
+  verifyMarking,
   type AssemblyOrder,
   type AssemblySellerDetail,
   type PrintOrder,
@@ -71,6 +72,8 @@ export function AssemblySellerPage() {
   const syncInFlightRef = useRef(false)
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
+  const [verifyingOrderId, setVerifyingOrderId] = useState<number | null>(null)
+  const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -138,6 +141,64 @@ export function AssemblySellerPage() {
       scanRef.current?.focus()
     }
   }, [scanPhase])
+
+  useEffect(() => {
+    if (!id || !verifyingOrderId) return
+
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const result = await verifyMarking(id, [verifyingOrderId])
+        if (cancelled) return
+        const item = result.results[0]
+        if (!item?.order) return
+
+        if (item.status === 'verified') {
+          setVerifyingOrderId(null)
+          const printWindow = openFbsStickerPrintWindow()
+          await finishPrint(item.order, printWindow)
+          await load({ silent: true })
+        } else if (item.status === 'error') {
+          setVerifyingOrderId(null)
+          setMarkingErrorOrder(item.order as unknown as AssemblyOrder)
+          resetScanFlow()
+          await load({ silent: true })
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Ошибка проверки ЧЗ')
+        }
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(() => void poll(), 6000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [id, verifyingOrderId])
+
+  useEffect(() => {
+    if (!id || !data || stage !== 'confirm') return
+    const pendingIds = data.orders
+      .filter((order) => order.marking_verify_status === 'pending')
+      .map((order) => order.id)
+    if (pendingIds.length === 0) return
+
+    const refreshPending = async () => {
+      try {
+        await verifyMarking(id, pendingIds)
+        await load({ silent: true })
+      } catch {
+        // Фоновый опрос — не перекрываем основной UI ошибками
+      }
+    }
+
+    void refreshPending()
+    const interval = window.setInterval(() => void refreshPending(), 8000)
+    return () => window.clearInterval(interval)
+  }, [id, data, stage, load])
 
   function resetScanFlow() {
     setScanPhase('barcode')
@@ -407,22 +468,47 @@ export function AssemblySellerPage() {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
     if (!id || !pendingOrder || !code) return
-    const printWindow = openFbsStickerPrintWindow()
     setSuccess('')
-    if (!printWindow) {
-      setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
-    } else {
-      setError('')
-    }
+    setError('')
     setLoading(true)
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
-      await finishPrint(result.order, printWindow)
-      await load()
+      const order = result.order
+
+      if (order.marking_verify_status === 'verified') {
+        const printWindow = openFbsStickerPrintWindow()
+        if (!printWindow) {
+          setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
+        }
+        await finishPrint(order, printWindow)
+      } else if (order.marking_verify_status === 'error') {
+        setMarkingErrorOrder(order as unknown as AssemblyOrder)
+        resetScanFlow()
+      } else {
+        setSuccess(result.message || 'Проверка ЧЗ в WB…')
+        setVerifyingOrderId(order.id)
+        resetScanFlow()
+      }
+      await load({ silent: true })
     } catch (err) {
-      printWindow?.close()
       setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
       markingRef.current?.focus()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleReplaceFromErrorModal() {
+    if (!id || !markingErrorOrder) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await replaceOrderItem(id, markingErrorOrder.id)
+      setSuccess(result.message)
+      setMarkingErrorOrder(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка замены товара')
     } finally {
       setLoading(false)
     }
@@ -673,7 +759,18 @@ export function AssemblySellerPage() {
                     <td>{order.cell_number || '—'}</td>
                     <td>
                       {order.requires_marking ? (
-                        order.marking_bound ? (
+                        order.marking_verify_status === 'pending' ? (
+                          <span className="marking-badge marking-badge--pending" title="Проверка ЧЗ в WB">⏳</span>
+                        ) : order.marking_verify_status === 'error' ? (
+                          <button
+                            type="button"
+                            className="marking-badge marking-badge--error"
+                            title={order.marking_verify_error || 'ЧЗ отклонён'}
+                            onClick={() => setMarkingErrorOrder(order)}
+                          >
+                            ✕
+                          </button>
+                        ) : order.marking_bound ? (
                           <span className="marking-badge marking-badge--ok">✓</span>
                         ) : (
                           <span className="marking-badge marking-badge--required">ЧЗ</span>
@@ -795,7 +892,7 @@ export function AssemblySellerPage() {
                     </div>
                   )}
                   <p className="assembly-scan-hint">
-                    Отсканируйте DataMatrix. После привязки в WB откроется печать стикера — нажмите Enter.
+                    Отсканируйте DataMatrix. WB проверит код в «Честном знаке» — после подтверждения откроется печать стикера.
                   </p>
                   <form onSubmit={handleMarkingSubmit}>
                     <input
@@ -873,6 +970,35 @@ export function AssemblySellerPage() {
           )}
         </div>
       </div>
+
+      {markingErrorOrder && (
+        <div className="assembly-marking-modal-backdrop" role="presentation" onClick={() => setMarkingErrorOrder(null)}>
+          <div
+            className="assembly-marking-modal assembly-marking-modal--error"
+            role="alertdialog"
+            aria-labelledby="marking-error-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="marking-error-title">Ошибка проверки Честного знака</h2>
+            <p className="assembly-marking-modal__message">
+              {markingErrorOrder.marking_verify_error || 'WB отклонил код ЧЗ. Замените товар и отсканируйте другой экземпляр.'}
+            </p>
+            <dl className="assembly-marking-modal__details">
+              <div><dt>Заказ WB</dt><dd>#{markingErrorOrder.wb_order_id}</dd></div>
+              <div><dt>Баркод</dt><dd><code>{markingErrorOrder.barcode}</code></dd></div>
+              <div><dt>Ячейка</dt><dd>{markingErrorOrder.cell_number || '—'}</dd></div>
+            </dl>
+            <div className="assembly-marking-modal__actions">
+              <button type="button" className="btn btn--primary" onClick={() => void handleReplaceFromErrorModal()} disabled={loading}>
+                Заменить товар
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={() => setMarkingErrorOrder(null)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

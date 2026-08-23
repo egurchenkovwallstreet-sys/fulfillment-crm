@@ -33,9 +33,13 @@ export function isWbNew(order: AssemblyOrder): boolean {
 }
 
 export function orderStickerPrinted(order: AssemblyOrder): boolean {
-  return order.status === 'label_printed'
-    || (order.status === 'marked' && order.marking_bound)
-    || order.has_sticker
+  if (order.requires_marking) {
+    if (order.marking_verify_status === 'pending') return false
+    if (order.marking_verify_status === 'error') return false
+    if (order.marking_verify_status === 'verified') return order.marking_bound
+    return order.status === 'marked' && order.marking_bound
+  }
+  return order.status === 'label_printed' || order.has_sticker
 }
 
 export function orderCanDeliver(order: AssemblyOrder): boolean {
@@ -52,6 +56,12 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
     return 'Отсканируйте баркод и распечатайте стикер FBS'
   }
   if (order.requires_marking && !order.marking_bound) {
+    if (order.marking_verify_status === 'pending') {
+      return 'Проверка ЧЗ в WB…'
+    }
+    if (order.marking_verify_status === 'error') {
+      return order.marking_verify_error || 'ЧЗ отклонён WB — замените товар'
+    }
     return 'Привяжите Честный знак (DataMatrix)'
   }
   if (order.warehouse_quantity == null) {

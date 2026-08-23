@@ -53,6 +53,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "sticker_part_a",
       "sticker_part_b",
       "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
       "requires_marking",
       "can_send_to_assembly",
       "can_send_to_delivery",
@@ -84,6 +86,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
 
 class OrderPrintSerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
+  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
   requires_marking = serializers.SerializerMethodField()
   marking_bound = serializers.BooleanField(read_only=True)
   can_send_to_delivery = serializers.SerializerMethodField()
@@ -94,6 +97,7 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "id",
       "wb_order_id",
       "barcode",
+      "cell_number",
       "status",
       "status_display",
       "sticker_file",
@@ -102,6 +106,8 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "has_sticker",
       "requires_marking",
       "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
       "can_send_to_delivery",
     )
 
@@ -220,6 +226,14 @@ class BindMarkingSerializer(serializers.Serializer):
   marking_code = serializers.CharField(max_length=500)
 
 
+class VerifyMarkingSerializer(serializers.Serializer):
+  order_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=True,
+  )
+
+
 class ReplaceOrderSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 
@@ -246,6 +260,8 @@ class SupplyOrderSerializer(serializers.ModelSerializer):
       "status_display",
       "has_sticker",
       "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
       "requires_marking",
       "can_send_to_delivery",
       "block_reason",

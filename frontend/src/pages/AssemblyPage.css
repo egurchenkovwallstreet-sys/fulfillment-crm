@@ -320,6 +320,82 @@
   color: #15803d;
 }
 
+.marking-badge--pending {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.marking-badge--error {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.assembly-marking-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.assembly-marking-modal {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 480px;
+  width: 100%;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+}
+
+.assembly-marking-modal--error {
+  border: 2px solid #ef4444;
+}
+
+.assembly-marking-modal h2 {
+  margin: 0 0 0.75rem;
+  color: #b91c1c;
+  font-size: 1.15rem;
+}
+
+.assembly-marking-modal__message {
+  margin: 0 0 1rem;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.assembly-marking-modal__details {
+  margin: 0 0 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.assembly-marking-modal__details div {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.assembly-marking-modal__details dt {
+  min-width: 5.5rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.assembly-marking-modal__details dd {
+  margin: 0;
+}
+
+.assembly-marking-modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .assembly-scan-panel--marking {
   color: #b45309;
 }
