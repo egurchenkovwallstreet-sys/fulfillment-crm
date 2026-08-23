@@ -56,7 +56,7 @@ export function SellerCabinetPage() {
       <header className="topbar">
         <div>
           <h1>Кабинет селлера</h1>
-          <p>{data?.seller.company_name ?? 'FBS-заказы с обслуживаемых складов · остатки на фулфилменте'}</p>
+          <p>{data?.seller.company_name ?? 'FBS-заказы · Statistics API WB · остатки на фулфилменте'}</p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
           {loading ? 'Обновление…' : 'Обновить'}

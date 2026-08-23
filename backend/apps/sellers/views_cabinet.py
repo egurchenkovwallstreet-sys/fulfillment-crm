@@ -149,7 +149,7 @@ class SellerCabinetView(APIView):
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
         "meta": {
           "enabled_warehouses": get_enabled_warehouses_meta(seller),
-          "source": "wb_api",
+          "source": "wb_statistics_api",
           "timezone": "Europe/Moscow",
         },
       })

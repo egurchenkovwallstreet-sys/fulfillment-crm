@@ -1,4 +1,4 @@
-"""Статистика FBS-заказов селлера напрямую из WB API."""
+"""Статистика FBS-заказов селлера — Statistics API WB (как сводный отчёт в ЛК)."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -6,33 +6,28 @@ from datetime import date, timedelta
 
 from django.utils import timezone
 
-from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
+from apps.integrations.wb_client import WBApiError
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
-from apps.orders.models import Order
+from apps.integrations.wb_statistics_client import (
+  WBStatisticsClient,
+  is_fbs_statistics_row,
+  parse_statistics_order_date,
+)
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import (
   calendar_month_start,
   calendar_week_bounds,
   days_back_to_cover_previous_month,
   previous_month_bounds,
-  previous_week_bounds,
   today_local,
 )
-from apps.sellers.services.warehouse_filter import (
-  get_enabled_warehouse_match_ids,
-  order_matches_enabled_warehouse,
-)
+from apps.sellers.services.warehouse_filter import seller_has_warehouse_config
 
 SALES_LOOKBACK_DAYS = 7
-WB_FETCH_DAYS_MIN = 30
 
 
 class SellerAnalyticsError(Exception):
   pass
-
-
-def _wb_fetch_days() -> int:
-  return max(WB_FETCH_DAYS_MIN, days_back_to_cover_previous_month())
 
 
 def _period_metric(current: int, previous: int) -> dict:
@@ -59,85 +54,144 @@ def _period_metric(current: int, previous: int) -> dict:
   }
 
 
-def _order_local_date(order: WBOrderData) -> date | None:
-  if not order.created_at:
-    return None
-  return timezone.localtime(order.created_at).date()
-
-
-def _is_fbs_order(order: WBOrderData) -> bool:
-  if not order.delivery_type:
-    return True
-  return order.delivery_type == "fbs"
-
-
-def _enrich_orders_from_db(seller: Seller, orders: list[WBOrderData]) -> None:
-  need_ids = [
-    order.wb_order_id
-    for order in orders
-    if order.warehouse_id is None or order.created_at is None
-  ]
-  if not need_ids:
-    return
-
-  db_map = dict(
-    Order.objects.filter(seller=seller, wb_order_id__in=need_ids).values_list(
-      "wb_order_id",
-      "wb_warehouse_id",
-      "wb_created_at",
-    )
-  )
-
-  for order in orders:
-    row = db_map.get(order.wb_order_id)
-    if not row:
-      continue
-    wb_warehouse_id, wb_created_at = row
-    if order.warehouse_id is None and wb_warehouse_id is not None:
-      order.warehouse_id = wb_warehouse_id
-    if order.created_at is None and wb_created_at is not None:
-      order.created_at = wb_created_at
-
-
-def _fetch_wb_fbs_orders(seller: Seller) -> list[WBOrderData]:
+def _get_statistics_client(seller: Seller) -> WBStatisticsClient:
   if not seller.wb_api_token_encrypted:
     raise SellerAnalyticsError("Токен WB не настроен для этого селлера")
   try:
     token = decrypt_token(seller.wb_api_token_encrypted)
   except TokenCryptoError as exc:
     raise SellerAnalyticsError("Не удалось расшифровать токен WB") from exc
+  return WBStatisticsClient(token)
 
-  match_ids = get_enabled_warehouse_match_ids(seller)
-  if not match_ids:
-    raise SellerAnalyticsError("Не выбраны обслуживаемые склады WB")
 
+def _enabled_warehouse_names(seller: Seller) -> list[str]:
+  return [
+    (name or "").strip().lower()
+    for name in SellerWarehouse.objects.filter(seller=seller, is_enabled=True).values_list("name", flat=True)
+    if (name or "").strip()
+  ]
+
+
+def _statistics_row_matches_enabled_warehouse(seller: Seller, row: dict, *, enabled_names: list[str]) -> bool:
+  if not seller_has_warehouse_config(seller):
+    return True
+  warehouse_name = (row.get("warehouseName") or "").strip().lower()
+  if not warehouse_name:
+    return False
+  for name in enabled_names:
+    if name in warehouse_name or warehouse_name in name:
+      return True
+  return False
+
+
+def _order_identity(row: dict) -> str:
+  srid = (row.get("srid") or "").strip()
+  if srid:
+    return srid
+  g_number = (row.get("gNumber") or "").strip()
+  if g_number:
+    return g_number
+  return ""
+
+
+def _fetch_statistics_orders(seller: Seller, date_from: date) -> list[dict]:
+  client = _get_statistics_client(seller)
+  date_from_param = f"{date_from.isoformat()}T00:00:00"
   try:
-    client = WBClient(token)
-    wb_orders = client.fetch_fbs_orders_for_period(days=_wb_fetch_days()).orders
+    return list(client.iter_supplier_orders(date_from_param))
   except WBApiError as exc:
+    if exc.status_code == 401:
+      raise SellerAnalyticsError(
+        "Токен WB не имеет доступа к Statistics API. "
+        "Включите категорию «Статистика» при создании токена."
+      ) from exc
     raise SellerAnalyticsError(str(exc)) from exc
 
-  _enrich_orders_from_db(seller, wb_orders)
 
-  seen: set[int] = set()
-  orders: list[WBOrderData] = []
-  for order in wb_orders:
-    if order.wb_order_id in seen:
+def load_wb_fbs_stats(seller: Seller) -> tuple[dict, dict[str, dict[str, int]], dict[str, dict[date, int]]]:
+  """
+  Счётчики заказов как в сводном отчёте WB («Количество заказов»).
+  Источник: GET /api/v1/supplier/orders, уникальные srid, FBS (склад продавца).
+  """
+  today = today_local()
+  week_start, week_end = calendar_week_bounds(today)
+  month_start = calendar_month_start(today)
+  yesterday = today - timedelta(days=1)
+  prev_week_start, prev_week_end = previous_week_bounds(today)
+  prev_month_start, prev_month_end = previous_month_bounds(today)
+  sales_start_date = today - timedelta(days=SALES_LOOKBACK_DAYS - 1)
+
+  fetch_from = previous_month_bounds(today)[0]
+  enabled_names = _enabled_warehouse_names(seller)
+  rows = _fetch_statistics_orders(seller, fetch_from)
+
+  period_srids: dict[str, set[str]] = {
+    "day": set(),
+    "day_prev": set(),
+    "week": set(),
+    "week_prev": set(),
+    "month": set(),
+    "month_prev": set(),
+  }
+  barcode_period_srids: dict[str, dict[str, set[str]]] = defaultdict(
+    lambda: {"day": set(), "week": set(), "month": set()},
+  )
+  daily_by_barcode: dict[str, dict[date, int]] = defaultdict(lambda: defaultdict(int))
+
+  for row in rows:
+    if not is_fbs_statistics_row(row):
       continue
-    seen.add(order.wb_order_id)
-    if not _is_fbs_order(order):
+    if row.get("isCancel"):
       continue
-    if not order_matches_enabled_warehouse(
-      seller,
-      order.warehouse_id,
-      order.office_id,
-      match_ids=match_ids,
-    ):
+    if not _statistics_row_matches_enabled_warehouse(seller, row, enabled_names=enabled_names):
       continue
-    if not order.barcode or not order.created_at:
+
+    order_dt = parse_statistics_order_date(row.get("date"))
+    if order_dt is None:
       continue
-    orders.append(order)
-  return orders
+    order_date = timezone.localtime(order_dt).date()
+    identity = _order_identity(row)
+    if not identity:
+      continue
+
+    barcode = str(row.get("barcode") or "").strip()
+
+    if order_date == today:
+      period_srids["day"].add(identity)
+      if barcode:
+        barcode_period_srids[barcode]["day"].add(identity)
+    if order_date == yesterday:
+      period_srids["day_prev"].add(identity)
+    if week_start <= order_date <= week_end:
+      period_srids["week"].add(identity)
+      if barcode:
+        barcode_period_srids[barcode]["week"].add(identity)
+    if prev_week_start <= order_date <= prev_week_end:
+      period_srids["week_prev"].add(identity)
+    if month_start <= order_date <= today:
+      period_srids["month"].add(identity)
+      if barcode:
+        barcode_period_srids[barcode]["month"].add(identity)
+    if prev_month_start <= order_date <= prev_month_end:
+      period_srids["month_prev"].add(identity)
+    if barcode and order_date >= sales_start_date:
+      daily_by_barcode[barcode][order_date] += 1
+
+  by_barcode = {
+    barcode: {
+      "day": len(stats["day"]),
+      "week": len(stats["week"]),
+      "month": len(stats["month"]),
+    }
+    for barcode, stats in barcode_period_srids.items()
+  }
+
+  summary = {
+    "orders_day": _period_metric(len(period_srids["day"]), len(period_srids["day_prev"])),
+    "orders_week": _period_metric(len(period_srids["week"]), len(period_srids["week_prev"])),
+    "orders_month": _period_metric(len(period_srids["month"]), len(period_srids["month_prev"])),
+  }
+  return summary, by_barcode, daily_by_barcode
 
 
 def get_enabled_warehouses_meta(seller: Seller) -> list[dict]:
@@ -149,60 +203,3 @@ def get_enabled_warehouses_meta(seller: Seller) -> list[dict]:
     }
     for wh in SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name")
   ]
-
-
-def load_wb_fbs_stats(seller: Seller) -> tuple[dict, dict[str, dict[str, int]], dict[str, dict[date, int]]]:
-  today = today_local()
-  week_start, week_end = calendar_week_bounds(today)
-  month_start = calendar_month_start(today)
-  yesterday = today - timedelta(days=1)
-  prev_week_start, prev_week_end = previous_week_bounds(today)
-  prev_month_start, prev_month_end = previous_month_bounds(today)
-  sales_start = timezone.now() - timedelta(days=SALES_LOOKBACK_DAYS)
-  sales_start_date = timezone.localdate(sales_start)
-
-  counts = {
-    "day": 0,
-    "day_prev": 0,
-    "week": 0,
-    "week_prev": 0,
-    "month": 0,
-    "month_prev": 0,
-  }
-  by_barcode: dict[str, dict[str, int]] = {}
-  daily_by_barcode: dict[str, dict[date, int]] = defaultdict(lambda: defaultdict(int))
-
-  for order in _fetch_wb_fbs_orders(seller):
-    order_date = _order_local_date(order)
-    if order_date is None:
-      continue
-
-    if order_date == today:
-      counts["day"] += 1
-    if order_date == yesterday:
-      counts["day_prev"] += 1
-    if week_start <= order_date <= week_end:
-      counts["week"] += 1
-    if prev_week_start <= order_date <= prev_week_end:
-      counts["week_prev"] += 1
-    if month_start <= order_date <= today:
-      counts["month"] += 1
-    if prev_month_start <= order_date <= prev_month_end:
-      counts["month_prev"] += 1
-
-    stats = by_barcode.setdefault(order.barcode, {"day": 0, "week": 0, "month": 0})
-    if order_date == today:
-      stats["day"] += 1
-    if week_start <= order_date <= week_end:
-      stats["week"] += 1
-    if month_start <= order_date <= today:
-      stats["month"] += 1
-    if order_date >= sales_start_date:
-      daily_by_barcode[order.barcode][order_date] += 1
-
-  summary = {
-    "orders_day": _period_metric(counts["day"], counts["day_prev"]),
-    "orders_week": _period_metric(counts["week"], counts["week_prev"]),
-    "orders_month": _period_metric(counts["month"], counts["month_prev"]),
-  }
-  return summary, by_barcode, daily_by_barcode
