@@ -120,6 +120,27 @@ class SellerCabinetSummarySerializer(serializers.Serializer):
   total_stock = serializers.IntegerField()
 
 
+class SellerWbStageCountsSerializer(serializers.Serializer):
+  new = serializers.IntegerField()
+  in_picking = serializers.IntegerField()
+  in_delivery = serializers.IntegerField()
+
+
+class SellerWeeklyShipmentDaySerializer(serializers.Serializer):
+  date = serializers.DateField()
+  weekday = serializers.CharField()
+  orders = serializers.IntegerField()
+
+
+class SellerWeeklyShipmentsSerializer(serializers.Serializer):
+  week_start = serializers.DateField()
+  week_end = serializers.DateField()
+  today = serializers.DateField()
+  total = serializers.IntegerField()
+  supplies_count = serializers.IntegerField()
+  days = SellerWeeklyShipmentDaySerializer(many=True)
+
+
 class SellerBarcodeAnalyticsSerializer(serializers.Serializer):
   barcode = serializers.CharField()
   name = serializers.CharField()

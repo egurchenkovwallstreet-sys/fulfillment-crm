@@ -16,6 +16,8 @@ from apps.sellers.serializers import (
   SellerInviteSerializer,
   SellerManageSerializer,
   SellerRegisterSerializer,
+  SellerWeeklyShipmentsSerializer,
+  SellerWbStageCountsSerializer,
 )
 from apps.sellers.services.invite import (
   deactivate_invite,
@@ -138,14 +140,17 @@ class SellerCabinetView(APIView):
     if not seller:
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
     try:
-      summary, items, _, _ = build_seller_cabinet_payload(seller)
+      summary, items, wb_stages, weekly_shipments = build_seller_cabinet_payload(seller)
       return Response({
         "seller": {"id": seller.id, "company_name": seller.company_name},
         "summary": SellerCabinetSummarySerializer(summary).data,
+        "wb_stages": SellerWbStageCountsSerializer(wb_stages).data,
+        "weekly_shipments": SellerWeeklyShipmentsSerializer(weekly_shipments).data,
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
         "meta": {
           "enabled_warehouses": get_enabled_warehouses_meta(seller),
           "source": "wb_api",
+          "timezone": "Europe/Moscow",
         },
       })
     except SellerAnalyticsError as exc:

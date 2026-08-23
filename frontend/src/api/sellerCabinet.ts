@@ -8,6 +8,27 @@ export type SellerCabinetSummary = {
   total_stock: number
 }
 
+export type SellerWbStageCounts = {
+  new: number
+  in_picking: number
+  in_delivery: number
+}
+
+export type SellerWeeklyShipmentDay = {
+  date: string
+  weekday: string
+  orders: number
+}
+
+export type SellerWeeklyShipments = {
+  week_start: string
+  week_end: string
+  today: string
+  total: number
+  supplies_count: number
+  days: SellerWeeklyShipmentDay[]
+}
+
 export type StockLevel = 'critical' | 'sufficient' | 'excess'
 
 export type SellerBarcodeItem = {
@@ -25,7 +46,14 @@ export type SellerBarcodeItem = {
 export type SellerCabinetResponse = {
   seller: { id: number; company_name: string }
   summary: SellerCabinetSummary
+  wb_stages: SellerWbStageCounts
+  weekly_shipments: SellerWeeklyShipments
   items: SellerBarcodeItem[]
+  meta?: {
+    enabled_warehouses: { wb_warehouse_id: number; name: string }[]
+    source: string
+    timezone?: string
+  }
 }
 
 export type SellerBarcodeDetail = SellerBarcodeItem & {

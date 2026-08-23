@@ -5,7 +5,9 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.orders.services.assembly import get_seller_wb_tab_counts
 from apps.sellers.models import Seller
+from apps.sellers.services.seller_billing_stats import load_weekly_shipped_orders
 from apps.sellers.services.wb_order_stats import (
   SALES_LOOKBACK_DAYS,
   load_wb_fbs_stats,
@@ -78,7 +80,9 @@ def build_seller_cabinet_payload(seller: Seller) -> tuple[dict, list[dict], dict
     ),
   }
   items = _build_items(seller, order_counts, daily_by_barcode)
-  return summary, items, order_counts, daily_by_barcode
+  wb_stages = get_seller_wb_tab_counts(seller)
+  weekly_shipments = load_weekly_shipped_orders(seller)
+  return summary, items, wb_stages, weekly_shipments
 
 
 def build_seller_summary(seller: Seller) -> dict:
@@ -87,12 +91,17 @@ def build_seller_summary(seller: Seller) -> dict:
 
 
 def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[dict]:
-  _, _, order_counts, daily_by_barcode = build_seller_cabinet_payload(seller)
+  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller)
   return _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
 
 
+def _load_cabinet_order_stats(seller: Seller) -> tuple[dict, dict, dict, dict]:
+  order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
+  return order_summary, order_counts, daily_by_barcode, {}
+
+
 def build_barcode_detail(seller: Seller, barcode: str) -> dict | None:
-  _, _, order_counts, daily_by_barcode = build_seller_cabinet_payload(seller)
+  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller)
   items = _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
   if not items:
     return None
