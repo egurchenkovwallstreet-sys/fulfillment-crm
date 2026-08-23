@@ -6,7 +6,7 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order
 from apps.orders.services.sync_statuses import sync_order_statuses_for_seller
-from apps.orders.services.wb_status import WB_SUPPLIER_NEW
+from apps.orders.services.wb_status import WB_SUPPLIER_NEW, apply_wb_status_to_order
 from apps.sellers.models import Seller
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.sellers.services.warehouse_filter import is_warehouse_enabled
@@ -89,6 +89,8 @@ def _import_wb_orders(
       wb_order_id=wb_order.wb_order_id,
       defaults=defaults,
     )
+    if mark_as_new:
+      apply_wb_status_to_order(order, WB_SUPPLIER_NEW, order.wb_status or "")
     if was_created:
       created += 1
     else:

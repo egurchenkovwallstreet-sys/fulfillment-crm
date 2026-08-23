@@ -26,7 +26,7 @@ from apps.sellers.services.warehouse_filter import (
   is_warehouse_enabled,
 )
 
-SYNC_VERSION = "delivery-v11"
+SYNC_VERSION = "delivery-v12"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]
@@ -135,6 +135,31 @@ def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> in
   return updated
 
 
+def repair_incoherent_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
+  """
+  Исправить рассинхрон CRM: wb_supplier_status=new, но CRM-статус финальный.
+  Такое возникало из-за shipped_missing — заказ помечался SHIPPED без обновления WB-полей.
+  """
+  if not new_wb_ids:
+    return 0
+  now = timezone.now()
+  return (
+    filter_orders_for_seller(
+      Order.objects.filter(
+        seller=seller,
+        wb_order_id__in=new_wb_ids,
+        wb_supplier_status=WB_SUPPLIER_NEW,
+        status__in=[
+          Order.Status.CANCELLED,
+          Order.Status.IN_DELIVERY,
+          Order.Status.SHIPPED,
+        ],
+      ),
+      seller,
+    ).update(status=Order.Status.NEW, updated_at=now)
+  )
+
+
 def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
   """Заказы из GET /orders/new — supplierStatus new в CRM + сброс устаревшего CRM-статуса."""
   if not new_wb_ids:
@@ -148,14 +173,8 @@ def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
     wb_supplier_status=WB_SUPPLIER_NEW,
     updated_at=now,
   )
-  reset = qs.filter(
-    status__in=[
-      Order.Status.CANCELLED,
-      Order.Status.IN_DELIVERY,
-      Order.Status.SHIPPED,
-    ],
-  ).update(status=Order.Status.NEW, updated_at=now)
-  return marked + reset
+  repaired = repair_incoherent_new_orders(seller, new_wb_ids)
+  return marked + repaired
 
 
 def reconcile_stale_new_orders(
@@ -242,13 +261,6 @@ def reconcile_wb_orders_for_seller(
     status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
   ).update(status=Order.Status.SHIPPED, updated_at=now)
 
-  shipped_missing = 0
-  if missing_ids:
-    shipped_missing = Order.objects.filter(
-      seller=seller,
-      wb_order_id__in=missing_ids,
-    ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
-
   delivery_waiting = sum(
     1
     for item in status_map.values()
@@ -262,14 +274,14 @@ def reconcile_wb_orders_for_seller(
     "cancelled_terminal": cancelled_terminal,
     "shipped_delivered": shipped_delivered,
     "shipped_not_waiting": shipped_not_waiting,
-    "shipped_missing": shipped_missing,
+    "shipped_missing": 0,
     "missing_from_api": len(missing_ids),
     "delivery_waiting_in_status_map": delivery_waiting,
     "delivery_status_breakdown": _delivery_status_breakdown(status_map),
   }
 
   reconciled = sum(result[k] for k in (
-    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
+    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting",
   ))
   if reconciled:
     AuditLog.objects.create(
@@ -337,7 +349,7 @@ def sync_order_statuses_for_seller(
   updated = _apply_statuses_to_orders(seller, status_map)
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
   reconciled = sum(reconcile.get(k, 0) for k in (
-    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting", "shipped_missing",
+    "cancelled_terminal", "shipped_delivered", "shipped_not_waiting",
   ))
 
   stale_new = reconcile_stale_new_orders(seller, client, new_ids_set, status_map)
