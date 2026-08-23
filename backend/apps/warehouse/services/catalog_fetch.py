@@ -78,7 +78,7 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
       if skus:
         size_rows.append((wb_size, tech_size, skus))
 
-    size_rows.sort(key=lambda row: size_sort_key(row[0], row[1]))
+    size_rows.sort(key=lambda row: size_sort_key(row[1], row[0]))
 
     for wb_size, tech_size, skus in size_rows:
       for barcode in skus:
@@ -226,7 +226,7 @@ def _serialize_item(item: CatalogBarcodeItem) -> dict:
     "title": item.title,
     "tech_size": item.tech_size,
     "wb_size": item.wb_size,
-    "size_label": item.wb_size or item.tech_size or "—",
+    "size_label": item.tech_size or "—",
     "photo_url": item.photo_url,
     "requires_marking": item.requires_marking,
     "wb_stock_total": item.wb_stock_total,

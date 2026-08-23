@@ -28,10 +28,10 @@ def _parse_numeric_size(value: str) -> int | None:
     return None
 
 
-def size_sort_key(wb_size: str, tech_size: str) -> tuple:
-  """Ключ сортировки: сначала RU (wbSize), затем EU (techSize)."""
-  primary = (wb_size or "").strip()
-  secondary = (tech_size or "").strip()
+def size_sort_key(tech_size: str, wb_size: str = "") -> tuple:
+  """Ключ сортировки: европейский/технический размер (techSize), затем wbSize."""
+  primary = (tech_size or "").strip()
+  secondary = (wb_size or "").strip()
   label = primary or secondary
   lower = label.lower()
 
