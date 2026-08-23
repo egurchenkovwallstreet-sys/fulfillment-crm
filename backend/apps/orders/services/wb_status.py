@@ -140,6 +140,14 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
     if order.status == Order.Status.NEW:
       order.status = Order.Status.IN_SUPPLY
       changed_fields.add("status")
+  elif supplier_status == WB_SUPPLIER_NEW:
+    if order.status in (
+      Order.Status.CANCELLED,
+      Order.Status.IN_DELIVERY,
+      Order.Status.SHIPPED,
+    ):
+      order.status = Order.Status.NEW
+      changed_fields.add("status")
 
   if changed_fields:
     changed_fields.add("updated_at")

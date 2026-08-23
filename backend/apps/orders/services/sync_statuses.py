@@ -136,18 +136,26 @@ def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> in
 
 
 def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
-  """Заказы из GET /orders/new — supplierStatus new в CRM."""
+  """Заказы из GET /orders/new — supplierStatus new в CRM + сброс устаревшего CRM-статуса."""
   if not new_wb_ids:
     return 0
   now = timezone.now()
-  return (
-    filter_orders_for_seller(
-      Order.objects.filter(seller=seller, wb_order_id__in=new_wb_ids),
-      seller,
-    )
-    .exclude(wb_supplier_status=WB_SUPPLIER_NEW)
-    .update(wb_supplier_status=WB_SUPPLIER_NEW, updated_at=now)
+  qs = filter_orders_for_seller(
+    Order.objects.filter(seller=seller, wb_order_id__in=new_wb_ids),
+    seller,
   )
+  marked = qs.exclude(wb_supplier_status=WB_SUPPLIER_NEW).update(
+    wb_supplier_status=WB_SUPPLIER_NEW,
+    updated_at=now,
+  )
+  reset = qs.filter(
+    status__in=[
+      Order.Status.CANCELLED,
+      Order.Status.IN_DELIVERY,
+      Order.Status.SHIPPED,
+    ],
+  ).update(status=Order.Status.NEW, updated_at=now)
+  return marked + reset
 
 
 def reconcile_stale_new_orders(
