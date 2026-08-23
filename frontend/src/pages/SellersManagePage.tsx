@@ -6,6 +6,7 @@ import {
   type SellerManageItem,
 } from '../api/sellerAdmin'
 import { copyToClipboard } from '../utils/copyToClipboard'
+import { SellerTariffModal } from '../components/SellerTariffModal'
 import './SellersManagePage.css'
 
 function inviteUrl(token: string | null): string {
@@ -21,6 +22,7 @@ export function SellersManagePage() {
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
+  const [tariffSeller, setTariffSeller] = useState<SellerManageItem | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -80,7 +82,7 @@ export function SellersManagePage() {
       <header className="topbar">
         <div>
           <h1>Селлеры</h1>
-          <p>Создание селлеров и одноразовые ссылки для регистрации</p>
+          <p>Создание селлеров, тарифы и одноразовые ссылки для регистрации</p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
           Обновить
@@ -118,6 +120,7 @@ export function SellersManagePage() {
                   <th>Компания</th>
                   <th>Аккаунт</th>
                   <th>WB: новые / сборка / доставка</th>
+                  <th>Тариф</th>
                   <th>Ссылка</th>
                 </tr>
               </thead>
@@ -137,6 +140,15 @@ export function SellersManagePage() {
                     </td>
                     <td>
                       {seller.wb_count_new} / {seller.wb_count_assembly} / {seller.wb_count_delivery}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => setTariffSeller(seller)}
+                      >
+                        Тариф
+                      </button>
                     </td>
                     <td>
                       {seller.has_account ? (
@@ -162,6 +174,14 @@ export function SellersManagePage() {
           </div>
         )}
       </section>
+
+      {tariffSeller && (
+        <SellerTariffModal
+          seller={tariffSeller}
+          onClose={() => setTariffSeller(null)}
+          onApplied={(text) => setMessage(text)}
+        />
+      )}
     </>
   )
 }

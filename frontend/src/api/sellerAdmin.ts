@@ -69,3 +69,54 @@ export async function registerSeller(payload: RegisterPayload) {
     body: JSON.stringify(payload),
   })
 }
+
+export type PriceGroupItem = {
+  id: number
+  name: string
+  processing_price: string
+  sort_order: number
+}
+
+export type SellerPricingGroup = {
+  id: number
+  name: string
+  default_price: string
+  product_count: number
+  tariff: string | null
+  mixed_tariffs: boolean
+}
+
+export type SellerPricingSummary = {
+  seller_id: number
+  company_name: string
+  product_count: number
+  ungrouped_count: number
+  common_tariff: string | null
+  mixed_common_tariff: boolean
+  groups: SellerPricingGroup[]
+}
+
+export type SellerTariffApplyPayload = {
+  scope: 'all' | 'group'
+  price: string
+  price_group_id?: number
+  assign_group?: boolean
+}
+
+export async function fetchPriceGroups(): Promise<PriceGroupItem[]> {
+  return apiFetch<PriceGroupItem[]>('/api/warehouse/price-groups/')
+}
+
+export async function fetchSellerPricing(sellerId: number): Promise<SellerPricingSummary> {
+  return apiFetch<SellerPricingSummary>(`/api/warehouse/sellers/${sellerId}/pricing/`)
+}
+
+export async function applySellerTariff(
+  sellerId: number,
+  payload: SellerTariffApplyPayload,
+): Promise<{ result: { updated: number }; summary: SellerPricingSummary }> {
+  return apiFetch(`/api/warehouse/sellers/${sellerId}/pricing/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
