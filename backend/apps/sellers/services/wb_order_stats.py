@@ -63,7 +63,7 @@ def _get_statistics_client(seller: Seller) -> WBStatisticsClient:
   return WBStatisticsClient(token)
 
 
-def _fetch_statistics_orders(seller: Seller, date_from: date) -> list[dict]:
+def _order_identity(row: dict) -> str:
   srid = str(row.get("srid") or "").strip()
   if srid:
     return srid
