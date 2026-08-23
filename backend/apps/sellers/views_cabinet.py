@@ -25,6 +25,7 @@ from apps.sellers.services.invite import (
 )
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError, get_enabled_warehouses_meta, load_wb_fbs_stats
+from apps.sellers.utils import seller_has_user_account, seller_username
 
 User = get_user_model()
 
@@ -64,7 +65,7 @@ class SellerInviteView(APIView):
     seller = Seller.objects.select_related("user_account").filter(pk=seller_id).first()
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
-    has_account = hasattr(seller, "user_account") and seller.user_account_id is not None
+    has_account = seller_has_user_account(seller)
     if has_account:
       return Response(
         {"detail": "Аккаунт уже создан. Новая ссылка не нужна."},
@@ -86,7 +87,7 @@ class SellerInvitePreviewView(APIView):
     invite = get_invite_by_token(token)
     if not invite:
       return Response({"detail": "Ссылка недействительна"}, status=status.HTTP_404_NOT_FOUND)
-    has_account = hasattr(invite.seller, "user_account") and invite.seller.user_account_id is not None
+    has_account = seller_has_user_account(invite.seller)
     return Response({
       "company_name": invite.seller.company_name,
       "has_account": has_account,
@@ -104,7 +105,7 @@ class SellerRegisterView(APIView):
     invite = get_invite_by_token(serializer.validated_data["token"])
     if not invite:
       return Response({"detail": "Ссылка недействительна или уже использована"}, status=status.HTTP_400_BAD_REQUEST)
-    if hasattr(invite.seller, "user_account") and invite.seller.user_account_id:
+    if seller_has_user_account(invite.seller):
       return Response(
         {"detail": "Аккаунт для этого селлера уже создан. Войдите в CRM."},
         status=status.HTTP_400_BAD_REQUEST,

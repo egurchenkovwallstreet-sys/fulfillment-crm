@@ -1,6 +1,9 @@
 from rest_framework import serializers
 
+from django.core.exceptions import ObjectDoesNotExist
+
 from apps.sellers.models import Seller, SellerWarehouse
+from apps.sellers.utils import seller_has_user_account, seller_username
 
 
 class SellerWarehouseSerializer(serializers.ModelSerializer):
@@ -60,16 +63,17 @@ class SellerManageSerializer(serializers.ModelSerializer):
     )
 
   def get_has_account(self, obj: Seller) -> bool:
-    return hasattr(obj, "user_account") and obj.user_account_id is not None
+    return seller_has_user_account(obj)
 
   def get_username(self, obj: Seller) -> str | None:
-    if hasattr(obj, "user_account") and obj.user_account_id:
-      return obj.user_account.username
-    return None
+    return seller_username(obj)
 
   def get_invite_token(self, obj: Seller) -> str | None:
-    invite = getattr(obj, "invite", None)
-    if invite and invite.is_active:
+    try:
+      invite = obj.invite
+    except ObjectDoesNotExist:
+      return None
+    if invite.is_active:
       return str(invite.token)
     return None
 
