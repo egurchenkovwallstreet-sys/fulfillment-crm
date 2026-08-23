@@ -12,6 +12,7 @@ import { PrintAgentPage } from './pages/PrintAgentPage'
 import { SellerBarcodeDetailPage } from './pages/SellerBarcodeDetailPage'
 import { SellerCabinetPage } from './pages/SellerCabinetPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
+import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
 
 function HomeRedirect() {

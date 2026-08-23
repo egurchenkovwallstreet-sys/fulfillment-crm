@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchSellers } from '../api/warehouse'
+import { fetchSellers, type Seller } from '../api/warehouse'
 import {
   confirmOnboarding,
   fetchOnboardingPreview,
   fetchStockOverview,
   transferStock,
-  type OnboardingItem,
   type OnboardingPreview,
   type StockOverview,
   type StockOverviewProduct,
