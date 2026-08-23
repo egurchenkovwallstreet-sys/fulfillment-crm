@@ -12,8 +12,8 @@
 ---
 
 ## Текущий статус проекта
-**Дата последнего обновления:** 22.08.2026  
-**Общий статус:** 📦 MVP + **полная синхронизация счётчиков с ЛК WB** + Честный знак + поштучные поставки + **§5 приёмка закрыта**  
+**Дата последнего обновления:** 24.08.2026  
+**Общий статус:** 📦 MVP + **кабинет селлера (Statistics API)** + синхронизация сборки FBS + Честный знак + §5 приёмка закрыта  
 **Стадия:** Следующий шаг — полный модуль поставок (§9 UI), Xprinter, списание остатков (§10)
 
 **Выбранный стек:**
@@ -75,7 +75,7 @@
 | Раздел ТЗ | Статус | Комментарий |
 |-----------|--------|-------------|
 | §2 Архитектура и стек | ✅ | Django + PostgreSQL + React, Docker на сервере |
-| §3 Роли (admin / manager / seller) | 🟡 | JWT + RBAC, разграничение на API; кабинет селлера неполный |
+| §3 Роли (admin / manager / seller) | 🟡 | JWT + RBAC; **кабинет селлера** ✅ (остатки, статистика, отгрузки) |
 | §4 Управление селлерами | 🟡 | Модель Seller, админка; склады WB (SellerWarehouse), фильтр; токен вручную |
 | §5 Модуль приёмки | ✅ | API + UI, needKiz, этикетки ячеек 75×120, раздел «Ячейки», перенос, **обновление названий из WB** (кнопка + Celery 03:00) |
 | §6 Заказы FBS, синхронизация | ✅ | Sync new + архив 30 дн. + статусы, Celery 15 мин |
@@ -87,9 +87,9 @@
 | §10 Списание остатков | ❌ | Не реализовано |
 | §11 Возвраты | ❌ | Не реализовано |
 | §12 Цены и финансы | 🟡 | Модели PriceGroup, individual_price; UI/API нет |
-| §13 Дашборды и отчёты | 🟡 | KPI по стадиям WB **синхронизированы**; отчёты и финансы — нет |
+| §13 Дашборды и отчёты | 🟡 | KPI по стадиям WB ✅; **кабинет селлера** ✅; финансы — нет |
 | §14 Нефункциональные требования | 🟡 | Логи AuditLog, health endpoint; HTTPS, бэкапы — нет |
-| §15 API Wildberries (полный набор) | 🟡 | Заказы, статусы, стикеры, ЧЗ, поставки ✅; остатки — нет |
+| §15 API Wildberries (полный набор) | 🟡 | Заказы, статусы, стикеры, ЧЗ, поставки ✅; **Statistics API** ✅; остатки — нет |
 
 **Легенда:** ✅ готово · 🟡 частично · ❌ не начато
 
@@ -122,6 +122,10 @@
 | 22.08.2026 | **§5 Модуль приёмки — этап закрыт** | ✅ | Подтверждено заказчиком |
 | 22.08.2026 | §6.2 Печать листа подбора (PDF A4) | ✅ | Макет утверждён, кнопка в сборке |
 | 22.08.2026 | **Сборка FBS: синхронизация вкладки «Новые»** | ✅ | delivery-v11: reconcile stale new, sync при входе, Celery 1 мин |
+| 24.08.2026 | **Сборка FBS: единый счётчик «Новые»** | ✅ | `new_stage_orders_queryset`, удалён `shipped_missing`, сброс stale CRM status |
+| 24.08.2026 | **Кабинет селлера: календарная статистика** | ✅ | День/неделя/месяц МСК, стадии WB, сравнение с прошлым периодом |
+| 24.08.2026 | **Кабинет селлера: WB Statistics API** | ✅ | `supplier/orders`, уникальные `srid`, FBS; как сводный отчёт WB |
+| 24.08.2026 | **Кабинет селлера: отгрузки 4 недели** | ✅ | Интерактивный график, вкладки недель, `done` supplies |
 
 ---
 
@@ -129,14 +133,18 @@
 
 ### Backend (Django apps)
 - **accounts** — User (admin/manager/seller), JWT, `/api/auth/me/`
-- **sellers** — Seller, SellerWarehouse (склады WB, is_enabled), WB-токен, кэш счётчиков `wb_count_*`
+- **sellers** — Seller, SellerWarehouse, WB-токен, кэш счётчиков `wb_count_*`
+  - `services/wb_order_stats.py` — Statistics API, заказы д/н/м
+  - `services/seller_billing_stats.py` — отгрузки на склад WB (4 недели)
+  - `services/seller_analytics.py` — payload кабинета селлера
+  - `services/calendar_periods.py` — календарь МСК
+- **integrations** — AuditLog, `wb_client.py`, **`wb_statistics_client.py`**, Celery
 - **warehouse** — Cell, Product, PriceGroup, StockOperation, приёмка, этикетки ячеек, перенос, sync названий из WB
 - **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
   - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
   - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v11`
   - `services/supply_flow.py` — поштучная отправка на сборку/в доставку
   - `services/assembly.py` — `get_seller_wb_tab_counts()` (кэш live API)
-- **integrations** — AuditLog, `wb_client.py` (orders, statuses, supplies, stickers), Celery
 
 ### API endpoints (работают)
 | Метод | URL | Описание |
@@ -159,10 +167,14 @@
 | POST | `/api/warehouse/products/<id>/move-cell/` | Перенос товара в другую ячейку |
 | GET | `/api/warehouse/products/<id>/cell-label/` | Данные для этикетки ячейки |
 | GET/POST | `/api/orders/pick-lists/*` | Лист подбора |
+| GET | `/api/sellers/cabinet/` | Кабинет селлера (статистика, стадии, отгрузки, товары) |
+| GET | `/api/sellers/cabinet/barcode/<barcode>/` | Детализация по штрихкоду |
 
 ### Frontend (React)
 - `/` — дашборд: **Новые / На сборке / В доставке** — совпадает с ЛК WB
 - `/assembly/:sellerId` — вкладки стадий, склады WB, «На сборку», «Все на сборку», «В доставку»
+- `/cabinet` — **кабинет селлера:** заказы д/н/м, стадии WB, отгрузки (4 нед.), остатки
+- `/cabinet/:barcode` — детализация товара (график 7 дней)
 - `/intake` — приёмка
 - `/cells` — ячейки: список товаров, печать этикеток, перенос, «Обновить из WB»
 - `/login` — вход
@@ -197,7 +209,7 @@
 ### Спринт 3
 6. [ ] **§11 Возвраты**
 7. [ ] **§12–13 Финансы и отчёты**
-8. [ ] **§3 Кабинет селлера**
+8. [ ] **§3 Кабинет селлера** — финансы/задолженность
 
 ### Техдолг
 9. [ ] Тесты для `wb_status.py` и sync reconcile
@@ -213,6 +225,8 @@
 - [x] Фильтр складов SellerWarehouse (строгий: только включённые `wb_warehouse_id`)
 - [x] Массовая «Все на сборку»
 - [x] Архив заказов + опрос поставок в доставке для точного счётчика
+- [x] **Кабинет селлера:** Statistics API, календарные периоды, стадии WB, отгрузки 4 недели
+- [x] **Сборка FBS:** единый queryset «Новые», fix `shipped_missing`
 
 ---
 
@@ -227,6 +241,7 @@
 | WB_TOKEN_ENCRYPTION_KEY пустой | ⚠️ | Задать в `.env` на сервере |
 | Печать Xprinter из браузера | 🟡 | Агент готов; **собрать .exe** на Windows (`print-bridge\build.bat`) и залить в `frontend/public/downloads/` |
 | **Сборка FBS: список заказов ≠ счётчик при выборе склада** | ✅ **Решено** | Строгий фильтр складов + `wb_new_order_ids` из WB `/orders/new` |
+| **Кабинет селлера: 37 заказов за месяц** | ✅ **Решено** | Statistics API + `srid`, не Marketplace API |
 | Старый UI после деплоя | ℹ️ | `git pull && bash scripts/deploy.sh` |
 
 ---
@@ -240,10 +255,18 @@
 | 19–20.08.2026 | Статусы WB, счётчики, ЧЗ | Ассистент |
 | **21.08.2026** | **Полная синхронизация с ЛК WB, supply_flow, delivery-v10** | Ассистент |
 | **22.08.2026** | **§5 приёмка закрыта: ячейки, этикетки, sync WB** | Заказчик + Ассистент |
+| **24.08.2026** | **Кабинет селлера + Statistics API + отгрузки 4 нед.** | Ассистент |
 
 ---
 
 ## Git-коммиты (основные, август 2026)
+- `1c2e18a` — Sync assembly FBS counters (единый queryset «Новые»)
+- `e9c72b4` — Remove `shipped_missing`, fix CRM/WB desync
+- `ec14ee8` — Seller cabinet: calendar stats, WB stages, weekly shipments
+- `6e4eabd` — Period comparison arrows/% in cabinet
+- `ba66160` — Statistics API for order counts
+- `c96624d` / `6022402` / `69ebd14` — Fix cabinet 500, zero counts, `_order_identity`
+- `dadde9c` — Interactive weekly shipments (4 weeks)
 - `4c4cf1c` — Per-order send to assembly/delivery via WB supplies
 - `c1fb424` — Warehouse filter, bulk «Все на сборку»
 - `d9bbef2` — Unify counters, archive backfill, delivery-v7
