@@ -41,7 +41,7 @@ const STAGES = [
   { key: 'complete', label: 'В доставке', tone: 'blue' },
 ] as const
 
-function showAssemblyButton(order: AssemblyOrder, currentStage: string): boolean {
+function showAssemblyButton(order: AssemblyOrder): boolean {
   return order.can_send_to_assembly ?? false
 }
 
@@ -563,17 +563,18 @@ export function AssemblySellerPage() {
   if (!data) return null
 
   const counts = data.counts
+  const assemblyEligible = data.assembly_eligible
 
   function stageCount(key: string): number {
     if (key === 'confirm') return counts.in_picking ?? 0
     if (key === 'complete') return counts.in_delivery ?? 0
-    if (key === 'new') return data.assembly_eligible ?? counts.new ?? 0
+    if (key === 'new') return assemblyEligible ?? counts.new ?? 0
     return counts.new ?? 0
   }
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = stage === 'new'
-    ? (data.assembly_eligible ?? data.orders.length)
+    ? (assemblyEligible ?? data.orders.length)
     : 0
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const currentWorkflowStep = resolveWorkflowStep(
@@ -801,7 +802,7 @@ export function AssemblySellerPage() {
                       ) : '—'}
                     </td>
                     <td className="assembly-table__actions">
-                      {showAssemblyButton(order, stage) && (
+                      {showAssemblyButton(order) && (
                         <button
                           type="button"
                           className="btn btn--small btn--primary"
