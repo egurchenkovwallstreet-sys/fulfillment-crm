@@ -74,6 +74,11 @@ class Product(models.Model):
     blank=True,
   )
   requires_marking = models.BooleanField("Требует маркировку (ЧЗ)", default=False)
+  wb_nm_id = models.BigIntegerField("Артикул WB (nmID)", null=True, blank=True, db_index=True)
+  vendor_code = models.CharField("Артикул продавца", max_length=200, blank=True)
+  tech_size = models.CharField("Размер (EU/тех.)", max_length=50, blank=True)
+  wb_size = models.CharField("Размер (RU)", max_length=50, blank=True)
+  photo_url = models.URLField("Фото WB", max_length=500, blank=True)
   quantity = models.PositiveIntegerField("Остаток", default=0)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
@@ -97,6 +102,30 @@ class Product(models.Model):
     if self.price_group:
       return self.price_group.processing_price
     return None
+
+
+class ProductWarehouseStock(models.Model):
+  """Остаток баркода на конкретном FBS-складе WB (для перераспределения)."""
+  product = models.ForeignKey(
+    Product,
+    on_delete=models.CASCADE,
+    related_name="warehouse_stocks",
+  )
+  seller_warehouse = models.ForeignKey(
+    "sellers.SellerWarehouse",
+    on_delete=models.CASCADE,
+    related_name="product_stocks",
+  )
+  quantity = models.PositiveIntegerField("Остаток на складе WB", default=0)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "Остаток на складе WB"
+    verbose_name_plural = "Остатки на складах WB"
+    unique_together = [("product", "seller_warehouse")]
+
+  def __str__(self):
+    return f"{self.product.barcode} @ {self.seller_warehouse_id}: {self.quantity}"
 
 
 class StockOperation(models.Model):

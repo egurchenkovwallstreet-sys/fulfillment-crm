@@ -5,11 +5,16 @@ from .views import (
   IntakeHistoryView,
   IntakeLookupView,
   IntakeView,
+  OnboardingConfirmView,
+  OnboardingExcludeView,
+  OnboardingPreviewView,
   ProductCellLabelView,
   ProductMoveCellView,
   SellerListView,
   SellerProductsRefreshView,
   SellerProductsView,
+  StockOverviewView,
+  StockTransferView,
 )
 
 urlpatterns = [
@@ -26,4 +31,29 @@ urlpatterns = [
   path("intake/lookup/", IntakeLookupView.as_view(), name="intake_lookup"),
   path("intake/", IntakeView.as_view(), name="intake"),
   path("intake/history/", IntakeHistoryView.as_view(), name="intake_history"),
+  path(
+    "onboarding/<int:seller_id>/preview/",
+    OnboardingPreviewView.as_view(),
+    name="onboarding_preview",
+  ),
+  path(
+    "onboarding/<int:seller_id>/exclude/",
+    OnboardingExcludeView.as_view(),
+    name="onboarding_exclude",
+  ),
+  path(
+    "onboarding/<int:seller_id>/confirm/",
+    OnboardingConfirmView.as_view(),
+    name="onboarding_confirm",
+  ),
+  path(
+    "sellers/<int:seller_id>/stock-overview/",
+    StockOverviewView.as_view(),
+    name="stock_overview",
+  ),
+  path(
+    "sellers/<int:seller_id>/stock-transfer/",
+    StockTransferView.as_view(),
+    name="stock_transfer",
+  ),
 ]

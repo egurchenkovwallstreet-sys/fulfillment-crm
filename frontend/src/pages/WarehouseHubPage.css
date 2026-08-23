@@ -1,0 +1,193 @@
+.whub-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.whub-tab {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.whub-tab--active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
+.whub-seller-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 320px;
+  font-weight: 600;
+}
+
+.whub-seller-bar select {
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.whub-hint {
+  color: #64748b;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.whub-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.whub-articles {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.whub-article {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.whub-article__head {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  align-items: flex-start;
+}
+
+.whub-article__head h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.whub-article__head p {
+  margin: 0 0 0.5rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.whub-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.whub-table th,
+.whub-table td {
+  border-bottom: 1px solid #f1f5f9;
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+}
+
+.whub-table--transfer {
+  margin-top: 1rem;
+}
+
+.whub-row--crm {
+  opacity: 0.65;
+  background: #f8fafc;
+}
+
+.whub-photo-btn {
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.whub-photo {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.whub-photo--empty {
+  display: inline-flex;
+  width: 56px;
+  height: 56px;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  border-radius: 8px;
+  color: #94a3b8;
+}
+
+.whub-photo-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 1rem;
+  cursor: zoom-out;
+}
+
+.whub-photo-zoom {
+  max-width: min(96vw, 900px);
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.whub-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.whub-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.whub-transfer-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+  padding: 1rem;
+}
+
+.whub-transfer-modal {
+  width: 100%;
+  max-width: 400px;
+}
+
+.whub-transfer-modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.whub-transfer-modal input,
+.whub-transfer-modal select {
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}

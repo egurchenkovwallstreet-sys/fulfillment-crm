@@ -12,14 +12,20 @@ from .serializers import (
   CellSerializer,
   IntakeSerializer,
   MoveCellSerializer,
+  OnboardingConfirmSerializer,
+  OnboardingExcludeSerializer,
   ProductSerializer,
   SellerBriefSerializer,
   StockOperationSerializer,
+  StockTransferSerializer,
 )
 from .services.cell_label import build_cell_label_data
 from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
+from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
 from .services.intake import IntakeError, perform_intake
+from .services.onboarding import OnboardingError, confirm_onboarding
+from .services.stock_transfer import StockTransferError, build_stock_overview, perform_stock_transfer
 from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
 from .services.wb_product_sync import refresh_seller_products_from_wb
@@ -279,3 +285,83 @@ class IntakeHistoryView(APIView):
       .order_by("-created_at")[:30]
     )
     return Response(StockOperationSerializer(ops, many=True).data)
+
+
+class OnboardingPreviewView(APIView):
+  """Сценарий 1: каталог WB + остатки + план ячеек."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    try:
+      data = build_onboarding_preview(seller)
+    except CatalogError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **data})
+
+
+class OnboardingExcludeView(APIView):
+  """Пересчитать план после исключения баркодов/артикулов."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = OnboardingExcludeSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    items = apply_exclusions_and_renumber(
+      serializer.validated_data["items"],
+      exclude_barcodes=set(serializer.validated_data.get("exclude_barcodes") or []),
+      exclude_nm_ids=set(serializer.validated_data.get("exclude_nm_ids") or []),
+    )
+    return Response({"success": True, "items": items})
+
+
+class OnboardingConfirmView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = OnboardingConfirmSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+      result = confirm_onboarding(
+        seller,
+        serializer.validated_data["items"],
+        user=request.user,
+      )
+    except OnboardingError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **result}, status=status.HTTP_201_CREATED)
+
+
+class StockOverviewView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    try:
+      data = build_stock_overview(seller)
+    except StockTransferError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **data})
+
+
+class StockTransferView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = StockTransferSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+      result = perform_stock_transfer(
+        seller,
+        product_id=serializer.validated_data["product_id"],
+        from_warehouse_id=serializer.validated_data["from_warehouse_id"],
+        to_warehouse_id=serializer.validated_data["to_warehouse_id"],
+        quantity=serializer.validated_data["quantity"],
+        user=request.user,
+      )
+    except StockTransferError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)

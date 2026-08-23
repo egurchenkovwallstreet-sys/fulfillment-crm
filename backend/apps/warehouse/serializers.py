@@ -33,6 +33,11 @@ class ProductSerializer(serializers.ModelSerializer):
       "seller",
       "seller_name",
       "requires_marking",
+      "wb_nm_id",
+      "vendor_code",
+      "tech_size",
+      "wb_size",
+      "photo_url",
     )
 
 
@@ -103,3 +108,28 @@ class MoveCellSerializer(serializers.Serializer):
     if not Cell.objects.filter(pk=value).exists():
       raise serializers.ValidationError("Ячейка не найдена")
     return value
+
+
+class OnboardingExcludeSerializer(serializers.Serializer):
+  items = serializers.ListField(child=serializers.DictField())
+  exclude_barcodes = serializers.ListField(
+    child=serializers.CharField(max_length=100),
+    required=False,
+    allow_empty=True,
+  )
+  exclude_nm_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=True,
+  )
+
+
+class OnboardingConfirmSerializer(serializers.Serializer):
+  items = serializers.ListField(child=serializers.DictField(), min_length=1)
+
+
+class StockTransferSerializer(serializers.Serializer):
+  product_id = serializers.IntegerField()
+  from_warehouse_id = serializers.IntegerField()
+  to_warehouse_id = serializers.IntegerField()
+  quantity = serializers.IntegerField(min_value=1)

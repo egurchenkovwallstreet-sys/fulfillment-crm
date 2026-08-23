@@ -86,3 +86,156 @@ def push_wb_stock_increment(
     "new_wb_amount": new_amount,
     "added": add_quantity,
   }
+
+
+def get_enabled_seller_warehouses(seller: Seller) -> list[SellerWarehouse]:
+  return list(
+    SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name", "id")
+  )
+
+
+def _parse_stock_amount(item: dict) -> int:
+  try:
+    return max(0, int(item.get("amount") or 0))
+  except (TypeError, ValueError):
+    return 0
+
+
+def fetch_summed_wb_stocks(
+  seller: Seller,
+  barcodes: list[str],
+) -> dict[str, dict]:
+  """
+  Остатки по баркодам с суммированием по включённым FBS-складам.
+  Возвращает {barcode: {total, by_warehouse: {seller_warehouse_pk: qty}}}.
+  """
+  warehouses = get_enabled_seller_warehouses(seller)
+  if not warehouses:
+    raise WBStockError("Нет включённых FBS-складов у селлера")
+
+  normalized = [b.strip() for b in barcodes if b and b.strip()]
+  result: dict[str, dict] = {
+    barcode: {"total": 0, "by_warehouse": {}} for barcode in normalized
+  }
+  if not normalized:
+    return result
+
+  client = _get_wb_client(seller)
+  stock_by_sku: dict[str, dict[int, int]] = {barcode: {} for barcode in normalized}
+
+  for warehouse in warehouses:
+    try:
+      items = client.fetch_warehouse_stocks_by_skus(warehouse.wb_warehouse_id, normalized)
+    except WBApiError as exc:
+      raise WBStockError(
+        f"Ошибка остатков склада {warehouse.name or warehouse.wb_warehouse_id}: {exc}"
+      ) from exc
+
+    for item in items:
+      sku = str(item.get("sku") or "").strip()
+      if sku not in stock_by_sku:
+        continue
+      stock_by_sku[sku][warehouse.id] = _parse_stock_amount(item)
+
+  for barcode in normalized:
+    by_wh = stock_by_sku[barcode]
+    total = sum(by_wh.values())
+    result[barcode] = {"total": total, "by_warehouse": by_wh}
+
+  return result
+
+
+def set_wb_stock_absolute(
+  seller: Seller,
+  warehouse: SellerWarehouse,
+  barcode: str,
+  amount: int,
+) -> int:
+  """Установить абсолютный остаток на складе WB."""
+  barcode = barcode.strip()
+  amount = max(0, int(amount))
+  client = _get_wb_client(seller)
+  try:
+    client.update_warehouse_stocks(
+      warehouse.wb_warehouse_id,
+      [{"sku": barcode, "amount": amount}],
+    )
+  except WBApiError as exc:
+    raise WBStockError(f"Не удалось обновить остаток в WB: {exc}") from exc
+  return amount
+
+
+def transfer_wb_stock_between_warehouses(
+  seller: Seller,
+  *,
+  barcode: str,
+  from_warehouse_id: int,
+  to_warehouse_id: int,
+  quantity: int,
+) -> dict:
+  """Переместить остаток между FBS-складами WB без изменения суммы."""
+  if from_warehouse_id == to_warehouse_id:
+    raise WBStockError("Выберите разные склады")
+  if quantity <= 0:
+    raise WBStockError("Количество должно быть больше 0")
+
+  from_wh = get_seller_warehouse(seller, from_warehouse_id)
+  to_wh = get_seller_warehouse(seller, to_warehouse_id)
+  if not from_wh.is_enabled or not to_wh.is_enabled:
+    raise WBStockError("Оба склада должны быть включены для работы")
+
+  barcode = barcode.strip()
+  from_amount = fetch_wb_stock_for_barcode(seller, from_wh, barcode)
+  to_amount = fetch_wb_stock_for_barcode(seller, to_wh, barcode)
+
+  if from_amount < quantity:
+    raise WBStockError(
+      f"На складе «{from_wh.name}» только {from_amount} шт., нельзя перенести {quantity}"
+    )
+
+  new_from = from_amount - quantity
+  new_to = to_amount + quantity
+
+  set_wb_stock_absolute(seller, from_wh, barcode, new_from)
+  set_wb_stock_absolute(seller, to_wh, barcode, new_to)
+
+  return {
+    "barcode": barcode,
+    "quantity": quantity,
+    "from_warehouse": {
+      "id": from_wh.id,
+      "name": from_wh.name,
+      "previous": from_amount,
+      "new": new_from,
+    },
+    "to_warehouse": {
+      "id": to_wh.id,
+      "name": to_wh.name,
+      "previous": to_amount,
+      "new": new_to,
+    },
+    "total": new_from + new_to,
+  }
+
+
+def sync_product_warehouse_stocks_from_wb(seller, product) -> dict:
+  """Обновить ProductWarehouseStock и Product.quantity из WB."""
+  from apps.warehouse.models import ProductWarehouseStock
+
+  stock_map = fetch_summed_wb_stocks(seller, [product.barcode])
+  data = stock_map.get(product.barcode, {"total": 0, "by_warehouse": {}})
+  warehouses = {wh.id: wh for wh in get_enabled_seller_warehouses(seller)}
+
+  for wh_pk, qty in (data.get("by_warehouse") or {}).items():
+    warehouse = warehouses.get(int(wh_pk))
+    if not warehouse:
+      continue
+    ProductWarehouseStock.objects.update_or_create(
+      product=product,
+      seller_warehouse=warehouse,
+      defaults={"quantity": max(0, int(qty))},
+    )
+
+  product.quantity = int(data.get("total") or 0)
+  product.save(update_fields=["quantity", "updated_at"])
+  return data

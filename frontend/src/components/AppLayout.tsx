@@ -25,6 +25,11 @@ export function AppLayout() {
             Дашборд
           </NavLink>
           {(isAdmin || isManager) && (
+            <NavLink to="/warehouse" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Склад
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/intake" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Приёмка
             </NavLink>

@@ -12,7 +12,7 @@ import { PrintAgentPage } from './pages/PrintAgentPage'
 import { SellerBarcodeDetailPage } from './pages/SellerBarcodeDetailPage'
 import { SellerCabinetPage } from './pages/SellerCabinetPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
-import { SellersManagePage } from './pages/SellersManagePage'
+import { WarehouseHubPage } from './pages/WarehouseHubPage'
 
 function HomeRedirect() {
   const { isSeller } = useAuth()
@@ -44,6 +44,7 @@ function AppRoutes() {
             <Route path="/cabinet/:barcode" element={<SellerBarcodeDetailPage />} />
           </Route>
           <Route element={<ManagerRoute />}>
+            <Route path="/warehouse" element={<WarehouseHubPage />} />
             <Route path="/intake" element={<IntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
