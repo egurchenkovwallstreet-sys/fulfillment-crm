@@ -21,7 +21,6 @@ from apps.sellers.services.calendar_periods import (
   previous_week_bounds,
   today_local,
 )
-from apps.sellers.services.warehouse_filter import seller_has_warehouse_config
 
 SALES_LOOKBACK_DAYS = 7
 
@@ -64,27 +63,7 @@ def _get_statistics_client(seller: Seller) -> WBStatisticsClient:
   return WBStatisticsClient(token)
 
 
-def _enabled_warehouse_names(seller: Seller) -> list[str]:
-  return [
-    (name or "").strip().lower()
-    for name in SellerWarehouse.objects.filter(seller=seller, is_enabled=True).values_list("name", flat=True)
-    if (name or "").strip()
-  ]
-
-
-def _statistics_row_matches_enabled_warehouse(seller: Seller, row: dict, *, enabled_names: list[str]) -> bool:
-  if not seller_has_warehouse_config(seller):
-    return True
-  warehouse_name = (row.get("warehouseName") or "").strip().lower()
-  if not warehouse_name:
-    return False
-  for name in enabled_names:
-    if name in warehouse_name or warehouse_name in name:
-      return True
-  return False
-
-
-def _order_identity(row: dict) -> str:
+def _fetch_statistics_orders(seller: Seller, date_from: date) -> list[dict]:
   srid = str(row.get("srid") or "").strip()
   if srid:
     return srid
@@ -122,7 +101,6 @@ def load_wb_fbs_stats(seller: Seller) -> tuple[dict, dict[str, dict[str, int]], 
   sales_start_date = today - timedelta(days=SALES_LOOKBACK_DAYS - 1)
 
   fetch_from = previous_month_bounds(today)[0]
-  enabled_names = _enabled_warehouse_names(seller)
   rows = _fetch_statistics_orders(seller, fetch_from)
 
   period_srids: dict[str, set[str]] = {
@@ -142,8 +120,6 @@ def load_wb_fbs_stats(seller: Seller) -> tuple[dict, dict[str, dict[str, int]], 
     if not is_fbs_statistics_row(row):
       continue
     if row.get("isCancel"):
-      continue
-    if not _statistics_row_matches_enabled_warehouse(seller, row, enabled_names=enabled_names):
       continue
 
     order_dt = parse_statistics_order_date(row.get("date"))

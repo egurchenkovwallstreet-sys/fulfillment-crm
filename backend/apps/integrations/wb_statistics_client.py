@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
 from typing import Iterator
 
 import httpx
@@ -102,7 +102,8 @@ def parse_statistics_order_date(value) -> datetime | None:
     except ValueError:
       return None
   if timezone.is_naive(parsed):
-    return timezone.make_aware(parsed, dt_timezone.utc)
+    # WB: без часового пояса — московское время (UTC+3)
+    return timezone.make_aware(parsed, timezone.get_current_timezone())
   return parsed
 
 
