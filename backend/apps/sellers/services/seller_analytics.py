@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.orders.services.assembly import get_seller_wb_tab_counts
 from apps.sellers.models import Seller
-from apps.sellers.services.calendar_periods import calendar_week_bounds, iter_week_days, today_local
+from apps.sellers.services.calendar_periods import calendar_week_bounds_offset, iter_week_days, today_local
 from apps.sellers.services.seller_billing_stats import load_weekly_shipped_orders
 from apps.sellers.services.wb_order_stats import (
   SALES_LOOKBACK_DAYS,
@@ -20,18 +20,25 @@ from apps.warehouse.models import Product
 logger = logging.getLogger(__name__)
 
 
-def _empty_weekly_shipments() -> dict:
-  week_start, week_end = calendar_week_bounds()
+def _empty_weekly_shipments(weeks: int = 4) -> dict:
+  today = today_local()
+  weeks_data = []
+  for weeks_ago in range(weeks):
+    week_start, week_end = calendar_week_bounds_offset(weeks_ago, today)
+    weeks_data.append({
+      "week_start": week_start.isoformat(),
+      "week_end": week_end.isoformat(),
+      "total": 0,
+      "supplies_count": 0,
+      "is_current": weeks_ago == 0,
+      "days": [
+        {"date": day.isoformat(), "weekday": label, "orders": 0}
+        for day, label in iter_week_days(week_start)
+      ],
+    })
   return {
-    "week_start": week_start.isoformat(),
-    "week_end": week_end.isoformat(),
-    "today": today_local().isoformat(),
-    "total": 0,
-    "supplies_count": 0,
-    "days": [
-      {"date": day.isoformat(), "weekday": label, "orders": 0}
-      for day, label in iter_week_days(week_start)
-    ],
+    "today": today.isoformat(),
+    "weeks": weeks_data,
   }
 
 

@@ -27,13 +27,18 @@ export type SellerWeeklyShipmentDay = {
   orders: number
 }
 
-export type SellerWeeklyShipments = {
+export type SellerWeeklyShipmentWeek = {
   week_start: string
   week_end: string
-  today: string
   total: number
   supplies_count: number
+  is_current: boolean
   days: SellerWeeklyShipmentDay[]
+}
+
+export type SellerWeeklyShipments = {
+  today: string
+  weeks: SellerWeeklyShipmentWeek[]
 }
 
 export type StockLevel = 'critical' | 'sufficient' | 'excess'

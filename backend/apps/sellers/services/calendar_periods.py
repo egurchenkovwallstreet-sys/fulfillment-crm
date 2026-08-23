@@ -44,6 +44,16 @@ def previous_week_bounds(day: date | None = None) -> tuple[date, date]:
   return prev_start, prev_end
 
 
+def calendar_week_bounds_offset(weeks_ago: int = 0, day: date | None = None) -> tuple[date, date]:
+  """Календарная неделя пн–вс, сдвинутая на weeks_ago назад (0 = текущая)."""
+  week_start, week_end = calendar_week_bounds(day)
+  if weeks_ago:
+    shift = timedelta(weeks=weeks_ago)
+    week_start -= shift
+    week_end -= shift
+  return week_start, week_end
+
+
 def previous_month_bounds(day: date | None = None) -> tuple[date, date]:
   day = day or today_local()
   first_this_month = calendar_month_start(day)

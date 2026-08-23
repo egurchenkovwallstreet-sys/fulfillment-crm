@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   fetchSellerCabinet,
   type SellerBarcodeItem,
   type SellerCabinetResponse,
+  type SellerWeeklyShipmentWeek,
 } from '../api/sellerCabinet'
 import { StatCard } from '../components/StatCard'
 import './SellerCabinetPage.css'
@@ -24,6 +25,10 @@ function formatShortDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+function formatWeekRange(week: SellerWeeklyShipmentWeek): string {
+  return `${formatShortDate(week.week_start)} — ${formatShortDate(week.week_end)}`
+}
+
 function StockBadge({ level }: { level: SellerBarcodeItem['stock_level'] }) {
   return <span className={`stock-badge stock-badge--${level}`}>{STOCK_LABELS[level] ?? level}</span>
 }
@@ -32,6 +37,7 @@ export function SellerCabinetPage() {
   const [data, setData] = useState<SellerCabinetResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [shipmentWeekIndex, setShipmentWeekIndex] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -48,6 +54,17 @@ export function SellerCabinetPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  const shipmentWeeks = data?.weekly_shipments?.weeks ?? []
+  const selectedShipmentWeek = shipmentWeeks[shipmentWeekIndex] ?? shipmentWeeks[0]
+  const shipmentChartMax = useMemo(
+    () => Math.max(...(selectedShipmentWeek?.days.map((item) => item.orders) ?? [0]), 1),
+    [selectedShipmentWeek],
+  )
+
+  useEffect(() => {
+    setShipmentWeekIndex(0)
+  }, [data?.weekly_shipments])
 
   const summary = data?.summary
 
@@ -103,31 +120,70 @@ export function SellerCabinetPage() {
             </section>
           )}
 
-          {data?.weekly_shipments && (
+          {selectedShipmentWeek && shipmentWeeks.length > 0 && (
             <section className="panel seller-weekly-shipments">
               <div className="seller-weekly-shipments__head">
                 <div>
                   <h2 className="section-title">Отгрузки на склад WB</h2>
                   <p className="seller-weekly-shipments__hint">
-                    Календарная неделя {formatShortDate(data.weekly_shipments.week_start)} — {formatShortDate(data.weekly_shipments.week_end)} (МСК).
+                    Календарная неделя {formatWeekRange(selectedShipmentWeek)} (МСК).
                     Считаются заказы из поставок, переданных/отсканированных WB (done).
+                    {selectedShipmentWeek.supplies_count > 0 && (
+                      <> Поставок: {selectedShipmentWeek.supplies_count}.</>
+                    )}
                   </p>
                 </div>
                 <div className="seller-weekly-shipments__total">
                   <span className="seller-weekly-shipments__total-label">Итого за неделю</span>
-                  <strong className="seller-weekly-shipments__total-value">{data.weekly_shipments.total}</strong>
+                  <strong className="seller-weekly-shipments__total-value">{selectedShipmentWeek.total}</strong>
                 </div>
               </div>
+
+              <div className="seller-weekly-shipments__nav">
+                <button
+                  type="button"
+                  className="seller-weekly-shipments__arrow"
+                  onClick={() => setShipmentWeekIndex((index) => Math.min(index + 1, shipmentWeeks.length - 1))}
+                  disabled={shipmentWeekIndex >= shipmentWeeks.length - 1}
+                  aria-label="Предыдущая неделя"
+                >
+                  ←
+                </button>
+                <div className="seller-weekly-shipments__tabs" role="tablist" aria-label="Недели отгрузок">
+                  {shipmentWeeks.map((week, index) => (
+                    <button
+                      key={week.week_start}
+                      type="button"
+                      role="tab"
+                      aria-selected={index === shipmentWeekIndex}
+                      className={`seller-weekly-shipments__tab${index === shipmentWeekIndex ? ' seller-weekly-shipments__tab--active' : ''}${week.is_current ? ' seller-weekly-shipments__tab--current' : ''}`}
+                      onClick={() => setShipmentWeekIndex(index)}
+                    >
+                      {week.is_current ? 'Текущая' : formatWeekRange(week)}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="seller-weekly-shipments__arrow"
+                  onClick={() => setShipmentWeekIndex((index) => Math.max(index - 1, 0))}
+                  disabled={shipmentWeekIndex <= 0}
+                  aria-label="Следующая неделя"
+                >
+                  →
+                </button>
+              </div>
+
               <div className="seller-chart seller-weekly-chart">
-                {data.weekly_shipments.days.map((day) => {
-                  const max = Math.max(...data.weekly_shipments.days.map((item) => item.orders), 1)
-                  const height = Math.max(4, Math.round((day.orders / max) * 140))
-                  const isToday = day.date === data.weekly_shipments.today
+                {selectedShipmentWeek.days.map((day) => {
+                  const height = Math.max(4, Math.round((day.orders / shipmentChartMax) * 140))
+                  const isToday = day.date === data?.weekly_shipments.today
                   return (
                     <div key={day.date} className={`seller-chart__col${isToday ? ' seller-chart__col--today' : ''}`}>
                       <span className="seller-chart__value">{day.orders}</span>
                       <div className="seller-chart__bar" style={{ height: `${height}px` }} />
                       <span className="seller-chart__label">{day.weekday}</span>
+                      <span className="seller-chart__date">{formatShortDate(day.date)}</span>
                     </div>
                   )
                 })}

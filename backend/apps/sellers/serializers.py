@@ -139,13 +139,18 @@ class SellerWeeklyShipmentDaySerializer(serializers.Serializer):
   orders = serializers.IntegerField()
 
 
-class SellerWeeklyShipmentsSerializer(serializers.Serializer):
+class SellerWeeklyShipmentWeekSerializer(serializers.Serializer):
   week_start = serializers.DateField()
   week_end = serializers.DateField()
-  today = serializers.DateField()
   total = serializers.IntegerField()
   supplies_count = serializers.IntegerField()
+  is_current = serializers.BooleanField()
   days = SellerWeeklyShipmentDaySerializer(many=True)
+
+
+class SellerWeeklyShipmentsSerializer(serializers.Serializer):
+  today = serializers.DateField()
+  weeks = SellerWeeklyShipmentWeekSerializer(many=True)
 
 
 class SellerBarcodeAnalyticsSerializer(serializers.Serializer):

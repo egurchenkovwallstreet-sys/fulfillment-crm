@@ -1,10 +1,10 @@
-"""Отгрузки FBS за календарную неделю — по факту передачи поставки на склад WB."""
+"""Отгрузки FBS — по факту передачи поставки на склад WB."""
 from __future__ import annotations
 
 import re
 import time
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from django.utils import timezone
 
@@ -13,12 +13,18 @@ from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order, Supply
 from apps.orders.services.supply_sync import _parse_wb_datetime
 from apps.sellers.models import Seller
-from apps.sellers.services.calendar_periods import calendar_week_bounds, iter_week_days, today_local
+from apps.sellers.services.calendar_periods import (
+  calendar_week_bounds,
+  calendar_week_bounds_offset,
+  iter_week_days,
+  today_local,
+)
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
 MAX_SUPPLY_ORDER_FETCHES = 80
+SHIPMENTS_WEEKS_HISTORY = 4
 
 
 def _get_client(seller: Seller) -> WBClient:
@@ -61,13 +67,47 @@ def _eligible_order_count(seller: Seller, wb_order_ids: list[int]) -> int:
   )
 
 
-def load_weekly_shipped_orders(seller: Seller) -> dict:
+def _week_start_for(day: date) -> date:
+  return day - timedelta(days=day.weekday())
+
+
+def _build_week_payload(
+  week_start: date,
+  week_end: date,
+  *,
+  daily_counts: dict[date, int],
+  supplies_per_week: dict[date, int],
+  today: date,
+) -> dict:
+  days = [
+    {
+      "date": day.isoformat(),
+      "weekday": label,
+      "orders": daily_counts.get(day, 0),
+    }
+    for day, label in iter_week_days(week_start)
+  ]
+  return {
+    "week_start": week_start.isoformat(),
+    "week_end": week_end.isoformat(),
+    "total": sum(day["orders"] for day in days),
+    "supplies_count": supplies_per_week.get(week_start, 0),
+    "is_current": week_start <= today <= week_end,
+    "days": days,
+  }
+
+
+def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_HISTORY) -> dict:
   """
-  Заказы, переданные на склад WB в текущую календарную неделю (пн–вс, МСК).
+  Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
   Источник: GET /api/v3/supplies, done=true, дата scanDt/closedAt.
   """
-  week_start, week_end = calendar_week_bounds()
+  today = today_local()
+  current_week_start, current_week_end = calendar_week_bounds(today)
+  oldest_week_start, _ = calendar_week_bounds_offset(weeks - 1, today)
+
   daily_counts: dict[date, int] = defaultdict(int)
+  supplies_per_week: dict[date, int] = defaultdict(int)
 
   client = _get_client(seller)
   try:
@@ -81,7 +121,6 @@ def load_weekly_shipped_orders(seller: Seller) -> dict:
   }
 
   api_fetches = 0
-  supplies_in_week = 0
 
   for wb_supply in wb_supplies:
     if not wb_supply.get("done"):
@@ -92,14 +131,13 @@ def load_weekly_shipped_orders(seller: Seller) -> dict:
       continue
 
     handoff_date = timezone.localtime(handoff_at).date()
-    if not (week_start <= handoff_date <= week_end):
+    if not (oldest_week_start <= handoff_date <= current_week_end):
       continue
 
     wb_supply_id = str(wb_supply.get("id") or "")
     if not wb_supply_id:
       continue
 
-    supplies_in_week += 1
     name = str(wb_supply.get("name") or "")
     order_wb_ids: list[int] = []
 
@@ -116,23 +154,24 @@ def load_weekly_shipped_orders(seller: Seller) -> dict:
         except WBApiError:
           order_wb_ids = []
 
-    daily_counts[handoff_date] += _eligible_order_count(seller, order_wb_ids)
+    order_count = _eligible_order_count(seller, order_wb_ids)
+    if order_count <= 0:
+      continue
 
-  days = [
-    {
-      "date": day.isoformat(),
-      "weekday": label,
-      "orders": daily_counts.get(day, 0),
-    }
-    for day, label in iter_week_days(week_start)
+    daily_counts[handoff_date] += order_count
+    supplies_per_week[_week_start_for(handoff_date)] += 1
+
+  weeks_data = [
+    _build_week_payload(
+      *calendar_week_bounds_offset(weeks_ago, today),
+      daily_counts=daily_counts,
+      supplies_per_week=supplies_per_week,
+      today=today,
+    )
+    for weeks_ago in range(weeks)
   ]
-  total = sum(day["orders"] for day in days)
 
   return {
-    "week_start": week_start.isoformat(),
-    "week_end": week_end.isoformat(),
-    "today": today_local().isoformat(),
-    "total": total,
-    "supplies_count": supplies_in_week,
-    "days": days,
+    "today": today.isoformat(),
+    "weeks": weeks_data,
   }

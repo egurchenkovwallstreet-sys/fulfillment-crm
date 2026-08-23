@@ -202,6 +202,69 @@
   color: #1d4ed8;
 }
 
+.seller-weekly-shipments__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.seller-weekly-shipments__tabs {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.seller-weekly-shipments__tab {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.seller-weekly-shipments__tab:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.seller-weekly-shipments__tab--active {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.seller-weekly-shipments__tab--current:not(.seller-weekly-shipments__tab--active) {
+  border-color: #86efac;
+}
+
+.seller-weekly-shipments__arrow {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.seller-weekly-shipments__arrow:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.seller-chart__date {
+  font-size: 0.65rem;
+  color: #cbd5e1;
+  text-align: center;
+}
+
 .seller-weekly-chart .seller-chart__col--today .seller-chart__bar {
   background: linear-gradient(180deg, #22c55e, #15803d);
 }
