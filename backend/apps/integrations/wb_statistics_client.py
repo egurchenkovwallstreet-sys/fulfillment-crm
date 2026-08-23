@@ -47,9 +47,18 @@ class WBStatisticsClient:
 
     if not response.content:
       return []
-    payload = response.json()
+    try:
+      payload = response.json()
+    except ValueError as exc:
+      raise WBApiError(
+        f"WB Statistics API: неверный формат ответа ({response.status_code}): "
+        f"{response.text[:200]}",
+        status_code=response.status_code,
+      ) from exc
     if isinstance(payload, list):
       return payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+      return payload["data"]
     return payload
 
   def iter_supplier_orders(self, date_from: str, *, flag: int = 0) -> Iterator[dict]:
@@ -68,8 +77,11 @@ class WBStatisticsClient:
       if not isinstance(rows, list) or not rows:
         break
       page += 1
-      yield from rows
-      cursor = rows[-1].get("lastChangeDate")
+      for row in rows:
+        if isinstance(row, dict):
+          yield row
+      last_row = rows[-1] if isinstance(rows[-1], dict) else None
+      cursor = last_row.get("lastChangeDate") if last_row else None
       if not cursor:
         break
       if len(rows) < 80_000:

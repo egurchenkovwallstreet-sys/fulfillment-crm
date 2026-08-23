@@ -17,8 +17,8 @@ from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import (
   calendar_month_start,
   calendar_week_bounds,
-  days_back_to_cover_previous_month,
   previous_month_bounds,
+  previous_week_bounds,
   today_local,
 )
 from apps.sellers.services.warehouse_filter import seller_has_warehouse_config
@@ -85,10 +85,10 @@ def _statistics_row_matches_enabled_warehouse(seller: Seller, row: dict, *, enab
 
 
 def _order_identity(row: dict) -> str:
-  srid = (row.get("srid") or "").strip()
+  srid = str(row.get("srid") or "").strip()
   if srid:
     return srid
-  g_number = (row.get("gNumber") or "").strip()
+  g_number = str(row.get("gNumber") or "").strip()
   if g_number:
     return g_number
   return ""

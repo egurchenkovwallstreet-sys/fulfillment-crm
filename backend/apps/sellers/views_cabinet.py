@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
@@ -30,6 +32,7 @@ from apps.sellers.services.wb_order_stats import SellerAnalyticsError, get_enabl
 from apps.sellers.utils import seller_has_user_account, seller_username
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _invite_path(request, token: str) -> str:
@@ -141,11 +144,14 @@ class SellerCabinetView(APIView):
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
     try:
       summary, items, wb_stages, weekly_shipments = build_seller_cabinet_payload(seller)
+      summary_data = SellerCabinetSummarySerializer(summary).data
+      wb_stages_data = SellerWbStageCountsSerializer(wb_stages).data
+      weekly_data = SellerWeeklyShipmentsSerializer(weekly_shipments).data
       return Response({
         "seller": {"id": seller.id, "company_name": seller.company_name},
-        "summary": SellerCabinetSummarySerializer(summary).data,
-        "wb_stages": SellerWbStageCountsSerializer(wb_stages).data,
-        "weekly_shipments": SellerWeeklyShipmentsSerializer(weekly_shipments).data,
+        "summary": summary_data,
+        "wb_stages": wb_stages_data,
+        "weekly_shipments": weekly_data,
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
         "meta": {
           "enabled_warehouses": get_enabled_warehouses_meta(seller),
@@ -155,6 +161,12 @@ class SellerCabinetView(APIView):
       })
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+      logger.exception("seller cabinet failed for seller %s", seller.id)
+      return Response(
+        {"detail": f"Ошибка загрузки кабинета: {exc}"},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      )
 
 
 class SellerCabinetBarcodeView(APIView):
