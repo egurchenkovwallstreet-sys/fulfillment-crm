@@ -1,9 +1,16 @@
 import { apiFetch } from './client'
 
+export type PeriodMetric = {
+  current: number
+  previous: number
+  change_pct: number | null
+  direction: 'up' | 'down' | 'flat' | 'new'
+}
+
 export type SellerCabinetSummary = {
-  orders_day: number
-  orders_week: number
-  orders_month: number
+  orders_day: PeriodMetric
+  orders_week: PeriodMetric
+  orders_month: PeriodMetric
   sku_count: number
   total_stock: number
 }

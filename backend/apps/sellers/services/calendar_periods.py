@@ -35,3 +35,24 @@ def iter_week_days(week_start: date) -> list[tuple[date, str]]:
     (week_start + timedelta(days=offset), WEEKDAY_LABELS[offset])
     for offset in range(7)
   ]
+
+
+def previous_week_bounds(day: date | None = None) -> tuple[date, date]:
+  week_start, _ = calendar_week_bounds(day)
+  prev_end = week_start - timedelta(days=1)
+  prev_start = prev_end - timedelta(days=6)
+  return prev_start, prev_end
+
+
+def previous_month_bounds(day: date | None = None) -> tuple[date, date]:
+  day = day or today_local()
+  first_this_month = calendar_month_start(day)
+  last_prev = first_this_month - timedelta(days=1)
+  first_prev = last_prev.replace(day=1)
+  return first_prev, last_prev
+
+
+def days_back_to_cover_previous_month(day: date | None = None) -> int:
+  day = day or today_local()
+  prev_start, _ = previous_month_bounds(day)
+  return (day - prev_start).days + 1

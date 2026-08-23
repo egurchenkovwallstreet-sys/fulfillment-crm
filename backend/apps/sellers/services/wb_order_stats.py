@@ -13,7 +13,9 @@ from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import (
   calendar_month_start,
   calendar_week_bounds,
-  days_since_month_start,
+  days_back_to_cover_previous_month,
+  previous_month_bounds,
+  previous_week_bounds,
   today_local,
 )
 from apps.sellers.services.warehouse_filter import (
@@ -29,16 +31,32 @@ class SellerAnalyticsError(Exception):
   pass
 
 
-def _period_bounds():
-  today = today_local()
-  week_start, week_end = calendar_week_bounds(today)
-  month_start = calendar_month_start(today)
-  sales_start = timezone.now() - timedelta(days=SALES_LOOKBACK_DAYS)
-  return today, week_start, week_end, month_start, sales_start
-
-
 def _wb_fetch_days() -> int:
-  return max(WB_FETCH_DAYS_MIN, days_since_month_start())
+  return max(WB_FETCH_DAYS_MIN, days_back_to_cover_previous_month())
+
+
+def _period_metric(current: int, previous: int) -> dict:
+  if previous == 0:
+    if current == 0:
+      direction = "flat"
+      change_pct = 0.0
+    else:
+      direction = "new"
+      change_pct = None
+  else:
+    change_pct = round((current - previous) / previous * 100, 1)
+    if change_pct > 0:
+      direction = "up"
+    elif change_pct < 0:
+      direction = "down"
+    else:
+      direction = "flat"
+  return {
+    "current": current,
+    "previous": previous,
+    "change_pct": change_pct,
+    "direction": direction,
+  }
 
 
 def _order_local_date(order: WBOrderData) -> date | None:
@@ -133,11 +151,24 @@ def get_enabled_warehouses_meta(seller: Seller) -> list[dict]:
   ]
 
 
-def load_wb_fbs_stats(seller: Seller) -> tuple[dict[str, int], dict[str, dict[str, int]], dict[str, dict[date, int]]]:
-  today, week_start, week_end, month_start, sales_start = _period_bounds()
+def load_wb_fbs_stats(seller: Seller) -> tuple[dict, dict[str, dict[str, int]], dict[str, dict[date, int]]]:
+  today = today_local()
+  week_start, week_end = calendar_week_bounds(today)
+  month_start = calendar_month_start(today)
+  yesterday = today - timedelta(days=1)
+  prev_week_start, prev_week_end = previous_week_bounds(today)
+  prev_month_start, prev_month_end = previous_month_bounds(today)
+  sales_start = timezone.now() - timedelta(days=SALES_LOOKBACK_DAYS)
   sales_start_date = timezone.localdate(sales_start)
 
-  summary = {"orders_day": 0, "orders_week": 0, "orders_month": 0}
+  counts = {
+    "day": 0,
+    "day_prev": 0,
+    "week": 0,
+    "week_prev": 0,
+    "month": 0,
+    "month_prev": 0,
+  }
   by_barcode: dict[str, dict[str, int]] = {}
   daily_by_barcode: dict[str, dict[date, int]] = defaultdict(lambda: defaultdict(int))
 
@@ -147,11 +178,17 @@ def load_wb_fbs_stats(seller: Seller) -> tuple[dict[str, int], dict[str, dict[st
       continue
 
     if order_date == today:
-      summary["orders_day"] += 1
+      counts["day"] += 1
+    if order_date == yesterday:
+      counts["day_prev"] += 1
     if week_start <= order_date <= week_end:
-      summary["orders_week"] += 1
+      counts["week"] += 1
+    if prev_week_start <= order_date <= prev_week_end:
+      counts["week_prev"] += 1
     if month_start <= order_date <= today:
-      summary["orders_month"] += 1
+      counts["month"] += 1
+    if prev_month_start <= order_date <= prev_month_end:
+      counts["month_prev"] += 1
 
     stats = by_barcode.setdefault(order.barcode, {"day": 0, "week": 0, "month": 0})
     if order_date == today:
@@ -163,4 +200,9 @@ def load_wb_fbs_stats(seller: Seller) -> tuple[dict[str, int], dict[str, dict[st
     if order_date >= sales_start_date:
       daily_by_barcode[order.barcode][order_date] += 1
 
+  summary = {
+    "orders_day": _period_metric(counts["day"], counts["day_prev"]),
+    "orders_week": _period_metric(counts["week"], counts["week_prev"]),
+    "orders_month": _period_metric(counts["month"], counts["month_prev"]),
+  }
   return summary, by_barcode, daily_by_barcode

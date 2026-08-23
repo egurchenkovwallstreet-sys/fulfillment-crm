@@ -68,9 +68,30 @@ export function SellerCabinetPage() {
       {summary && (
         <>
           <section className="stats-grid">
-            <StatCard label="Заказы сегодня" value={summary.orders_day} hint="FBS · календарный день (МСК)" tone="blue" />
-            <StatCard label="За неделю" value={summary.orders_week} hint="FBS · календарная неделя пн–вс" tone="purple" />
-            <StatCard label="За месяц" value={summary.orders_month} hint="FBS · с 1-го числа (МСК)" tone="orange" />
+            <StatCard
+              label="Заказы сегодня"
+              value={summary.orders_day.current}
+              hint="FBS · календарный день (МСК)"
+              tone="blue"
+              trend={summary.orders_day}
+              trendLabel="к вчера"
+            />
+            <StatCard
+              label="За неделю"
+              value={summary.orders_week.current}
+              hint="FBS · календарная неделя пн–вс"
+              tone="purple"
+              trend={summary.orders_week}
+              trendLabel="к прошлой неделе"
+            />
+            <StatCard
+              label="За месяц"
+              value={summary.orders_month.current}
+              hint="FBS · с 1-го числа (МСК)"
+              tone="orange"
+              trend={summary.orders_month}
+              trendLabel="к прошлому месяцу"
+            />
             <StatCard label="Остаток (шт.)" value={summary.total_stock} hint={`${summary.sku_count} SKU на складе`} tone="green" />
           </section>
 

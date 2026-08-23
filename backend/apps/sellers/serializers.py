@@ -112,10 +112,17 @@ class SellerRegisterSerializer(serializers.Serializer):
     return value
 
 
+class SellerPeriodMetricSerializer(serializers.Serializer):
+  current = serializers.IntegerField()
+  previous = serializers.IntegerField()
+  change_pct = serializers.FloatField(allow_null=True)
+  direction = serializers.CharField()
+
+
 class SellerCabinetSummarySerializer(serializers.Serializer):
-  orders_day = serializers.IntegerField()
-  orders_week = serializers.IntegerField()
-  orders_month = serializers.IntegerField()
+  orders_day = SellerPeriodMetricSerializer()
+  orders_week = SellerPeriodMetricSerializer()
+  orders_month = SellerPeriodMetricSerializer()
   sku_count = serializers.IntegerField()
   total_stock = serializers.IntegerField()
 
