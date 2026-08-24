@@ -8,7 +8,7 @@ git reset --hard origin/main
 git log -1 --oneline
 
 echo "=== build ==="
-docker compose build frontend web worker
+docker compose build --no-cache frontend web worker
 
 echo "=== up db/redis ==="
 docker compose up -d db redis
@@ -37,7 +37,14 @@ if [[ "$ok" -ne 1 ]]; then
 fi
 
 echo "=== up worker + frontend ==="
-docker compose up -d worker frontend
+docker compose up -d --force-recreate worker frontend
+
+echo "=== frontend bundle check ==="
+if docker compose exec -T frontend sh -c 'grep -rq "Поиск по баркоду" /usr/share/nginx/html/assets/ 2>/dev/null'; then
+  echo "OK: новый фронтенд (поиск по баркоду в бандле)"
+else
+  echo "WARN: в контейнере frontend старый бандл — проверьте docker compose build frontend"
+fi
 
 echo "=== backend version ==="
 curl -fsS http://127.0.0.1:8001/api/health/
