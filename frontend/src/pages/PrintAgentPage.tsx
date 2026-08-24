@@ -104,11 +104,17 @@ export function PrintAgentPage() {
           </p>
           <pre className="print-agent__code">{`{
   "default_printer": "Xprinter XP-365B",
+  "print_mode": "full_page",
   "port": 9123
 }`}</pre>
           <p className="print-agent__hint">
+            <strong>print_mode:</strong> <code>full_page</code> — картинка на всю область печати принтера (универсально);
+            <code>label</code> — фиксированный размер 58×40 мм.
+            <br />
             Проверка: <a href="http://127.0.0.1:9123/health" target="_blank" rel="noreferrer">http://127.0.0.1:9123/health</a>
-            {' '}— должен открыться JSON с <code>&quot;ok&quot;: true</code>
+            {' '}— JSON с <code>&quot;ok&quot;: true</code> и именем принтера.
+            <br />
+            Журнал ошибок: <code>%APPDATA%\\FulfillmentCRM\\PrintAgent\\agent.log</code>
           </p>
         </section>
 
@@ -119,7 +125,8 @@ export function PrintAgentPage() {
             <li>Если Windows SmartScreen блокирует — «Подробнее» → «Выполнить в любом случае»</li>
             <li>Разрешите программе в брандмауэре доступ к частной сети (порт <strong>9123</strong>)</li>
             <li>Xprinter подключён по USB и выбран принтером по умолчанию в Windows</li>
-            <li>На этой странице нажмите <strong>«Проверить снова»</strong></li>
+            <li>Если иконка в трее исчезает — откройте <code>agent.log</code> (путь выше) и пришлите текст ошибки</li>
+            <li>Агент может работать <strong>без трея</strong> — тогда появится окно «запущен без иконки», порт 9123 остаётся активным</li>
             <li>В <Link to="/assembly">Сборке FBS</Link> в шапке должно быть «Печать: Xprinter», не «Chrome»</li>
           </ol>
       </div>

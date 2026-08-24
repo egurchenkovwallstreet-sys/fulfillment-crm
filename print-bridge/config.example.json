@@ -2,6 +2,7 @@
   "host": "127.0.0.1",
   "port": 9123,
   "default_printer": "",
+  "print_mode": "full_page",
   "jobs": {
     "fbs_sticker": { "width_mm": 58, "height_mm": 40 },
     "supply_sticker": { "width_mm": 58, "height_mm": 40 },

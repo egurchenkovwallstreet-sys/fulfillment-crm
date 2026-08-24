@@ -42,6 +42,7 @@ def load_config() -> dict:
     "host": "127.0.0.1",
     "port": 9123,
     "default_printer": "",
+    "print_mode": "full_page",
     "jobs": {
       "fbs_sticker": {"width_mm": 58, "height_mm": 40},
       "supply_sticker": {"width_mm": 58, "height_mm": 40},
@@ -81,6 +82,20 @@ def job_size(job_type: str) -> tuple[float, float]:
   return float(spec.get("width_mm", 58)), float(spec.get("height_mm", 40))
 
 
+def print_mode() -> str:
+  return str(load_config().get("print_mode") or "full_page").strip().lower()
+
+
+def _fit_image_to_box(img: Image.Image, width_px: int, height_px: int) -> Image.Image:
+  if width_px < 1 or height_px < 1:
+    return img
+  src_w, src_h = img.size
+  scale = min(width_px / src_w, height_px / src_h)
+  target_w = max(1, int(src_w * scale))
+  target_h = max(1, int(src_h * scale))
+  return img.resize((target_w, target_h), Image.LANCZOS)
+
+
 def print_png(
   image_b64: str,
   *,
@@ -97,31 +112,39 @@ def print_png(
 
   width_mm, height_mm = job_size(job_type)
   printer = resolve_printer(printer_name)
+  mode = print_mode()
 
   hdc = win32ui.CreateDC()
   hdc.CreatePrinterDC(printer)
 
-  logpixelsx = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
-  logpixelsy = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
-  width_px = max(1, int(width_mm / 25.4 * logpixelsx))
-  height_px = max(1, int(height_mm / 25.4 * logpixelsy))
-
-  img = img.resize((width_px, height_px), Image.LANCZOS)
+  if mode == "full_page":
+    width_px = hdc.GetDeviceCaps(win32con.HORZRES)
+    height_px = hdc.GetDeviceCaps(win32con.VERTRES)
+    width_mm = round(width_px / hdc.GetDeviceCaps(win32con.LOGPIXELSX) * 25.4, 1)
+    height_mm = round(height_px / hdc.GetDeviceCaps(win32con.LOGPIXELSY) * 25.4, 1)
+    img = _fit_image_to_box(img, width_px, height_px)
+  else:
+    logpixelsx = hdc.GetDeviceCaps(win32con.LOGPIXELSX)
+    logpixelsy = hdc.GetDeviceCaps(win32con.LOGPIXELSY)
+    width_px = max(1, int(width_mm / 25.4 * logpixelsx))
+    height_px = max(1, int(height_mm / 25.4 * logpixelsy))
+    img = img.resize((width_px, height_px), Image.LANCZOS)
 
   hdc.StartDoc(f"CRM {job_type}")
   hdc.StartPage()
   dib = ImageWin.Dib(img)
-  dib.draw(hdc.GetHandleOutput(), (0, 0, width_px, height_px))
+  dib.draw(hdc.GetHandleOutput(), (0, 0, img.size[0], img.size[1]))
   hdc.EndPage()
   hdc.EndDoc()
   hdc.DeleteDC()
 
   return {
     "printer": printer,
+    "print_mode": mode,
     "width_mm": width_mm,
     "height_mm": height_mm,
-    "width_px": width_px,
-    "height_px": height_px,
+    "width_px": img.size[0],
+    "height_px": img.size[1],
   }
 
 
@@ -138,6 +161,7 @@ def health():
     "platform": sys.platform,
     "win32": HAS_WIN32,
     "printer": printer,
+    "print_mode": print_mode(),
     "port": cfg.get("port", 9123),
   })
 
@@ -158,6 +182,10 @@ def set_config():
   cfg = load_config()
   if "default_printer" in data:
     cfg["default_printer"] = str(data["default_printer"] or "")
+  if "print_mode" in data:
+    mode = str(data["print_mode"] or "").strip().lower()
+    if mode in ("full_page", "label"):
+      cfg["print_mode"] = mode
   save_config(cfg)
   return jsonify({"ok": True, "config": cfg})
 
