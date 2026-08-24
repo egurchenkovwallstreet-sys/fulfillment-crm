@@ -301,17 +301,18 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
 
 
 def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
-  """Вкладка «В доставке»: переданы в WB, поставка ещё не принята на складе (waiting)."""
-  confirmed_supply = Supply.objects.filter(
+  """Вкладка «В доставке»: в поставке WB, ШК поставки ещё не отсканирован на складе."""
+  confirmed_unscanned_supply = Supply.objects.filter(
     seller=seller,
     status=Supply.Status.CONFIRMED,
+    wb_scanned_at__isnull=True,
     orders__id=OuterRef("pk"),
   )
   return filter_orders_for_seller(
     Order.objects.filter(seller=seller)
     .filter(wb_in_delivery_q())
-    .annotate(_has_confirmed_supply=Exists(confirmed_supply))
-    .filter(_has_confirmed_supply=True),
+    .annotate(_awaiting_supply_scan=Exists(confirmed_unscanned_supply))
+    .filter(_awaiting_supply_scan=True),
     seller,
   )
 

@@ -27,7 +27,7 @@ from apps.sellers.services.warehouse_filter import (
   is_warehouse_enabled,
 )
 
-SYNC_VERSION = "delivery-v12"
+SYNC_VERSION = "delivery-v13"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]

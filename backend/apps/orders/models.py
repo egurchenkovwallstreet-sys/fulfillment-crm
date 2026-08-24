@@ -136,6 +136,7 @@ class Supply(models.Model):
   )
   orders = models.ManyToManyField(Order, related_name="supplies", blank=True)
   supply_barcode_printed = models.BooleanField("ШК поставки распечатан", default=False)
+  wb_scanned_at = models.DateTimeField("ШК поставки отсканирован на складе WB", null=True, blank=True)
   stock_deducted = models.BooleanField("Остатки списаны", default=False)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)

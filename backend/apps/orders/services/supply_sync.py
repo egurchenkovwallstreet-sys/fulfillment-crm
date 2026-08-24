@@ -143,6 +143,10 @@ def sync_supplies_from_wb(
       if not supply.supply_barcode_printed:
         supply.supply_barcode_printed = True
         update_fields.append("supply_barcode_printed")
+      scanned_at = _parse_wb_datetime(wb_supply.get("scanDt") or wb_supply.get("scan_dt"))
+      if scanned_at and supply.wb_scanned_at != scanned_at:
+        supply.wb_scanned_at = scanned_at
+        update_fields.append("wb_scanned_at")
       if update_fields:
         supply.save(update_fields=list(dict.fromkeys(update_fields)))
 
@@ -161,4 +165,63 @@ def sync_supplies_from_wb(
     "wb_supplies_total": len(wb_supplies),
     "stock_deducted": stock_deducted,
     "stock_errors": stock_errors,
+  }
+
+
+def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
+  """
+  Обновить wb_scanned_at по scanDt из WB API.
+  После сканирования ШК поставки на складе заказы уходят из вкладки «В доставке».
+  """
+  from apps.orders.services.assembly import _get_client
+
+  if client is None:
+    client = _get_client(seller)
+
+  try:
+    wb_supplies = client.fetch_supplies()
+  except WBApiError as exc:
+    raise AssemblyError(str(exc)) from exc
+
+  scan_by_id = {}
+  for wb_supply in wb_supplies:
+    wb_supply_id = str(wb_supply.get("id") or "")
+    if not wb_supply_id:
+      continue
+    scanned_at = _parse_wb_datetime(wb_supply.get("scanDt") or wb_supply.get("scan_dt"))
+    if scanned_at:
+      scan_by_id[wb_supply_id] = scanned_at
+
+  if not scan_by_id:
+    return {"supplies_checked": len(wb_supplies), "supplies_scanned": 0, "orders_closed": 0}
+
+  supplies = list(
+    Supply.objects.filter(seller=seller, wb_supply_id__in=scan_by_id.keys())
+    .prefetch_related("orders")
+  )
+  now = timezone.now()
+  supplies_scanned = 0
+  orders_closed = 0
+
+  for supply in supplies:
+    scanned_at = scan_by_id.get(supply.wb_supply_id)
+    if not scanned_at:
+      continue
+    if supply.wb_scanned_at == scanned_at:
+      continue
+
+    supply.wb_scanned_at = scanned_at
+    supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    supplies_scanned += 1
+
+    closed = supply.orders.filter(status=Order.Status.IN_DELIVERY).update(
+      status=Order.Status.SHIPPED,
+      updated_at=now,
+    )
+    orders_closed += closed
+
+  return {
+    "supplies_checked": len(wb_supplies),
+    "supplies_scanned": supplies_scanned,
+    "orders_closed": orders_closed,
   }

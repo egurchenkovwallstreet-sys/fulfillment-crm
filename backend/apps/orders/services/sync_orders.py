@@ -166,6 +166,14 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   except WBApiError:
     pass
 
+  supply_scan_result = {"supplies_scanned": 0, "orders_closed": 0}
+  try:
+    from apps.orders.services.supply_sync import sync_supply_scan_dates
+
+    supply_scan_result = sync_supply_scan_dates(seller, client=client)
+  except Exception:
+    pass
+
   wb_orders = fetch_result.orders
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
   status_error = ""
@@ -205,6 +213,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
       "skipped_warehouse": skipped_warehouse,
       "archive_backfill": archive_import,
       "delivery_supply_orders": len(delivery_supply_ids),
+      "supply_scan": supply_scan_result,
       "warehouse_sync_error": warehouse_sync_error,
       "fetched": len(wb_orders),
       "raw_total": fetch_result.raw_total,
