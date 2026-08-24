@@ -20,11 +20,15 @@ import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
   buildDeliveryConfirmMessage,
+  canSendOrdersToAssembly,
+  canSwitchToStage,
   orderBlockReason,
   orderCanDeliver,
   resolveWorkflowStep,
   type ScanPhase,
+  type StageKey,
 } from '../utils/assemblyWorkflow'
+import { AssemblyModal, type AssemblyModalState } from '../components/AssemblyModal'
 import {
   printFbsSticker,
   printSupplySticker,
@@ -72,6 +76,7 @@ export function AssemblySellerPage() {
   const [bridgePrinter, setBridgePrinter] = useState('')
   const [verifyingOrderId, setVerifyingOrderId] = useState<number | null>(null)
   const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
+  const [modal, setModal] = useState<AssemblyModalState | null>(null)
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -296,8 +301,28 @@ export function AssemblySellerPage() {
     }
   }
 
+  function requestStageChange(nextStage: StageKey) {
+    if (!data) return
+    const gate = canSwitchToStage(nextStage, data.counts)
+    if (!gate.ok) {
+      setModal({ kind: 'block', title: 'Переход заблокирован', message: gate.reason })
+      return
+    }
+    setStage(nextStage)
+  }
+
+  function guardAssemblyStart(): boolean {
+    if (!data) return false
+    const gate = canSendOrdersToAssembly(Boolean(data.active_pick_list))
+    if (!gate.ok) {
+      setModal({ kind: 'block', title: 'Шаг 1 не завершён', message: gate.reason })
+      return false
+    }
+    return true
+  }
+
   async function handleSendToAssembly(orderId: number) {
-    if (!id) return
+    if (!id || !guardAssemblyStart()) return
     setError('')
     setSuccess('')
     setLoading(true)
@@ -316,11 +341,19 @@ export function AssemblySellerPage() {
     }
   }
 
-  async function handleSendAllToAssembly() {
+  function handleSendAllToAssembly() {
+    if (!id || !guardAssemblyStart()) return
+    setModal({
+      kind: 'confirm',
+      title: 'Отправка на сборку WB',
+      message: `Отправить на сборку ${bulkAssemblyCount} заказов?\n\nДля каждого будет создана поставка WB.`,
+      confirmLabel: 'Отправить',
+      onConfirm: () => void runSendAllToAssembly(),
+    })
+  }
+
+  async function runSendAllToAssembly() {
     if (!id) return
-    if (!window.confirm(`Отправить на сборку в WB ${bulkAssemblyCount} заказов?\n\nБудет создана поставка на каждый заказ.`)) {
-      return
-    }
     setError('')
     setSuccess('')
     setLoading(true)
@@ -338,14 +371,27 @@ export function AssemblySellerPage() {
     }
   }
 
-  async function handleSendToDelivery(order: AssemblyOrder) {
+  function handleSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     if (!orderCanDeliver(order)) {
-      setError(orderBlockReason(order) || 'Заказ не готов к доставке')
+      setModal({
+        kind: 'block',
+        title: 'Нельзя передать в доставку',
+        message: orderBlockReason(order) || 'Заказ не готов к доставке',
+      })
       return
     }
-    if (!window.confirm(buildDeliveryConfirmMessage(order))) return
+    setModal({
+      kind: 'confirm',
+      title: 'Передача в доставку WB',
+      message: buildDeliveryConfirmMessage(order),
+      confirmLabel: 'Подтвердить и печать QR',
+      onConfirm: () => void runSendToDelivery(order),
+    })
+  }
 
+  async function runSendToDelivery(order: AssemblyOrder) {
+    if (!id) return
     setError('')
     setSuccess('')
     setLoading(true)
@@ -371,17 +417,28 @@ export function AssemblySellerPage() {
     }
   }
 
-  async function handleSendAllReadyToDelivery() {
+  function handleSendAllReadyToDelivery() {
     if (!data) return
     const ready = data.orders.filter((order) => orderCanDeliver(order))
     if (ready.length === 0) {
-      setError('Нет заказов, готовых к передаче в доставку')
+      setModal({
+        kind: 'block',
+        title: 'Нет готовых заказов',
+        message: 'Сначала отсканируйте баркоды, распечатайте стикеры FBS и привяжите ЧЗ (если нужен).',
+      })
       return
     }
-    if (!window.confirm(
-      `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
-    )) return
+    setModal({
+      kind: 'confirm',
+      title: 'Массовая передача в доставку',
+      message: `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
+      confirmLabel: 'Передать все',
+      onConfirm: () => void runSendAllReadyToDelivery(ready),
+    })
+  }
 
+  async function runSendAllReadyToDelivery(ready: AssemblyOrder[]) {
+    if (!data) return
     setError('')
     setSuccess('')
     setLoading(true)
@@ -658,17 +715,22 @@ export function AssemblySellerPage() {
       </section>
 
       <section className="assembly-pipeline">
-        {STAGES.map((s) => (
+        {STAGES.map((s) => {
+          const gate = canSwitchToStage(s.key, counts)
+          const locked = !gate.ok && stage !== s.key
+          return (
           <button
             key={s.key}
             type="button"
-            className={`assembly-stage assembly-stage--${s.tone}${stage === s.key ? ' assembly-stage--active' : ''}`}
-            onClick={() => setStage(s.key)}
+            className={`assembly-stage assembly-stage--${s.tone}${stage === s.key ? ' assembly-stage--active' : ''}${locked ? ' assembly-stage--locked' : ''}`}
+            onClick={() => requestStageChange(s.key)}
+            title={locked ? gate.reason : undefined}
           >
             <span className="assembly-stage__count">{stageCount(s.key)}</span>
             <span className="assembly-stage__label">{s.label}</span>
           </button>
-        ))}
+          )
+        })}
       </section>
 
       {stage === 'new' && (
@@ -969,6 +1031,10 @@ export function AssemblySellerPage() {
           )}
         </div>
       </div>
+
+      {modal && (
+        <AssemblyModal modal={modal} onClose={() => setModal(null)} loading={loading} />
+      )}
 
       {markingErrorOrder && (
         <div className="assembly-marking-modal-backdrop" role="presentation" onClick={() => setMarkingErrorOrder(null)}>

@@ -1,0 +1,47 @@
+.assembly-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.assembly-modal {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 520px;
+  width: 100%;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+  border: 2px solid #2563eb;
+}
+
+.assembly-modal--block {
+  border-color: #f59e0b;
+}
+
+.assembly-modal h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.assembly-modal--block h2 {
+  color: #b45309;
+}
+
+.assembly-modal__message {
+  margin: 0 0 1.25rem;
+  color: #334155;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.assembly-modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

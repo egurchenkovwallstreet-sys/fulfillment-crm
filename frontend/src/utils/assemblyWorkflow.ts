@@ -103,3 +103,38 @@ export function buildDeliveryConfirmMessage(order: AssemblyOrder): string {
   lines.push('', 'После подтверждения будет напечатан QR поставки.')
   return lines.join('\n')
 }
+
+export type StageKey = 'new' | 'confirm' | 'complete'
+
+export function canSwitchToStage(
+  target: StageKey,
+  counts: Record<string, number>,
+): { ok: true } | { ok: false; reason: string } {
+  if (target === 'new') return { ok: true }
+  if (target === 'confirm') {
+    if ((counts.in_picking ?? 0) < 1) {
+      return {
+        ok: false,
+        reason: 'Сначала отправьте заказы на сборку в WB (шаг 1 — «Лист подбора» и «Все на сборку»).',
+      }
+    }
+    return { ok: true }
+  }
+  if ((counts.in_delivery ?? 0) < 1) {
+    return {
+      ok: false,
+      reason: 'Нет заказов в доставке. Сначала подтвердите передачу в WB (шаг 4).',
+    }
+  }
+  return { ok: true }
+}
+
+export function canSendOrdersToAssembly(hasPickList: boolean): { ok: true } | { ok: false; reason: string } {
+  if (!hasPickList) {
+    return {
+      ok: false,
+      reason: 'Сначала сформируйте лист подбора — кнопка «Лист подбора» в шапке.',
+    }
+  }
+  return { ok: true }
+}

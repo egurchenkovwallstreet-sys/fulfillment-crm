@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Как настроить сканер YHD-5700DW</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <style>
+    :root { font-family: Segoe UI, system-ui, sans-serif; color: #1a1a1a; }
+    body { max-width: 760px; margin: 24px auto; padding: 0 16px 64px; line-height: 1.5; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 20px; margin-top: 36px; }
+    .howto { background: #eef6ff; border: 1px solid #c5ddf5; border-radius: 10px; padding: 16px 18px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 18px 0; background: #fff; page-break-inside: avoid; }
+    .n { display: inline-block; width: 32px; height: 32px; line-height: 32px; text-align: center; border-radius: 50%; background: #111; color: #fff; font-weight: 700; margin-right: 8px; }
+    svg { display: block; max-width: 100%; height: auto; background: #fff; }
+    ol.steps li { margin: 8px 0; }
+    .warn { background: #fff8e5; border: 1px solid #f0d78c; padding: 12px 14px; border-radius: 8px; }
+    .ok { background: #eefaf0; border: 1px solid #b7e0be; padding: 12px 14px; border-radius: 8px; }
+    .muted { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Как зайти в настройки сканера</h1>
+
+  <div class="howto">
+    <p><b>Важно:</b> у этого сканера нет экрана и нет кнопки «Настройки».
+    Настройки включают так: наводите сканер на специальный штрихкод и нажимаете жёлтую кнопку.</p>
+    <p>Первый штрихкод ниже как раз означает «войти в настройки». После него сканер коротко пискнет — значит, он готов принимать остальные коды.</p>
+  </div>
+
+  <h2>Что сделать до штрихкодов</h2>
+  <ol class="steps">
+    <li>Вставьте в компьютер маленький USB-приёмник сканера (как флешка).</li>
+    <li>Эта страница уже открыта на мониторе — не сворачивайте её.</li>
+    <li>Внизу справа на панели Windows переключите язык на <b>ENG</b> (английский).</li>
+    <li>Увеличьте страницу, если штрихкоды мелкие: клавиши <b>Ctrl</b> и <b>+</b>.</li>
+  </ol>
+
+  <p class="warn">Сканируйте <b>только по порядку: 1 → 2 → 3 → 4 → 5</b>. Не пропускайте и не сканируйте снизу вверх. После каждого кода должен быть <b>один короткий писк</b>. Если писк длинный или двойной — поднесите сканер ближе к экрану и повторите этот же номер.</p>
+
+  <h2>Пять штрихкодов, которые нужно считать</h2>
+
+  <div class="card">
+    <p><span class="n">1</span> <b>Войти в настройки</b></p>
+    <p class="muted">Наведите красную точку/рамку на этот штрихкод и нажмите жёлтую кнопку на сканере.</p>
+    <svg class="bc" data-value="$&gt;:S01010F.&lt;$"></svg>
+  </div>
+  <div class="card">
+    <p><span class="n">2</span> <b>Разрешить скрытые символы</b></p>
+    <p class="muted">Это главный код. Без него Wildberries не видит Честный знак.</p>
+    <svg class="bc" data-value="$&gt;:S070236.&lt;$"></svg>
+  </div>
+  <div class="card">
+    <p><span class="n">3</span> <b>Передавать скрытый символ как F8</b></p>
+    <p class="muted">Так умеет принимать кабинет Wildberries.</p>
+    <svg class="bc" data-value="$&gt;:S070036.&lt;$"></svg>
+  </div>
+  <div class="card">
+    <p><span class="n">4</span> <b>Английская клавиатура</b></p>
+    <svg class="bc" data-value="$&gt;:S1F001D.&lt;$"></svg>
+  </div>
+  <div class="card">
+    <p><span class="n">5</span> <b>Выйти из настроек</b></p>
+    <p class="muted">Обязательно. Иначе сканер останется в режиме настройки и обычные коды может читать странно.</p>
+    <svg class="bc" data-value="$&gt;:S01000F.&lt;$"></svg>
+  </div>
+
+  <div class="ok">
+    <p><b>После пятого кода настройка закончена.</b> Теперь откройте в Wildberries страницу «Проверка сканера на считывание КИЗ» и отсканируйте квадратный код с товара. Должно получиться: скрытых символов <b>2</b>, ключ 91 — есть, код 92 — есть.</p>
+  </div>
+
+  <h2>Если после пяти кодов WB всё ещё ругается</h2>
+  <p>Сначала снова считайте штрихкод <b>№1</b>, потом два запасных ниже, потом снова <b>№5</b>.</p>
+  <div class="card">
+    <p><b>Запасной 1</b></p>
+    <svg class="bc" data-value="$&gt;:S030337.&lt;$"></svg>
+  </div>
+  <div class="card">
+    <p><b>Запасной 2</b></p>
+    <svg class="bc" data-value="$&gt;:S101036.&lt;$"></svg>
+  </div>
+
+  <h2>Если сканер «сломался» и перестал нормально пищать</h2>
+  <p>Считайте этот код сброса, подождите 2 секунды, затем заново сделайте шаги 1–5.</p>
+  <div class="card">
+    <p><b>Сброс на заводские настройки</b></p>
+    <svg class="bc" data-value="$&gt;:S010186.&lt;$"></svg>
+  </div>
+
+  <script>
+    document.querySelectorAll('.bc').forEach((el) => {
+      JsBarcode(el, el.getAttribute('data-value'), {
+        format: 'CODE128',
+        displayValue: true,
+        fontSize: 14,
+        margin: 8,
+        height: 80,
+        width: 1.7,
+      })
+    })
+  </script>
+</body>
+</html>
