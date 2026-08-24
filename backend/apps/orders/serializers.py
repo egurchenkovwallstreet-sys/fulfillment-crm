@@ -36,6 +36,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   can_send_to_delivery = serializers.SerializerMethodField()
 
   warehouse_quantity = serializers.SerializerMethodField()
+  photo_url = serializers.SerializerMethodField()
+  tech_size = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -44,6 +46,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "wb_order_id",
       "barcode",
       "cell_number",
+      "photo_url",
+      "tech_size",
       "status",
       "status_display",
       "wb_supplier_status",
@@ -82,6 +86,20 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.warehouse.services.stock_deduction import resolve_order_product
     product = resolve_order_product(obj)
     return product.quantity if product else None
+
+  def _resolve_product(self, obj):
+    from apps.warehouse.services.stock_deduction import resolve_order_product
+    return resolve_order_product(obj)
+
+  def get_photo_url(self, obj):
+    product = self._resolve_product(obj)
+    return (product.photo_url or "").strip() if product else ""
+
+  def get_tech_size(self, obj):
+    product = self._resolve_product(obj)
+    if not product:
+      return ""
+    return (product.tech_size or product.wb_size or "").strip()
 
 
 class OrderPrintSerializer(serializers.ModelSerializer):

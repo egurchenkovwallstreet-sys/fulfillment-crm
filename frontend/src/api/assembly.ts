@@ -21,6 +21,8 @@ export interface AssemblyOrder {
   id: number
   wb_order_id: number
   barcode: string
+  photo_url: string
+  tech_size: string
   cell_number: string
   status: string
   status_display: string
@@ -170,6 +172,22 @@ export function startAssembly(sellerId: number) {
     method: 'POST',
     body: '{}',
   })
+}
+
+export interface DeletePickListResult {
+  success: boolean
+  deleted_pick_list_id: number
+  orders_unlocked: number
+}
+
+export function deletePickList(sellerId: number, pickListId?: number) {
+  return apiFetch<DeletePickListResult>(
+    `/api/orders/assembly/sellers/${sellerId}/delete-pick-list/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(pickListId ? { pick_list_id: pickListId } : {}),
+    },
+  )
 }
 
 export function scanOrderBarcode(sellerId: number, barcode: string) {

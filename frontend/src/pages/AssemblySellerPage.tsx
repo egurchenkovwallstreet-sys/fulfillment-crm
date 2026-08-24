@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type For
 import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
+  deletePickList,
   fetchAssemblySeller,
   replaceOrderItem,
   reprintOrderSticker,
@@ -27,6 +28,7 @@ import {
   type StageKey,
 } from '../utils/assemblyWorkflow'
 import { AssemblyModal, type AssemblyModalState } from '../components/AssemblyModal'
+import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
   printFbsSticker,
   printSupplySticker,
@@ -260,6 +262,25 @@ export function AssemblySellerPage() {
     if (!data?.active_pick_list) return
     if (!printPickList(data.active_pick_list)) {
       setError('Не удалось открыть окно печати')
+    }
+  }
+
+  async function handleDeletePickList() {
+    if (!id || !data?.active_pick_list) return
+    const pickListId = data.active_pick_list.id
+    if (!window.confirm(`Удалить лист подбора #${pickListId}? Заказы вернутся в «Новые».`)) {
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const result = await deletePickList(id, pickListId)
+      setSuccess(`Лист подбора #${result.deleted_pick_list_id} удалён (${result.orders_unlocked} зак.)`)
+      await load({ silent: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить лист подбора')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -747,6 +768,8 @@ export function AssemblySellerPage() {
               <tr>
                 <th>WB ID</th>
                 <th>Баркод</th>
+                <th>Фото</th>
+                <th>Размер</th>
                 <th>Ячейка</th>
                 <th>ЧЗ</th>
                 <th>Остаток</th>
@@ -758,7 +781,7 @@ export function AssemblySellerPage() {
             <tbody>
               {data.orders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="assembly-table__empty">Нет заказов на этой вкладке</td>
+                  <td colSpan={10} className="assembly-table__empty">Нет заказов на этой вкладке</td>
                 </tr>
               ) : data.orders.map((order) => {
                 const blockReason = orderBlockReason(order)
@@ -766,6 +789,17 @@ export function AssemblySellerPage() {
                   <tr key={order.id}>
                     <td>{order.wb_order_id}</td>
                     <td><code>{order.barcode}</code></td>
+                    <td>
+                      <ProductPhotoThumb
+                        url={order.photo_url ?? ''}
+                        alt={order.barcode || String(order.wb_order_id)}
+                      />
+                    </td>
+                    <td>
+                      <strong className="assembly-order-size">
+                        {order.tech_size || '—'}
+                      </strong>
+                    </td>
                     <td>{order.cell_number || '—'}</td>
                     <td>
                       {order.requires_marking ? (
@@ -846,9 +880,19 @@ export function AssemblySellerPage() {
             <section className="panel">
               <div className="assembly-picklist-head">
                 <h2 className="section-title">Лист подбора #{data.active_pick_list.id}</h2>
-                <button type="button" className="btn btn--secondary btn--small" onClick={handlePrintPickList} disabled={loading}>
-                  Печать PDF
-                </button>
+                <div className="assembly-picklist-actions">
+                  <button type="button" className="btn btn--secondary btn--small" onClick={handlePrintPickList} disabled={loading}>
+                    Печать PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--small"
+                    onClick={handleDeletePickList}
+                    disabled={loading}
+                  >
+                    Удалить лист подбора
+                  </button>
+                </div>
               </div>
               <table className="assembly-table pick-list-table">
                 <thead>

@@ -89,3 +89,52 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   )
 
   return pick_list
+
+
+@transaction.atomic
+def delete_active_pick_list(
+  seller: Seller,
+  *,
+  pick_list_id: int | None = None,
+  user=None,
+) -> dict:
+  """Удалить активный лист подбора и отвязать заказы (если сканирование не начато)."""
+  qs = PickList.objects.filter(seller=seller, is_completed=False)
+  if pick_list_id:
+    pick_list = qs.filter(pk=pick_list_id).first()
+  else:
+    pick_list = qs.order_by("-created_at").first()
+
+  if not pick_list:
+    raise PickListError("Активный лист подбора не найден")
+
+  orders = list(Order.objects.filter(pick_list=pick_list))
+  blocked = [
+    order
+    for order in orders
+    if order.status
+    not in (Order.Status.NEW, Order.Status.IN_PICKING)
+  ]
+  if blocked:
+    raise PickListError(
+      "Нельзя удалить лист: часть заказов уже прошла сканирование или печать стикера",
+    )
+
+  unlocked = 0
+  for order in orders:
+    order.pick_list = None
+    update_fields = ["pick_list", "updated_at"]
+    wb_status = (order.wb_supplier_status or "").strip()
+    if order.status == Order.Status.IN_PICKING and wb_status in ("", WB_SUPPLIER_NEW):
+      order.status = Order.Status.NEW
+      update_fields.append("status")
+    order.save(update_fields=update_fields)
+    unlocked += 1
+
+  deleted_id = pick_list.id
+  pick_list.delete()
+
+  return {
+    "deleted_pick_list_id": deleted_id,
+    "orders_unlocked": unlocked,
+  }

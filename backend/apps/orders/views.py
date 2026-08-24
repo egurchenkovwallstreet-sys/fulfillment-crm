@@ -58,6 +58,7 @@ from .services.supply_flow import (
   send_supplies_to_delivery_bulk,
   send_supply_to_delivery,
 )
+from .services.pick_list import PickListError, delete_active_pick_list, generate_pick_list
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
@@ -396,6 +397,28 @@ class AssemblyStartView(APIView):
       **result,
       "pick_list": PickListSerializer(pick_list).data if pick_list else None,
     }, status=status.HTTP_201_CREATED)
+
+
+class AssemblyDeletePickListView(APIView):
+  """Удалить активный лист подбора и вернуть заказы в «Новые»."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    pick_list_id = request.data.get("pick_list_id") if isinstance(request.data, dict) else None
+    try:
+      result = delete_active_pick_list(
+        seller,
+        pick_list_id=int(pick_list_id) if pick_list_id else None,
+        user=request.user,
+      )
+    except PickListError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"success": True, **result})
 
 
 class AssemblyScanPrintView(APIView):

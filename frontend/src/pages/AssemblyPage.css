@@ -171,6 +171,16 @@
   margin: 0;
 }
 
+.assembly-picklist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assembly-order-size {
+  font-weight: 700;
+}
+
 .assembly-side {
   display: flex;
   flex-direction: column;
