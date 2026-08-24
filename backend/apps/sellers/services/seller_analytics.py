@@ -45,12 +45,14 @@ def _empty_weekly_shipments(weeks: int = 4) -> dict:
 
 def _stock_level(days_remaining: float | None, quantity: int) -> str:
   if quantity <= 0:
-    return "critical"
+    return "urgent"
   if days_remaining is None:
     return "excess"
   if days_remaining < 5:
-    return "critical"
-  if days_remaining <= 15:
+    return "urgent"
+  if days_remaining < 10:
+    return "restock"
+  if days_remaining <= 20:
     return "sufficient"
   return "excess"
 
@@ -84,6 +86,8 @@ def _build_items(
     items.append({
       "barcode": product.barcode,
       "name": product.name or product.barcode,
+      "tech_size": (product.tech_size or "").strip(),
+      "photo_url": (product.photo_url or "").strip(),
       "stock_quantity": product.quantity,
       "orders_day": counts["day"],
       "orders_week": counts["week"],
@@ -93,7 +97,7 @@ def _build_items(
       "stock_level": level,
     })
 
-  level_order = {"critical": 0, "sufficient": 1, "excess": 2, "unknown": 3}
+  level_order = {"urgent": 0, "restock": 1, "sufficient": 2, "excess": 3, "unknown": 4}
   items.sort(key=lambda row: (level_order.get(row["stock_level"], 9), row["days_remaining"] if row["days_remaining"] is not None else 9999))
   return items
 

@@ -7,10 +7,12 @@ import {
   type SellerWeeklyShipmentWeek,
 } from '../api/sellerCabinet'
 import { StatCard } from '../components/StatCard'
+import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import './SellerCabinetPage.css'
 
 const STOCK_LABELS: Record<string, string> = {
-  critical: 'Догрузить',
+  urgent: 'Срочно догрузить',
+  restock: 'Догрузить',
   sufficient: 'Норма',
   excess: 'Много',
 }
@@ -209,9 +211,10 @@ export function SellerCabinetPage() {
       <section className="panel seller-cabinet-table-wrap">
         <h2 className="section-title">Товары и остатки</h2>
         <p className="seller-cabinet-legend">
-          <span className="stock-badge stock-badge--critical">Догрузить</span> — меньше 5 дней запаса
-          <span className="stock-badge stock-badge--sufficient">Норма</span> — 5–15 дней
-          <span className="stock-badge stock-badge--excess">Много</span> — больше 15 дней
+          <span className="stock-badge stock-badge--urgent">Срочно догрузить</span> — меньше 5 дней
+          <span className="stock-badge stock-badge--restock">Догрузить</span> — 5–10 дней
+          <span className="stock-badge stock-badge--sufficient">Норма</span> — 10–20 дней
+          <span className="stock-badge stock-badge--excess">Много</span> — свыше 20 дней
         </p>
 
         {loading && !data && <p>Загрузка…</p>}
@@ -225,8 +228,9 @@ export function SellerCabinetPage() {
             <table className="seller-cabinet-table">
               <thead>
                 <tr>
+                  <th>Фото</th>
                   <th>Товар</th>
-                  <th>Штрихкод</th>
+                  <th>Размер / штрихкод</th>
                   <th>Остаток</th>
                   <th>Заказы д/н/м</th>
                   <th>Ср. в день (7д)</th>
@@ -238,11 +242,23 @@ export function SellerCabinetPage() {
                 {data.items.map((item) => (
                   <tr key={item.barcode} className={`seller-cabinet-row seller-cabinet-row--${item.stock_level}`}>
                     <td>
+                      <ProductPhotoThumb url={item.photo_url} alt={item.name} />
+                    </td>
+                    <td>
                       <Link to={`/cabinet/${encodeURIComponent(item.barcode)}`} className="seller-cabinet-link">
                         {item.name}
                       </Link>
                     </td>
-                    <td className="mono">{item.barcode}</td>
+                    <td>
+                      <div className="seller-cabinet-barcode-cell">
+                        {item.tech_size ? (
+                          <strong className="seller-cabinet-eu-size">{item.tech_size}</strong>
+                        ) : (
+                          <span className="seller-cabinet-eu-size seller-cabinet-eu-size--empty">—</span>
+                        )}
+                        <span className="mono">{item.barcode}</span>
+                      </div>
+                    </td>
                     <td>{item.stock_quantity}</td>
                     <td>
                       {item.orders_day} / {item.orders_week} / {item.orders_month}

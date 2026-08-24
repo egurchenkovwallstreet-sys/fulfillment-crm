@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fetchSellerBarcodeDetail, type SellerBarcodeDetail } from '../api/sellerCabinet'
+import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import './SellerCabinetPage.css'
+
+const STOCK_LABELS: Record<string, string> = {
+  urgent: 'Срочно догрузить',
+  restock: 'Догрузить',
+  sufficient: 'Норма',
+  excess: 'Много',
+}
 
 export function SellerBarcodeDetailPage() {
   const { barcode } = useParams<{ barcode: string }>()
@@ -37,7 +45,10 @@ export function SellerBarcodeDetailPage() {
             <Link to="/cabinet">← Кабинет</Link>
           </p>
           <h1>{item?.name ?? 'Товар'}</h1>
-          <p className="mono">{barcode}</p>
+          <p className="seller-cabinet-barcode-cell">
+            {item?.tech_size && <strong className="seller-cabinet-eu-size">{item.tech_size}</strong>}
+            <span className="mono">{barcode}</span>
+          </p>
         </div>
       </header>
 
@@ -46,6 +57,11 @@ export function SellerBarcodeDetailPage() {
 
       {item && (
         <>
+          {item.photo_url && (
+            <section className="panel seller-detail-photo">
+              <ProductPhotoThumb url={item.photo_url} alt={item.name} />
+            </section>
+          )}
           <section className="stats-grid seller-detail-stats">
             <article className="stat-card stat-card--green">
               <p className="stat-card__label">Остаток на складе</p>
@@ -56,11 +72,12 @@ export function SellerBarcodeDetailPage() {
               <p className="stat-card__value">{item.avg_daily_sales}</p>
               <p className="stat-card__hint">заказов в сутки за {item.sales_lookback_days} дн.</p>
             </article>
-            <article className={`stat-card stat-card--${item.stock_level === 'critical' ? 'red' : item.stock_level === 'sufficient' ? 'green' : 'orange'}`}>
+            <article className={`stat-card stat-card--${item.stock_level === 'urgent' || item.stock_level === 'restock' ? 'red' : item.stock_level === 'sufficient' ? 'green' : 'orange'}`}>
               <p className="stat-card__label">Хватит на</p>
               <p className="stat-card__value">
                 {item.days_remaining === null ? '—' : `${item.days_remaining} дн.`}
               </p>
+              <p className="stat-card__hint">{STOCK_LABELS[item.stock_level] ?? item.stock_level}</p>
             </article>
           </section>
 

@@ -43,11 +43,13 @@ export type SellerWeeklyShipments = {
   weeks: SellerWeeklyShipmentWeek[]
 }
 
-export type StockLevel = 'critical' | 'sufficient' | 'excess'
+export type StockLevel = 'urgent' | 'restock' | 'sufficient' | 'excess'
 
 export type SellerBarcodeItem = {
   barcode: string
   name: string
+  tech_size: string
+  photo_url: string
   stock_quantity: number
   orders_day: number
   orders_week: number

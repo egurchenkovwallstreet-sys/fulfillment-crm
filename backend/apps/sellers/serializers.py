@@ -171,6 +171,8 @@ class AdminBillingDashboardSerializer(serializers.Serializer):
 class SellerBarcodeAnalyticsSerializer(serializers.Serializer):
   barcode = serializers.CharField()
   name = serializers.CharField()
+  tech_size = serializers.CharField(allow_blank=True)
+  photo_url = serializers.URLField(allow_blank=True)
   stock_quantity = serializers.IntegerField()
   orders_day = serializers.IntegerField()
   orders_week = serializers.IntegerField()
