@@ -10,6 +10,7 @@ from apps.warehouse.services.wb_stocks import (
   WBStockError,
   fetch_summed_wb_stocks,
   get_enabled_seller_warehouses,
+  set_wb_stock_absolute,
   transfer_wb_stock_between_warehouses,
 )
 
