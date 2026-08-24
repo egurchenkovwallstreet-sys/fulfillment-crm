@@ -133,7 +133,7 @@ export function SellerCabinetPage() {
                   <h2 className="section-title">Отгрузки на склад WB</h2>
                   <p className="seller-weekly-shipments__hint">
                     Календарная неделя {formatWeekRange(selectedShipmentWeek)} (МСК).
-                    Считаются заказы из поставок, переданных/отсканированных WB (done).
+                    Считаются все заказы из поставок WB (done), в т.ч. отгруженные вне CRM.
                     Сумма — по тарифу обработки за единицу.
                     {selectedShipmentWeek.supplies_count > 0 && (
                       <> Поставок: {selectedShipmentWeek.supplies_count}.</>

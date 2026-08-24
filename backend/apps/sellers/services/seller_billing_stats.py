@@ -4,7 +4,8 @@ from __future__ import annotations
 import re
 import time
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
@@ -20,13 +21,25 @@ from apps.sellers.services.calendar_periods import (
   iter_week_days,
   today_local,
 )
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import (
+  get_enabled_warehouse_match_ids,
+  order_matches_enabled_warehouse,
+  seller_has_warehouse_config,
+)
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.warehouse.models import Product
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
-MAX_SUPPLY_ORDER_FETCHES = 80
+MAX_SUPPLY_ORDER_FETCHES = 300
 SHIPMENTS_WEEKS_HISTORY = 4
+WB_ORDERS_LOOKBACK_DAYS = 30
+
+
+@dataclass
+class _ShippedOrderMeta:
+  barcode: str = ""
+  warehouse_id: int | None = None
+  office_id: int | None = None
 
 
 def _get_client(seller: Seller) -> WBClient:
@@ -39,16 +52,12 @@ def _get_client(seller: Seller) -> WBClient:
   return WBClient(token)
 
 
-def _supply_handoff_at(wb_supply: dict) -> datetime | None:
+def _supply_handoff_at(wb_supply: dict):
   for key in ("scanDt", "scan_dt", "closedAt", "closed_at"):
     parsed = _parse_wb_datetime(wb_supply.get(key))
     if parsed is not None:
       return parsed
   return None
-
-
-def _order_ids_from_crm_supply(supply: Supply) -> list[int]:
-  return list(supply.orders.values_list("wb_order_id", flat=True))
 
 
 def _order_ids_from_wb_supply_name(name: str) -> list[int]:
@@ -67,30 +76,147 @@ def _barcode_price_map(seller: Seller) -> dict[str, Decimal]:
   return prices
 
 
+def _seller_fallback_tariff(seller: Seller) -> Decimal | None:
+  """Общий тариф селлера, если у всех товаров одна individual_price."""
+  distinct = list(
+    Product.objects.filter(seller=seller, individual_price__isnull=False)
+    .values_list("individual_price", flat=True)
+    .distinct()
+  )
+  if len(distinct) == 1:
+    return distinct[0]
+  return None
+
+
+def _build_wb_order_index(seller: Seller, client: WBClient) -> dict[int, _ShippedOrderMeta]:
+  """Баркод и склад заказа: CRM + архив WB (не только заказы, прошедшие через CRM)."""
+  index: dict[int, _ShippedOrderMeta] = {}
+
+  for wb_order_id, barcode, warehouse_id in Order.objects.filter(seller=seller).values_list(
+    "wb_order_id",
+    "barcode",
+    "wb_warehouse_id",
+  ):
+    index[int(wb_order_id)] = _ShippedOrderMeta(
+      barcode=str(barcode or "").strip(),
+      warehouse_id=warehouse_id,
+    )
+
+  try:
+    wb_orders = client.fetch_fbs_orders_for_period(days=WB_ORDERS_LOOKBACK_DAYS)
+  except WBApiError:
+    wb_orders = None
+
+  if wb_orders is not None:
+    for order in wb_orders.orders:
+      meta = index.get(order.wb_order_id)
+      if meta is None:
+        index[order.wb_order_id] = _ShippedOrderMeta(
+          barcode=order.barcode,
+          warehouse_id=order.warehouse_id,
+          office_id=order.office_id,
+        )
+        continue
+      if not meta.barcode and order.barcode:
+        meta.barcode = order.barcode
+      if meta.warehouse_id is None and order.warehouse_id is not None:
+        meta.warehouse_id = order.warehouse_id
+      if meta.office_id is None and order.office_id is not None:
+        meta.office_id = order.office_id
+
+  return index
+
+
+def _fetch_supply_order_ids(
+  client: WBClient,
+  wb_supply: dict,
+  *,
+  crm_supply: Supply | None,
+) -> list[int]:
+  """ID заказов в поставке — в первую очередь из WB API."""
+  wb_supply_id = str(wb_supply.get("id") or "")
+  if wb_supply_id:
+    try:
+      order_ids = client.fetch_supply_order_ids(wb_supply_id)
+      if order_ids:
+        return order_ids
+    except WBApiError:
+      pass
+
+  if crm_supply is not None:
+    crm_ids = list(crm_supply.orders.values_list("wb_order_id", flat=True))
+    if crm_ids:
+      return crm_ids
+
+  return _order_ids_from_wb_supply_name(str(wb_supply.get("name") or ""))
+
+
+def _order_eligible_for_billing(
+  seller: Seller,
+  meta: _ShippedOrderMeta | None,
+  *,
+  match_ids: set[int] | None,
+) -> bool:
+  if match_ids is None:
+    return True
+  if meta is None:
+    # Заказ есть в поставке WB, но нет в индексе — считаем (типично для работы без CRM).
+    return True
+  return order_matches_enabled_warehouse(
+    seller,
+    meta.warehouse_id,
+    meta.office_id,
+    match_ids=match_ids,
+  )
+
+
+def _resolve_unit_price(
+  meta: _ShippedOrderMeta | None,
+  *,
+  price_by_barcode: dict[str, Decimal],
+  fallback_tariff: Decimal | None,
+) -> Decimal | None:
+  if meta and meta.barcode:
+    price = price_by_barcode.get(meta.barcode)
+    if price is not None:
+      return price
+  return fallback_tariff
+
+
 def _sum_shipped_orders(
   seller: Seller,
   wb_order_ids: list[int],
   *,
+  order_index: dict[int, _ShippedOrderMeta],
   price_by_barcode: dict[str, Decimal],
-) -> tuple[int, Decimal, int]:
+  fallback_tariff: Decimal | None,
+  match_ids: set[int] | None,
+) -> tuple[int, Decimal]:
   if not wb_order_ids:
-    return 0, Decimal("0"), 0
+    return 0, Decimal("0")
 
-  orders = filter_orders_for_seller(
-    Order.objects.filter(seller=seller, wb_order_id__in=wb_order_ids),
-    seller,
-  )
   count = 0
   amount = Decimal("0")
-  without_tariff = 0
-  for barcode in orders.values_list("barcode", flat=True):
-    count += 1
-    price = price_by_barcode.get(barcode)
-    if price is None:
-      without_tariff += 1
+  seen: set[int] = set()
+  for wb_order_id in wb_order_ids:
+    if wb_order_id in seen:
       continue
-    amount += price
-  return count, amount, without_tariff
+    seen.add(wb_order_id)
+
+    meta = order_index.get(wb_order_id)
+    if not _order_eligible_for_billing(seller, meta, match_ids=match_ids):
+      continue
+
+    count += 1
+    unit_price = _resolve_unit_price(
+      meta,
+      price_by_barcode=price_by_barcode,
+      fallback_tariff=fallback_tariff,
+    )
+    if unit_price is not None:
+      amount += unit_price
+
+  return count, amount
 
 
 def _week_start_for(day: date) -> date:
@@ -129,7 +255,8 @@ def _build_week_payload(
 def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_HISTORY) -> dict:
   """
   Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
-  Источник: GET /api/v3/supplies, done=true, дата scanDt/closedAt.
+  Источник: GET /api/v3/supplies (done) + order-ids из WB API.
+  Учитываются все заказы в поставках, в т.ч. отгруженные до/вне CRM.
   """
   today = today_local()
   current_week_start, current_week_end = calendar_week_bounds(today)
@@ -138,13 +265,22 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
   daily_counts: dict[date, int] = defaultdict(int)
   daily_amounts: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
   supplies_per_week: dict[date, int] = defaultdict(int)
+
   price_by_barcode = _barcode_price_map(seller)
+  fallback_tariff = _seller_fallback_tariff(seller)
+  match_ids = (
+    get_enabled_warehouse_match_ids(seller)
+    if seller_has_warehouse_config(seller)
+    else None
+  )
 
   client = _get_client(seller)
   try:
     wb_supplies = client.fetch_supplies()
   except WBApiError as exc:
     raise SellerAnalyticsError(str(exc)) from exc
+
+  order_index = _build_wb_order_index(seller, client)
 
   crm_supplies = {
     supply.wb_supply_id: supply
@@ -169,26 +305,21 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
     if not wb_supply_id:
       continue
 
-    name = str(wb_supply.get("name") or "")
-    order_wb_ids: list[int] = []
+    if api_fetches >= MAX_SUPPLY_ORDER_FETCHES:
+      break
 
     crm_supply = crm_supplies.get(wb_supply_id)
-    if crm_supply is not None:
-      order_wb_ids = _order_ids_from_crm_supply(crm_supply)
-    else:
-      order_wb_ids = _order_ids_from_wb_supply_name(name)
-      if not order_wb_ids and api_fetches < MAX_SUPPLY_ORDER_FETCHES:
-        try:
-          order_wb_ids = client.fetch_supply_order_ids(wb_supply_id)
-          api_fetches += 1
-          time.sleep(REQUEST_INTERVAL_SEC)
-        except WBApiError:
-          order_wb_ids = []
+    order_wb_ids = _fetch_supply_order_ids(client, wb_supply, crm_supply=crm_supply)
+    api_fetches += 1
+    time.sleep(REQUEST_INTERVAL_SEC)
 
-    order_count, order_amount, _ = _sum_shipped_orders(
+    order_count, order_amount = _sum_shipped_orders(
       seller,
       order_wb_ids,
+      order_index=order_index,
       price_by_barcode=price_by_barcode,
+      fallback_tariff=fallback_tariff,
+      match_ids=match_ids,
     )
     if order_count <= 0:
       continue
