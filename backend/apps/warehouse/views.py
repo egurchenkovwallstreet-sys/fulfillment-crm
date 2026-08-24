@@ -14,8 +14,10 @@ from .serializers import (
   MoveCellSerializer,
   OnboardingConfirmSerializer,
   OnboardingExcludeSerializer,
+  OnboardingPreviewSerializer,
   ProductSerializer,
   SellerBriefSerializer,
+  StockFileApplySerializer,
   StockOperationSerializer,
   StockTransferSerializer,
 )
@@ -25,6 +27,11 @@ from .services.cells import cells_queryset_ordered
 from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
 from .services.intake import IntakeError, perform_intake
 from .services.onboarding import OnboardingError, confirm_onboarding
+from .services.stock_file_import import (
+  StockFileImportError,
+  apply_stock_import,
+  build_stock_import_preview,
+)
 from .services.stock_transfer import StockTransferError, build_stock_overview, perform_stock_transfer
 from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
@@ -293,11 +300,21 @@ class OnboardingPreviewView(APIView):
 
   def post(self, request, seller_id):
     seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = OnboardingPreviewSerializer(
+      data=request.data or {},
+      context={"seller_id": seller_id},
+    )
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
     try:
-      data = build_onboarding_preview(seller)
+      payload = build_onboarding_preview(
+        seller,
+        catalog_mode=data.get("catalog_mode", "all"),
+        warehouse_ids=data.get("warehouse_ids"),
+      )
     except CatalogError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    return Response({"success": True, **data})
+    return Response({"success": True, **payload})
 
 
 class OnboardingExcludeView(APIView):
@@ -365,3 +382,55 @@ class StockTransferView(APIView):
     except StockTransferError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
+
+
+class StockFilePreviewView(APIView):
+  """Предпросмотр импорта остатков из Excel (формат WB)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    upload = request.FILES.get("file")
+    warehouse_id = request.data.get("warehouse_id")
+    if not upload:
+      return Response({"detail": "Загрузите файл Excel"}, status=status.HTTP_400_BAD_REQUEST)
+    if not warehouse_id:
+      return Response({"detail": "Укажите warehouse_id"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+      warehouse_id = int(warehouse_id)
+    except (TypeError, ValueError):
+      return Response({"detail": "Некорректный warehouse_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      payload = build_stock_import_preview(
+        seller,
+        warehouse_id=warehouse_id,
+        file_bytes=upload.read(),
+      )
+    except StockFileImportError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"success": True, **payload})
+
+
+class StockFileApplyView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = StockFileApplySerializer(
+      data=request.data,
+      context={"seller_id": seller_id},
+    )
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+      result = apply_stock_import(
+        seller,
+        warehouse_id=data["warehouse_id"],
+        rows=data["rows"],
+        user=request.user,
+      )
+    except StockFileImportError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **result}, status=status.HTTP_201_CREATED)

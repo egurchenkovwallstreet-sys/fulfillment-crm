@@ -110,6 +110,37 @@ class MoveCellSerializer(serializers.Serializer):
     return value
 
 
+class OnboardingPreviewSerializer(serializers.Serializer):
+  catalog_mode = serializers.ChoiceField(
+    choices=["all", "with_stock"],
+    default="all",
+  )
+  warehouse_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=False,
+  )
+
+  def validate(self, attrs):
+    seller_id = self.context.get("seller_id")
+    warehouse_ids = attrs.get("warehouse_ids") or []
+    if not warehouse_ids:
+      raise serializers.ValidationError({
+        "warehouse_ids": "Выберите хотя бы один FBS-склад",
+      })
+    from apps.sellers.models import SellerWarehouse
+
+    found = SellerWarehouse.objects.filter(
+      seller_id=seller_id,
+      pk__in=warehouse_ids,
+    ).count()
+    if found != len(set(warehouse_ids)):
+      raise serializers.ValidationError({
+        "warehouse_ids": "Один или несколько складов не найдены у селлера",
+      })
+    return attrs
+
+
 class OnboardingExcludeSerializer(serializers.Serializer):
   items = serializers.ListField(child=serializers.DictField())
   exclude_barcodes = serializers.ListField(
@@ -133,3 +164,19 @@ class StockTransferSerializer(serializers.Serializer):
   from_warehouse_id = serializers.IntegerField()
   to_warehouse_id = serializers.IntegerField()
   quantity = serializers.IntegerField(min_value=1)
+
+
+class StockFileApplySerializer(serializers.Serializer):
+  warehouse_id = serializers.IntegerField()
+  rows = serializers.ListField(child=serializers.DictField(), min_length=1)
+
+  def validate(self, attrs):
+    seller_id = self.context.get("seller_id")
+    from apps.sellers.models import SellerWarehouse
+
+    wh_id = attrs["warehouse_id"]
+    if not SellerWarehouse.objects.filter(pk=wh_id, seller_id=seller_id).exists():
+      raise serializers.ValidationError({
+        "warehouse_id": "Склад WB не найден у этого селлера",
+      })
+    return attrs

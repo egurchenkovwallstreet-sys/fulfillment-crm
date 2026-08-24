@@ -6,15 +6,16 @@ from dataclasses import dataclass, field
 from apps.integrations.wb_client import WBApiError
 from apps.integrations.wb_content import _pick_photo_url, fetch_all_seller_cards
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
-from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import get_enabled_wb_warehouse_ids
+from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
 from apps.warehouse.services.size_sort import size_sort_key
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
-  fetch_summed_wb_stocks,
-  get_enabled_seller_warehouses,
+  fetch_wb_stocks_for_warehouses,
 )
+
+CATALOG_MODE_ALL = "all"
+CATALOG_MODE_WITH_STOCK = "with_stock"
 
 
 class CatalogError(Exception):
@@ -128,13 +129,39 @@ def _assign_cell_numbers(items: list[CatalogBarcodeItem], start_from: int = 1) -
     num += 1
 
 
-def build_onboarding_preview(seller: Seller) -> dict:
-  """Каталог WB + остатки по включённым FBS-складам + план ячеек."""
-  enabled_ids = get_enabled_wb_warehouse_ids(seller)
-  if not enabled_ids:
-    raise CatalogError(
-      "Нет включённых FBS-складов. Загрузите склады WB и включите нужные в сборке."
-    )
+def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
+  """Индекс баркод → данные карточки WB для селлера."""
+  try:
+    cards = fetch_all_seller_cards(_get_token(seller))
+  except WBApiError as exc:
+    raise CatalogError(str(exc)) from exc
+  index: dict[str, CatalogBarcodeItem] = {}
+  for item in _parse_cards_to_items(cards):
+    index[item.barcode] = item
+  return index
+
+
+def resolve_seller_warehouses(
+  seller: Seller,
+  warehouse_ids: list[int] | None,
+) -> list[SellerWarehouse]:
+  qs = SellerWarehouse.objects.filter(seller=seller)
+  if warehouse_ids:
+    qs = qs.filter(pk__in=warehouse_ids)
+  warehouses = list(qs.order_by("name", "id"))
+  if not warehouses:
+    raise CatalogError("Выберите хотя бы один FBS-склад")
+  return warehouses
+
+
+def build_onboarding_preview(
+  seller: Seller,
+  *,
+  catalog_mode: str = CATALOG_MODE_ALL,
+  warehouse_ids: list[int] | None = None,
+) -> dict:
+  """Каталог WB + остатки по выбранным FBS-складам + план ячеек."""
+  warehouses = resolve_seller_warehouses(seller, warehouse_ids)
 
   try:
     cards = fetch_all_seller_cards(_get_token(seller))
@@ -145,18 +172,9 @@ def build_onboarding_preview(seller: Seller) -> dict:
   if not flat_items:
     raise CatalogError("На WB не найдено карточек с баркодами")
 
-  existing_barcodes = set(
-    Product.objects.filter(seller=seller).values_list("barcode", flat=True)
-  )
-  for item in flat_items:
-    item.already_in_crm = item.barcode in existing_barcodes
-
-  new_items = [item for item in flat_items if not item.already_in_crm]
-  _assign_cell_numbers(new_items)
-
   barcodes = [item.barcode for item in flat_items]
   try:
-    stock_map = fetch_summed_wb_stocks(seller, barcodes)
+    stock_map = fetch_wb_stocks_for_warehouses(seller, warehouses, barcodes)
   except WBStockError as exc:
     raise CatalogError(str(exc)) from exc
 
@@ -166,14 +184,33 @@ def build_onboarding_preview(seller: Seller) -> dict:
     item.wb_stock_by_warehouse = dict(stock.get("by_warehouse") or {})
 
   articles = _group_by_article(flat_items)
-  warehouses = get_enabled_seller_warehouses(seller)
+
+  if catalog_mode == CATALOG_MODE_WITH_STOCK:
+    articles = [
+      article
+      for article in articles
+      if any(item.wb_stock_total >= 1 for item in article.items)
+    ]
+    kept_barcodes = {item.barcode for article in articles for item in article.items}
+    flat_items = [item for item in flat_items if item.barcode in kept_barcodes]
+
+  existing_barcodes = set(
+    Product.objects.filter(seller=seller).values_list("barcode", flat=True)
+  )
+  for item in flat_items:
+    item.already_in_crm = item.barcode in existing_barcodes
+
+  new_items = [item for item in flat_items if not item.already_in_crm]
+  _assign_cell_numbers(new_items)
 
   return {
     "seller_id": seller.id,
+    "catalog_mode": catalog_mode,
     "cards_count": len(cards),
     "barcodes_count": len(flat_items),
     "new_barcodes_count": len(new_items),
     "existing_barcodes_count": len(existing_barcodes),
+    "filtered_articles_count": len(articles),
     "warehouses": [
       {
         "id": wh.id,

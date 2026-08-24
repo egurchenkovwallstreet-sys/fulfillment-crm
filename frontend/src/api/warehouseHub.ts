@@ -37,13 +37,43 @@ export type OnboardingArticle = {
 export type OnboardingPreview = {
   success: boolean
   seller_id: number
+  catalog_mode?: 'all' | 'with_stock'
   cards_count: number
   barcodes_count: number
   new_barcodes_count: number
   existing_barcodes_count: number
+  filtered_articles_count?: number
   warehouses: OnboardingWarehouse[]
   articles: OnboardingArticle[]
   items: OnboardingItem[]
+}
+
+export type StockImportPreviewRow = {
+  barcode: string
+  add_quantity: number
+  status: string
+  title: string
+  crm_before: number
+  crm_after: number
+  wb_before: number
+  wb_after: number
+  will_create: boolean
+  cell_number: string
+  message: string
+}
+
+export type StockImportPreview = {
+  success: boolean
+  warehouse: { id: number; wb_warehouse_id: number; name: string }
+  rows: StockImportPreviewRow[]
+  skipped_unknown: string[]
+  totals: {
+    file_rows: number
+    to_apply: number
+    skipped_unknown: number
+    new_products: number
+    add_units: number
+  }
 }
 
 export type StockWarehouseMeta = {
@@ -76,10 +106,13 @@ export type StockOverview = {
   warehouses: StockWarehouseMeta[]
 }
 
-export function fetchOnboardingPreview(sellerId: number) {
+export function fetchOnboardingPreview(
+  sellerId: number,
+  payload: { catalog_mode: 'all' | 'with_stock'; warehouse_ids: number[] },
+) {
   return apiFetch<OnboardingPreview>(`/api/warehouse/onboarding/${sellerId}/preview/`, {
     method: 'POST',
-    body: '{}',
+    body: JSON.stringify(payload),
   })
 }
 
@@ -128,6 +161,55 @@ export function transferStock(
   return apiFetch(`/api/warehouse/sellers/${sellerId}/stock-transfer/`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function previewStockImport(
+  sellerId: number,
+  warehouseId: number,
+  file: File,
+): Promise<StockImportPreview> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('warehouse_id', String(warehouseId))
+
+  const headers = new Headers()
+  const token = (await import('./tokens')).getAccessToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetch(`/api/warehouse/stock-import/${sellerId}/preview/`, {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  if (!response.ok) {
+    let detail = `Ошибка ${response.status}`
+    try {
+      const data = await response.json()
+      if (data.detail) detail = String(data.detail)
+    } catch {
+      // ignore
+    }
+    throw new Error(detail)
+  }
+  return response.json() as Promise<StockImportPreview>
+}
+
+export function applyStockImport(
+  sellerId: number,
+  warehouseId: number,
+  rows: StockImportPreviewRow[],
+) {
+  return apiFetch<{
+    success: boolean
+    applied: number
+    created_products: number
+    skipped_unknown: string[]
+    errors: Array<{ barcode: string; error: string }>
+    add_units: number
+  }>(`/api/warehouse/stock-import/${sellerId}/apply/`, {
+    method: 'POST',
+    body: JSON.stringify({ warehouse_id: warehouseId, rows }),
   })
 }
 

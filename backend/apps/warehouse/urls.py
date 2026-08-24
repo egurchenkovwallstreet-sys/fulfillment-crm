@@ -13,6 +13,8 @@ from .views import (
   SellerListView,
   SellerProductsRefreshView,
   SellerProductsView,
+  StockFileApplyView,
+  StockFilePreviewView,
   StockOverviewView,
   StockTransferView,
 )
@@ -46,6 +48,16 @@ urlpatterns = [
     "onboarding/<int:seller_id>/confirm/",
     OnboardingConfirmView.as_view(),
     name="onboarding_confirm",
+  ),
+  path(
+    "stock-import/<int:seller_id>/preview/",
+    StockFilePreviewView.as_view(),
+    name="stock_file_preview",
+  ),
+  path(
+    "stock-import/<int:seller_id>/apply/",
+    StockFileApplyView.as_view(),
+    name="stock_file_apply",
   ),
   path(
     "sellers/<int:seller_id>/stock-overview/",

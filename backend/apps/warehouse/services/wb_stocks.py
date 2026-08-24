@@ -101,6 +101,66 @@ def _parse_stock_amount(item: dict) -> int:
     return 0
 
 
+def fetch_wb_stocks_for_warehouses(
+  seller: Seller,
+  warehouses: list[SellerWarehouse],
+  barcodes: list[str],
+) -> dict[str, dict]:
+  """Остатки по баркодам на указанных FBS-складах (сумма total + by_warehouse)."""
+  if not warehouses:
+    raise WBStockError("Не выбраны FBS-склады")
+
+  normalized = [b.strip() for b in barcodes if b and b.strip()]
+  result: dict[str, dict] = {
+    barcode: {"total": 0, "by_warehouse": {}} for barcode in normalized
+  }
+  if not normalized:
+    return result
+
+  client = _get_wb_client(seller)
+  stock_by_sku: dict[str, dict[int, int]] = {barcode: {} for barcode in normalized}
+
+  for warehouse in warehouses:
+    try:
+      items = client.fetch_warehouse_stocks_by_skus(warehouse.wb_warehouse_id, normalized)
+    except WBApiError as exc:
+      raise WBStockError(
+        f"Ошибка остатков склада {warehouse.name or warehouse.wb_warehouse_id}: {exc}"
+      ) from exc
+
+    for item in items:
+      sku = str(item.get("sku") or "").strip()
+      if sku not in stock_by_sku:
+        continue
+      stock_by_sku[sku][warehouse.id] = _parse_stock_amount(item)
+
+  for barcode in normalized:
+    by_wh = stock_by_sku[barcode]
+    result[barcode] = {"total": sum(by_wh.values()), "by_warehouse": by_wh}
+
+  return result
+
+
+def increment_product_warehouse_stock(
+  product,
+  warehouse: SellerWarehouse,
+  add_quantity: int,
+) -> int:
+  """Увеличить остаток товара на конкретном FBS-складе в CRM."""
+  from apps.warehouse.models import ProductWarehouseStock
+
+  if add_quantity <= 0:
+    return 0
+  pws, _ = ProductWarehouseStock.objects.get_or_create(
+    product=product,
+    seller_warehouse=warehouse,
+    defaults={"quantity": 0},
+  )
+  pws.quantity += add_quantity
+  pws.save(update_fields=["quantity", "updated_at"])
+  return pws.quantity
+
+
 def fetch_summed_wb_stocks(
   seller: Seller,
   barcodes: list[str],

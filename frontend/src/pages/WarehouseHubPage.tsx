@@ -2,18 +2,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchSellers, type Seller } from '../api/warehouse'
 import {
+  applyStockImport,
   confirmOnboarding,
   fetchOnboardingPreview,
   fetchStockOverview,
+  previewStockImport,
   transferStock,
   type OnboardingPreview,
+  type StockImportPreview,
   type StockOverview,
   type StockOverviewProduct,
 } from '../api/warehouseHub'
-import { syncSellerWarehouses } from '../api/sellers'
+import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import './WarehouseHubPage.css'
 
-type TabId = 'onboarding' | 'intake' | 'transfer'
+type TabId = 'onboarding' | 'import' | 'intake' | 'transfer'
 
 function PhotoThumb({ url, alt }: { url: string; alt: string }) {
   const [zoomed, setZoomed] = useState(false)
@@ -52,6 +55,9 @@ export function WarehouseHubPage() {
   const [success, setSuccess] = useState('')
 
   const [preview, setPreview] = useState<OnboardingPreview | null>(null)
+  const [sellerWarehouses, setSellerWarehouses] = useState<SellerWarehouse[]>([])
+  const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>([])
+  const [catalogMode, setCatalogMode] = useState<'all' | 'with_stock'>('all')
   const [excludeBarcodes, setExcludeBarcodes] = useState<Set<string>>(new Set())
   const [excludeNmIds, setExcludeNmIds] = useState<Set<number>>(new Set())
 
@@ -61,6 +67,10 @@ export function WarehouseHubPage() {
   const [toWh, setToWh] = useState<number | ''>('')
   const [transferQty, setTransferQty] = useState(1)
 
+  const [importWarehouseId, setImportWarehouseId] = useState<number | ''>('')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [stockImportPreview, setStockImportPreview] = useState<StockImportPreview | null>(null)
+
   useEffect(() => {
     fetchSellers()
       .then((data) => {
@@ -69,6 +79,21 @@ export function WarehouseHubPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка'))
   }, [])
+
+  useEffect(() => {
+    if (!sellerId) {
+      setSellerWarehouses([])
+      setSelectedWarehouseIds([])
+      return
+    }
+    fetchSellerWarehouses(Number(sellerId))
+      .then((whs) => {
+        setSellerWarehouses(whs)
+        setSelectedWarehouseIds(whs.filter((w) => w.is_enabled).map((w) => w.id))
+        if (whs.length === 1) setImportWarehouseId(whs[0].id)
+      })
+      .catch(() => setSellerWarehouses([]))
+  }, [sellerId])
 
   const activeItems = useMemo(() => {
     if (!preview) return []
@@ -112,16 +137,23 @@ export function WarehouseHubPage() {
 
   const handleLoadPreview = useCallback(async () => {
     if (!sellerId) return
+    if (selectedWarehouseIds.length === 0) {
+      setError('Выберите хотя бы один FBS-склад')
+      return
+    }
     setLoading(true)
     setError('')
     setSuccess('')
     setExcludeBarcodes(new Set())
     setExcludeNmIds(new Set())
     try {
-      if (sellers.length) {
-        await syncSellerWarehouses(Number(sellerId))
-      }
-      const data = await fetchOnboardingPreview(Number(sellerId))
+      await syncSellerWarehouses(Number(sellerId))
+      const whs = await fetchSellerWarehouses(Number(sellerId))
+      setSellerWarehouses(whs)
+      const data = await fetchOnboardingPreview(Number(sellerId), {
+        catalog_mode: catalogMode,
+        warehouse_ids: selectedWarehouseIds,
+      })
       setPreview(data)
       setSuccess(
         `Каталог: ${data.cards_count} карточек, ${data.barcodes_count} баркодов, новых: ${data.new_barcodes_count}`,
@@ -132,7 +164,58 @@ export function WarehouseHubPage() {
     } finally {
       setLoading(false)
     }
-  }, [sellerId, sellers.length])
+  }, [sellerId, catalogMode, selectedWarehouseIds])
+
+  function toggleWarehouseSelection(warehouseId: number, checked: boolean) {
+    setSelectedWarehouseIds((prev) => {
+      if (checked) return [...prev, warehouseId]
+      return prev.filter((id) => id !== warehouseId)
+    })
+  }
+
+  async function handleStockImportPreview() {
+    if (!sellerId || !importFile || !importWarehouseId) return
+    setLoading(true)
+    setError('')
+    setStockImportPreview(null)
+    try {
+      const data = await previewStockImport(Number(sellerId), Number(importWarehouseId), importFile)
+      setStockImportPreview(data)
+      setSuccess(
+        `Файл: ${data.totals.to_apply} баркодов, +${data.totals.add_units} шт.`
+        + (data.skipped_unknown.length ? `, пропущено: ${data.skipped_unknown.length}` : ''),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка чтения файла')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleStockImportApply() {
+    if (!sellerId || !stockImportPreview || !importWarehouseId) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await applyStockImport(
+        Number(sellerId),
+        Number(importWarehouseId),
+        stockImportPreview.rows,
+      )
+      let msg = `Применено: ${result.applied} баркодов, +${result.add_units} шт.`
+      if (result.created_products) msg += `, новых товаров: ${result.created_products}`
+      if (result.skipped_unknown.length) {
+        msg += `. Пропущено (нет в WB): ${result.skipped_unknown.length}`
+      }
+      setSuccess(msg)
+      setStockImportPreview(null)
+      setImportFile(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка применения')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleExcludeBarcode = (barcode: string) => {
     setExcludeBarcodes((prev) => new Set(prev).add(barcode))
@@ -220,6 +303,13 @@ export function WarehouseHubPage() {
         </button>
         <button
           type="button"
+          className={`whub-tab${tab === 'import' ? ' whub-tab--active' : ''}`}
+          onClick={() => setTab('import')}
+        >
+          Импорт Excel
+        </button>
+        <button
+          type="button"
           className={`whub-tab${tab === 'intake' ? ' whub-tab--active' : ''}`}
           onClick={() => setTab('intake')}
         >
@@ -243,6 +333,7 @@ export function WarehouseHubPage() {
               setSellerId(e.target.value ? Number(e.target.value) : '')
               setPreview(null)
               setStockOverview(null)
+              setStockImportPreview(null)
             }}
           >
             <option value="">— выберите —</option>
@@ -259,16 +350,71 @@ export function WarehouseHubPage() {
       {tab === 'onboarding' && (
         <section className="panel">
           <p className="whub-hint">
-            Сценарий 1: загрузка всего каталога WB, назначение ячеек по размерам, остатки суммируются
-            по включённым FBS-складам. Удалите лишние баркоды или артикулы перед подтверждением.
+            Подключение каталога WB: выберите склады FBS и режим загрузки. Ячейки назначаются на все
+            размеры артикула (даже с нулевым остатком), если артикул попал в выборку.
           </p>
+
+          <div className="whub-options">
+            <fieldset className="whub-fieldset">
+              <legend>Режим каталога</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="catalogMode"
+                  checked={catalogMode === 'all'}
+                  onChange={() => setCatalogMode('all')}
+                />
+                Все карточки со всеми баркодами
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="catalogMode"
+                  checked={catalogMode === 'with_stock'}
+                  onChange={() => setCatalogMode('with_stock')}
+                />
+                Только артикулы с остатком ≥ 1 на выбранных складах
+              </label>
+            </fieldset>
+
+            <fieldset className="whub-fieldset">
+              <legend>FBS-склады для остатков</legend>
+              {sellerWarehouses.length === 0 ? (
+                <p className="whub-hint">Загрузите склады WB (кнопка ниже)</p>
+              ) : (
+                <ul className="whub-warehouse-picks">
+                  {sellerWarehouses.map((wh) => (
+                    <li key={wh.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedWarehouseIds.includes(wh.id)}
+                          onChange={(e) => toggleWarehouseSelection(wh.id, e.target.checked)}
+                        />
+                        {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </fieldset>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn--secondary btn--small"
+            disabled={!sellerId || loading}
+            onClick={() => void syncSellerWarehouses(Number(sellerId)).then(() => fetchSellerWarehouses(Number(sellerId)).then(setSellerWarehouses))}
+          >
+            Обновить склады из WB
+          </button>
           <button
             type="button"
             className="btn btn--primary"
-            disabled={!sellerId || loading}
+            disabled={!sellerId || loading || selectedWarehouseIds.length === 0}
             onClick={() => void handleLoadPreview()}
           >
-            {loading ? 'Загрузка каталога WB…' : 'Загрузить каталог и остатки'}
+            {loading ? 'Загрузка каталога WB…' : 'Подключение — загрузить каталог'}
           </button>
 
           {preview && (
@@ -349,6 +495,113 @@ export function WarehouseHubPage() {
                   onClick={() => void handleConfirmOnboarding()}
                 >
                   Подтвердить ({newToCreate.length} товаров)
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {tab === 'import' && (
+        <section className="panel">
+          <p className="whub-hint">
+            Excel в формате WB (баркод + количество). Остатки <strong>прибавляются</strong> к CRM и
+            выбранному FBS-складу в WB. Баркоды, которых нет в каталоге WB селлера, пропускаются.
+          </p>
+          <div className="whub-import-form">
+            <label>
+              FBS-склад
+              <select
+                value={importWarehouseId}
+                onChange={(e) => setImportWarehouseId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">— выберите —</option>
+                {sellerWarehouses.map((wh) => (
+                  <option key={wh.id} value={wh.id}>
+                    {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Файл Excel
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => {
+                  setImportFile(e.target.files?.[0] ?? null)
+                  setStockImportPreview(null)
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!sellerId || !importFile || !importWarehouseId || loading}
+              onClick={() => void handleStockImportPreview()}
+            >
+              Предпросмотр
+            </button>
+          </div>
+
+          {stockImportPreview && (
+            <>
+              <div className="whub-stats">
+                <span>Склад: {stockImportPreview.warehouse.name}</span>
+                <span>К применению: {stockImportPreview.totals.to_apply}</span>
+                <span>+{stockImportPreview.totals.add_units} шт.</span>
+                <span>Новых товаров: {stockImportPreview.totals.new_products}</span>
+                {stockImportPreview.skipped_unknown.length > 0 && (
+                  <span className="whub-stat--warn">
+                    Пропущено: {stockImportPreview.skipped_unknown.length}
+                  </span>
+                )}
+              </div>
+
+              {stockImportPreview.skipped_unknown.length > 0 && (
+                <details className="whub-skipped">
+                  <summary>Баркоды не найдены в WB ({stockImportPreview.skipped_unknown.length})</summary>
+                  <ul>
+                    {stockImportPreview.skipped_unknown.map((bc) => (
+                      <li key={bc}><code>{bc}</code></li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              <table className="whub-table">
+                <thead>
+                  <tr>
+                    <th>Баркод</th>
+                    <th>Товар</th>
+                    <th>+</th>
+                    <th>CRM</th>
+                    <th>WB</th>
+                    <th>Действие</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockImportPreview.rows.map((row) => (
+                    <tr key={row.barcode}>
+                      <td><code>{row.barcode}</code></td>
+                      <td>{row.title || '—'}</td>
+                      <td>+{row.add_quantity}</td>
+                      <td>{row.crm_before} → {row.crm_after}</td>
+                      <td>{row.wb_before} → {row.wb_after}</td>
+                      <td>{row.will_create ? 'новая ячейка' : `яч. ${row.cell_number}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="whub-actions">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={loading || stockImportPreview.rows.length === 0}
+                  onClick={() => void handleStockImportApply()}
+                >
+                  Применить ({stockImportPreview.rows.length})
                 </button>
               </div>
             </>

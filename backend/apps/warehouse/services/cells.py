@@ -40,6 +40,15 @@ def first_free_cell(seller: Seller) -> Cell:
   )
 
 
+def create_cell_with_next_number(seller: Seller) -> Cell:
+  """Новая ячейка со следующим порядковым номером (для пакетного импорта)."""
+  return Cell.objects.create(
+    seller=seller,
+    number=_next_cell_number(seller),
+    is_occupied=False,
+  )
+
+
 def refresh_cell_occupied(cell: Cell) -> None:
   """Синхронизировать флаг is_occupied с фактическими товарами в ячейке."""
   occupied = cell.products.exists()
