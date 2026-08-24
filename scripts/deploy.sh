@@ -7,6 +7,9 @@ git fetch origin main
 git reset --hard origin/main
 git log -1 --oneline
 
+echo "=== print agent download ==="
+bash scripts/fetch-print-agent.sh || echo "WARN: print agent exe not updated — deploy continues"
+
 echo "=== build ==="
 docker compose build --no-cache frontend web worker
 

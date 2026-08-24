@@ -72,7 +72,25 @@ def resolve_printer(name: str | None) -> str:
   configured = (cfg.get("default_printer") or "").strip()
   if configured:
     return configured
-  return win32print.GetDefaultPrinter()
+  try:
+    return win32print.GetDefaultPrinter()
+  except Exception:
+    pass
+  for printer in list_printers():
+    if "xprinter" in printer.lower():
+      return printer
+  printers = list_printers()
+  if printers:
+    return printers[0]
+  raise RuntimeError(
+    "Принтер не найден. Подключите принтер по USB и сделайте его принтером по умолчанию в Windows."
+  )
+
+
+def set_default_printer(printer_name: str) -> None:
+  cfg = load_config()
+  cfg["default_printer"] = (printer_name or "").strip()
+  save_config(cfg)
 
 
 def job_size(job_type: str) -> tuple[float, float]:

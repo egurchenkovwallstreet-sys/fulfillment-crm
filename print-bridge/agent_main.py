@@ -166,6 +166,73 @@ def open_log(_icon=None, _item=None) -> None:
     os.startfile(str(path))
 
 
+def current_printer_label() -> str:
+  try:
+    from server import resolve_printer
+
+    return resolve_printer(None)
+  except Exception:
+    return "не найден"
+
+
+def saved_printer_name() -> str:
+  cfg = json.loads(get_config_path().read_text(encoding="utf-8"))
+  return (cfg.get("default_printer") or "").strip()
+
+
+def choose_printer(printer_name: str):
+  def handler(_icon=None, _item=None) -> None:
+    from server import set_default_printer
+
+    set_default_printer(printer_name)
+    log(f"Printer selected: {printer_name or '(Windows default)'}")
+
+  return handler
+
+
+def printer_is_checked(printer_name: str):
+  def checked(_item) -> bool:
+    return saved_printer_name() == printer_name
+
+  return checked
+
+
+def build_printer_menu():
+  import pystray
+  from server import list_printers
+
+  items = [
+    pystray.MenuItem(
+      "Как в Windows (по умолчанию)",
+      choose_printer(""),
+      checked=printer_is_checked(""),
+      radio=True,
+    ),
+  ]
+  for name in list_printers():
+    items.append(
+      pystray.MenuItem(
+        name,
+        choose_printer(name),
+        checked=printer_is_checked(name),
+        radio=True,
+      )
+    )
+  return pystray.Menu(*items)
+
+
+def ensure_autostart_on_first_run() -> None:
+  if not is_frozen() or not HAS_WIN32:
+    return
+  marker = get_data_dir() / ".autostart_done"
+  if marker.exists():
+    return
+  if not autostart_enabled():
+    set_autostart(True)
+    log("Autostart enabled on first run")
+  marker.write_text("1", encoding="utf-8")
+
+
 def toggle_autostart(_icon=None, item=None) -> None:
   set_autostart(not item.checked)
 
@@ -192,14 +259,16 @@ def run_tray() -> None:
   draw.text((14, 18), "FF", fill="white", font=font)
 
   port = read_port()
-  log(f"Tray icon starting on port {port}")
+  printer = current_printer_label()
+  log(f"Tray icon starting on port {port}, printer={printer}")
 
   icon = pystray.Icon(
     "FulfillmentCRM PrintAgent",
     img,
-    f"Fulfillment CRM — Агент печати (: {port})",
+    f"Fulfillment CRM — печать\n{printer}\n:{port}",
     menu=pystray.Menu(
       pystray.MenuItem("Проверка (health)", open_health, default=True),
+      pystray.MenuItem("Принтер", build_printer_menu()),
       pystray.MenuItem("Папка настроек", open_config_folder),
       pystray.MenuItem("Журнал (agent.log)", open_log),
       pystray.MenuItem(
@@ -255,6 +324,7 @@ def main() -> int:
 
   try:
     ensure_config()
+    ensure_autostart_on_first_run()
     start_server_thread()
     if not wait_for_server():
       log("ERROR: HTTP server did not become ready")

@@ -31,7 +31,7 @@ export function PrintAgentPage() {
       <header className="topbar">
         <div>
           <h1>Агент печати</h1>
-          <p>Локальная программа для Xprinter 365/370 — стикеры FBS без диалога Chrome</p>
+          <p>Скачайте, запустите — стикеры FBS печатаются без диалога Chrome</p>
         </div>
         <div className="topbar__actions">
           <button
@@ -59,76 +59,58 @@ export function PrintAgentPage() {
           )}
           {bridgeOk === false && (
             <p>
-              <strong>Агент не найден</strong> — установите и запустите программу на этом ПК
+              <strong>Агент не найден</strong> — скачайте и запустите программу на этом ПК
               {bridgeDetail ? ` (${bridgeDetail})` : ''}
             </p>
           )}
         </section>
 
         <section className="card print-agent__card">
+          <h2>Установка — 3 шага</h2>
+          <ol className="print-agent__steps">
+            <li>
+              Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a> с этой страницы
+            </li>
+            <li>Подключите принтер по USB (драйвер Windows установится сам или с диска производителя)</li>
+            <li>
+              Запустите файл — в трее появится синяя иконка <strong>FF</strong>. Готово, ничего настраивать не нужно
+            </li>
+          </ol>
+          <p className="print-agent__hint">
+            Агент сам найдёт принтер: сначала тот, что выбран в Windows по умолчанию, иначе Xprinter.
+            Другой принтер — правый клик по иконке FF → <strong>Принтер</strong>.
+          </p>
+        </section>
+
+        <section className="card print-agent__card">
           <h2>Когда нужен агент</h2>
           <p>
-            CRM — это сайт в браузере. Браузер не может напрямую печатать на USB-принтер без подтверждения.
-            Агент — небольшая программа на ПК склада, куда подключён Xprinter.
+            CRM — сайт в браузере. Браузер не может печатать на USB-принтер без подтверждения.
+            Агент — маленькая программа на ПК, куда подключён принтер.
           </p>
           <ul>
             <li>
-              <strong>Стикер FBS</strong> после скана — через агент (&lt; 2 сек)
+              <strong>Стикер FBS</strong> после скана ЧЗ — через агент (мгновенно)
             </li>
             <li>
               <strong>Лист подбора PDF</strong> и <strong>этикетки ячеек</strong> — через Chrome (с подтверждением)
             </li>
           </ul>
-        </section>
-
-        <section className="card print-agent__card">
-          <h2>Установка (один раз на ПК с принтером)</h2>
-          <ol className="print-agent__steps">
-            <li>
-              Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a>
-            </li>
-            <li>Подключите Xprinter 365 или 370 по USB, установите драйвер</li>
-            <li>Запустите агент — появится иконка в трее Windows (синий квадрат FF)</li>
-            <li>Включите «Автозапуск Windows» в меню иконки (правый клик)</li>
-            <li>
-              Откройте <Link to="/assembly">Сборку FBS</Link> — в шапке должно быть «Печать: Xprinter»
-            </li>
-          </ol>
-        </section>
-
-        <section className="card print-agent__card">
-          <h2>Настройки принтера</h2>
           <p>
-            По умолчанию используется принтер Windows по умолчанию. Чтобы указать Xprinter явно, откройте папку
-            настроек из меню трея и отредактируйте <code>config.json</code>:
-          </p>
-          <pre className="print-agent__code">{`{
-  "default_printer": "Xprinter XP-365B",
-  "print_mode": "full_page",
-  "port": 9123
-}`}</pre>
-          <p className="print-agent__hint">
-            <strong>print_mode:</strong> <code>full_page</code> — картинка на всю область печати принтера (универсально);
-            <code>label</code> — фиксированный размер 58×40 мм.
-            <br />
-            Проверка: <a href="http://127.0.0.1:9123/health" target="_blank" rel="noreferrer">http://127.0.0.1:9123/health</a>
-            {' '}— JSON с <code>&quot;ok&quot;: true</code> и именем принтера.
-            <br />
-            Журнал ошибок: <code>%APPDATA%\\FulfillmentCRM\\PrintAgent\\agent.log</code>
+            Откройте <Link to="/assembly">Сборку FBS</Link> — в шапке должно быть «Печать: …имя принтера…», не «Chrome».
           </p>
         </section>
 
         <section className="card print-agent__card">
-          <h2>Если агент не работает</h2>
+          <h2>Если не работает</h2>
           <ol className="print-agent__steps">
-            <li>Запустите <strong>FulfillmentCRM-PrintAgent.exe</strong> — в трее должна быть иконка FF (синий квадрат)</li>
+            <li>Запустите <strong>FulfillmentCRM-PrintAgent.exe</strong> ещё раз</li>
             <li>Если Windows SmartScreen блокирует — «Подробнее» → «Выполнить в любом случае»</li>
-            <li>Разрешите программе в брандмауэре доступ к частной сети (порт <strong>9123</strong>)</li>
-            <li>Xprinter подключён по USB и выбран принтером по умолчанию в Windows</li>
-            <li>Если иконка в трее исчезает — откройте <code>agent.log</code> (путь выше) и пришлите текст ошибки</li>
-            <li>Агент может работать <strong>без трея</strong> — тогда появится окно «запущен без иконки», порт 9123 остаётся активным</li>
-            <li>В <Link to="/assembly">Сборке FBS</Link> в шапке должно быть «Печать: Xprinter», не «Chrome»</li>
+            <li>Сделайте нужный принтер <strong>принтером по умолчанию</strong> в Windows (Параметры → Принтеры)</li>
+            <li>Или: правый клик по иконке FF → <strong>Принтер</strong> → выберите из списка</li>
+            <li>Если иконка исчезает — правый клик FF → <strong>Журнал (agent.log)</strong> и пришлите текст ошибки</li>
           </ol>
+        </section>
       </div>
     </>
   )
