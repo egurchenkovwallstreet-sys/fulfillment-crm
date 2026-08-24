@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { fetchSellers, type Seller } from '../api/warehouse'
 import {
   applyStockImport,
@@ -17,34 +18,6 @@ import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } fro
 import './WarehouseHubPage.css'
 
 type TabId = 'onboarding' | 'import' | 'intake' | 'transfer'
-
-function PhotoThumb({ url, alt }: { url: string; alt: string }) {
-  const [zoomed, setZoomed] = useState(false)
-  if (!url) {
-    return <span className="whub-photo whub-photo--empty">—</span>
-  }
-  return (
-    <>
-      <button
-        type="button"
-        className="whub-photo-btn"
-        onClick={() => setZoomed(true)}
-        aria-label="Увеличить фото"
-      >
-        <img src={url} alt={alt} className="whub-photo" />
-      </button>
-      {zoomed && (
-        <div
-          className="whub-photo-zoom-backdrop"
-          role="presentation"
-          onClick={() => setZoomed(false)}
-        >
-          <img src={url} alt={alt} className="whub-photo-zoom" onClick={() => setZoomed(false)} />
-        </div>
-      )}
-    </>
-  )
-}
 
 export function WarehouseHubPage() {
   const [tab, setTab] = useState<TabId>('onboarding')
@@ -431,7 +404,7 @@ export function WarehouseHubPage() {
                 {visibleArticles.map((article) => (
                   <article key={article.wb_nm_id} className="whub-article">
                     <header className="whub-article__head">
-                      <PhotoThumb url={article.photo_url} alt={article.title} />
+                      <ProductPhotoThumb url={article.photo_url} alt={article.title} />
                       <div>
                         <h3>{article.title || `Артикул ${article.wb_nm_id}`}</h3>
                         <p>
@@ -655,7 +628,7 @@ export function WarehouseHubPage() {
                     <td>{product.cell_number}</td>
                     <td>
                       <div className="whub-product-cell">
-                        <PhotoThumb url={product.photo_url} alt={product.name} />
+                        <ProductPhotoThumb url={product.photo_url} alt={product.name} />
                         <span>{product.name || '—'}</span>
                       </div>
                     </td>

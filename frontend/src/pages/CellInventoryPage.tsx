@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   fetchAllCells,
   fetchProductCellLabel,
@@ -12,6 +12,7 @@ import {
   type Seller,
 } from '../api/warehouse'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import './CellInventoryPage.css'
 
@@ -20,6 +21,7 @@ export function CellInventoryPage() {
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [products, setProducts] = useState<Product[]>([])
   const [cells, setCells] = useState<Cell[]>([])
+  const [barcodeQuery, setBarcodeQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -121,6 +123,12 @@ export function CellInventoryPage() {
 
   const movingProduct = products.find((p) => p.id === moveProductId)
 
+  const filteredProducts = useMemo(() => {
+    const query = barcodeQuery.trim()
+    if (!query) return products
+    return products.filter((product) => product.barcode.includes(query))
+  }, [products, barcodeQuery])
+
   return (
     <>
       <header className="topbar">
@@ -138,7 +146,10 @@ export function CellInventoryPage() {
           Селлер
           <select
             value={sellerId}
-            onChange={(e) => setSellerId(e.target.value ? Number(e.target.value) : '')}
+            onChange={(e) => {
+              setSellerId(e.target.value ? Number(e.target.value) : '')
+              setBarcodeQuery('')
+            }}
           >
             <option value="">— выберите —</option>
             {sellers.map((s) => (
@@ -146,12 +157,24 @@ export function CellInventoryPage() {
             ))}
           </select>
         </label>
+        {sellerId && (
+          <label className="cell-inventory-field cell-inventory-field--search">
+            Поиск по баркоду
+            <input
+              type="search"
+              value={barcodeQuery}
+              onChange={(e) => setBarcodeQuery(e.target.value)}
+              placeholder="Введите баркод или часть номера"
+              autoComplete="off"
+            />
+          </label>
+        )}
       </section>
 
       <section className="panel">
         <div className="cell-inventory-section-head">
           <h2 className="section-title">
-            Товары {sellerId ? `(${products.length})` : ''}
+            Товары {sellerId ? `(${filteredProducts.length}${barcodeQuery.trim() ? ` из ${products.length}` : ''})` : ''}
           </h2>
           {sellerId && products.length > 0 && (
             <button
@@ -168,12 +191,15 @@ export function CellInventoryPage() {
           <p className="cell-inventory-empty">Выберите селлера</p>
         ) : loading && products.length === 0 ? (
           <p className="cell-inventory-empty">Загрузка…</p>
-        ) : products.length === 0 ? (
-          <p className="cell-inventory-empty">Нет товаров на складе</p>
+        ) : filteredProducts.length === 0 ? (
+          <p className="cell-inventory-empty">
+            {barcodeQuery.trim() ? 'Ничего не найдено по баркоду' : 'Нет товаров на складе'}
+          </p>
         ) : (
           <table className="cell-inventory-table">
             <thead>
               <tr>
+                <th>Фото</th>
                 <th>Ячейка</th>
                 <th>Баркод</th>
                 <th>Название</th>
@@ -182,8 +208,11 @@ export function CellInventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
+              {filteredProducts.map((product) => (
                 <tr key={product.id}>
+                  <td>
+                    <ProductPhotoThumb url={product.photo_url ?? ''} alt={product.name || product.barcode} />
+                  </td>
                   <td><strong>№{product.cell_number}</strong></td>
                   <td>{product.barcode}</td>
                   <td>{product.name || '—'}</td>

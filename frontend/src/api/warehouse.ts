@@ -21,6 +21,7 @@ export type Product = {
   seller: number
   seller_name: string
   requires_marking: boolean
+  photo_url?: string
 }
 
 export type StockMode = 'intake' | 'sync_from_wb'

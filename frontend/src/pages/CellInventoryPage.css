@@ -29,12 +29,23 @@
   max-width: 360px;
 }
 
-.cell-inventory-field select {
+.cell-inventory-field select,
+.cell-inventory-field input {
   padding: 0.65rem 0.85rem;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   font-size: 1rem;
   font-weight: 400;
+}
+
+.cell-inventory-field--search {
+  flex: 1;
+  min-width: 220px;
+  max-width: 420px;
+}
+
+.cell-inventory-field--search input {
+  width: 100%;
 }
 
 .cell-inventory-table {
