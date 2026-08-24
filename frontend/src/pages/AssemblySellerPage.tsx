@@ -847,7 +847,7 @@ export function AssemblySellerPage() {
                       ) : '—'}
                     </td>
                     <td className="assembly-table__actions">
-                      {showAssemblyButton(order) && stage !== 'new' && (
+                      {showAssemblyButton(order) && stage !== 'complete' && (
                         <button
                           type="button"
                           className="btn btn--small btn--primary"
