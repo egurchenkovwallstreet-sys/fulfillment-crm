@@ -26,15 +26,12 @@ export function getCachedPrintBridgeHealth(): PrintBridgeHealth | null {
 }
 
 async function printViaBridge(jobType: PrintJobType, base64: string): Promise<boolean> {
-  if (cachedHealth && !cachedHealth.ok) {
-    return false
-  }
   try {
     await bridgePrintImage(jobType, base64)
     cachedHealth = { ok: true, ...(cachedHealth || {}) }
     return true
   } catch {
-    cachedHealth = { ok: false, detail: 'Ошибка печати через мост' }
+    cachedHealth = await checkPrintBridge()
     return false
   }
 }
@@ -44,8 +41,7 @@ export async function printFbsSticker(
   autoPrint = true,
   printWindow?: Window | null,
 ): Promise<PrintChannel> {
-  const tryBridge = !printWindow || cachedHealth?.ok
-  if (tryBridge && (await printViaBridge('fbs_sticker', base64))) {
+  if (await printViaBridge('fbs_sticker', base64)) {
     printWindow?.close()
     return 'bridge'
   }

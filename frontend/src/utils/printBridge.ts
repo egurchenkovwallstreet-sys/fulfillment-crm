@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'ff_print_bridge_url'
 const DEFAULT_URL = 'http://127.0.0.1:9123'
-const BRIDGE_TIMEOUT_MS = 2000
+const BRIDGE_TIMEOUT_MS = 5000
 
 export type PrintJobType = 'fbs_sticker' | 'supply_sticker' | 'cell_label'
 

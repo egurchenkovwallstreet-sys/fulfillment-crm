@@ -7,12 +7,23 @@ import './PrintAgentPage.css'
 export function PrintAgentPage() {
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [printer, setPrinter] = useState('')
+  const [bridgeDetail, setBridgeDetail] = useState('')
+  const [checking, setChecking] = useState(false)
 
-  useEffect(() => {
-    refreshPrintBridgeStatus().then((health) => {
+  async function runHealthCheck() {
+    setChecking(true)
+    try {
+      const health = await refreshPrintBridgeStatus()
       setBridgeOk(health.ok)
       setPrinter(health.printer || '')
-    })
+      setBridgeDetail(health.detail || '')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    void runHealthCheck()
   }, [])
 
   return (
@@ -23,6 +34,14 @@ export function PrintAgentPage() {
           <p>Локальная программа для Xprinter 365/370 — стикеры FBS без диалога Chrome</p>
         </div>
         <div className="topbar__actions">
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => void runHealthCheck()}
+            disabled={checking}
+          >
+            {checking ? 'Проверка…' : 'Проверить снова'}
+          </button>
           <a className="btn btn--primary" href={PRINT_AGENT_DOWNLOAD_URL} download>
             Скачать агент (.exe)
           </a>
@@ -41,6 +60,7 @@ export function PrintAgentPage() {
           {bridgeOk === false && (
             <p>
               <strong>Агент не найден</strong> — установите и запустите программу на этом ПК
+              {bridgeDetail ? ` (${bridgeDetail})` : ''}
             </p>
           )}
         </section>
@@ -88,8 +108,20 @@ export function PrintAgentPage() {
 }`}</pre>
           <p className="print-agent__hint">
             Проверка: <a href="http://127.0.0.1:9123/health" target="_blank" rel="noreferrer">http://127.0.0.1:9123/health</a>
+            {' '}— должен открыться JSON с <code>&quot;ok&quot;: true</code>
           </p>
         </section>
+
+        <section className="card print-agent__card">
+          <h2>Если агент не работает</h2>
+          <ol className="print-agent__steps">
+            <li>Запустите <strong>FulfillmentCRM-PrintAgent.exe</strong> — в трее должна быть иконка FF (синий квадрат)</li>
+            <li>Если Windows SmartScreen блокирует — «Подробнее» → «Выполнить в любом случае»</li>
+            <li>Разрешите программе в брандмауэре доступ к частной сети (порт <strong>9123</strong>)</li>
+            <li>Xprinter подключён по USB и выбран принтером по умолчанию в Windows</li>
+            <li>На этой странице нажмите <strong>«Проверить снова»</strong></li>
+            <li>В <Link to="/assembly">Сборке FBS</Link> в шапке должно быть «Печать: Xprinter», не «Chrome»</li>
+          </ol>
       </div>
     </>
   )
