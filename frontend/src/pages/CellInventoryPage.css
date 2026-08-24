@@ -69,6 +69,12 @@
   color: #64748b;
 }
 
+.cell-inventory-size {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .cell-inventory-actions {
   display: flex;
   flex-wrap: wrap;

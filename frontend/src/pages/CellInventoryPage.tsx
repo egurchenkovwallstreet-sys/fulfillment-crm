@@ -202,6 +202,7 @@ export function CellInventoryPage() {
                 <th>Фото</th>
                 <th>Ячейка</th>
                 <th>Баркод</th>
+                <th>Размер</th>
                 <th>Название</th>
                 <th>Остаток</th>
                 <th>Действия</th>
@@ -215,6 +216,11 @@ export function CellInventoryPage() {
                   </td>
                   <td><strong>№{product.cell_number}</strong></td>
                   <td>{product.barcode}</td>
+                  <td>
+                    <strong className="cell-inventory-size">
+                      {product.tech_size || product.wb_size || '—'}
+                    </strong>
+                  </td>
                   <td>{product.name || '—'}</td>
                   <td>{product.quantity} шт.</td>
                   <td className="cell-inventory-actions">
