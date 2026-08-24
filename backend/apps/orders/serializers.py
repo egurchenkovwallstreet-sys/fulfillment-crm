@@ -300,6 +300,7 @@ class SupplySerializer(serializers.ModelSerializer):
       "orders",
       "can_deliver",
       "supply_barcode_printed",
+      "stock_deducted",
       "created_at",
       "updated_at",
     )

@@ -40,6 +40,11 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
+            <NavLink to="/supplies" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Поставки
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/assembly" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Сборка FBS
             </NavLink>

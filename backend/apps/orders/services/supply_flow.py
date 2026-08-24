@@ -175,7 +175,7 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     Supply.objects.filter(
       seller=seller,
       orders=order,
-      status=Supply.Status.FORMING,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
     )
     .exclude(wb_supply_id="")
     .order_by("-created_at")

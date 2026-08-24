@@ -10,6 +10,7 @@ import { IntakePage } from './pages/IntakePage'
 import { CellInventoryPage } from './pages/CellInventoryPage'
 import { LoginPage } from './pages/LoginPage'
 import { PrintAgentPage } from './pages/PrintAgentPage'
+import { SuppliesPage } from './pages/SuppliesPage'
 import { SellerBarcodeDetailPage } from './pages/SellerBarcodeDetailPage'
 import { SellerCabinetPage } from './pages/SellerCabinetPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
@@ -51,6 +52,7 @@ function AppRoutes() {
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />
+            <Route path="/supplies" element={<SuppliesPage />} />
             <Route path="/print-agent" element={<PrintAgentPage />} />
             <Route path="/orders" element={<AssemblySellersPage />} />
           </Route>

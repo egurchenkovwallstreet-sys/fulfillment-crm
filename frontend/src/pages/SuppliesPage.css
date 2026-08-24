@@ -1,0 +1,111 @@
+.supplies-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.supplies-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.supplies-toolbar select {
+  min-width: 220px;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.supplies-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.supplies-tabs button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.supplies-tabs__btn--active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.supply-status {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.supply-status--forming {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.supply-status--ready {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.supply-status--confirmed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.supply-status--shipped {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.supply-flag {
+  font-size: 0.8rem;
+}
+
+.supply-flag--ok {
+  color: #15803d;
+}
+
+.supply-flag--no {
+  color: #94a3b8;
+}
+
+.supplies-sync-msg {
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.supplies-orders {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.supplies-orders li {
+  margin-bottom: 0.2rem;
+}
+
+.supplies-expand-btn {
+  background: none;
+  border: none;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+}

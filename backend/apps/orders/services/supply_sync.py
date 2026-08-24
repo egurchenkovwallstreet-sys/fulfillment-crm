@@ -12,6 +12,7 @@ from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client
 from apps.orders.services.supply_flow import refresh_supply_readiness
 from apps.sellers.models import Seller
+from apps.warehouse.services.stock_deduction import deduct_stock_for_confirmed_supply
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
 
@@ -77,6 +78,8 @@ def sync_supplies_from_wb(
   linked_orders = 0
   skipped = 0
   api_order_fetches = 0
+  stock_deducted = 0
+  stock_errors = 0
 
   for wb_supply in wb_supplies:
     done = bool(wb_supply.get("done"))
@@ -133,9 +136,19 @@ def sync_supplies_from_wb(
     linked_orders += len(crm_orders)
 
     if done:
+      update_fields = []
       if supply.status != Supply.Status.CONFIRMED:
         supply.status = Supply.Status.CONFIRMED
-        supply.save(update_fields=["status", "updated_at"])
+        update_fields.extend(["status", "updated_at"])
+      if not supply.supply_barcode_printed:
+        supply.supply_barcode_printed = True
+        update_fields.append("supply_barcode_printed")
+      if update_fields:
+        supply.save(update_fields=list(dict.fromkeys(update_fields)))
+
+      deduction = deduct_stock_for_confirmed_supply(supply)
+      stock_deducted += deduction["deducted"]
+      stock_errors += len(deduction["errors"])
     else:
       refresh_supply_readiness(supply)
 
@@ -146,4 +159,6 @@ def sync_supplies_from_wb(
     "skipped": skipped,
     "api_order_fetches": api_order_fetches,
     "wb_supplies_total": len(wb_supplies),
+    "stock_deducted": stock_deducted,
+    "stock_errors": stock_errors,
   }
