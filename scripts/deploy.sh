@@ -23,6 +23,10 @@ for i in $(seq 1 60); do
     ok=1
     break
   fi
+  echo "  attempt $i/60..."
+  if [[ "$i" -eq 6 || "$i" -eq 12 || "$i" -eq 24 ]]; then
+    docker compose logs web --tail 15 2>/dev/null || true
+  fi
   sleep 5
 done
 if [[ "$ok" -ne 1 ]]; then
