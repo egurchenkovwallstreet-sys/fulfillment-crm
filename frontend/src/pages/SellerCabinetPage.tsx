@@ -25,6 +25,12 @@ function formatShortDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+function formatMoney(value: string | number): string {
+  const amount = typeof value === 'string' ? Number(value) : value
+  if (Number.isNaN(amount)) return '—'
+  return `${amount.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽`
+}
+
 function formatWeekRange(week: SellerWeeklyShipmentWeek): string {
   return `${formatShortDate(week.week_start)} — ${formatShortDate(week.week_end)}`
 }
@@ -128,6 +134,7 @@ export function SellerCabinetPage() {
                   <p className="seller-weekly-shipments__hint">
                     Календарная неделя {formatWeekRange(selectedShipmentWeek)} (МСК).
                     Считаются заказы из поставок, переданных/отсканированных WB (done).
+                    Сумма — по тарифу обработки за единицу.
                     {selectedShipmentWeek.supplies_count > 0 && (
                       <> Поставок: {selectedShipmentWeek.supplies_count}.</>
                     )}
@@ -135,7 +142,12 @@ export function SellerCabinetPage() {
                 </div>
                 <div className="seller-weekly-shipments__total">
                   <span className="seller-weekly-shipments__total-label">Итого за неделю</span>
-                  <strong className="seller-weekly-shipments__total-value">{selectedShipmentWeek.total}</strong>
+                  <strong className="seller-weekly-shipments__total-value">
+                    {formatMoney(selectedShipmentWeek.total_amount)}
+                  </strong>
+                  <span className="seller-weekly-shipments__total-orders">
+                    {selectedShipmentWeek.total} заказов
+                  </span>
                 </div>
               </div>
 
@@ -181,6 +193,7 @@ export function SellerCabinetPage() {
                   return (
                     <div key={day.date} className={`seller-chart__col${isToday ? ' seller-chart__col--today' : ''}`}>
                       <span className="seller-chart__value">{day.orders}</span>
+                      <span className="seller-chart__amount">{formatMoney(day.amount)}</span>
                       <div className="seller-chart__bar" style={{ height: `${height}px` }} />
                       <span className="seller-chart__label">{day.weekday}</span>
                       <span className="seller-chart__date">{formatShortDate(day.date)}</span>

@@ -29,10 +29,11 @@ def _empty_weekly_shipments(weeks: int = 4) -> dict:
       "week_start": week_start.isoformat(),
       "week_end": week_end.isoformat(),
       "total": 0,
+      "total_amount": "0.00",
       "supplies_count": 0,
       "is_current": weeks_ago == 0,
       "days": [
-        {"date": day.isoformat(), "weekday": label, "orders": 0}
+        {"date": day.isoformat(), "weekday": label, "orders": 0, "amount": "0.00"}
         for day, label in iter_week_days(week_start)
       ],
     })

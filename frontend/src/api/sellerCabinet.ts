@@ -25,12 +25,14 @@ export type SellerWeeklyShipmentDay = {
   date: string
   weekday: string
   orders: number
+  amount: string
 }
 
 export type SellerWeeklyShipmentWeek = {
   week_start: string
   week_end: string
   total: number
+  total_amount: string
   supplies_count: number
   is_current: boolean
   days: SellerWeeklyShipmentDay[]

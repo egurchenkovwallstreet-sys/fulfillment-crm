@@ -143,6 +143,12 @@
   color: #334155;
 }
 
+.seller-chart__amount {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
 .form-optional {
   color: #94a3b8;
   font-weight: 400;
@@ -200,6 +206,11 @@
   font-size: 2rem;
   line-height: 1;
   color: #1d4ed8;
+}
+
+.seller-weekly-shipments__total-orders {
+  color: #64748b;
+  font-size: 0.85rem;
 }
 
 .seller-weekly-shipments__nav {

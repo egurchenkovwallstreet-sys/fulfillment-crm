@@ -5,6 +5,7 @@ import re
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from django.utils import timezone
 
@@ -21,6 +22,7 @@ from apps.sellers.services.calendar_periods import (
 )
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
+from apps.warehouse.models import Product
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
 MAX_SUPPLY_ORDER_FETCHES = 80
@@ -56,15 +58,39 @@ def _order_ids_from_wb_supply_name(name: str) -> list[int]:
   return [int(match.group(1))]
 
 
-def _eligible_order_count(seller: Seller, wb_order_ids: list[int]) -> int:
+def _barcode_price_map(seller: Seller) -> dict[str, Decimal]:
+  prices: dict[str, Decimal] = {}
+  for product in Product.objects.filter(seller=seller).select_related("price_group"):
+    price = product.processing_price
+    if price is not None:
+      prices[product.barcode] = price
+  return prices
+
+
+def _sum_shipped_orders(
+  seller: Seller,
+  wb_order_ids: list[int],
+  *,
+  price_by_barcode: dict[str, Decimal],
+) -> tuple[int, Decimal, int]:
   if not wb_order_ids:
-    return 0
-  return (
-    filter_orders_for_seller(
-      Order.objects.filter(seller=seller, wb_order_id__in=wb_order_ids),
-      seller,
-    ).count()
+    return 0, Decimal("0"), 0
+
+  orders = filter_orders_for_seller(
+    Order.objects.filter(seller=seller, wb_order_id__in=wb_order_ids),
+    seller,
   )
+  count = 0
+  amount = Decimal("0")
+  without_tariff = 0
+  for barcode in orders.values_list("barcode", flat=True):
+    count += 1
+    price = price_by_barcode.get(barcode)
+    if price is None:
+      without_tariff += 1
+      continue
+    amount += price
+  return count, amount, without_tariff
 
 
 def _week_start_for(day: date) -> date:
@@ -76,6 +102,7 @@ def _build_week_payload(
   week_end: date,
   *,
   daily_counts: dict[date, int],
+  daily_amounts: dict[date, Decimal],
   supplies_per_week: dict[date, int],
   today: date,
 ) -> dict:
@@ -84,6 +111,7 @@ def _build_week_payload(
       "date": day.isoformat(),
       "weekday": label,
       "orders": daily_counts.get(day, 0),
+      "amount": daily_amounts.get(day, Decimal("0")),
     }
     for day, label in iter_week_days(week_start)
   ]
@@ -91,6 +119,7 @@ def _build_week_payload(
     "week_start": week_start.isoformat(),
     "week_end": week_end.isoformat(),
     "total": sum(day["orders"] for day in days),
+    "total_amount": sum((day["amount"] for day in days), Decimal("0")),
     "supplies_count": supplies_per_week.get(week_start, 0),
     "is_current": week_start <= today <= week_end,
     "days": days,
@@ -107,7 +136,9 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
   oldest_week_start, _ = calendar_week_bounds_offset(weeks - 1, today)
 
   daily_counts: dict[date, int] = defaultdict(int)
+  daily_amounts: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
   supplies_per_week: dict[date, int] = defaultdict(int)
+  price_by_barcode = _barcode_price_map(seller)
 
   client = _get_client(seller)
   try:
@@ -154,17 +185,23 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
         except WBApiError:
           order_wb_ids = []
 
-    order_count = _eligible_order_count(seller, order_wb_ids)
+    order_count, order_amount, _ = _sum_shipped_orders(
+      seller,
+      order_wb_ids,
+      price_by_barcode=price_by_barcode,
+    )
     if order_count <= 0:
       continue
 
     daily_counts[handoff_date] += order_count
+    daily_amounts[handoff_date] += order_amount
     supplies_per_week[_week_start_for(handoff_date)] += 1
 
   weeks_data = [
     _build_week_payload(
       *calendar_week_bounds_offset(weeks_ago, today),
       daily_counts=daily_counts,
+      daily_amounts=daily_amounts,
       supplies_per_week=supplies_per_week,
       today=today,
     )

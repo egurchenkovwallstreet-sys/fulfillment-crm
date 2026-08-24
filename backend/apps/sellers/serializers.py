@@ -137,12 +137,14 @@ class SellerWeeklyShipmentDaySerializer(serializers.Serializer):
   date = serializers.DateField()
   weekday = serializers.CharField()
   orders = serializers.IntegerField()
+  amount = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
 class SellerWeeklyShipmentWeekSerializer(serializers.Serializer):
   week_start = serializers.DateField()
   week_end = serializers.DateField()
   total = serializers.IntegerField()
+  total_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
   supplies_count = serializers.IntegerField()
   is_current = serializers.BooleanField()
   days = SellerWeeklyShipmentDaySerializer(many=True)
