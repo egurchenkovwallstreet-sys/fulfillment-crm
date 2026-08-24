@@ -8,7 +8,7 @@ export const WORKFLOW_STEPS = [
   {
     id: 1 as WorkflowStepId,
     title: 'Лист подбора',
-    hint: 'Сформируйте лист и отправьте заказы на сборку в WB',
+    hint: 'Кнопка «Передать на сборку» — лист, печать и отправка в WB',
   },
   {
     id: 2 as WorkflowStepId,
@@ -47,7 +47,7 @@ export function orderCanDeliver(order: AssemblyOrder): boolean {
 
 export function orderBlockReason(order: AssemblyOrder): string | null {
   if ((order.wb_supplier_status || '').trim() !== 'confirm') {
-    return 'Сначала отправьте заказ на сборку в WB'
+    return 'Сначала передайте заказы на сборку в WB (шаг 1)'
   }
   if (!orderStickerPrinted(order)) {
     if (order.requires_marking && order.status === 'assembled') {
@@ -115,7 +115,7 @@ export function canSwitchToStage(
     if ((counts.in_picking ?? 0) < 1) {
       return {
         ok: false,
-        reason: 'Сначала отправьте заказы на сборку в WB (шаг 1 — «Лист подбора» и «Все на сборку»).',
+        reason: 'Сначала передайте заказы на сборку в WB (кнопка «Передать на сборку»).',
       }
     }
     return { ok: true }
@@ -123,17 +123,7 @@ export function canSwitchToStage(
   if ((counts.in_delivery ?? 0) < 1) {
     return {
       ok: false,
-      reason: 'Нет заказов в доставке. Сначала подтвердите передачу в WB (шаг 4).',
-    }
-  }
-  return { ok: true }
-}
-
-export function canSendOrdersToAssembly(hasPickList: boolean): { ok: true } | { ok: false; reason: string } {
-  if (!hasPickList) {
-    return {
-      ok: false,
-      reason: 'Сначала сформируйте лист подбора — кнопка «Лист подбора» в шапке.',
+      reason: 'Нет заказов в поставках, ожидающих приёмки на складе WB.',
     }
   }
   return { ok: true }

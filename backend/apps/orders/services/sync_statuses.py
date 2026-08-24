@@ -5,6 +5,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
+from apps.orders.services.supply_flow import count_delivery_stage_orders
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -361,8 +362,7 @@ def sync_order_statuses_for_seller(
   elif new_wb_ids is not None:
     live_counts["new"] = len(new_ids_set & scoped_ids)
 
-  if quick and seller.wb_counts_synced_at and live_counts["in_delivery"] < seller.wb_count_delivery:
-    live_counts["in_delivery"] = seller.wb_count_delivery
+  live_counts["in_delivery"] = count_delivery_stage_orders(seller)
 
   scoped_new_ids = sorted(new_ids_set & scoped_ids)
   save_wb_counts_to_seller(seller, live_counts, new_order_ids=scoped_new_ids)

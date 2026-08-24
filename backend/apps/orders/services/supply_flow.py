@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -15,6 +15,7 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
+  wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
@@ -297,6 +298,26 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     "supply_barcode": supply_barcode_value,
     "stock": stock_info,
   }
+
+
+def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
+  """Вкладка «В доставке»: переданы в WB, поставка ещё не принята на складе (waiting)."""
+  confirmed_supply = Supply.objects.filter(
+    seller=seller,
+    status=Supply.Status.CONFIRMED,
+    orders__id=OuterRef("pk"),
+  )
+  return filter_orders_for_seller(
+    Order.objects.filter(seller=seller)
+    .filter(wb_in_delivery_q())
+    .annotate(_has_confirmed_supply=Exists(confirmed_supply))
+    .filter(_has_confirmed_supply=True),
+    seller,
+  )
+
+
+def count_delivery_stage_orders(seller: Seller) -> int:
+  return delivery_stage_orders_queryset(seller).count()
 
 
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:

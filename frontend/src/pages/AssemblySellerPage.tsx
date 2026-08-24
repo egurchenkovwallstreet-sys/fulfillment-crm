@@ -7,7 +7,6 @@ import {
   reprintOrderSticker,
   scanOrderBarcode,
   sendOrderToAssembly,
-  sendAllOrdersToAssembly,
   sendOrderToDelivery,
   startAssembly,
   verifyMarking,
@@ -20,7 +19,6 @@ import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
   buildDeliveryConfirmMessage,
-  canSendOrdersToAssembly,
   canSwitchToStage,
   orderBlockReason,
   orderCanDeliver,
@@ -169,6 +167,23 @@ export function AssemblySellerPage() {
     return () => window.clearInterval(interval)
   }, [id, data, stage, load])
 
+  useEffect(() => {
+    if (!id || stage !== 'complete') return
+
+    const syncDelivery = async () => {
+      try {
+        await syncOrders(id, 'quick')
+        await load({ silent: true })
+      } catch {
+        // Фоновый опрос вкладки «В доставке»
+      }
+    }
+
+    void syncDelivery()
+    const interval = window.setInterval(() => void syncDelivery(), 5 * 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [id, stage, load])
+
   function resetScanFlow() {
     setScanPhase('barcode')
     setPendingOrder(null)
@@ -199,14 +214,28 @@ export function AssemblySellerPage() {
     setStage('confirm')
   }
 
-  async function handleStartAssembly() {
+  function handleTransferToAssembly() {
+    const count = data?.assembly_eligible ?? 0
+    if (!id || count < 1) return
+    setModal({
+      kind: 'confirm',
+      title: 'Передать на сборку',
+      message:
+        `Сформировать лист подбора и передать на сборку ${count} заказов?\n\n` +
+        'Откроется окно печати листа подбора.',
+      confirmLabel: 'Передать',
+      onConfirm: () => void runTransferToAssembly(),
+    })
+  }
+
+  async function runTransferToAssembly() {
     if (!id) return
     setError('')
     setSuccess('')
     setLoading(true)
     try {
       const result = await startAssembly(id)
-      let msg = `Шаг 1: лист подбора — ${result.orders_count} заказов, стикеров ${result.stickers_fetched}`
+      let msg = `Лист подбора: ${result.orders_count} заказов`
       if (result.wb_assembly_sent != null) {
         msg += `, на сборку WB ${result.wb_assembly_sent}`
       }
@@ -215,10 +244,13 @@ export function AssemblySellerPage() {
       }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
       setSuccess(msg)
+      setStage('confirm')
       await load()
-      if (result.pick_list) printPickList(result.pick_list)
+      if (result.pick_list && !printPickList(result.pick_list)) {
+        setError('Лист создан, но не удалось открыть печать — разрешите всплывающие окна в браузере')
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка начала сборки')
+      setError(err instanceof Error ? err.message : 'Ошибка передачи на сборку')
     } finally {
       setLoading(false)
     }
@@ -283,18 +315,8 @@ export function AssemblySellerPage() {
     setStage(nextStage)
   }
 
-  function guardAssemblyStart(): boolean {
-    if (!data) return false
-    const gate = canSendOrdersToAssembly(Boolean(data.active_pick_list))
-    if (!gate.ok) {
-      setModal({ kind: 'block', title: 'Шаг 1 не завершён', message: gate.reason })
-      return false
-    }
-    return true
-  }
-
   async function handleSendToAssembly(orderId: number) {
-    if (!id || !guardAssemblyStart()) return
+    if (!id) return
     setError('')
     setSuccess('')
     setLoading(true)
@@ -313,34 +335,12 @@ export function AssemblySellerPage() {
     }
   }
 
-  function handleSendAllToAssembly() {
-    if (!id || !guardAssemblyStart()) return
-    setModal({
-      kind: 'confirm',
-      title: 'Отправка на сборку WB',
-      message: `Отправить на сборку ${bulkAssemblyCount} заказов?\n\nДля каждого будет создана поставка WB.`,
-      confirmLabel: 'Отправить',
-      onConfirm: () => void runSendAllToAssembly(),
-    })
-  }
-
-  async function runSendAllToAssembly() {
+  async function handleSync() {
     if (!id) return
     setError('')
-    setSuccess('')
-    setLoading(true)
-    try {
-      const result = await sendAllOrdersToAssembly(id)
-      let msg = `Шаг 1: на сборку отправлено ${result.sent} из ${result.total}`
-      if (result.errors.length > 0) msg += `. Ошибок: ${result.errors.length}`
-      setSuccess(msg)
-      setStage('confirm')
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка массовой отправки')
-    } finally {
-      setLoading(false)
-    }
+    setSuccess('Обновление заказов…')
+    await runBackgroundSync()
+    setSuccess('Заказы обновлены')
   }
 
   function handleSendToDelivery(order: AssemblyOrder) {
@@ -453,14 +453,6 @@ export function AssemblySellerPage() {
     } finally {
       setLoading(false)
     }
-  }
-
-  async function handleSync() {
-    if (!id) return
-    setError('')
-    setSuccess('Синхронизация с WB…')
-    await runBackgroundSync()
-    setSuccess('Заказы обновлены из WB')
   }
 
   async function handleBarcodeSubmit(e?: FormEvent) {
@@ -596,9 +588,7 @@ export function AssemblySellerPage() {
   }
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
-  const bulkAssemblyCount = stage === 'new'
-    ? (assemblyEligible ?? data.orders.length)
-    : 0
+  const bulkAssemblyCount = assemblyEligible ?? 0
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -634,21 +624,11 @@ export function AssemblySellerPage() {
         </div>
         <div className="topbar__actions">
           <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing || refreshing}>
-            Обновить из WB
+            Обновить заказы
           </button>
           {stage === 'new' && bulkAssemblyCount > 0 && (
-            <button type="button" className="btn btn--secondary" onClick={handleStartAssembly} disabled={loading}>
-              Лист подбора ({bulkAssemblyCount})
-            </button>
-          )}
-          {data.active_pick_list && (
-            <button type="button" className="btn btn--secondary" onClick={handlePrintPickList} disabled={loading}>
-              Печать листа
-            </button>
-          )}
-          {stage === 'new' && bulkAssemblyCount > 0 && (
-            <button type="button" className="btn btn--primary" onClick={handleSendAllToAssembly} disabled={loading}>
-              Все на сборку ({bulkAssemblyCount})
+            <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
+              Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
@@ -702,7 +682,10 @@ export function AssemblySellerPage() {
       {stage === 'new' && (
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
-          <p>Сформируйте лист подбора, обойдите ячейки, затем отправьте заказы на сборку в WB.</p>
+          <p>
+            Выберите склады, нажмите «Передать на сборку» — система сформирует лист подбора,
+            отправит заказы в WB и предложит распечатать лист.
+          </p>
         </section>
       )}
 
@@ -830,7 +813,7 @@ export function AssemblySellerPage() {
                       ) : '—'}
                     </td>
                     <td className="assembly-table__actions">
-                      {showAssemblyButton(order) && (
+                      {showAssemblyButton(order) && stage !== 'new' && (
                         <button
                           type="button"
                           className="btn btn--small btn--primary"
@@ -983,7 +966,7 @@ export function AssemblySellerPage() {
             <section className="panel assembly-scan-panel assembly-scan-panel--disabled">
               <h2 className="section-title">Сканирование</h2>
               <p className="assembly-scan-hint">
-                Сначала выполните шаг 1: отправьте заказы на сборку в WB. Затем перейдите на вкладку «На сборке».
+                Сначала нажмите «Передать на сборку». Затем перейдите на вкладку «На сборке».
               </p>
             </section>
           )}
@@ -992,7 +975,8 @@ export function AssemblySellerPage() {
             <section className="panel assembly-scan-panel assembly-scan-panel--disabled">
               <h2 className="section-title">Заказы в доставке</h2>
               <p className="assembly-scan-hint">
-                Заказы переданы в WB. QR поставки уже напечатан при подтверждении.
+                Заказы в поставках, ожидающих приёмки на складе WB. Список обновляется каждые 5 минут —
+                после сканирования поставки на складе заказы исчезнут отсюда.
               </p>
             </section>
           )}

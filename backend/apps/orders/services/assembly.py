@@ -194,7 +194,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   if not order.has_sticker or not order.sticker_file:
     raise AssemblyError(
       f"Стикер для заказа WB #{order.wb_order_id} ещё не загружен. "
-      "Нажмите «Начать сборку» или обновите заказы.",
+      "Нажмите «Передать на сборку» или обновите заказы.",
       code="no_sticker",
     )
 
@@ -212,7 +212,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       raise AssemblyError(
         f"Заказ WB #{order.wb_order_id} ещё не на сборке в WB "
         f"(статус: {wb_status or 'new'}). "
-        "Сначала нажмите «На сборку» или «Все на сборку» на шаге 1.",
+        "Сначала нажмите «Передать на сборку» на шаге 1.",
         code="wb_not_confirm",
       )
 
@@ -432,13 +432,15 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
   """Счётчики по БД + фильтр складов (для списков заказов в сборке)."""
+  from apps.orders.services.supply_flow import count_delivery_stage_orders
+
   qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
   active = qs.exclude(status=Order.Status.CANCELLED)
 
   return {
     "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
     "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
-    "in_delivery": active.filter(wb_in_delivery_q()).count(),
+    "in_delivery": count_delivery_stage_orders(seller),
     "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
     "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
     "marked": active.filter(status=Order.Status.MARKED).count(),
@@ -450,11 +452,13 @@ def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
 
 def get_seller_wb_tab_counts(seller: Seller) -> dict[str, int]:
   """Счётчики вкладок как в ЛК WB — из live API после синка."""
+  from apps.orders.services.supply_flow import count_delivery_stage_orders
+
   if seller.wb_counts_synced_at:
     return {
       "new": seller.wb_count_new,
       "in_picking": seller.wb_count_assembly,
-      "in_delivery": seller.wb_count_delivery,
+      "in_delivery": count_delivery_stage_orders(seller),
     }
   stage = get_seller_stage_counts(seller)
   return {

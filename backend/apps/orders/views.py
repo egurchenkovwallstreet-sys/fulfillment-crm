@@ -9,7 +9,11 @@ from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
 from apps.orders.services.assembly import AssemblyError
-from apps.orders.services.supply_flow import new_stage_orders_queryset
+from apps.orders.services.supply_flow import (
+  count_delivery_stage_orders,
+  delivery_stage_orders_queryset,
+  new_stage_orders_queryset,
+)
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from .services.supply_sync import sync_supplies_from_wb
 from apps.sellers.services.warehouse_filter import filter_orders_queryset
@@ -320,10 +324,15 @@ class AssemblySellerDetailView(APIView):
 
     stage_counts = get_seller_stage_counts(seller)
     tab_counts = get_seller_wb_tab_counts(seller)
-    counts = {**stage_counts, **tab_counts}
+    delivery_count = count_delivery_stage_orders(seller)
+    counts = {**stage_counts, **tab_counts, "in_delivery": delivery_count}
     stage = request.query_params.get("stage", "")
     if stage == "new":
       orders_qs = new_stage_orders_queryset(seller).select_related(
+        "product", "product__cell",
+      )
+    elif stage == "complete":
+      orders_qs = delivery_stage_orders_queryset(seller).select_related(
         "product", "product__cell",
       )
     else:
