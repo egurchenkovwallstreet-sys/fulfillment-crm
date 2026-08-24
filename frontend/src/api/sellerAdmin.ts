@@ -1,5 +1,7 @@
 import { apiFetch } from './client'
 
+import type { SellerWeeklyShipments } from './sellerCabinet'
+
 export type SellerManageItem = {
   id: number
   company_name: string
@@ -119,4 +121,21 @@ export async function applySellerTariff(
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export type AdminBillingSellerRow = {
+  seller_id: number
+  company_name: string
+  weekly_shipments: SellerWeeklyShipments | null
+  error: string | null
+}
+
+export type AdminBillingResponse = {
+  today: string
+  combined: SellerWeeklyShipments
+  sellers: AdminBillingSellerRow[]
+}
+
+export async function fetchAdminBilling(): Promise<AdminBillingResponse> {
+  return apiFetch<AdminBillingResponse>('/api/sellers/admin/billing/')
 }

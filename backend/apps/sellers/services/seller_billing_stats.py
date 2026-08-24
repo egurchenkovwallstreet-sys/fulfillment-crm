@@ -343,3 +343,101 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
     "today": today.isoformat(),
     "weeks": weeks_data,
   }
+
+
+def _decimal_amount(value) -> Decimal:
+  if isinstance(value, Decimal):
+    return value
+  return Decimal(str(value or "0"))
+
+
+def merge_weekly_shipments_payloads(
+  payloads: list[dict],
+  *,
+  weeks: int = SHIPMENTS_WEEKS_HISTORY,
+) -> dict:
+  """Суммирует отгрузки нескольких селлеров по календарным неделям."""
+  today = today_local()
+  merged_weeks: list[dict] = []
+  for weeks_ago in range(weeks):
+    week_start, week_end = calendar_week_bounds_offset(weeks_ago, today)
+    merged_weeks.append({
+      "week_start": week_start.isoformat(),
+      "week_end": week_end.isoformat(),
+      "total": 0,
+      "total_amount": Decimal("0"),
+      "supplies_count": 0,
+      "is_current": weeks_ago == 0,
+      "days": [
+        {
+          "date": day.isoformat(),
+          "weekday": label,
+          "orders": 0,
+          "amount": Decimal("0"),
+        }
+        for day, label in iter_week_days(week_start)
+      ],
+    })
+
+  for payload in payloads:
+    if not payload or not payload.get("weeks"):
+      continue
+    for week_index, week in enumerate(payload["weeks"]):
+      if week_index >= len(merged_weeks):
+        break
+      target_week = merged_weeks[week_index]
+      target_week["total"] += week.get("total", 0)
+      target_week["total_amount"] += _decimal_amount(week.get("total_amount"))
+      target_week["supplies_count"] += week.get("supplies_count", 0)
+      target_week["is_current"] = target_week["is_current"] or week.get("is_current", False)
+      for day_index, day in enumerate(week.get("days") or []):
+        if day_index >= len(target_week["days"]):
+          break
+        target_day = target_week["days"][day_index]
+        target_day["orders"] += day.get("orders", 0)
+        target_day["amount"] += _decimal_amount(day.get("amount"))
+
+  return {
+    "today": today.isoformat(),
+    "weeks": merged_weeks,
+  }
+
+
+def load_admin_billing_dashboard() -> dict:
+  """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
+  sellers = Seller.objects.filter(is_active=True).order_by("company_name")
+  seller_rows: list[dict] = []
+  successful_payloads: list[dict] = []
+
+  for seller in sellers:
+    if not seller.wb_api_token_encrypted:
+      seller_rows.append({
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": None,
+        "error": "Токен WB не настроен",
+      })
+      continue
+    try:
+      shipments = load_weekly_shipped_orders(seller)
+      successful_payloads.append(shipments)
+      seller_rows.append({
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": shipments,
+        "error": None,
+      })
+    except SellerAnalyticsError as exc:
+      seller_rows.append({
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": None,
+        "error": str(exc),
+      })
+
+  combined = merge_weekly_shipments_payloads(successful_payloads)
+  return {
+    "today": combined["today"],
+    "combined": combined,
+    "sellers": seller_rows,
+  }

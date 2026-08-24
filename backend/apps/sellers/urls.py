@@ -6,6 +6,7 @@ from .views import (
   SellerWarehouseToggleView,
 )
 from .views_cabinet import (
+  AdminBillingDashboardView,
   SellerCabinetBarcodeView,
   SellerCabinetView,
   SellerInviteView,
@@ -14,6 +15,11 @@ from .views_cabinet import (
 
 urlpatterns = [
   path("manage/", SellerManageListCreateView.as_view(), name="seller-manage-list"),
+  path(
+    "admin/billing/",
+    AdminBillingDashboardView.as_view(),
+    name="admin-billing-dashboard",
+  ),
   path(
     "manage/<int:seller_id>/invite/",
     SellerInviteView.as_view(),

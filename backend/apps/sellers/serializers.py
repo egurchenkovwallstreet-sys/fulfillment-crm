@@ -155,6 +155,19 @@ class SellerWeeklyShipmentsSerializer(serializers.Serializer):
   weeks = SellerWeeklyShipmentWeekSerializer(many=True)
 
 
+class AdminBillingSellerSerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  company_name = serializers.CharField()
+  weekly_shipments = SellerWeeklyShipmentsSerializer(allow_null=True)
+  error = serializers.CharField(allow_null=True)
+
+
+class AdminBillingDashboardSerializer(serializers.Serializer):
+  today = serializers.DateField()
+  combined = SellerWeeklyShipmentsSerializer()
+  sellers = AdminBillingSellerSerializer(many=True)
+
+
 class SellerBarcodeAnalyticsSerializer(serializers.Serializer):
   barcode = serializers.CharField()
   name = serializers.CharField()

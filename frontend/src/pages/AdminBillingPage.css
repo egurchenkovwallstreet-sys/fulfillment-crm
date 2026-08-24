@@ -1,0 +1,29 @@
+.admin-billing-sellers {
+  margin-top: 1rem;
+}
+
+.admin-billing-sellers__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  margin-bottom: 1rem;
+}
+
+.admin-billing-sellers__meta {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.admin-billing-table td:nth-child(2),
+.admin-billing-table td:nth-child(3),
+.admin-billing-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
+.admin-billing-table td:nth-child(3) {
+  font-weight: 600;
+  color: #1d4ed8;
+}

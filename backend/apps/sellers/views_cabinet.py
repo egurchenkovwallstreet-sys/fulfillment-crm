@@ -11,6 +11,7 @@ from apps.accounts.permissions import IsAdmin, IsSeller
 from apps.accounts.serializers import UserSerializer
 from apps.sellers.models import Seller
 from apps.sellers.serializers import (
+  AdminBillingDashboardSerializer,
   SellerBarcodeAnalyticsSerializer,
   SellerBarcodeDetailSerializer,
   SellerCabinetSummarySerializer,
@@ -28,6 +29,7 @@ from apps.sellers.services.invite import (
   issue_seller_invite,
 )
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
+from apps.sellers.services.seller_billing_stats import load_admin_billing_dashboard
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError, get_enabled_warehouses_meta, load_wb_fbs_stats
 from apps.sellers.utils import seller_has_user_account, seller_username
 
@@ -183,3 +185,18 @@ class SellerCabinetBarcodeView(APIView):
     if not detail:
       return Response(status=status.HTTP_404_NOT_FOUND)
     return Response(SellerBarcodeDetailSerializer(detail).data)
+
+
+class AdminBillingDashboardView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def get(self, request):
+    try:
+      payload = load_admin_billing_dashboard()
+      return Response(AdminBillingDashboardSerializer(payload).data)
+    except Exception as exc:
+      logger.exception("admin billing dashboard failed")
+      return Response(
+        {"detail": f"Ошибка загрузки статистики: {exc}"},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      )

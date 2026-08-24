@@ -50,6 +50,11 @@ export function AppLayout() {
             </NavLink>
           )}
           {isAdmin && (
+            <NavLink to="/billing" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
+              Статистика
+            </NavLink>
+          )}
+          {isAdmin && (
             <NavLink to="/sellers" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Селлеры
             </NavLink>

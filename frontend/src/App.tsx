@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { AdminRoute, ManagerRoute, ProtectedRoute, SellerRoute } from './components/ProtectedRoute'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { AdminBillingPage } from './pages/AdminBillingPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -55,6 +56,7 @@ function AppRoutes() {
           </Route>
           <Route element={<AdminRoute />}>
             <Route path="/sellers" element={<SellersManagePage />} />
+            <Route path="/billing" element={<AdminBillingPage />} />
           </Route>
         </Route>
       </Route>
