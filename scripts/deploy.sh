@@ -43,8 +43,10 @@ echo "=== up worker + frontend ==="
 docker compose up -d --force-recreate worker frontend
 
 echo "=== frontend bundle check ==="
-if docker compose exec -T frontend sh -c 'grep -rq "Поиск по баркоду" /usr/share/nginx/html/assets/ 2>/dev/null'; then
-  echo "OK: новый фронтенд (поиск по баркоду в бандле)"
+if docker compose exec -T frontend sh -c 'grep -rq "Передать на сборку" /usr/share/nginx/html/assets/ 2>/dev/null'; then
+  echo "OK: новый фронтенд (сборка FBS — одна кнопка)"
+elif docker compose exec -T frontend sh -c 'grep -rq "Поиск по баркоду" /usr/share/nginx/html/assets/ 2>/dev/null'; then
+  echo "WARN: фронтенд частично обновлён (ячейки), но сборка FBS — старая версия"
 else
   echo "WARN: в контейнере frontend старый бандл — проверьте docker compose build frontend"
 fi
