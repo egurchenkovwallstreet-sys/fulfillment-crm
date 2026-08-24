@@ -20,6 +20,7 @@ from .serializers import (
   StockFileApplySerializer,
   StockOperationSerializer,
   StockTransferSerializer,
+  StockDistributeSerializer,
 )
 from .services.cell_label import build_cell_label_data
 from .services.cell_move import CellMoveError, move_product_to_cell
@@ -32,7 +33,12 @@ from .services.stock_file_import import (
   apply_stock_import,
   build_stock_import_preview,
 )
-from .services.stock_transfer import StockTransferError, build_stock_overview, perform_stock_transfer
+from .services.stock_transfer import (
+  StockTransferError,
+  build_stock_overview,
+  distribute_stocks_evenly_bulk,
+  perform_stock_transfer,
+)
 from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
 from .services.wb_product_sync import refresh_seller_products_from_wb
@@ -377,6 +383,27 @@ class StockTransferView(APIView):
         from_warehouse_id=serializer.validated_data["from_warehouse_id"],
         to_warehouse_id=serializer.validated_data["to_warehouse_id"],
         quantity=serializer.validated_data["quantity"],
+        user=request.user,
+      )
+    except StockTransferError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+class StockDistributeView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    serializer = StockDistributeSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    product_ids = serializer.validated_data.get("product_ids")
+    if product_ids is not None and len(product_ids) == 0:
+      product_ids = None
+    try:
+      result = distribute_stocks_evenly_bulk(
+        seller,
+        product_ids=product_ids,
         user=request.user,
       )
     except StockTransferError as exc:

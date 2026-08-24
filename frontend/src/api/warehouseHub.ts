@@ -164,6 +164,25 @@ export function transferStock(
   })
 }
 
+export type StockDistributeResult = {
+  success: boolean
+  distributed: number
+  skipped: number
+  errors: Array<{ product_id: number; barcode: string; error: string }>
+}
+
+export function distributeStockEvenly(sellerId: number, productIds?: number[]) {
+  return apiFetch<StockDistributeResult>(
+    `/api/warehouse/sellers/${sellerId}/stock-distribute/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(
+        productIds && productIds.length > 0 ? { product_ids: productIds } : {},
+      ),
+    },
+  )
+}
+
 export async function previewStockImport(
   sellerId: number,
   warehouseId: number,

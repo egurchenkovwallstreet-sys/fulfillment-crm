@@ -17,6 +17,7 @@ from .views import (
   StockFilePreviewView,
   StockOverviewView,
   StockTransferView,
+  StockDistributeView,
 )
 from .views_pricing import PriceGroupListView, SellerPricingView
 
@@ -68,6 +69,11 @@ urlpatterns = [
     "sellers/<int:seller_id>/stock-transfer/",
     StockTransferView.as_view(),
     name="stock_transfer",
+  ),
+  path(
+    "sellers/<int:seller_id>/stock-distribute/",
+    StockDistributeView.as_view(),
+    name="stock_distribute",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
   path(

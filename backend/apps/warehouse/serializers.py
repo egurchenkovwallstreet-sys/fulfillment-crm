@@ -166,6 +166,14 @@ class StockTransferSerializer(serializers.Serializer):
   quantity = serializers.IntegerField(min_value=1)
 
 
+class StockDistributeSerializer(serializers.Serializer):
+  product_ids = serializers.ListField(
+    child=serializers.IntegerField(min_value=1),
+    required=False,
+    allow_empty=True,
+  )
+
+
 class StockFileApplySerializer(serializers.Serializer):
   warehouse_id = serializers.IntegerField()
   rows = serializers.ListField(child=serializers.DictField(), min_length=1)

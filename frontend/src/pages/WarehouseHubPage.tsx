@@ -9,6 +9,7 @@ import {
   fetchStockOverview,
   previewStockImport,
   transferStock,
+  distributeStockEvenly,
   type OnboardingPreview,
   type StockImportPreview,
   type StockOverview,
@@ -39,6 +40,19 @@ export function WarehouseHubPage() {
   const [fromWh, setFromWh] = useState<number | ''>('')
   const [toWh, setToWh] = useState<number | ''>('')
   const [transferQty, setTransferQty] = useState(1)
+  const [selectedDistributeIds, setSelectedDistributeIds] = useState<Set<number>>(new Set())
+
+  const canDistributeEvenly = (stockOverview?.warehouses.length ?? 0) >= 2
+
+  const distributableProducts = useMemo(
+    () => stockOverview?.products.filter((product) => product.wb_total > 0) ?? [],
+    [stockOverview],
+  )
+
+  const allDistributableSelected = useMemo(() => {
+    if (distributableProducts.length === 0) return false
+    return distributableProducts.every((product) => selectedDistributeIds.has(product.product_id))
+  }, [distributableProducts, selectedDistributeIds])
 
   const [importWarehouseId, setImportWarehouseId] = useState<number | ''>('')
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -234,6 +248,76 @@ export function WarehouseHubPage() {
       void handleLoadStockOverview()
     }
   }, [tab, sellerId, handleLoadStockOverview])
+
+  useEffect(() => {
+    setSelectedDistributeIds(new Set())
+  }, [stockOverview])
+
+  function toggleDistributeSelection(productId: number, checked: boolean) {
+    setSelectedDistributeIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(productId)
+      else next.delete(productId)
+      return next
+    })
+  }
+
+  function toggleSelectAllDistributable(checked: boolean) {
+    if (!checked) {
+      setSelectedDistributeIds(new Set())
+      return
+    }
+    setSelectedDistributeIds(new Set(distributableProducts.map((product) => product.product_id)))
+  }
+
+  async function runDistributeEvenly(productIds?: number[]) {
+    if (!sellerId || !canDistributeEvenly) return
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await distributeStockEvenly(Number(sellerId), productIds)
+      let msg = `Распределено: ${result.distributed}`
+      if (result.skipped > 0) msg += `, пропущено: ${result.skipped}`
+      if (result.errors.length > 0) msg += `, ошибок: ${result.errors.length}`
+      setSuccess(msg)
+      setSelectedDistributeIds(new Set())
+      await handleLoadStockOverview()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка распределения')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleDistributeProduct(product: StockOverviewProduct) {
+    if (!canDistributeEvenly || product.wb_total <= 0) return
+    if (!window.confirm(
+      `Равномерно распределить ${product.wb_total} шт. баркода ${product.barcode} по всем складам?`,
+    )) return
+    void runDistributeEvenly([product.product_id])
+  }
+
+  function handleDistributeSelected() {
+    const ids = [...selectedDistributeIds]
+    if (ids.length === 0) {
+      setError('Отметьте товары галочкой')
+      return
+    }
+    if (!window.confirm(`Равномерно распределить ${ids.length} выбранных товаров?`)) return
+    void runDistributeEvenly(ids)
+  }
+
+  function handleDistributeAll() {
+    if (!distributableProducts.length) {
+      setError('Нет товаров с остатком для распределения')
+      return
+    }
+    if (!window.confirm(
+      `Равномерно распределить все ${distributableProducts.length} товаров с остатком?`,
+    )) return
+    void runDistributeEvenly()
+  }
 
   async function handleTransferSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -599,19 +683,53 @@ export function WarehouseHubPage() {
           <p className="whub-hint">
             Перенос остатков между FBS-складами WB. Суммарный остаток баркода в CRM не меняется.
           </p>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            disabled={!sellerId || loading}
-            onClick={() => void handleLoadStockOverview()}
-          >
-            Обновить остатки из WB
-          </button>
+          <div className="whub-transfer-toolbar">
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={!sellerId || loading}
+              onClick={() => void handleLoadStockOverview()}
+            >
+              Обновить остатки из WB
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!sellerId || loading || !canDistributeEvenly || distributableProducts.length === 0}
+              onClick={handleDistributeAll}
+              title={!canDistributeEvenly ? 'Нужно минимум 2 включённых FBS-склада' : undefined}
+            >
+              Распределить все
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={!sellerId || loading || !canDistributeEvenly || selectedDistributeIds.size === 0}
+              onClick={handleDistributeSelected}
+              title={!canDistributeEvenly ? 'Нужно минимум 2 включённых FBS-склада' : undefined}
+            >
+              Распределить выбранные ({selectedDistributeIds.size})
+            </button>
+          </div>
+          {!canDistributeEvenly && stockOverview && (
+            <p className="whub-hint whub-hint--warn">
+              Для равномерного распределения включите минимум 2 FBS-склада у селлера.
+            </p>
+          )}
 
           {stockOverview && (
             <table className="whub-table whub-table--transfer">
               <thead>
                 <tr>
+                  <th className="whub-table__check">
+                    <input
+                      type="checkbox"
+                      checked={allDistributableSelected}
+                      disabled={!canDistributeEvenly || distributableProducts.length === 0}
+                      onChange={(e) => toggleSelectAllDistributable(e.target.checked)}
+                      aria-label="Выбрать все товары с остатком"
+                    />
+                  </th>
                   <th>Ячейка</th>
                   <th>Товар</th>
                   <th>Баркод</th>
@@ -625,6 +743,15 @@ export function WarehouseHubPage() {
               <tbody>
                 {stockOverview.products.map((product) => (
                   <tr key={product.product_id}>
+                    <td className="whub-table__check">
+                      <input
+                        type="checkbox"
+                        checked={selectedDistributeIds.has(product.product_id)}
+                        disabled={!canDistributeEvenly || product.wb_total <= 0}
+                        onChange={(e) => toggleDistributeSelection(product.product_id, e.target.checked)}
+                        aria-label={`Выбрать ${product.barcode}`}
+                      />
+                    </td>
                     <td>{product.cell_number}</td>
                     <td>
                       <div className="whub-product-cell">
@@ -638,7 +765,16 @@ export function WarehouseHubPage() {
                       const row = product.by_warehouse.find((x) => x.warehouse_id === wh.id)
                       return <td key={wh.id}>{row?.quantity ?? 0}</td>
                     })}
-                    <td>
+                    <td className="whub-transfer-actions">
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        disabled={!canDistributeEvenly || product.wb_total <= 0 || loading}
+                        onClick={() => handleDistributeProduct(product)}
+                        title={!canDistributeEvenly ? 'Нужно минимум 2 склада' : product.wb_total <= 0 ? 'Нулевой остаток' : undefined}
+                      >
+                        Поровну
+                      </button>
                       <button
                         type="button"
                         className="btn btn--small btn--primary"
