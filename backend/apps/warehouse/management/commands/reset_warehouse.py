@@ -1,8 +1,9 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.orders.models import Order, PickList, PickListItem
+from apps.orders.models import PickList
 from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOperation
+from apps.warehouse.services.cell_delete import force_delete_cells
 
 
 class Command(BaseCommand):
@@ -29,9 +30,7 @@ class Command(BaseCommand):
       return
 
     stats = {
-      "pick_list_items": PickListItem.objects.count(),
       "pick_lists": PickList.objects.count(),
-      "orders_with_product": Order.objects.filter(product__isnull=False).count(),
       "warehouse_stocks": ProductWarehouseStock.objects.count(),
       "stock_operations": StockOperation.objects.count(),
       "products": Product.objects.count(),
@@ -43,19 +42,17 @@ class Command(BaseCommand):
       self.stdout.write(f"  {key}: {value}")
 
     with transaction.atomic():
-      deleted_items, _ = PickListItem.objects.all().delete()
       deleted_lists, _ = PickList.objects.all().delete()
-      orders_updated = Order.objects.filter(product__isnull=False).update(product=None)
-      deleted_products, product_details = Product.objects.all().delete()
-      deleted_cells, _ = Cell.objects.all().delete()
+      orphan_products = Product.objects.filter(cell__isnull=True).count()
+      if orphan_products:
+        Product.objects.filter(cell__isnull=True).delete()
+      cell_stats = force_delete_cells(Cell.objects.all())
 
     self.stdout.write(self.style.SUCCESS("Сброс выполнен:"))
-    self.stdout.write(f"  позиций листов подбора: {deleted_items}")
     self.stdout.write(f"  листов подбора: {deleted_lists}")
-    self.stdout.write(f"  заказов (снята привязка к товару): {orders_updated}")
-    self.stdout.write(f"  товаров (и связанных остатков/операций): {deleted_products}")
-    if product_details:
-      for model, count in sorted(product_details.items()):
-        if count:
-          self.stdout.write(f"    — {model}: {count}")
-    self.stdout.write(f"  ячеек: {deleted_cells}")
+    self.stdout.write(f"  позиций листов подбора: {cell_stats['pick_list_items']}")
+    self.stdout.write(f"  заказов (снята привязка к товару): {cell_stats['orders_unlinked']}")
+    self.stdout.write(f"  товаров: {cell_stats['products']}")
+    if orphan_products:
+      self.stdout.write(f"  товаров без ячейки: {orphan_products}")
+    self.stdout.write(f"  ячеек: {cell_stats['cells']}")
