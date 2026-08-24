@@ -444,17 +444,19 @@ class AssemblyBindMarkingView(APIView):
         serializer.validated_data["marking_code"],
         user=request.user,
       )
-      verify_marking_orders(
-        seller,
-        [serializer.validated_data["order_id"]],
-        user=request.user,
-      )
-      result["order"] = Order.objects.get(pk=serializer.validated_data["order_id"])
     except AssemblyError as exc:
       return Response(
         {"detail": str(exc), "code": exc.code},
         status=status.HTTP_400_BAD_REQUEST,
       )
+
+    order_id = serializer.validated_data["order_id"]
+    try:
+      verify_marking_orders(seller, [order_id], user=request.user)
+    except AssemblyError:
+      pass
+
+    result["order"] = Order.objects.get(pk=order_id)
 
     order_data = OrderPrintSerializer(result["order"]).data
     payload = {

@@ -241,6 +241,12 @@ export function AssemblySellerPage() {
     try {
       const result = await startAssembly(id)
       let msg = `Шаг 1: лист подбора — ${result.orders_count} заказов, стикеров ${result.stickers_fetched}`
+      if (result.wb_assembly_sent != null) {
+        msg += `, на сборку WB ${result.wb_assembly_sent}`
+      }
+      if (result.wb_assembly_errors?.length) {
+        msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
+      }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
       setSuccess(msg)
       await load()

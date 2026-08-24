@@ -54,6 +54,8 @@ export interface StartAssemblyResult {
   success: boolean
   pick_list_id: number
   orders_count: number
+  wb_assembly_sent?: number
+  wb_assembly_errors?: string[]
   stickers_fetched: number
   sticker_errors: string
   pick_list: PickList | null

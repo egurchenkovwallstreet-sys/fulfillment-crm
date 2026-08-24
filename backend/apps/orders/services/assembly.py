@@ -113,8 +113,35 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
 
 
 def start_assembly(seller: Seller, *, user=None) -> dict:
-  """Начать сборку: лист подбора + автозагрузка стикеров WB."""
+  """Начать сборку: лист подбора → отправка в WB (confirm) → стикеры."""
   pick_list = generate_pick_list(seller, user=user)
+  orders = list(
+    Order.objects.filter(pick_list=pick_list, status=Order.Status.IN_PICKING)
+  )
+
+  wb_assembly_sent = 0
+  wb_assembly_errors: list[str] = []
+  from apps.orders.services.supply_flow import (  # noqa: PLC0415
+    SupplyFlowError,
+    order_can_send_to_assembly,
+    send_order_to_assembly,
+  )
+
+  for order in orders:
+    if (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
+      continue
+    if not order_can_send_to_assembly(order):
+      wb_assembly_errors.append(
+        f"WB #{order.wb_order_id}: нельзя отправить на сборку "
+        f"(WB: {order.wb_supplier_status or 'new'})",
+      )
+      continue
+    try:
+      send_order_to_assembly(seller, order.id, user=user)
+      wb_assembly_sent += 1
+    except (AssemblyError, SupplyFlowError) as exc:
+      wb_assembly_errors.append(f"WB #{order.wb_order_id}: {exc}")
+
   orders = list(
     Order.objects.filter(pick_list=pick_list, status=Order.Status.IN_PICKING)
   )
@@ -122,7 +149,9 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   stickers_fetched = 0
   sticker_errors = ""
   try:
-    stickers_fetched = fetch_stickers_for_orders(seller, orders, user=user)
+    missing_sticker = [order for order in orders if not order.has_sticker or not order.sticker_file]
+    if missing_sticker:
+      stickers_fetched = fetch_stickers_for_orders(seller, missing_sticker, user=user)
   except AssemblyError as exc:
     sticker_errors = str(exc)
 
@@ -132,11 +161,13 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     action_type=AuditLog.ActionType.ASSEMBLY,
     message=(
       f"Начата сборка: лист #{pick_list.id}, заказов {len(orders)}, "
-      f"стикеров {stickers_fetched}"
+      f"на сборку WB {wb_assembly_sent}, стикеров {stickers_fetched}"
     ),
     details={
       "pick_list_id": pick_list.id,
       "orders_count": len(orders),
+      "wb_assembly_sent": wb_assembly_sent,
+      "wb_assembly_errors": wb_assembly_errors,
       "stickers_fetched": stickers_fetched,
       "sticker_errors": sticker_errors,
     },
@@ -145,6 +176,8 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   return {
     "pick_list_id": pick_list.id,
     "orders_count": len(orders),
+    "wb_assembly_sent": wb_assembly_sent,
+    "wb_assembly_errors": wb_assembly_errors,
     "stickers_fetched": stickers_fetched,
     "sticker_errors": sticker_errors,
   }
@@ -172,6 +205,16 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       order.save(update_fields=["product", "updated_at"])
 
   requires_marking = _order_requires_marking(order)
+
+  if requires_marking:
+    wb_status = (order.wb_supplier_status or "").strip()
+    if wb_status != WB_SUPPLIER_ASSEMBLY:
+      raise AssemblyError(
+        f"Заказ WB #{order.wb_order_id} ещё не на сборке в WB "
+        f"(статус: {wb_status or 'new'}). "
+        "Сначала нажмите «На сборку» или «Все на сборку» на шаге 1.",
+        code="wb_not_confirm",
+      )
 
   if not requires_marking:
     order.status = Order.Status.LABEL_PRINTED
@@ -230,6 +273,16 @@ def bind_marking_and_print(
     raise AssemblyError(
       "Для этого заказа маркировка ЧЗ не требуется",
       code="marking_not_required",
+    )
+
+  wb_status = (order.wb_supplier_status or "").strip()
+  if wb_status != WB_SUPPLIER_ASSEMBLY:
+    raise AssemblyError(
+      f"Заказ WB #{order.wb_order_id} не на сборке в WB "
+      f"(статус: {wb_status or 'new'}). "
+      "WB принимает ЧЗ только для заказов в статусе confirm. "
+      "Сначала отправьте заказ на сборку («На сборку» / «Все на сборку»).",
+      code="wb_not_confirm",
     )
 
   if not order.has_sticker or not order.sticker_file:

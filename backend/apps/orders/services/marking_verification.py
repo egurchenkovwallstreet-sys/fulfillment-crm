@@ -31,11 +31,18 @@ def order_marking_ready(order: Order) -> bool:
 
 def _extract_sgtin_decision(meta_item: dict) -> str:
   for detail in meta_item.get("metaDetails") or []:
-    if (detail.get("key") or "").lower() == "sgtin":
-      return str(detail.get("decision") or "")
+    if (detail.get("key") or "").lower() != "sgtin":
+      continue
+    status = str(detail.get("status") or detail.get("decision") or "").strip()
+    if status:
+      return status
+    if detail.get("value"):
+      return "filled"
   meta = meta_item.get("meta") or {}
   sgtin = meta.get("sgtin")
   if isinstance(sgtin, dict) and sgtin.get("value"):
+    return "filled"
+  if isinstance(sgtin, str) and sgtin.strip():
     return "filled"
   return ""
 
