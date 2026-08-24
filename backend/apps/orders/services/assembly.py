@@ -253,7 +253,7 @@ def bind_marking_and_print(
   *,
   user=None,
 ) -> dict:
-  """Шаг 2: скан ЧЗ → привязка в WB → ожидание проверки WB."""
+  """Скан ЧЗ → привязка в WB → сразу печать стикера (проверка WB — в фоне)."""
   try:
     order = Order.objects.select_related("product").get(
       pk=order_id,
@@ -325,7 +325,7 @@ def bind_marking_and_print(
   order.marking_bound = False
   order.marking_verify_status = "pending"
   order.marking_verify_error = ""
-  order.status = Order.Status.ASSEMBLED
+  order.status = Order.Status.LABEL_PRINTED
   order.save(
     update_fields=[
       "marking_code",
@@ -341,16 +341,23 @@ def bind_marking_and_print(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ отправлен в WB, ожидание проверки — заказ #{order.wb_order_id}",
+    message=f"ЧЗ отправлен в WB — заказ #{order.wb_order_id}, стикер к печати",
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.LABEL_PRINT,
+    message=f"Печать стикера после ЧЗ — заказ WB #{order.wb_order_id}",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
   return {
-    "action": "await_verification",
+    "action": "print",
     "order": order,
     "message": (
-      f"Код ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
-      "Ожидайте проверку в «Честном знаке»…"
+      f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
+      "Стикер печатается сразу; проверка в «Честном знаке» займёт несколько минут."
     ),
   }
 

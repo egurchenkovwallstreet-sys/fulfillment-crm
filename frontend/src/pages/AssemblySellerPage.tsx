@@ -74,7 +74,6 @@ export function AssemblySellerPage() {
   const syncInFlightRef = useRef(false)
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
-  const [verifyingOrderId, setVerifyingOrderId] = useState<number | null>(null)
   const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
 
@@ -146,43 +145,6 @@ export function AssemblySellerPage() {
   }, [scanPhase])
 
   useEffect(() => {
-    if (!id || !verifyingOrderId) return
-
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const result = await verifyMarking(id, [verifyingOrderId])
-        if (cancelled) return
-        const item = result.results[0]
-        if (!item?.order) return
-
-        if (item.status === 'verified') {
-          setVerifyingOrderId(null)
-          const printWindow = openFbsStickerPrintWindow()
-          await finishPrint(item.order, printWindow)
-          await load({ silent: true })
-        } else if (item.status === 'error') {
-          setVerifyingOrderId(null)
-          setMarkingErrorOrder(item.order as unknown as AssemblyOrder)
-          resetScanFlow()
-          await load({ silent: true })
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Ошибка проверки ЧЗ')
-        }
-      }
-    }
-
-    void poll()
-    const interval = window.setInterval(() => void poll(), 6000)
-    return () => {
-      cancelled = true
-      window.clearInterval(interval)
-    }
-  }, [id, verifyingOrderId])
-
-  useEffect(() => {
     if (!id || !data || stage !== 'confirm') return
     const pendingIds = data.orders
       .filter((order) => order.marking_verify_status === 'pending')
@@ -191,7 +153,11 @@ export function AssemblySellerPage() {
 
     const refreshPending = async () => {
       try {
-        await verifyMarking(id, pendingIds)
+        const result = await verifyMarking(id, pendingIds)
+        const errored = result.results?.find((item) => item.status === 'error')
+        if (errored?.order) {
+          setMarkingErrorOrder(errored.order as unknown as AssemblyOrder)
+        }
         await load({ silent: true })
       } catch {
         // Фоновый опрос — не перекрываем основной UI ошибками
@@ -532,26 +498,20 @@ export function AssemblySellerPage() {
     setSuccess('')
     setError('')
     setLoading(true)
+    const printWindow = openFbsStickerPrintWindow()
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
       const order = result.order
-
-      if (order.marking_verify_status === 'verified') {
-        const printWindow = openFbsStickerPrintWindow()
-        if (!printWindow) {
-          setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
-        }
-        await finishPrint(order, printWindow)
-      } else if (order.marking_verify_status === 'error') {
+      if (!printWindow) {
+        setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
+      }
+      await finishPrint(order, printWindow)
+      if (order.marking_verify_status === 'error') {
         setMarkingErrorOrder(order as unknown as AssemblyOrder)
-        resetScanFlow()
-      } else {
-        setSuccess(result.message || 'Проверка ЧЗ в WB…')
-        setVerifyingOrderId(order.id)
-        resetScanFlow()
       }
       await load({ silent: true })
     } catch (err) {
+      printWindow?.close()
       setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
       markingRef.current?.focus()
     } finally {
@@ -959,7 +919,8 @@ export function AssemblySellerPage() {
                     </div>
                   )}
                   <p className="assembly-scan-hint">
-                    Отсканируйте DataMatrix. WB проверит код в «Честном знаке» — после подтверждения откроется печать стикера.
+                    Отсканируйте DataMatrix. Код уйдёт в WB, стикер FBS напечатается сразу.
+                    Проверка в «Честном знаке» — в фоне (несколько минут); в доставку — только после подтверждения WB.
                   </p>
                   <form onSubmit={handleMarkingSubmit}>
                     <input

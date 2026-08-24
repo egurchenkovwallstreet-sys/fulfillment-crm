@@ -13,12 +13,12 @@ export const WORKFLOW_STEPS = [
   {
     id: 2 as WorkflowStepId,
     title: 'Скан баркода',
-    hint: 'Сверка с листом подбора и печать стикера FBS',
+    hint: 'Сверка с листом подбора; для ЧЗ — затем шаг 3',
   },
   {
     id: 3 as WorkflowStepId,
     title: 'Честный знак',
-    hint: 'Скан DataMatrix и привязка к заказу в WB',
+    hint: 'Скан DataMatrix → привязка в WB → сразу печать стикера',
   },
   {
     id: 4 as WorkflowStepId,
@@ -34,10 +34,7 @@ export function isWbNew(order: AssemblyOrder): boolean {
 
 export function orderStickerPrinted(order: AssemblyOrder): boolean {
   if (order.requires_marking) {
-    if (order.marking_verify_status === 'pending') return false
-    if (order.marking_verify_status === 'error') return false
-    if (order.marking_verify_status === 'verified') return order.marking_bound
-    return order.status === 'marked' && order.marking_bound
+    return order.status === 'label_printed' || order.status === 'marked'
   }
   return order.status === 'label_printed' || order.has_sticker
 }
@@ -53,11 +50,14 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
     return 'Сначала отправьте заказ на сборку в WB'
   }
   if (!orderStickerPrinted(order)) {
+    if (order.requires_marking && order.status === 'assembled') {
+      return 'Отсканируйте Честный знак (DataMatrix) — затем печать стикера'
+    }
     return 'Отсканируйте баркод и распечатайте стикер FBS'
   }
   if (order.requires_marking && !order.marking_bound) {
     if (order.marking_verify_status === 'pending') {
-      return 'Проверка ЧЗ в WB…'
+      return 'WB проверяет ЧЗ (несколько минут) — в доставку после подтверждения'
     }
     if (order.marking_verify_status === 'error') {
       return order.marking_verify_error || 'ЧЗ отклонён WB — замените товар'
@@ -98,7 +98,7 @@ export function buildDeliveryConfirmMessage(order: AssemblyOrder): string {
     '✓ Стикер FBS напечатан и наклеен',
   ]
   if (order.requires_marking) {
-    lines.push('✓ Честный знак привязан в WB')
+    lines.push('✓ Честный знак подтверждён WB (проверка перед доставкой)')
   }
   lines.push('', 'После подтверждения будет напечатан QR поставки.')
   return lines.join('\n')

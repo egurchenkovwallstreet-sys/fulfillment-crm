@@ -18,7 +18,12 @@ from apps.orders.services.wb_status import (
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
-from apps.orders.services.marking_verification import order_marking_ready
+from apps.orders.services.marking_verification import (
+  VERIFY_ERROR,
+  VERIFY_PENDING,
+  order_marking_ready,
+  verify_marking_orders,
+)
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 from apps.warehouse.services.stock_deduction import (
   StockDeductionError,
@@ -72,11 +77,45 @@ def _parse_deliver_error(exc: WBApiError) -> str:
   if exc.status_code == 409:
     if "sgtin" in text or "marking" in text or "meta" in text:
       return (
-        "WB отклонил передачу в доставку: не заполнена маркировка ЧЗ. "
-        "Привяжите код и повторите."
+        "WB отклонил передачу в доставку: ошибка маркировки ЧЗ в поставке. "
+        "Замените товар, привяжите новый ЧЗ и повторите."
       )
     return f"WB отклонил передачу в доставку: {exc}"
   return str(exc)
+
+
+def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=None) -> None:
+  """Перед доставкой — свежий опрос WB по ЧЗ; ошибка = только замена товара."""
+  if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    return
+  if not (order.marking_code or "").strip():
+    raise SupplyFlowError(
+      "Сначала отсканируйте и привяжите Честный знак (DataMatrix).",
+      code="marking_required",
+    )
+  try:
+    verify_marking_orders(seller, [order.id], user=user)
+  except AssemblyError as exc:
+    raise SupplyFlowError(str(exc), code="marking_verify_failed") from exc
+  order.refresh_from_db()
+  verify_status = (order.marking_verify_status or "").strip()
+  if verify_status == VERIFY_ERROR:
+    raise SupplyFlowError(
+      order.marking_verify_error
+      or "ЧЗ отклонён WB — замените товар и отсканируйте другой экземпляр.",
+      code="marking_error",
+    )
+  if verify_status == VERIFY_PENDING:
+    raise SupplyFlowError(
+      "WB ещё проверяет Честный знак (обычно несколько минут). "
+      "Дождитесь подтверждения или нажмите «Обновить из WB».",
+      code="marking_pending",
+    )
+  if not order_marking_ready(order):
+    raise SupplyFlowError(
+      "Честный знак не подтверждён WB — нельзя передать в доставку.",
+      code="marking_not_ready",
+    )
 
 
 @transaction.atomic
@@ -157,6 +196,8 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   """
   order = _get_order(seller, order_id)
 
+  _ensure_marking_verified_for_delivery(seller, order, user=user)
+
   if not order_can_send_to_delivery(order):
     requires_marking = resolve_product_requires_marking(
       order.product, order.barcode, order.seller,
@@ -164,6 +205,10 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     hint = ""
     if requires_marking and not order.marking_bound:
       hint = " Сначала привяжите Честный знак и распечатайте стикер."
+    elif requires_marking and (order.marking_verify_status or "").strip() == VERIFY_PENDING:
+      hint = " WB ещё проверяет Честный знак — подождите несколько минут."
+    elif requires_marking and (order.marking_verify_status or "").strip() == VERIFY_ERROR:
+      hint = f" {order.marking_verify_error or 'ЧЗ отклонён — замените товар.'}"
     elif order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
       hint = " Сначала отсканируйте баркод и распечатайте стикер FBS."
     raise SupplyFlowError(
@@ -342,7 +387,7 @@ def order_delivery_block_reason(order: Order) -> str | None:
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
     verify_status = (order.marking_verify_status or "").strip()
     if verify_status == "pending":
-      return "Проверка ЧЗ в WB…"
+      return "WB проверяет ЧЗ (несколько минут) — в доставку после подтверждения WB"
     if verify_status == "error":
       return order.marking_verify_error or "ЧЗ отклонён WB — замените товар"
     if not order_marking_ready(order):
