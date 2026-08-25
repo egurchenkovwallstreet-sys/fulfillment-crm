@@ -3,7 +3,6 @@ from collections import defaultdict
 from django.db import transaction
 
 from apps.orders.models import Order, PickList, PickListItem
-from apps.orders.services.supply_flow import new_stage_orders_queryset
 from apps.orders.services.wb_status import WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product
@@ -22,6 +21,8 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   )
   if existing and existing.items.exists():
     return existing
+
+  from apps.orders.services.supply_flow import new_stage_orders_queryset
 
   orders = list(
     new_stage_orders_queryset(seller)
