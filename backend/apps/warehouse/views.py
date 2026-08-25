@@ -460,4 +460,4 @@ class StockFileApplyView(APIView):
       )
     except StockFileImportError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    return Response({"success": True, **result}, status=status.HTTP_201_CREATED)
+    return Response({"success": result.get("ok", False), **result}, status=status.HTTP_201_CREATED)

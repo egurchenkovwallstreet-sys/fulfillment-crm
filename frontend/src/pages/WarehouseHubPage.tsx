@@ -12,6 +12,7 @@ import {
   distributeStockEvenly,
   type OnboardingPreview,
   type StockImportPreview,
+  type StockImportResult,
   type StockOverview,
   type StockOverviewProduct,
 } from '../api/warehouseHub'
@@ -57,6 +58,7 @@ export function WarehouseHubPage() {
   const [importWarehouseId, setImportWarehouseId] = useState<number | ''>('')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [stockImportPreview, setStockImportPreview] = useState<StockImportPreview | null>(null)
+  const [stockImportResult, setStockImportResult] = useState<StockImportResult | null>(null)
 
   useEffect(() => {
     fetchSellers()
@@ -164,14 +166,21 @@ export function WarehouseHubPage() {
     if (!sellerId || !importFile || !importWarehouseId) return
     setLoading(true)
     setError('')
+    setSuccess('')
+    setStockImportResult(null)
     setStockImportPreview(null)
     try {
       const data = await previewStockImport(Number(sellerId), Number(importWarehouseId), importFile)
       setStockImportPreview(data)
-      setSuccess(
-        `Файл: ${data.totals.to_apply} баркодов, +${data.totals.add_units} шт.`
-        + (data.skipped_unknown.length ? `, пропущено: ${data.skipped_unknown.length}` : ''),
-      )
+      const totals = data.totals
+      let msg = `В файле: ${totals.file_barcodes} баркодов, ${totals.file_units} шт.`
+      if (totals.to_apply > 0) {
+        msg += `. К загрузке: ${totals.to_apply} баркодов (+${totals.add_units} шт.)`
+      }
+      if (totals.skipped_unknown > 0) {
+        msg += `. Не в каталоге WB: ${totals.skipped_unknown} баркодов (${totals.skipped_units} шт.)`
+      }
+      setSuccess(msg)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка чтения файла')
     } finally {
@@ -179,24 +188,46 @@ export function WarehouseHubPage() {
     }
   }
 
+  function buildImportResultMessage(result: StockImportResult): string {
+    const s = result.summary
+    const lines = [
+      `Было: CRM ${s.was_crm_units} шт., WB ${s.was_wb_units} шт.`,
+      `Добавлено: +${s.added_units} шт. (${s.applied_barcodes} баркодов)`,
+      `Получилось: CRM ${s.result_crm_units} шт., WB ${s.result_wb_units} шт.`,
+      `Ожидалось: CRM ${s.expected_crm_units} шт., WB ${s.expected_wb_units} шт.`,
+    ]
+    if (result.created_products > 0) {
+      lines.push(`Новых товаров в CRM: ${result.created_products}`)
+    }
+    if (result.ok) {
+      lines.push('Сверка CRM и WB: всё совпало.')
+    } else {
+      lines.push(`Ошибок: ${s.failed_barcodes}. См. список баркодов ниже.`)
+    }
+    return lines.join('\n')
+  }
+
   async function handleStockImportApply() {
     if (!sellerId || !stockImportPreview || !importWarehouseId) return
     setLoading(true)
     setError('')
+    setSuccess('')
+    setStockImportResult(null)
     try {
       const result = await applyStockImport(
         Number(sellerId),
         Number(importWarehouseId),
         stockImportPreview.rows,
       )
-      let msg = `Применено: ${result.applied} баркодов, +${result.add_units} шт.`
-      if (result.created_products) msg += `, новых товаров: ${result.created_products}`
-      if (result.skipped_unknown.length) {
-        msg += `. Пропущено (нет в WB): ${result.skipped_unknown.length}`
+      setStockImportResult(result)
+      const message = buildImportResultMessage(result)
+      if (result.ok) {
+        setSuccess(message)
+        setStockImportPreview(null)
+        setImportFile(null)
+      } else {
+        setError(message)
       }
-      setSuccess(msg)
-      setStockImportPreview(null)
-      setImportFile(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка применения')
     } finally {
@@ -588,6 +619,7 @@ export function WarehouseHubPage() {
                 onChange={(e) => {
                   setImportFile(e.target.files?.[0] ?? null)
                   setStockImportPreview(null)
+                  setStockImportResult(null)
                 }}
               />
             </label>
@@ -603,24 +635,37 @@ export function WarehouseHubPage() {
 
           {stockImportPreview && (
             <>
+              <div className="whub-import-file-summary panel">
+                <strong>Файл Excel</strong>
+                <p>
+                  {stockImportPreview.totals.file_barcodes} баркодов,{' '}
+                  <strong>{stockImportPreview.totals.file_units} шт.</strong> всего
+                </p>
+              </div>
+
               <div className="whub-stats">
                 <span>Склад: {stockImportPreview.warehouse.name}</span>
                 <span>К применению: {stockImportPreview.totals.to_apply}</span>
                 <span>+{stockImportPreview.totals.add_units} шт.</span>
                 <span>Новых товаров: {stockImportPreview.totals.new_products}</span>
-                {stockImportPreview.skipped_unknown.length > 0 && (
+                {stockImportPreview.totals.skipped_unknown > 0 && (
                   <span className="whub-stat--warn">
-                    Пропущено: {stockImportPreview.skipped_unknown.length}
+                    Не в каталоге WB: {stockImportPreview.totals.skipped_unknown} (
+                    {stockImportPreview.totals.skipped_units} шт.)
                   </span>
                 )}
               </div>
 
-              {stockImportPreview.skipped_unknown.length > 0 && (
+              {stockImportPreview.skipped_unknown_details.length > 0 && (
                 <details className="whub-skipped">
-                  <summary>Баркоды не найдены в WB ({stockImportPreview.skipped_unknown.length})</summary>
+                  <summary>
+                    Баркоды не найдены в WB ({stockImportPreview.skipped_unknown_details.length})
+                  </summary>
                   <ul>
-                    {stockImportPreview.skipped_unknown.map((bc) => (
-                      <li key={bc}><code>{bc}</code></li>
+                    {stockImportPreview.skipped_unknown_details.map((item) => (
+                      <li key={item.barcode}>
+                        <code>{item.barcode}</code> — {item.add_quantity} шт.
+                      </li>
                     ))}
                   </ul>
                 </details>
@@ -662,6 +707,41 @@ export function WarehouseHubPage() {
                 </button>
               </div>
             </>
+          )}
+
+          {stockImportResult && (
+            <div className={`whub-import-result panel${stockImportResult.ok ? ' whub-import-result--ok' : ' whub-import-result--error'}`}>
+              <h3>{stockImportResult.ok ? 'Импорт завершён успешно' : 'Импорт завершён с ошибками'}</h3>
+              <pre className="whub-import-result__text">{buildImportResultMessage(stockImportResult)}</pre>
+              {stockImportResult.mismatches.length > 0 && (
+                <table className="whub-table whub-import-result__table">
+                  <thead>
+                    <tr>
+                      <th>Баркод</th>
+                      <th>+из файла</th>
+                      <th>CRM было → ожид.</th>
+                      <th>CRM факт</th>
+                      <th>WB было → ожид.</th>
+                      <th>WB факт</th>
+                      <th>Ошибка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockImportResult.mismatches.map((row) => (
+                      <tr key={row.barcode}>
+                        <td><code>{row.barcode}</code></td>
+                        <td>{row.add_quantity}</td>
+                        <td>{row.crm_before} → {row.crm_expected}</td>
+                        <td>{row.crm_actual}</td>
+                        <td>{row.wb_before} → {row.wb_expected}</td>
+                        <td>{row.wb_actual}</td>
+                        <td>{row.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </section>
       )}

@@ -279,6 +279,51 @@
   font-size: 0.85rem;
 }
 
+.whub-import-file-summary {
+  margin: 1rem 0 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.whub-import-file-summary p {
+  margin: 0.35rem 0 0;
+  color: #334155;
+}
+
+.whub-import-result {
+  margin-top: 1rem;
+  border-width: 2px;
+}
+
+.whub-import-result--ok {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.whub-import-result--error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.whub-import-result h3 {
+  margin: 0 0 0.75rem;
+}
+
+.whub-import-result__text {
+  margin: 0 0 1rem;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: inherit;
+}
+
+.whub-import-result__table {
+  margin-top: 0.5rem;
+}
+
 .whub-skipped ul {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;

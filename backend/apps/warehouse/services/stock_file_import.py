@@ -9,11 +9,12 @@ from django.db import transaction
 
 from apps.integrations.models import AuditLog
 from apps.sellers.models import Seller
-from apps.warehouse.models import Product, StockOperation
+from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
 from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
+  fetch_wb_stock_for_barcode,
   fetch_wb_stocks_for_warehouses,
   get_seller_warehouse,
   increment_product_warehouse_stock,
@@ -133,6 +134,16 @@ def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
   ]
 
 
+def _get_crm_warehouse_qty(product: Product | None, warehouse) -> int:
+  if not product:
+    return 0
+  pws = ProductWarehouseStock.objects.filter(
+    product=product,
+    seller_warehouse=warehouse,
+  ).first()
+  return int(pws.quantity) if pws else 0
+
+
 def build_stock_import_preview(
   seller: Seller,
   *,
@@ -141,6 +152,7 @@ def build_stock_import_preview(
 ) -> dict:
   warehouse = get_seller_warehouse(seller, warehouse_id)
   parsed_rows = parse_stock_excel(file_bytes)
+  file_units = sum(row.add_quantity for row in parsed_rows)
 
   try:
     catalog_index = build_seller_catalog_index(seller)
@@ -159,12 +171,15 @@ def build_stock_import_preview(
     raise StockFileImportError(str(exc)) from exc
 
   preview_rows: list[StockImportPreviewRow] = []
-  skipped_unknown: list[str] = []
+  skipped_unknown_details: list[dict] = []
 
   for row in parsed_rows:
     catalog_item = catalog_index.get(row.barcode)
     if not catalog_item:
-      skipped_unknown.append(row.barcode)
+      skipped_unknown_details.append({
+        "barcode": row.barcode,
+        "add_quantity": row.add_quantity,
+      })
       continue
 
     product = crm_products.get(row.barcode)
@@ -194,11 +209,14 @@ def build_stock_import_preview(
       "name": warehouse.name,
     },
     "rows": [_serialize_preview_row(row) for row in preview_rows],
-    "skipped_unknown": skipped_unknown,
+    "skipped_unknown": [item["barcode"] for item in skipped_unknown_details],
+    "skipped_unknown_details": skipped_unknown_details,
     "totals": {
-      "file_rows": len(parsed_rows),
+      "file_barcodes": len(parsed_rows),
+      "file_units": file_units,
       "to_apply": len(preview_rows),
-      "skipped_unknown": len(skipped_unknown),
+      "skipped_unknown": len(skipped_unknown_details),
+      "skipped_units": sum(item["add_quantity"] for item in skipped_unknown_details),
       "new_products": sum(1 for row in preview_rows if row.will_create),
       "add_units": sum(row.add_quantity for row in preview_rows),
     },
@@ -221,6 +239,21 @@ def _serialize_preview_row(row: StockImportPreviewRow) -> dict:
   }
 
 
+def _serialize_mismatch(item: dict) -> dict:
+  return {
+    "barcode": item["barcode"],
+    "add_quantity": item["add_quantity"],
+    "crm_before": item["crm_before"],
+    "crm_expected": item["crm_expected"],
+    "crm_actual": item["crm_actual"],
+    "wb_before": item["wb_before"],
+    "wb_expected": item["wb_expected"],
+    "wb_actual": item["wb_actual"],
+    "error": item["error"],
+    "stage": item["stage"],
+  }
+
+
 @transaction.atomic
 def apply_stock_import(
   seller: Seller,
@@ -238,11 +271,6 @@ def apply_stock_import(
   except CatalogError as exc:
     raise StockFileImportError(str(exc)) from exc
 
-  applied = 0
-  created_products = 0
-  skipped_unknown: list[str] = []
-  errors: list[dict] = []
-
   aggregated: dict[str, int] = {}
   for row in rows:
     barcode = str(row.get("barcode") or "").strip()
@@ -254,10 +282,37 @@ def apply_stock_import(
       continue
     aggregated[barcode] = aggregated.get(barcode, 0) + qty
 
+  if not aggregated:
+    raise StockFileImportError("Нет корректных строк для применения")
+
+  applied = 0
+  created_products = 0
+  verified = 0
+  skipped_unknown_details: list[dict] = []
+  mismatches: list[dict] = []
+
+  was_crm_units = 0
+  was_wb_units = 0
+  added_units = 0
+  result_crm_units = 0
+  result_wb_units = 0
+
   for barcode, add_qty in aggregated.items():
     catalog_item = catalog_index.get(barcode)
     if not catalog_item:
-      skipped_unknown.append(barcode)
+      skipped_unknown_details.append({"barcode": barcode, "add_quantity": add_qty})
+      mismatches.append({
+        "barcode": barcode,
+        "add_quantity": add_qty,
+        "crm_before": 0,
+        "crm_expected": 0,
+        "crm_actual": 0,
+        "wb_before": 0,
+        "wb_expected": 0,
+        "wb_actual": 0,
+        "error": "Баркод не найден в каталоге WB селлера",
+        "stage": "catalog",
+      })
       continue
 
     product = (
@@ -266,7 +321,18 @@ def apply_stock_import(
       .select_related("cell")
       .first()
     )
+    crm_before = product.quantity if product else 0
+    wb_before = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+    crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
+    crm_expected = crm_before + add_qty
+    wb_expected = wb_before + add_qty
+    crm_wh_expected = crm_wh_before + add_qty
 
+    was_crm_units += crm_before
+    was_wb_units += wb_before
+
+    savepoint = transaction.savepoint()
+    created_here = False
     try:
       if product:
         product.quantity += add_qty
@@ -289,9 +355,32 @@ def apply_stock_import(
         )
         refresh_cell_occupied(cell)
         increment_product_warehouse_stock(product, warehouse, add_qty)
-        created_products += 1
+        created_here = True
 
       push_wb_stock_increment(seller, warehouse, barcode, add_qty)
+
+      product.refresh_from_db()
+      crm_actual = product.quantity
+      crm_wh_actual = _get_crm_warehouse_qty(product, warehouse)
+      wb_actual = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+
+      crm_ok = crm_actual == crm_expected and crm_wh_actual == crm_wh_expected
+      wb_ok = wb_actual == wb_expected
+
+      if not crm_ok and not wb_ok:
+        raise StockFileImportError(
+          f"CRM: ожидалось {crm_expected}, получилось {crm_actual}; "
+          f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
+        )
+      if not crm_ok:
+        raise StockFileImportError(
+          f"CRM: ожидалось {crm_expected} (склад {crm_wh_expected}), "
+          f"получилось {crm_actual} (склад {crm_wh_actual})",
+        )
+      if not wb_ok:
+        raise StockFileImportError(
+          f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
+        )
 
       StockOperation.objects.create(
         product=product,
@@ -303,34 +392,92 @@ def apply_stock_import(
           f"{warehouse.name or warehouse.wb_warehouse_id}"
         ),
       )
+      transaction.savepoint_commit(savepoint)
       applied += 1
-    except WBStockError as exc:
-      errors.append({"barcode": barcode, "error": str(exc)})
+      verified += 1
+      added_units += add_qty
+      if created_here:
+        created_products += 1
+      result_crm_units += crm_actual
+      result_wb_units += wb_actual
+    except (WBStockError, StockFileImportError) as exc:
+      transaction.savepoint_rollback(savepoint)
+      if isinstance(exc, WBStockError):
+        stage = "wb"
+      elif "CRM" in str(exc):
+        stage = "crm"
+      elif "WB" in str(exc):
+        stage = "wb"
+      else:
+        stage = "verify"
 
-  if applied == 0 and (skipped_unknown or errors):
-    detail = errors[0]["error"] if errors else "Нет подходящих баркодов"
-    raise StockFileImportError(detail)
+      mismatches.append({
+        "barcode": barcode,
+        "add_quantity": add_qty,
+        "crm_before": crm_before,
+        "crm_expected": crm_expected,
+        "crm_actual": crm_before,
+        "wb_before": wb_before,
+        "wb_expected": wb_expected,
+        "wb_actual": wb_before,
+        "error": str(exc),
+        "stage": stage,
+      })
+      result_crm_units += crm_before
+      result_wb_units += wb_before
+
+  file_barcodes = len(aggregated)
+  file_units = sum(aggregated.values())
+
+  all_ok = len(mismatches) == 0 and applied > 0
+
+  summary = {
+    "file_barcodes": file_barcodes,
+    "file_units": file_units,
+    "was_crm_units": was_crm_units,
+    "was_wb_units": was_wb_units,
+    "added_units": added_units,
+    "expected_crm_units": was_crm_units + added_units,
+    "expected_wb_units": was_wb_units + added_units,
+    "result_crm_units": result_crm_units,
+    "result_wb_units": result_wb_units,
+    "applied_barcodes": applied,
+    "verified_barcodes": verified,
+    "failed_barcodes": len(mismatches),
+  }
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.INTAKE,
-    message=f"Импорт остатков Excel: {applied} баркодов, +{sum(aggregated.values())} шт.",
+    message=(
+      f"Импорт остатков Excel: {applied}/{file_barcodes} баркодов, "
+      f"+{added_units} шт., сверка {'OK' if all_ok else 'ОШИБКИ'}"
+    ),
     details={
       "warehouse_id": warehouse.id,
+      "summary": summary,
       "applied": applied,
       "created_products": created_products,
-      "skipped_unknown": skipped_unknown,
-      "errors": errors,
+      "skipped_unknown_details": skipped_unknown_details,
+      "mismatches": mismatches,
+      "all_ok": all_ok,
     },
   )
 
+  if applied == 0 and mismatches:
+    raise StockFileImportError(
+      f"Не удалось применить ни одного баркода. Ошибок: {len(mismatches)}",
+    )
+
   return {
+    "ok": all_ok,
     "applied": applied,
     "created_products": created_products,
-    "skipped_unknown": skipped_unknown,
-    "errors": errors,
-    "add_units": sum(
-      qty for barcode, qty in aggregated.items() if barcode in catalog_index
-    ),
+    "verified": verified,
+    "skipped_unknown": [item["barcode"] for item in skipped_unknown_details],
+    "skipped_unknown_details": skipped_unknown_details,
+    "mismatches": [_serialize_mismatch(item) for item in mismatches],
+    "summary": summary,
+    "add_units": added_units,
   }

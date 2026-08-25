@@ -67,13 +67,57 @@ export type StockImportPreview = {
   warehouse: { id: number; wb_warehouse_id: number; name: string }
   rows: StockImportPreviewRow[]
   skipped_unknown: string[]
+  skipped_unknown_details: Array<{ barcode: string; add_quantity: number }>
   totals: {
-    file_rows: number
+    file_barcodes: number
+    file_units: number
     to_apply: number
     skipped_unknown: number
+    skipped_units: number
     new_products: number
     add_units: number
   }
+}
+
+export type StockImportMismatch = {
+  barcode: string
+  add_quantity: number
+  crm_before: number
+  crm_expected: number
+  crm_actual: number
+  wb_before: number
+  wb_expected: number
+  wb_actual: number
+  error: string
+  stage: string
+}
+
+export type StockImportSummary = {
+  file_barcodes: number
+  file_units: number
+  was_crm_units: number
+  was_wb_units: number
+  added_units: number
+  expected_crm_units: number
+  expected_wb_units: number
+  result_crm_units: number
+  result_wb_units: number
+  applied_barcodes: number
+  verified_barcodes: number
+  failed_barcodes: number
+}
+
+export type StockImportResult = {
+  success: boolean
+  ok: boolean
+  applied: number
+  created_products: number
+  verified: number
+  skipped_unknown: string[]
+  skipped_unknown_details: Array<{ barcode: string; add_quantity: number }>
+  mismatches: StockImportMismatch[]
+  summary: StockImportSummary
+  add_units: number
 }
 
 export type StockWarehouseMeta = {
@@ -219,14 +263,7 @@ export function applyStockImport(
   warehouseId: number,
   rows: StockImportPreviewRow[],
 ) {
-  return apiFetch<{
-    success: boolean
-    applied: number
-    created_products: number
-    skipped_unknown: string[]
-    errors: Array<{ barcode: string; error: string }>
-    add_units: number
-  }>(`/api/warehouse/stock-import/${sellerId}/apply/`, {
+  return apiFetch<StockImportResult>(`/api/warehouse/stock-import/${sellerId}/apply/`, {
     method: 'POST',
     body: JSON.stringify({ warehouse_id: warehouseId, rows }),
   })
