@@ -8,7 +8,7 @@ export const WORKFLOW_STEPS = [
   {
     id: 1 as WorkflowStepId,
     title: 'Лист подбора',
-    hint: 'Кнопка «Передать на сборку» — лист PDF и отправка в WB',
+    hint: 'Выберите склад → «Сформировать лист подбора» → PDF A4',
   },
   {
     id: 2 as WorkflowStepId,

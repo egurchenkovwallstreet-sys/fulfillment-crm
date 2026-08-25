@@ -12,6 +12,7 @@ from .views import (
   AssemblySendToDeliveryView,
   AssemblySellerDetailView,
   AssemblySellerListView,
+  AssemblyPickListPreviewView,
   AssemblyStartView,
   AssemblyVerifyMarkingView,
   OrderListView,
@@ -44,6 +45,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/start/",
       AssemblyStartView.as_view(),
       name="assembly-start",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/pick-list-preview/",
+      AssemblyPickListPreviewView.as_view(),
+      name="assembly-pick-list-preview",
     ),
     path(
       "assembly/sellers/<int:seller_id>/delete-pick-list/",

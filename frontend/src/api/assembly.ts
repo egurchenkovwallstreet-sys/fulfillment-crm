@@ -1,5 +1,7 @@
 import { apiFetch } from './client'
 import type { PickList } from './orders'
+
+export type { PickList }
 import type { SellerWarehouse } from './sellers'
 
 export interface SellerAssemblyCounters {
@@ -54,13 +56,32 @@ export interface AssemblySellerDetail {
 
 export interface StartAssemblyResult {
   success: boolean
-  pick_list_id: number
   orders_count: number
   wb_assembly_sent?: number
   wb_assembly_errors?: string[]
   stickers_fetched: number
   sticker_errors: string
   pick_list: PickList | null
+}
+
+export interface PickListPreviewResult {
+  success: boolean
+  pick_list: PickList & {
+    preview?: boolean
+    warehouse_label?: string
+    orders_in_list?: number
+    orders_skipped?: number
+  }
+}
+
+export function previewPickList(sellerId: number) {
+  return apiFetch<PickListPreviewResult>(
+    `/api/orders/assembly/sellers/${sellerId}/pick-list-preview/`,
+    {
+      method: 'POST',
+      body: '{}',
+    },
+  )
 }
 
 export interface PrintOrder {

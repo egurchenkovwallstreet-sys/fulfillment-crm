@@ -58,7 +58,7 @@ from .services.supply_flow import (
   send_supplies_to_delivery_bulk,
   send_supply_to_delivery,
 )
-from .services.pick_list import PickListError, delete_active_pick_list, generate_pick_list
+from .services.pick_list import PickListError, delete_active_pick_list, generate_pick_list, preview_pick_list
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
@@ -385,7 +385,7 @@ class AssemblySellerDetailView(APIView):
 
 
 class AssemblyStartView(APIView):
-  """Начать сборку: лист подбора + стикеры WB."""
+  """Передать заказы на сборку в WB + стикеры."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
@@ -395,15 +395,34 @@ class AssemblyStartView(APIView):
 
     try:
       result = start_assembly(seller, user=request.user)
-    except PickListError as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except AssemblyError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
 
-    pick_list = PickList.objects.filter(pk=result["pick_list_id"]).first()
     return Response({
       "success": True,
       **result,
-      "pick_list": PickListSerializer(pick_list).data if pick_list else None,
+      "pick_list": None,
     }, status=status.HTTP_201_CREATED)
+
+
+class AssemblyPickListPreviewView(APIView):
+  """Сформировать лист подбора PDF по включённым складам (без отправки в WB)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      pick_list = preview_pick_list(seller, user=request.user)
+    except PickListError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"success": True, "pick_list": pick_list})
 
 
 class AssemblyDeletePickListView(APIView):

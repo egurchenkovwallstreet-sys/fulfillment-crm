@@ -6,6 +6,7 @@ import {
   deletePickList,
   fetchAssemblySeller,
   replaceOrderItem,
+  previewPickList,
   reprintOrderSticker,
   scanOrderBarcode,
   sendOrderToAssembly,
@@ -14,6 +15,7 @@ import {
   verifyMarking,
   type AssemblyOrder,
   type AssemblySellerDetail,
+  type PickList,
   type PrintOrder,
 } from '../api/assembly'
 import { syncOrders } from '../api/orders'
@@ -77,6 +79,7 @@ export function AssemblySellerPage() {
   const [bridgePrinter, setBridgePrinter] = useState('')
   const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
+  const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -224,8 +227,8 @@ export function AssemblySellerPage() {
       kind: 'confirm',
       title: 'Передать на сборку',
       message:
-        `Сформировать лист подбора и передать на сборку ${count} заказов?\n\n` +
-        'Лист можно будет скачать PDF кнопкой справа.',
+        `Передать на сборку ${count} заказов в Wildberries?\n\n` +
+        'Лист подбора формируется отдельной кнопкой «Сформировать лист подбора».',
       confirmLabel: 'Передать',
       onConfirm: () => void runTransferToAssembly(),
     })
@@ -238,15 +241,14 @@ export function AssemblySellerPage() {
     setLoading(true)
     try {
       const result = await startAssembly(id)
-      let msg = `Лист подбора #${result.pick_list_id}: ${result.orders_count} заказов`
+      let msg = `Передано на сборку: ${result.orders_count} заказов`
       if (result.wb_assembly_sent != null) {
-        msg += `, на сборку WB ${result.wb_assembly_sent}`
+        msg += `, в WB отправлено ${result.wb_assembly_sent}`
       }
       if (result.wb_assembly_errors?.length) {
         msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
       }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
-      msg += '. Скачайте PDF кнопкой «Скачать PDF» справа.'
       setSuccess(msg)
       setStage('confirm')
       await load()
@@ -296,9 +298,33 @@ export function AssemblySellerPage() {
     }
   }
 
+  async function handleGeneratePickList() {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await previewPickList(id)
+      setPickListPreview(result.pick_list)
+      const skipped = result.pick_list.orders_skipped
+      let msg = `Лист подбора сформирован: ${result.pick_list.total_quantity} заказов`
+      if (result.pick_list.warehouse_label) {
+        msg += ` (${result.pick_list.warehouse_label})`
+      }
+      if (skipped) msg += `. Без товара на складе: ${skipped}`
+      msg += '. Нажмите «Скачать PDF (A4)».'
+      setSuccess(msg)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function handleDownloadPickListPdf() {
-    if (!data?.active_pick_list) return
-    if (!downloadPickListPdf(data.active_pick_list)) {
+    const pickList = pickListPreview ?? data?.active_pick_list
+    if (!pickList) return
+    if (!downloadPickListPdf(pickList)) {
       setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
     }
   }
@@ -347,6 +373,7 @@ export function AssemblySellerPage() {
       )),
     })
     setTogglingWarehouseId(warehouseId)
+    setPickListPreview(null)
     setError('')
     setSuccess(isEnabled ? 'Склад включён — обновляем список…' : 'Склад выключен — обновляем список…')
     try {
@@ -648,6 +675,7 @@ export function AssemblySellerPage() {
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = assemblyEligible ?? 0
+  const displayPickList = pickListPreview ?? data.active_pick_list
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -686,18 +714,38 @@ export function AssemblySellerPage() {
             Обновить заказы
           </button>
           {stage === 'new' && bulkAssemblyCount > 0 && (
-            <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
-              Передать на сборку ({bulkAssemblyCount})
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void handleGeneratePickList()}
+                disabled={loading || ordersBusy}
+              >
+                Сформировать лист подбора
+              </button>
+              {displayPickList && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={handleDownloadPickListPdf}
+                  disabled={loading}
+                >
+                  Скачать PDF (A4)
+                </button>
+              )}
+              <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
+                Передать на сборку ({bulkAssemblyCount})
+              </button>
+            </>
           )}
-          {data.active_pick_list && stage !== 'complete' && (
+          {stage !== 'new' && displayPickList && stage !== 'complete' && (
             <button
               type="button"
               className="btn btn--secondary"
               onClick={handleDownloadPickListPdf}
               disabled={loading}
             >
-              Скачать лист подбора
+              Скачать PDF (A4)
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
@@ -752,8 +800,8 @@ export function AssemblySellerPage() {
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
-            Выберите склады, нажмите «Передать на сборку» — система сформирует лист подбора,
-            отправит заказы в WB. PDF листа скачивается кнопкой «Скачать PDF» справа.
+            Выберите склады WB, нажмите «Сформировать лист подбора» — PDF A4 для печати.
+            Отдельно «Передать на сборку» отправляет заказы в Wildberries.
           </p>
         </section>
       )}
@@ -933,14 +981,17 @@ export function AssemblySellerPage() {
         </section>
 
         <div className="assembly-side">
-          {data.active_pick_list && stage !== 'complete' && (
+          {displayPickList && stage !== 'complete' && (
             <section className="panel">
               <div className="assembly-picklist-head">
-                <h2 className="section-title">Лист подбора #{data.active_pick_list.id}</h2>
+                <h2 className="section-title">
+                  {pickListPreview ? 'Лист подбора (черновик)' : `Лист подбора #${displayPickList.id}`}
+                </h2>
                 <div className="assembly-picklist-actions">
                   <button type="button" className="btn btn--secondary btn--small" onClick={handleDownloadPickListPdf} disabled={loading}>
-                    Скачать PDF
+                    Скачать PDF (A4)
                   </button>
+                  {data.active_pick_list && !pickListPreview && (
                   <button
                     type="button"
                     className="btn btn--secondary btn--small"
@@ -949,8 +1000,15 @@ export function AssemblySellerPage() {
                   >
                     Удалить лист подбора
                   </button>
+                  )}
                 </div>
               </div>
+              {pickListPreview && (
+                <p className="print-agent__hint">
+                  Склады: {(pickListPreview as PickList & { warehouse_label?: string }).warehouse_label || 'включённые'}
+                  {' · '}{displayPickList.total_quantity} заказов
+                </p>
+              )}
               <table className="assembly-table pick-list-table">
                 <thead>
                   <tr>
@@ -960,7 +1018,7 @@ export function AssemblySellerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.active_pick_list.items.map((item) => (
+                  {displayPickList.items.map((item) => (
                     <tr key={item.id}>
                       <td><strong>{item.cell_number}</strong></td>
                       <td><code>{item.barcode}</code></td>

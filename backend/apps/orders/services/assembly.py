@@ -14,7 +14,6 @@ from apps.orders.models import Order, PickList, PickListItem, Supply
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
-from apps.orders.services.pick_list import PickListError, generate_pick_list
 from apps.warehouse.models import Product
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
@@ -114,19 +113,23 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
 
 
 def start_assembly(seller: Seller, *, user=None) -> dict:
-  """Начать сборку: лист подбора → отправка в WB (confirm) → стикеры."""
-  pick_list = generate_pick_list(seller, user=user)
-  orders = list(
-    Order.objects.filter(pick_list=pick_list, status=Order.Status.IN_PICKING)
-  )
-
-  wb_assembly_sent = 0
-  wb_assembly_errors: list[str] = []
+  """Передать новые заказы на сборку в WB (confirm) и загрузить стикеры."""
   from apps.orders.services.supply_flow import (  # noqa: PLC0415
     SupplyFlowError,
+    new_stage_orders_queryset,
     order_can_send_to_assembly,
     send_order_to_assembly,
   )
+
+  orders = list(new_stage_orders_queryset(seller).select_related("product"))
+  if not orders:
+    raise AssemblyError(
+      "Нет новых заказов для передачи на сборку. Выберите склад и обновите заказы из WB.",
+      code="no_orders",
+    )
+
+  wb_assembly_sent = 0
+  wb_assembly_errors: list[str] = []
 
   for order in orders:
     if (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
@@ -144,7 +147,10 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
       wb_assembly_errors.append(f"WB #{order.wb_order_id}: {exc}")
 
   orders = list(
-    Order.objects.filter(pick_list=pick_list, status=Order.Status.IN_PICKING)
+    Order.objects.filter(
+      seller=seller,
+      id__in=[order.id for order in orders],
+    )
   )
 
   stickers_fetched = 0
@@ -161,11 +167,10 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     seller=seller,
     action_type=AuditLog.ActionType.ASSEMBLY,
     message=(
-      f"Начата сборка: лист #{pick_list.id}, заказов {len(orders)}, "
-      f"на сборку WB {wb_assembly_sent}, стикеров {stickers_fetched}"
+      f"Передано на сборку WB: заказов {len(orders)}, "
+      f"отправлено {wb_assembly_sent}, стикеров {stickers_fetched}"
     ),
     details={
-      "pick_list_id": pick_list.id,
       "orders_count": len(orders),
       "wb_assembly_sent": wb_assembly_sent,
       "wb_assembly_errors": wb_assembly_errors,
@@ -175,7 +180,6 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   )
 
   return {
-    "pick_list_id": pick_list.id,
     "orders_count": len(orders),
     "wb_assembly_sent": wb_assembly_sent,
     "wb_assembly_errors": wb_assembly_errors,
