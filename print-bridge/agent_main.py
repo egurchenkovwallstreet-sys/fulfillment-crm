@@ -221,6 +221,30 @@ def build_printer_menu():
   return pystray.Menu(*items)
 
 
+def ensure_first_run_notice() -> None:
+  if not is_frozen() or not HAS_WIN32:
+    return
+  marker = get_data_dir() / ".first_run_notice"
+  if marker.exists():
+    return
+  marker.write_text("1", encoding="utf-8")
+  import ctypes
+
+  printer = current_printer_label()
+  ctypes.windll.user32.MessageBoxW(
+    0,
+    (
+      "Агент печати Fulfillment CRM запущен.\n\n"
+      f"Принтер: {printer}\n"
+      f"Проверка: {health_url()}\n\n"
+      "Иконка FF — в трее Windows (возможно под стрелкой ^).\n"
+      "Правый клик по FF → Принтер — выбор принтера."
+    ),
+    "Fulfillment CRM — Агент печати",
+    0x40,
+  )
+
+
 def ensure_autostart_on_first_run() -> None:
   if not is_frozen() or not HAS_WIN32:
     return
@@ -343,6 +367,7 @@ def main() -> int:
       return 1
 
     log("HTTP server ready")
+    ensure_first_run_notice()
 
     if is_frozen() or "--tray" in sys.argv:
       try:

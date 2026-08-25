@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { PRINT_AGENT_DOWNLOAD_URL } from '../constants/printAgent'
+import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL } from '../constants/printAgent'
 import { refreshPrintBridgeStatus } from '../utils/printService'
 import { useEffect, useState } from 'react'
 import './PrintAgentPage.css'
@@ -45,6 +45,9 @@ export function PrintAgentPage() {
           <a className="btn btn--primary" href={PRINT_AGENT_DOWNLOAD_URL} download>
             Скачать агент (.exe)
           </a>
+          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download>
+            Установщик (.bat)
+          </a>
         </div>
       </header>
 
@@ -66,19 +69,24 @@ export function PrintAgentPage() {
         </section>
 
         <section className="card print-agent__card">
-          <h2>Установка — 3 шага</h2>
+          <h2>Установка — рекомендуемый способ</h2>
           <ol className="print-agent__steps">
             <li>
-              Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a> с этой страницы
+              Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a> и{' '}
+              <a href={PRINT_AGENT_INSTALLER_URL} download>«install-agent.bat»</a> в одну папку (например, «Загрузки»)
             </li>
-            <li>Подключите принтер по USB (драйвер Windows установится сам или с диска производителя)</li>
+            <li>Подключите принтер по USB (драйвер Windows)</li>
             <li>
-              Запустите файл — в трее появится синяя иконка <strong>FF</strong>. Готово, ничего настраивать не нужно
+              Запустите <strong>install-agent.bat</strong> — он скопирует агент в постоянную папку,
+              снимет блокировку Windows и проверит, что порт 9123 отвечает
+            </li>
+            <li>
+              Появится окно «Агент запущен» и иконка <strong>FF</strong> в трее (возможно под стрелкой ^)
             </li>
           </ol>
           <p className="print-agent__hint">
-            Агент сам найдёт принтер: сначала тот, что выбран в Windows по умолчанию, иначе Xprinter.
-            Другой принтер — правый клик по иконке FF → <strong>Принтер</strong>.
+            Можно запустить только .exe, но на новом ПК надёжнее через <strong>install-agent.bat</strong>.
+            Агент сам найдёт принтер: сначала по умолчанию в Windows, иначе Xprinter.
           </p>
         </section>
 
@@ -102,13 +110,29 @@ export function PrintAgentPage() {
         </section>
 
         <section className="card print-agent__card">
-          <h2>Если не работает</h2>
+          <h2>Если не устанавливается / не работает</h2>
           <ol className="print-agent__steps">
-            <li>Запустите <strong>FulfillmentCRM-PrintAgent.exe</strong> ещё раз</li>
+            <li>
+              Используйте <a href={PRINT_AGENT_INSTALLER_URL} download>install-agent.bat</a> — не запускайте exe
+              напрямую из «Загрузок» без установщика
+            </li>
             <li>Если Windows SmartScreen блокирует — «Подробнее» → «Выполнить в любом случае»</li>
-            <li>Сделайте нужный принтер <strong>принтером по умолчанию</strong> в Windows (Параметры → Принтеры)</li>
-            <li>Или: правый клик по иконке FF → <strong>Принтер</strong> → выберите из списка</li>
-            <li>Если иконка исчезает — правый клик FF → <strong>Журнал (agent.log)</strong> и пришлите текст ошибки</li>
+            <li>Антивирус / корпоративная политика — добавьте в исключения:
+              <code>%LOCALAPPDATA%\FulfillmentCRM\PrintAgent\</code>
+            </li>
+            <li>
+              Установите{' '}
+              <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe" target="_blank" rel="noreferrer">
+                Microsoft Visual C++ Redistributable x64
+              </a>{' '}
+              (если exe сразу закрывается)
+            </li>
+            <li>Сделайте принтер <strong>по умолчанию</strong> в Windows или: FF в трее → Принтер</li>
+            <li>
+              Журнал ошибок: <code>%APPDATA%\FulfillmentCRM\PrintAgent\agent.log</code> — пришлите текст,
+              если агент не стартует
+            </li>
+            <li>На странице CRM нажмите «Проверить снова» — должно быть «Агент работает»</li>
           </ol>
         </section>
       </div>
