@@ -180,6 +180,23 @@ export interface DeletePickListResult {
   orders_unlocked: number
 }
 
+export interface DeleteOrderResult {
+  success: boolean
+  order: AssemblyOrder
+  counts: Record<string, number>
+  assembly_eligible: number
+}
+
+export function deleteAssemblyOrder(sellerId: number, orderId: number) {
+  return apiFetch<DeleteOrderResult>(
+    `/api/orders/assembly/sellers/${sellerId}/delete-order/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId }),
+    },
+  )
+}
+
 export function deletePickList(sellerId: number, pickListId?: number) {
   return apiFetch<DeletePickListResult>(
     `/api/orders/assembly/sellers/${sellerId}/delete-pick-list/`,

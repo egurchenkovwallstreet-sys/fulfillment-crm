@@ -10,7 +10,7 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_NEW,
   wb_in_delivery_q,
 )
-from apps.orders.models import Order, PickList
+from apps.orders.models import Order, PickList, PickListItem, Supply
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
@@ -43,6 +43,7 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
   orders_qs = filter_orders_for_seller(
     Order.objects.filter(
       seller=seller,
+      assembly_hidden=False,
       status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
     ).select_related("product"),
     seller,
@@ -417,6 +418,107 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
   )
 
   return order
+
+
+def _detach_order_from_pick_list(order: Order) -> None:
+  pick_list_id = order.pick_list_id
+  if not pick_list_id:
+    return
+
+  item_qs = PickListItem.objects.filter(pick_list_id=pick_list_id, barcode=order.barcode)
+  if order.product_id:
+    item_qs = item_qs.filter(product_id=order.product_id)
+  item = item_qs.first()
+
+  if item:
+    if item.quantity > 1:
+      item.quantity -= 1
+      item.save(update_fields=["quantity"])
+    else:
+      item.delete()
+
+  order.pick_list = None
+
+  pick_list = PickList.objects.filter(pk=pick_list_id).first()
+  if pick_list and not pick_list.items.exists():
+    pick_list.delete()
+
+
+def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
+  """Скрыть заказ из сборки FBS (на любом этапе вкладок)."""
+  from apps.orders.services.supply_flow import get_assembly_stage_counts
+
+  try:
+    order = Order.objects.get(pk=order_id, seller=seller)
+  except Order.DoesNotExist as exc:
+    raise AssemblyError("Заказ не найден", code="order_not_found") from exc
+
+  if order.assembly_hidden:
+    raise AssemblyError("Заказ уже удалён из сборки", code="already_hidden")
+
+  if order.marking_code:
+    client = _get_client(seller)
+    try:
+      client.delete_order_meta(order.wb_order_id, key="sgtin")
+    except WBApiError as exc:
+      raise AssemblyError(
+        f"Не удалось снять привязку ЧЗ в WB: {parse_wb_marking_error(exc)}. "
+        "Проверьте заказ в личном кабинете WB.",
+        code="wb_unbind_failed",
+      ) from exc
+
+  _detach_order_from_pick_list(order)
+
+  for supply in Supply.objects.filter(seller=seller, status=Supply.Status.FORMING, orders=order):
+    supply.orders.remove(order)
+
+  order.assembly_hidden = True
+  order.marking_code = ""
+  order.marking_bound = False
+  order.marking_verify_status = ""
+  order.marking_verify_error = ""
+  order.save(
+    update_fields=[
+      "pick_list",
+      "assembly_hidden",
+      "marking_code",
+      "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
+      "updated_at",
+    ],
+  )
+
+  seller_update_fields: list[str] = []
+  wb_new_ids = list(seller.wb_new_order_ids or [])
+  if order.wb_order_id in wb_new_ids:
+    seller.wb_new_order_ids = [wid for wid in wb_new_ids if wid != order.wb_order_id]
+    seller.wb_count_new = max(0, (seller.wb_count_new or 0) - 1)
+    seller_update_fields.extend(["wb_new_order_ids", "wb_count_new"])
+
+  wb_supplier = (order.wb_supplier_status or "").strip()
+  if wb_supplier == WB_SUPPLIER_ASSEMBLY:
+    seller.wb_count_assembly = max(0, (seller.wb_count_assembly or 0) - 1)
+    seller_update_fields.append("wb_count_assembly")
+
+  if seller_update_fields:
+    seller_update_fields.append("updated_at")
+    seller.save(update_fields=seller_update_fields)
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=f"Удалён из сборки FBS: заказ WB #{order.wb_order_id}",
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
+
+  counts = get_assembly_stage_counts(seller)
+  return {
+    "order": order,
+    "counts": counts,
+    "assembly_eligible": counts["new"],
+  }
 
 
 def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:

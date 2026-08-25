@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type For
 import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
+  deleteAssemblyOrder,
   deletePickList,
   fetchAssemblySeller,
   replaceOrderItem,
@@ -35,7 +36,7 @@ import {
   refreshPrintBridgeStatus,
   openFbsStickerPrintWindow,
 } from '../utils/printService'
-import { printPickList } from '../utils/pickListPrint'
+import { downloadPickListPdf } from '../utils/pickListPrint'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import './AssemblyPage.css'
 
@@ -224,7 +225,7 @@ export function AssemblySellerPage() {
       title: 'Передать на сборку',
       message:
         `Сформировать лист подбора и передать на сборку ${count} заказов?\n\n` +
-        'Откроется окно печати листа подбора.',
+        'Лист можно будет скачать PDF кнопкой справа.',
       confirmLabel: 'Передать',
       onConfirm: () => void runTransferToAssembly(),
     })
@@ -237,7 +238,7 @@ export function AssemblySellerPage() {
     setLoading(true)
     try {
       const result = await startAssembly(id)
-      let msg = `Лист подбора: ${result.orders_count} заказов`
+      let msg = `Лист подбора #${result.pick_list_id}: ${result.orders_count} заказов`
       if (result.wb_assembly_sent != null) {
         msg += `, на сборку WB ${result.wb_assembly_sent}`
       }
@@ -245,12 +246,10 @@ export function AssemblySellerPage() {
         msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
       }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
+      msg += '. Скачайте PDF кнопкой «Скачать PDF» справа.'
       setSuccess(msg)
       setStage('confirm')
       await load()
-      if (result.pick_list && !printPickList(result.pick_list)) {
-        setError('Лист создан, но не удалось открыть печать — разрешите всплывающие окна в браузере')
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка передачи на сборку')
     } finally {
@@ -258,10 +257,49 @@ export function AssemblySellerPage() {
     }
   }
 
-  function handlePrintPickList() {
+  function handleDeleteOrder(order: AssemblyOrder) {
+    setModal({
+      kind: 'confirm',
+      title: 'Удалить заказ',
+      message:
+        `Удалить заказ WB #${order.wb_order_id} из сборки?\n\n` +
+        `Баркод: ${order.barcode}\n` +
+        'Заказ исчезнет из списка на этой вкладке. В Wildberries статус не меняется.',
+      confirmLabel: 'Удалить',
+      onConfirm: () => void runDeleteOrder(order.id),
+    })
+  }
+
+  async function runDeleteOrder(orderId: number) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await deleteAssemblyOrder(id, orderId)
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              counts: { ...prev.counts, ...result.counts },
+              assembly_eligible: result.assembly_eligible,
+              orders: prev.orders.filter((o) => o.id !== orderId),
+            }
+          : prev,
+      )
+      setSuccess(`Заказ WB #${result.order.wb_order_id} удалён из сборки`)
+      await load({ silent: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить заказ')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleDownloadPickListPdf() {
     if (!data?.active_pick_list) return
-    if (!printPickList(data.active_pick_list)) {
-      setError('Не удалось открыть окно печати')
+    if (!downloadPickListPdf(data.active_pick_list)) {
+      setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
     }
   }
 
@@ -652,6 +690,16 @@ export function AssemblySellerPage() {
               Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
+          {data.active_pick_list && stage !== 'complete' && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={handleDownloadPickListPdf}
+              disabled={loading}
+            >
+              Скачать лист подбора
+            </button>
+          )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
             <button type="button" className="btn btn--primary" onClick={handleSendAllReadyToDelivery} disabled={loading}>
               Все готовые в доставку ({readyToDeliverCount})
@@ -705,7 +753,7 @@ export function AssemblySellerPage() {
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
             Выберите склады, нажмите «Передать на сборку» — система сформирует лист подбора,
-            отправит заказы в WB и предложит распечатать лист.
+            отправит заказы в WB. PDF листа скачивается кнопкой «Скачать PDF» справа.
           </p>
         </section>
       )}
@@ -867,6 +915,15 @@ export function AssemblySellerPage() {
                           В доставку
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="btn btn--small btn--ghost assembly-order-delete"
+                        onClick={() => handleDeleteOrder(order)}
+                        disabled={loading}
+                        title="Удалить заказ из сборки"
+                      >
+                        Удалить
+                      </button>
                     </td>
                   </tr>
                 )
@@ -881,8 +938,8 @@ export function AssemblySellerPage() {
               <div className="assembly-picklist-head">
                 <h2 className="section-title">Лист подбора #{data.active_pick_list.id}</h2>
                 <div className="assembly-picklist-actions">
-                  <button type="button" className="btn btn--secondary btn--small" onClick={handlePrintPickList} disabled={loading}>
-                    Печать PDF
+                  <button type="button" className="btn btn--secondary btn--small" onClick={handleDownloadPickListPdf} disabled={loading}>
+                    Скачать PDF
                   </button>
                   <button
                     type="button"

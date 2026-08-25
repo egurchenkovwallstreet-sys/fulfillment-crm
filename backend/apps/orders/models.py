@@ -66,6 +66,11 @@ class Order(models.Model):
   )
   marking_verify_error = models.TextField("Ошибка проверки ЧЗ", blank=True)
   wb_created_at = models.DateTimeField("Дата заказа WB", null=True, blank=True, db_index=True)
+  assembly_hidden = models.BooleanField(
+    "Скрыт из сборки FBS",
+    default=False,
+    db_index=True,
+  )
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 

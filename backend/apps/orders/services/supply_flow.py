@@ -309,7 +309,7 @@ def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
     orders__id=OuterRef("pk"),
   )
   return filter_orders_for_seller(
-    Order.objects.filter(seller=seller)
+    Order.objects.filter(seller=seller, assembly_hidden=False)
     .filter(wb_in_delivery_q())
     .annotate(_awaiting_supply_scan=Exists(confirmed_unscanned_supply))
     .filter(_awaiting_supply_scan=True),
@@ -324,7 +324,7 @@ def count_delivery_stage_orders(seller: Seller) -> int:
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
   """Заказы вкладки «Новые» на странице сборки — как в ЛК WB + готовые к отправке."""
   qs = filter_orders_for_seller(
-    Order.objects.filter(seller=seller),
+    Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
   qs = qs.filter(WB_STAGE_QUERIES["new"]())
@@ -341,6 +341,26 @@ def new_stage_orders_queryset(seller: Seller) -> QuerySet:
 
 def count_orders_ready_for_assembly(seller: Seller) -> int:
   return new_stage_orders_queryset(seller).count()
+
+
+def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
+  """Счётчики вкладок сборки FBS (без скрытых заказов)."""
+  confirm_qs = filter_orders_for_seller(
+    Order.objects.filter(seller=seller, assembly_hidden=False).filter(
+      WB_STAGE_QUERIES["confirm"](),
+    ),
+    seller,
+  ).exclude(
+    status__in=[
+      Order.Status.CANCELLED,
+      Order.Status.SHIPPED,
+    ],
+  )
+  return {
+    "new": new_stage_orders_queryset(seller).count(),
+    "in_picking": confirm_qs.count(),
+    "in_delivery": delivery_stage_orders_queryset(seller).count(),
+  }
 
 
 def send_orders_to_assembly_bulk(

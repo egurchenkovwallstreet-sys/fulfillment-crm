@@ -185,35 +185,53 @@ const PRINT_STYLES = `
   }
 `
 
-export function printPickList(pickList: PickList, autoPrint = true): boolean {
-  if (!pickList.items.length) return false
-
-  const win = window.open('', '_blank', 'width=900,height=1200')
-  if (!win) return false
-
+function buildPickListPages(pickList: PickList): PickList['items'][] {
   const pages: PickList['items'][] = []
   for (let i = 0; i < pickList.items.length; i += ROWS_PER_PAGE) {
     pages.push(pickList.items.slice(i, i + ROWS_PER_PAGE))
   }
+  return pages
+}
 
+function buildPickListDocument(pickList: PickList, autoPrint = false): string {
+  const pages = buildPickListPages(pickList)
   const sheets = pages
     .map((pageItems, index) => sheetHtml(pickList, pageItems, index, pages.length))
     .join('')
+  const title = `Лист подбора ${pickList.id}`
 
-  win.document.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title></title>
+  <title>${escapeHtml(title)}</title>
   <style>${PRINT_STYLES}</style>
 </head>
 <body>
   ${sheets}
   <script>
-    ${autoPrint ? 'window.onload = function () { window.print(); window.close(); };' : ''}
+    ${autoPrint ? 'window.onload = function () { window.print(); };' : ''}
   </script>
 </body>
-</html>`)
+</html>`
+}
+
+function openPickListDocument(pickList: PickList, autoPrint = false): boolean {
+  if (!pickList.items.length) return false
+
+  const win = window.open('', '_blank', 'width=900,height=1200')
+  if (!win) return false
+
+  win.document.write(buildPickListDocument(pickList, autoPrint))
   win.document.close()
   return true
+}
+
+/** Открыть диалог «Печать → Сохранить как PDF». */
+export function downloadPickListPdf(pickList: PickList): boolean {
+  return openPickListDocument(pickList, true)
+}
+
+export function printPickList(pickList: PickList, autoPrint = true): boolean {
+  return openPickListDocument(pickList, autoPrint)
 }

@@ -3,9 +3,9 @@ from collections import defaultdict
 from django.db import transaction
 
 from apps.orders.models import Order, PickList, PickListItem
+from apps.orders.services.supply_flow import new_stage_orders_queryset
 from apps.orders.services.wb_status import WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.warehouse.models import Cell, Product
 
 
@@ -15,15 +15,18 @@ class PickListError(Exception):
 
 @transaction.atomic
 def generate_pick_list(seller: Seller, *, user=None) -> PickList:
+  existing = (
+    PickList.objects.filter(seller=seller, is_completed=False)
+    .prefetch_related("items__cell", "items__product")
+    .first()
+  )
+  if existing and existing.items.exists():
+    return existing
+
   orders = list(
-    filter_orders_for_seller(
-      Order.objects.filter(
-        seller=seller,
-        status=Order.Status.NEW,
-        wb_supplier_status__in=[WB_SUPPLIER_NEW, ""],
-      ),
-      seller,
-    ).select_related("product", "product__cell")
+    new_stage_orders_queryset(seller)
+    .filter(pick_list__isnull=True)
+    .select_related("product", "product__cell")
   )
 
   if not orders:

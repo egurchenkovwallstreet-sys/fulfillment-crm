@@ -54,6 +54,15 @@
   margin-right: 0.35rem;
 }
 
+.assembly-order-delete {
+  color: #b91c1c;
+}
+
+.assembly-order-delete:hover:not(:disabled) {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
 .assembly-last-print {
   margin-top: 0.75rem;
   padding-top: 0.75rem;

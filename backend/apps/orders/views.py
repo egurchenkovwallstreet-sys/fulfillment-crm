@@ -10,8 +10,8 @@ from apps.sellers.serializers import SellerWarehouseSerializer
 
 from apps.orders.services.assembly import AssemblyError
 from apps.orders.services.supply_flow import (
-  count_delivery_stage_orders,
   delivery_stage_orders_queryset,
+  get_assembly_stage_counts,
   new_stage_orders_queryset,
 )
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
@@ -42,6 +42,7 @@ from .services.assembly import (
   fetch_stickers_for_orders,
   get_seller_stage_counts,
   get_seller_wb_tab_counts,
+  remove_order_from_assembly,
   replace_order_item,
   scan_order_barcode,
   start_assembly,
@@ -49,7 +50,6 @@ from .services.assembly import (
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
-  count_orders_ready_for_assembly,
   fetch_supply_barcode,
   refresh_supply_readiness,
   send_order_to_assembly,
@@ -325,9 +325,16 @@ class AssemblySellerDetailView(APIView):
 
     stage_counts = get_seller_stage_counts(seller)
     tab_counts = get_seller_wb_tab_counts(seller)
-    delivery_count = count_delivery_stage_orders(seller)
-    counts = {**stage_counts, **tab_counts, "in_delivery": delivery_count}
+    assembly_counts = get_assembly_stage_counts(seller)
+    counts = {
+      **stage_counts,
+      **tab_counts,
+      "new": assembly_counts["new"],
+      "in_picking": assembly_counts["in_picking"],
+      "in_delivery": assembly_counts["in_delivery"],
+    }
     stage = request.query_params.get("stage", "")
+    visible_orders = Order.objects.filter(seller=seller, assembly_hidden=False)
     if stage == "new":
       orders_qs = new_stage_orders_queryset(seller).select_related(
         "product", "product__cell",
@@ -338,7 +345,7 @@ class AssemblySellerDetailView(APIView):
       )
     else:
       orders_qs = filter_orders_queryset(
-        Order.objects.filter(seller=seller).select_related("product", "product__cell"),
+        visible_orders.select_related("product", "product__cell"),
         seller=seller,
       )
       if stage in WB_STAGE_QUERIES:
@@ -367,7 +374,7 @@ class AssemblySellerDetailView(APIView):
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "counts": counts,
-      "assembly_eligible": count_orders_ready_for_assembly(seller),
+      "assembly_eligible": assembly_counts["new"],
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
@@ -419,6 +426,39 @@ class AssemblyDeletePickListView(APIView):
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response({"success": True, **result})
+
+
+class AssemblyDeleteOrderView(APIView):
+  """Удалить заказ из сборки FBS (скрыть с вкладок, с подтверждением на фронте)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = OrderActionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      result = remove_order_from_assembly(
+        seller,
+        serializer.validated_data["order_id"],
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return Response(
+        {"detail": str(exc), "code": exc.code},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    order = result["order"]
+    return Response({
+      "success": True,
+      "order": OrderAssemblySerializer(order).data,
+      "counts": result["counts"],
+      "assembly_eligible": result["assembly_eligible"],
+    })
 
 
 class AssemblyScanPrintView(APIView):
