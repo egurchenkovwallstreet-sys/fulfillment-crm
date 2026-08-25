@@ -5,7 +5,6 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
-from apps.orders.services.supply_flow import count_delivery_stage_orders
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -27,7 +26,7 @@ from apps.sellers.services.warehouse_filter import (
   is_warehouse_enabled,
 )
 
-SYNC_VERSION = "delivery-v13"
+SYNC_VERSION = "delivery-v14"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]
@@ -176,6 +175,57 @@ def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
   )
   repaired = repair_incoherent_new_orders(seller, new_wb_ids)
   return marked + repaired
+
+
+def reconcile_stale_delivery_orders(
+  seller: Seller,
+  client: WBClient,
+  status_map: dict[int, dict],
+) -> dict:
+  """
+  Снять «в доставке» с заказов, у которых в WB уже не waiting (часто sorted).
+  Именно из-за рассинхрона счётчик показывал 303 вместо 209 как в ЛК WB.
+  """
+  stale_orders = list(
+    filter_orders_for_seller(
+      Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
+      seller,
+    ).only("id", "wb_order_id", "wb_supplier_status", "wb_status", "status")
+  )
+  if not stale_orders:
+    return {"stale_delivery_cleared": 0}
+
+  missing_ids = [
+    order.wb_order_id
+    for order in stale_orders
+    if order.wb_order_id not in status_map
+  ]
+  if missing_ids:
+    try:
+      for item in client.fetch_order_statuses(missing_ids):
+        oid = item.get("id")
+        if oid is not None:
+          status_map[int(oid)] = item
+    except WBApiError:
+      pass
+
+  cleared = 0
+  for order in stale_orders:
+    data = status_map.get(order.wb_order_id)
+    if data:
+      supplier = (data.get("supplierStatus") or "").strip()
+      wb = (data.get("wbStatus") or "").strip()
+      if apply_wb_status_to_order(order, supplier, wb):
+        cleared += 1
+      continue
+
+    order.wb_supplier_status = WB_SUPPLIER_DELIVERY
+    order.wb_status = "sorted"
+    order.status = Order.Status.SHIPPED
+    order.save(update_fields=["wb_supplier_status", "wb_status", "status", "updated_at"])
+    cleared += 1
+
+  return {"stale_delivery_cleared": cleared}
 
 
 def reconcile_stale_new_orders(
@@ -356,13 +406,14 @@ def sync_order_statuses_for_seller(
   stale_new = reconcile_stale_new_orders(seller, client, new_ids_set, status_map)
   reconciled += stale_new.get("stale_new_cleared", 0)
 
+  stale_delivery = reconcile_stale_delivery_orders(seller, client, status_map)
+  reconciled += stale_delivery.get("stale_delivery_cleared", 0)
+
   live_counts = compute_live_wb_counts(status_map, allowed_ids=scoped_ids)
   if new_orders_total > 0:
     live_counts["new"] = new_orders_total
   elif new_wb_ids is not None:
     live_counts["new"] = len(new_ids_set & scoped_ids)
-
-  live_counts["in_delivery"] = count_delivery_stage_orders(seller)
 
   scoped_new_ids = sorted(new_ids_set & scoped_ids)
   save_wb_counts_to_seller(seller, live_counts, new_order_ids=scoped_new_ids)
@@ -376,6 +427,7 @@ def sync_order_statuses_for_seller(
     "statuses_updated": updated,
     "reconciled": reconciled,
     "stale_new": stale_new,
+    "stale_delivery": stale_delivery,
     "live_counts": live_counts,
     "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
     "delivery_waiting_raw": reconcile.get("delivery_waiting_in_status_map"),

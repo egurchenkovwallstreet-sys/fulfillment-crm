@@ -490,15 +490,18 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
   """Счётчики по БД + фильтр складов (для списков заказов в сборке)."""
-  from apps.orders.services.supply_flow import count_delivery_stage_orders
-
   qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
   active = qs.exclude(status=Order.Status.CANCELLED)
+
+  if seller.wb_counts_synced_at:
+    in_delivery = seller.wb_count_delivery
+  else:
+    in_delivery = active.filter(wb_in_delivery_q()).count()
 
   return {
     "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
     "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
-    "in_delivery": count_delivery_stage_orders(seller),
+    "in_delivery": in_delivery,
     "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
     "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
     "marked": active.filter(status=Order.Status.MARKED).count(),
@@ -510,13 +513,11 @@ def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
 
 def get_seller_wb_tab_counts(seller: Seller) -> dict[str, int]:
   """Счётчики вкладок как в ЛК WB — из live API после синка."""
-  from apps.orders.services.supply_flow import count_delivery_stage_orders
-
   if seller.wb_counts_synced_at:
     return {
       "new": seller.wb_count_new,
       "in_picking": seller.wb_count_assembly,
-      "in_delivery": count_delivery_stage_orders(seller),
+      "in_delivery": seller.wb_count_delivery,
     }
   stage = get_seller_stage_counts(seller)
   return {

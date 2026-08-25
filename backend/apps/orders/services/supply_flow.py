@@ -424,10 +424,19 @@ def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
       Order.Status.SHIPPED,
     ],
   )
+  if seller.wb_counts_synced_at:
+    in_delivery = seller.wb_count_delivery
+  else:
+    in_delivery = (
+      filter_orders_for_seller(
+        Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
+        seller,
+      ).count()
+    )
   return {
     "new": new_stage_orders_queryset(seller).count(),
     "in_picking": confirm_qs.count(),
-    "in_delivery": delivery_stage_orders_queryset(seller).count(),
+    "in_delivery": in_delivery,
   }
 
 
