@@ -80,6 +80,7 @@ export function AssemblySellerPage() {
   const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
+  const [pickListPreviewStage, setPickListPreviewStage] = useState<'new' | 'confirm' | null>(null)
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -245,6 +246,9 @@ export function AssemblySellerPage() {
       if (result.wb_assembly_sent != null) {
         msg += `, в WB отправлено ${result.wb_assembly_sent}`
       }
+      if (result.supplies) {
+        msg += `, поставок WB: ${result.supplies}`
+      }
       if (result.wb_assembly_errors?.length) {
         msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
       }
@@ -300,12 +304,14 @@ export function AssemblySellerPage() {
 
   async function handleGeneratePickList() {
     if (!id) return
+    const pickStage: 'new' | 'confirm' = stage === 'confirm' ? 'confirm' : 'new'
     setError('')
     setSuccess('')
     setLoading(true)
     try {
-      const result = await previewPickList(id)
+      const result = await previewPickList(id, pickStage)
       setPickListPreview(result.pick_list)
+      setPickListPreviewStage(pickStage)
       const skipped = result.pick_list.orders_skipped
       let msg = `Лист подбора сформирован: ${result.pick_list.total_quantity} заказов`
       if (result.pick_list.warehouse_label) {
@@ -322,7 +328,8 @@ export function AssemblySellerPage() {
   }
 
   function handleDownloadPickListPdf() {
-    const pickList = pickListPreview ?? data?.active_pick_list
+    const pickList =
+      (pickListPreviewStage === stage ? pickListPreview : null) ?? data?.active_pick_list
     if (!pickList) return
     if (!downloadPickListPdf(pickList)) {
       setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
@@ -374,6 +381,7 @@ export function AssemblySellerPage() {
     })
     setTogglingWarehouseId(warehouseId)
     setPickListPreview(null)
+    setPickListPreviewStage(null)
     setError('')
     setSuccess(isEnabled ? 'Склад включён — обновляем список…' : 'Склад выключен — обновляем список…')
     try {
@@ -399,6 +407,8 @@ export function AssemblySellerPage() {
       return
     }
     setStage(nextStage)
+    setPickListPreview(null)
+    setPickListPreviewStage(null)
   }
 
   async function handleSendToAssembly(orderId: number) {
@@ -675,7 +685,10 @@ export function AssemblySellerPage() {
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = assemblyEligible ?? 0
-  const displayPickList = pickListPreview ?? data.active_pick_list
+  const confirmStageCount = counts.in_picking ?? 0
+  const pickListOrderCount = stage === 'confirm' ? confirmStageCount : bulkAssemblyCount
+  const displayPickList =
+    pickListPreviewStage === stage ? pickListPreview : pickListPreview ?? data.active_pick_list
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -713,7 +726,7 @@ export function AssemblySellerPage() {
           <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing || refreshing}>
             Обновить заказы
           </button>
-          {stage === 'new' && bulkAssemblyCount > 0 && (
+          {(stage === 'new' || stage === 'confirm') && pickListOrderCount > 0 && (
             <>
               <button
                 type="button"
@@ -723,7 +736,7 @@ export function AssemblySellerPage() {
               >
                 Сформировать лист подбора
               </button>
-              {displayPickList && (
+              {displayPickList && pickListPreviewStage === stage && (
                 <button
                   type="button"
                   className="btn btn--secondary"
@@ -733,19 +746,11 @@ export function AssemblySellerPage() {
                   Скачать PDF (A4)
                 </button>
               )}
-              <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
-                Передать на сборку ({bulkAssemblyCount})
-              </button>
             </>
           )}
-          {stage !== 'new' && displayPickList && stage !== 'complete' && (
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={handleDownloadPickListPdf}
-              disabled={loading}
-            >
-              Скачать PDF (A4)
+          {stage === 'new' && bulkAssemblyCount > 0 && (
+            <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
+              Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
@@ -809,7 +814,10 @@ export function AssemblySellerPage() {
       {stage === 'confirm' && scanPhase === 'barcode' && (
         <section className="panel assembly-step-card assembly-step-card--scan">
           <h2 className="section-title">Шаг 2 — сканирование</h2>
-          <p>Отсканируйте баркод каждого заказа. Система сверит с листом подбора и напечатает стикер FBS.</p>
+          <p>
+            Отсканируйте баркод каждого заказа. Лист подбора — кнопки «Сформировать лист подбора»
+            и «Скачать PDF (A4)» в шапке.
+          </p>
         </section>
       )}
 
@@ -985,7 +993,9 @@ export function AssemblySellerPage() {
             <section className="panel">
               <div className="assembly-picklist-head">
                 <h2 className="section-title">
-                  {pickListPreview ? 'Лист подбора (черновик)' : `Лист подбора #${displayPickList.id}`}
+                  {pickListPreviewStage === stage
+                    ? `Лист подбора (${stage === 'confirm' ? 'на сборке' : 'новые'})`
+                    : `Лист подбора #${displayPickList.id}`}
                 </h2>
                 <div className="assembly-picklist-actions">
                   <button type="button" className="btn btn--secondary btn--small" onClick={handleDownloadPickListPdf} disabled={loading}>
@@ -1003,7 +1013,7 @@ export function AssemblySellerPage() {
                   )}
                 </div>
               </div>
-              {pickListPreview && (
+              {pickListPreviewStage === stage && pickListPreview && (
                 <p className="print-agent__hint">
                   Склады: {(pickListPreview as PickList & { warehouse_label?: string }).warehouse_label || 'включённые'}
                   {' · '}{displayPickList.total_quantity} заказов
@@ -1013,6 +1023,8 @@ export function AssemblySellerPage() {
                 <thead>
                   <tr>
                     <th>Ячейка</th>
+                    <th>Арт. WB</th>
+                    <th>Размер</th>
                     <th>Баркод</th>
                     <th>Кол-во</th>
                   </tr>
@@ -1021,6 +1033,8 @@ export function AssemblySellerPage() {
                   {displayPickList.items.map((item) => (
                     <tr key={item.id}>
                       <td><strong>{item.cell_number}</strong></td>
+                      <td>{item.wb_article || item.wb_nm_id || '—'}</td>
+                      <td><strong>{item.tech_size || '—'}</strong></td>
                       <td><code>{item.barcode}</code></td>
                       <td>{item.quantity} шт.</td>
                     </tr>

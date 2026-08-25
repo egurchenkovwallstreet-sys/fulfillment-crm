@@ -134,6 +134,12 @@ class Supply(models.Model):
     related_name="supplies",
   )
   wb_supply_id = models.CharField("ID поставки WB", max_length=100, blank=True)
+  wb_warehouse_id = models.BigIntegerField(
+    "ID склада WB",
+    null=True,
+    blank=True,
+    db_index=True,
+  )
   status = models.CharField(
     max_length=20,
     choices=Status.choices,

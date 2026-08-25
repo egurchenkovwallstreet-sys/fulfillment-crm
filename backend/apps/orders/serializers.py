@@ -141,6 +141,9 @@ class OrderPrintSerializer(serializers.ModelSerializer):
 class PickListItemSerializer(serializers.ModelSerializer):
   cell_number = serializers.CharField(source="cell.number", read_only=True)
   product_name = serializers.CharField(source="product.name", read_only=True)
+  wb_nm_id = serializers.SerializerMethodField()
+  wb_article = serializers.SerializerMethodField()
+  tech_size = serializers.SerializerMethodField()
 
   class Meta:
     model = PickListItem
@@ -149,9 +152,25 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "cell_number",
       "barcode",
       "product_name",
+      "wb_nm_id",
+      "wb_article",
+      "tech_size",
       "quantity",
       "picked_quantity",
     )
+
+  def get_wb_nm_id(self, obj):
+    return obj.product.wb_nm_id
+
+  def get_wb_article(self, obj):
+    product = obj.product
+    if product.wb_nm_id:
+      return str(product.wb_nm_id)
+    return (product.vendor_code or "").strip()
+
+  def get_tech_size(self, obj):
+    product = obj.product
+    return (product.tech_size or product.wb_size or "").strip()
 
 
 class PickListSerializer(serializers.ModelSerializer):

@@ -417,8 +417,14 @@ class AssemblyPickListPreviewView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
+    stage = "new"
+    if isinstance(request.data, dict):
+      stage = (request.data.get("stage") or "new").strip() or "new"
+    if stage not in ("new", "confirm"):
+      return Response({"detail": "stage должен быть new или confirm"}, status=400)
+
     try:
-      pick_list = preview_pick_list(seller, user=request.user)
+      pick_list = preview_pick_list(seller, stage=stage, user=request.user)
     except PickListError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 

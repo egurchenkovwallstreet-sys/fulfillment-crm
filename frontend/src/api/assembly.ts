@@ -61,6 +61,7 @@ export interface StartAssemblyResult {
   wb_assembly_errors?: string[]
   stickers_fetched: number
   sticker_errors: string
+  supplies?: number
   pick_list: PickList | null
 }
 
@@ -74,12 +75,12 @@ export interface PickListPreviewResult {
   }
 }
 
-export function previewPickList(sellerId: number) {
+export function previewPickList(sellerId: number, stage: 'new' | 'confirm' = 'new') {
   return apiFetch<PickListPreviewResult>(
     `/api/orders/assembly/sellers/${sellerId}/pick-list-preview/`,
     {
       method: 'POST',
-      body: '{}',
+      body: JSON.stringify({ stage }),
     },
   )
 }

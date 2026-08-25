@@ -22,12 +22,18 @@ function rowHtml(item: PickList['items'][number]): string {
   const cell = escapeHtml(item.cell_number || '—')
   const qty = escapeHtml(String(item.quantity))
   const barcode = escapeHtml(item.barcode || '—')
+  const article = escapeHtml(
+    item.wb_article || (item.wb_nm_id != null ? String(item.wb_nm_id) : '—'),
+  )
+  const size = escapeHtml(item.tech_size || '—')
   const name = escapeHtml(item.product_name || '—')
   return `
     <tr>
       <td class="col-cell"><div class="row-text row-text--cell">${cell}</div></td>
       <td class="col-qty"><div class="row-text">${qty}</div></td>
       <td class="col-barcode"><div class="row-text">${barcode}</div></td>
+      <td class="col-article"><div class="row-text">${article}</div></td>
+      <td class="col-size"><div class="row-text">${size}</div></td>
       <td class="col-name"><div class="row-text">${name}</div></td>
       <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
     </tr>`
@@ -41,6 +47,8 @@ function tableHtml(items: PickList['items']): string {
           <th class="col-cell">Ячейка</th>
           <th class="col-qty">Кол-во</th>
           <th class="col-barcode">Баркод</th>
+          <th class="col-article">Арт. WB</th>
+          <th class="col-size">Размер</th>
           <th class="col-name">Название</th>
           <th class="col-check">Собрано</th>
         </tr>
@@ -53,7 +61,7 @@ function sheetHtml(pickList: PickList, pageItems: PickList['items'], pageIndex: 
   const seller = escapeHtml(pickList.seller_name || '—')
   const date = escapeHtml(formatDate(pickList.created_at))
   const orders = escapeHtml(String(pickList.total_quantity))
-  const listId = escapeHtml(String(pickList.id))
+  const listId = escapeHtml(String(pickList.id || 'черновик'))
 
   const header = pageIndex === 0
     ? `
@@ -136,12 +144,12 @@ const PRINT_STYLES = `
   }
   .pick-table thead th {
     text-align: left;
-    font-size: 7pt;
+    font-size: 6.5pt;
     font-weight: 400;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #64748b;
-    padding: 0 1.5mm 1.5mm;
+    padding: 0 1mm 1.5mm;
     border-bottom: 1px solid #cbd5e1;
     vertical-align: bottom;
     height: 5mm;
@@ -154,24 +162,26 @@ const PRINT_STYLES = `
   }
   .pick-table tbody tr:last-child { border-bottom: none; }
   .pick-table td {
-    padding: 0 1.5mm;
+    padding: 0 1mm;
     vertical-align: middle;
     overflow: hidden;
   }
-  .col-cell { width: 11%; }
-  .col-qty { width: 8%; text-align: center; }
-  .col-barcode { width: 24%; }
-  .col-name { width: 45%; }
+  .col-cell { width: 9%; }
+  .col-qty { width: 7%; text-align: center; }
+  .col-barcode { width: 18%; }
+  .col-article { width: 11%; }
+  .col-size { width: 8%; }
+  .col-name { width: 35%; }
   .col-check { width: 12%; text-align: center; }
   .row-text {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 11pt;
+    font-size: 9.5pt;
     font-weight: 400;
     line-height: 1;
     word-break: break-word;
   }
   .row-text--cell {
-    font-size: 14pt;
+    font-size: 13pt;
     font-weight: 700;
     line-height: 1;
   }
@@ -198,7 +208,7 @@ function buildPickListDocument(pickList: PickList, autoPrint = false): string {
   const sheets = pages
     .map((pageItems, index) => sheetHtml(pickList, pageItems, index, pages.length))
     .join('')
-  const title = `Лист подбора ${pickList.id}`
+  const title = `Лист подбора ${pickList.id || ''}`
 
   return `<!DOCTYPE html>
 <html lang="ru">

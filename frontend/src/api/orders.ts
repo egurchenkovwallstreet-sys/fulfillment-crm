@@ -36,6 +36,9 @@ export interface PickListItem {
   cell_number: string
   barcode: string
   product_name: string
+  wb_nm_id?: number | null
+  wb_article?: string
+  tech_size?: string
   quantity: number
   picked_quantity: number
 }

@@ -4,8 +4,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.orders.models import Order, PickList, PickListItem
-from apps.orders.services.wb_status import WB_SUPPLIER_NEW
+from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 from apps.warehouse.models import Product
 
 
@@ -13,7 +14,34 @@ class PickListError(Exception):
   pass
 
 
-def _orders_for_pick_list(seller: Seller):
+def _product_size_label(product: Product) -> str:
+  return (product.tech_size or product.wb_size or "").strip()
+
+
+def _product_wb_article(product: Product) -> str:
+  if product.wb_nm_id:
+    return str(product.wb_nm_id)
+  return (product.vendor_code or "").strip()
+
+
+def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
+  if stage == "confirm":
+    return list(
+      filter_orders_for_seller(
+        Order.objects.filter(seller=seller, assembly_hidden=False).filter(
+          WB_STAGE_QUERIES["confirm"](),
+        ),
+        seller,
+      )
+      .exclude(
+        status__in=[
+          Order.Status.CANCELLED,
+          Order.Status.SHIPPED,
+        ],
+      )
+      .select_related("product", "product__cell")
+    )
+
   from apps.orders.services.supply_flow import new_stage_orders_queryset
 
   return list(
@@ -58,11 +86,15 @@ def _group_orders_for_pick_list(
     start=1,
   ):
     _cell_id, _product_id, barcode = key
+    product = data["product"]
     items.append({
       "id": index,
       "cell_number": str(data["cell"].number),
       "barcode": barcode,
-      "product_name": data["product"].name,
+      "product_name": product.name,
+      "wb_nm_id": product.wb_nm_id,
+      "wb_article": _product_wb_article(product),
+      "tech_size": _product_size_label(product),
       "quantity": data["quantity"],
       "picked_quantity": 0,
     })
@@ -70,12 +102,13 @@ def _group_orders_for_pick_list(
   return items, missing_product
 
 
-def preview_pick_list(seller: Seller, *, user=None) -> dict:
-  """Лист подбора для PDF по включённым складам — без привязки заказов и WB."""
-  orders = _orders_for_pick_list(seller)
+def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
+  """Лист подбора для PDF — без привязки заказов и без отправки в WB."""
+  orders = _orders_for_pick_list(seller, stage=stage)
   if not orders:
+    stage_label = "на сборке" if stage == "confirm" else "новых"
     raise PickListError(
-      "Нет новых заказов для листа подбора. Выберите склад и обновите заказы из WB.",
+      f"Нет {stage_label} заказов для листа подбора. Выберите склад и обновите заказы из WB.",
     )
 
   items, missing_product = _group_orders_for_pick_list(seller, orders)
@@ -90,10 +123,12 @@ def preview_pick_list(seller: Seller, *, user=None) -> dict:
     seller.wb_warehouses.filter(is_enabled=True).values_list("name", flat=True)
   )
   warehouse_label = ", ".join(name for name in enabled_names if name) or "включённые склады"
+  stage_title = "На сборке" if stage == "confirm" else "Новые"
 
   return {
     "id": 0,
     "preview": True,
+    "stage": stage,
     "seller": seller.id,
     "seller_name": seller.company_name,
     "is_completed": False,
@@ -102,6 +137,7 @@ def preview_pick_list(seller: Seller, *, user=None) -> dict:
     "items_count": len(items),
     "total_quantity": total_quantity,
     "warehouse_label": warehouse_label,
+    "stage_label": stage_title,
     "orders_in_list": total_quantity,
     "orders_skipped": len(missing_product),
   }
@@ -118,7 +154,7 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
     return existing
 
   orders = [
-    order for order in _orders_for_pick_list(seller)
+    order for order in _orders_for_pick_list(seller, stage="new")
     if order.pick_list_id is None
   ]
 

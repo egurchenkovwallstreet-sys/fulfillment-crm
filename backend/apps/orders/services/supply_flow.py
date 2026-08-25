@@ -1,6 +1,8 @@
 """Поштучная отправка заказов на сборку и в доставку через WB FBS API."""
 from __future__ import annotations
 
+from collections import defaultdict
+
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from django.utils import timezone
@@ -119,11 +121,75 @@ def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=
     )
 
 
+def _get_or_create_forming_supply(
+  seller: Seller,
+  wb_warehouse_id: int,
+  client,
+) -> Supply:
+  """Одна формирующаяся поставка WB на склад."""
+  supply = (
+    Supply.objects.filter(
+      seller=seller,
+      wb_warehouse_id=wb_warehouse_id,
+      status=Supply.Status.FORMING,
+    )
+    .exclude(wb_supply_id="")
+    .order_by("-created_at")
+    .first()
+  )
+  if supply:
+    return supply
+
+  supply_name = f"CRM-S{seller.id}-W{wb_warehouse_id}-{timezone.now():%Y%m%d%H%M}"
+  wb_supply_id = client.create_supply(supply_name)
+  return Supply.objects.create(
+    seller=seller,
+    wb_supply_id=wb_supply_id,
+    wb_warehouse_id=wb_warehouse_id,
+    status=Supply.Status.FORMING,
+  )
+
+
+def _append_orders_to_forming_supply(
+  seller: Seller,
+  supply: Supply,
+  orders: list[Order],
+  *,
+  client,
+  user=None,
+) -> tuple[int, str, int]:
+  """Добавить заказы в поставку WB. Возвращает (стикеры, ошибка, добавлено)."""
+  existing_wb_ids = set(supply.orders.values_list("wb_order_id", flat=True))
+  new_orders = [order for order in orders if order.wb_order_id not in existing_wb_ids]
+  if not new_orders:
+    return 0, "", 0
+
+  client.add_orders_to_supply(
+    supply.wb_supply_id,
+    [order.wb_order_id for order in new_orders],
+  )
+  supply.orders.add(*new_orders)
+
+  stickers_fetched = 0
+  sticker_error = ""
+  try:
+    stickers_fetched = fetch_stickers_for_orders(seller, new_orders, user=user)
+  except AssemblyError as exc:
+    sticker_error = str(exc)
+
+  for order in new_orders:
+    order.status = Order.Status.IN_PICKING
+    order.wb_supplier_status = WB_SUPPLIER_ASSEMBLY
+    order.save(update_fields=["status", "wb_supplier_status", "updated_at"])
+
+  return stickers_fetched, sticker_error, len(new_orders)
+
+
 @transaction.atomic
 def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   """
-  Один заказ → поставка WB → статус confirm («На сборке»).
-  Загружает стикер для печати.
+  Один заказ → поставка WB склада → статус confirm («На сборке»).
+  Все заказы одного склада попадают в одну поставку.
   """
   order = _get_order(seller, order_id)
 
@@ -134,12 +200,30 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
       code="invalid_status",
     )
 
-  client = _get_client(seller)
-  supply_name = f"CRM-{order.wb_order_id}-{timezone.now():%Y%m%d%H%M}"
+  if order.wb_warehouse_id is None:
+    raise SupplyFlowError(
+      f"У заказа WB #{order.wb_order_id} не указан склад WB.",
+      code="no_warehouse",
+    )
 
+  client = _get_client(seller)
   try:
-    wb_supply_id = client.create_supply(supply_name)
-    client.add_orders_to_supply(wb_supply_id, [order.wb_order_id])
+    supply = _get_or_create_forming_supply(seller, order.wb_warehouse_id, client)
+    stickers_fetched, sticker_error, added = _append_orders_to_forming_supply(
+      seller,
+      supply,
+      [order],
+      client=client,
+      user=user,
+    )
+    if added == 0:
+      order.refresh_from_db()
+      return {
+        "order": order,
+        "wb_supply_id": supply.wb_supply_id,
+        "stickers_fetched": 0,
+        "sticker_error": "",
+      }
   except WBApiError as exc:
     AuditLog.objects.create(
       user=user,
@@ -150,33 +234,17 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
     )
     raise SupplyFlowError(str(exc), code="wb_assembly_failed") from exc
 
-  stickers_fetched = 0
-  sticker_error = ""
-  try:
-    stickers_fetched = fetch_stickers_for_orders(seller, [order], user=user)
-    order.refresh_from_db()
-  except AssemblyError as exc:
-    sticker_error = str(exc)
-
-  supply = Supply.objects.create(
-    seller=seller,
-    wb_supply_id=wb_supply_id,
-    status=Supply.Status.FORMING,
-  )
-  supply.orders.add(order)
-
-  order.status = Order.Status.IN_PICKING
-  order.wb_supplier_status = WB_SUPPLIER_ASSEMBLY
-  order.save(update_fields=["status", "wb_supplier_status", "updated_at"])
+  order.refresh_from_db()
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.ASSEMBLY,
-    message=f"На сборку (WB): заказ #{order.wb_order_id}, поставка {wb_supply_id}",
+    message=f"На сборку (WB): заказ #{order.wb_order_id}, поставка {supply.wb_supply_id}",
     details={
       "order_id": order.id,
-      "wb_supply_id": wb_supply_id,
+      "wb_supply_id": supply.wb_supply_id,
+      "wb_warehouse_id": order.wb_warehouse_id,
       "stickers_fetched": stickers_fetched,
       "sticker_error": sticker_error,
     },
@@ -184,7 +252,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
 
   return {
     "order": order,
-    "wb_supply_id": wb_supply_id,
+    "wb_supply_id": supply.wb_supply_id,
     "stickers_fetched": stickers_fetched,
     "sticker_error": sticker_error,
   }
@@ -369,7 +437,7 @@ def send_orders_to_assembly_bulk(
   order_ids: list[int] | None = None,
   user=None,
 ) -> dict:
-  """Отправить на сборку все подходящие заказы (или выбранные) — по одному supply на заказ."""
+  """Отправить на сборку заказы: одна поставка WB на каждый склад."""
   qs = new_stage_orders_queryset(seller).select_related("product")
   if order_ids is not None:
     qs = qs.filter(pk__in=order_ids)
@@ -381,21 +449,47 @@ def send_orders_to_assembly_bulk(
       code="no_orders",
     )
 
-  sent = 0
-  stickers_total = 0
+  by_warehouse: dict[int, list[Order]] = defaultdict(list)
   errors: list[dict] = []
-
   for order in orders:
-    try:
-      result = send_order_to_assembly(seller, order.id, user=user)
-      sent += 1
-      stickers_total += result.get("stickers_fetched", 0)
-    except SupplyFlowError as exc:
+    if order.wb_warehouse_id is None:
       errors.append({
         "order_id": order.id,
         "wb_order_id": order.wb_order_id,
-        "error": str(exc),
+        "error": "Не указан склад WB",
       })
+      continue
+    by_warehouse[order.wb_warehouse_id].append(order)
+
+  client = _get_client(seller)
+  sent = 0
+  stickers_total = 0
+
+  for wb_warehouse_id, wh_orders in by_warehouse.items():
+    try:
+      supply = _get_or_create_forming_supply(seller, wb_warehouse_id, client)
+      stickers_fetched, sticker_error, added = _append_orders_to_forming_supply(
+        seller,
+        supply,
+        wh_orders,
+        client=client,
+        user=user,
+      )
+      sent += added
+      stickers_total += stickers_fetched
+      if sticker_error:
+        errors.append({
+          "wb_warehouse_id": wb_warehouse_id,
+          "wb_supply_id": supply.wb_supply_id,
+          "error": sticker_error,
+        })
+    except (SupplyFlowError, WBApiError) as exc:
+      for order in wh_orders:
+        errors.append({
+          "order_id": order.id,
+          "wb_order_id": order.wb_order_id,
+          "error": str(exc),
+        })
 
   if sent == 0 and errors:
     raise SupplyFlowError(
@@ -407,13 +501,22 @@ def send_orders_to_assembly_bulk(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.ASSEMBLY,
-    message=f"Массовая отправка на сборку: {sent} из {len(orders)}",
-    details={"sent": sent, "total": len(orders), "errors": errors},
+    message=(
+      f"Массовая отправка на сборку: {sent} заказов, "
+      f"поставок WB: {len(by_warehouse)}"
+    ),
+    details={
+      "sent": sent,
+      "total": len(orders),
+      "supplies": len(by_warehouse),
+      "errors": errors,
+    },
   )
 
   return {
     "sent": sent,
     "total": len(orders),
+    "supplies": len(by_warehouse),
     "stickers_fetched": stickers_total,
     "errors": errors,
   }

@@ -113,78 +113,30 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
 
 
 def start_assembly(seller: Seller, *, user=None) -> dict:
-  """Передать новые заказы на сборку в WB (confirm) и загрузить стикеры."""
+  """Передать новые заказы на сборку в WB — одна поставка на склад."""
   from apps.orders.services.supply_flow import (  # noqa: PLC0415
     SupplyFlowError,
-    new_stage_orders_queryset,
-    order_can_send_to_assembly,
-    send_order_to_assembly,
+    send_orders_to_assembly_bulk,
   )
 
-  orders = list(new_stage_orders_queryset(seller).select_related("product"))
-  if not orders:
-    raise AssemblyError(
-      "Нет новых заказов для передачи на сборку. Выберите склад и обновите заказы из WB.",
-      code="no_orders",
-    )
-
-  wb_assembly_sent = 0
-  wb_assembly_errors: list[str] = []
-
-  for order in orders:
-    if (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
-      continue
-    if not order_can_send_to_assembly(order):
-      wb_assembly_errors.append(
-        f"WB #{order.wb_order_id}: нельзя отправить на сборку "
-        f"(WB: {order.wb_supplier_status or 'new'})",
-      )
-      continue
-    try:
-      send_order_to_assembly(seller, order.id, user=user)
-      wb_assembly_sent += 1
-    except (AssemblyError, SupplyFlowError) as exc:
-      wb_assembly_errors.append(f"WB #{order.wb_order_id}: {exc}")
-
-  orders = list(
-    Order.objects.filter(
-      seller=seller,
-      id__in=[order.id for order in orders],
-    )
-  )
-
-  stickers_fetched = 0
-  sticker_errors = ""
   try:
-    missing_sticker = [order for order in orders if not order.has_sticker or not order.sticker_file]
-    if missing_sticker:
-      stickers_fetched = fetch_stickers_for_orders(seller, missing_sticker, user=user)
-  except AssemblyError as exc:
-    sticker_errors = str(exc)
+    result = send_orders_to_assembly_bulk(seller, user=user)
+  except SupplyFlowError as exc:
+    raise AssemblyError(str(exc), code=getattr(exc, "code", "error")) from exc
 
-  AuditLog.objects.create(
-    user=user,
-    seller=seller,
-    action_type=AuditLog.ActionType.ASSEMBLY,
-    message=(
-      f"Передано на сборку WB: заказов {len(orders)}, "
-      f"отправлено {wb_assembly_sent}, стикеров {stickers_fetched}"
-    ),
-    details={
-      "orders_count": len(orders),
-      "wb_assembly_sent": wb_assembly_sent,
-      "wb_assembly_errors": wb_assembly_errors,
-      "stickers_fetched": stickers_fetched,
-      "sticker_errors": sticker_errors,
-    },
-  )
+  wb_errors = [
+    item.get("error", "")
+    for item in result.get("errors", [])
+    if item.get("error")
+  ]
 
   return {
-    "orders_count": len(orders),
-    "wb_assembly_sent": wb_assembly_sent,
-    "wb_assembly_errors": wb_assembly_errors,
-    "stickers_fetched": stickers_fetched,
-    "sticker_errors": sticker_errors,
+    "orders_count": result["total"],
+    "wb_assembly_sent": result["sent"],
+    "wb_assembly_errors": wb_errors,
+    "stickers_fetched": result["stickers_fetched"],
+    "sticker_errors": "",
+    "supplies": result.get("supplies", 0),
   }
 
 
