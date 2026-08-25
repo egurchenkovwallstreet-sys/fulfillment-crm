@@ -126,6 +126,63 @@ def deduct_stock_for_delivery(
   }
 
 
+def deduct_pending_delivery_stock(seller, *, user=None) -> dict:
+  """
+  Списать остатки по заказам «в доставке» (complete+waiting), если поставка уже в CRM,
+  но списание ещё не прошло (например, заказ ушёл в доставку из ЛК WB).
+  """
+  from apps.orders.services.wb_status import wb_in_delivery_q
+  from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+
+  orders = list(
+    filter_orders_for_seller(
+      Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
+      seller,
+    ).prefetch_related("supplies")
+  )
+
+  deducted = 0
+  already = 0
+  no_supply = 0
+  errors: list[dict] = []
+
+  for order in orders:
+    supply = (
+      order.supplies.filter(status=Supply.Status.CONFIRMED)
+      .exclude(wb_supply_id="")
+      .order_by("-created_at")
+      .first()
+    )
+    if not supply:
+      supply = (
+        order.supplies.exclude(wb_supply_id="")
+        .order_by("-created_at")
+        .first()
+      )
+    if not supply:
+      no_supply += 1
+      continue
+    try:
+      result = deduct_stock_for_delivery(order=order, supply=supply, user=user)
+      if result["deducted"]:
+        deducted += 1
+      elif result["already_deducted"]:
+        already += 1
+    except StockDeductionError as exc:
+      errors.append({
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "error": str(exc),
+      })
+
+  return {
+    "deducted": deducted,
+    "already_deducted": already,
+    "no_supply": no_supply,
+    "errors": errors,
+  }
+
+
 def deduct_stock_for_confirmed_supply(
   supply: Supply,
   *,

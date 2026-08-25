@@ -167,12 +167,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     pass
 
   supply_scan_result = {"supplies_scanned": 0, "orders_closed": 0}
-  try:
-    from apps.orders.services.supply_sync import sync_supply_scan_dates
-
-    supply_scan_result = sync_supply_scan_dates(seller, client=client)
-  except Exception:
-    pass
+  supply_sync_result = {}
 
   wb_orders = fetch_result.orders
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
@@ -195,6 +190,14 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   except WBApiError as exc:
     status_error = str(exc)
 
+  try:
+    from apps.orders.services.supply_sync import sync_supplies_from_wb, sync_supply_scan_dates
+
+    supply_sync_result = sync_supplies_from_wb(seller, include_closed=True)
+    supply_scan_result = sync_supply_scan_dates(seller, client=client)
+  except Exception:
+    pass
+
   reconciled = status_result.get("reconciled", 0)
 
   AuditLog.objects.create(
@@ -213,6 +216,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
       "skipped_warehouse": skipped_warehouse,
       "archive_backfill": archive_import,
       "delivery_supply_orders": len(delivery_supply_ids),
+      "supply_sync": supply_sync_result,
       "supply_scan": supply_scan_result,
       "warehouse_sync_error": warehouse_sync_error,
       "fetched": len(wb_orders),
@@ -258,6 +262,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     "delivery_recent": status_result.get("delivery_recent"),
     "delivery_breakdown": status_result.get("delivery_breakdown"),
     "reconcile": status_result.get("reconcile", {}),
+    "supply_sync": supply_sync_result,
+    "supply_scan": supply_scan_result,
   }
 
 
