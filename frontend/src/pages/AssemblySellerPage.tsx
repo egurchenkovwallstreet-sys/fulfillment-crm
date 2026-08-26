@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
   deleteAssemblyOrder,
   deletePickList,
   fetchAssemblySeller,
+  fetchMarkingStatus,
   replaceOrderItem,
   previewPickList,
   reprintOrderSticker,
@@ -17,6 +19,7 @@ import {
   type AssemblySellerDetail,
   type PickList,
   type PrintOrder,
+  type MarkingStatusResult,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders } from '../api/orders'
@@ -32,6 +35,11 @@ import {
   type StageKey,
 } from '../utils/assemblyWorkflow'
 import { AssemblyModal, type AssemblyModalState } from '../components/AssemblyModal'
+import {
+  AssemblyMarkingListModal,
+  AssemblyMarkingPanels,
+  type MarkingPanelKind,
+} from '../components/AssemblyMarkingPanels'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
   printFbsSticker,
@@ -42,6 +50,18 @@ import { downloadPickListPdf } from '../utils/pickListPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import './AssemblyPage.css'
+
+const MARKING_STATUS_POLL_MS = 4000
+const MARKING_VERIFY_INITIAL_MS = 3000
+const MARKING_VERIFY_INTERVAL_MS = 3000
+
+const EMPTY_MARKING_STATUS: MarkingStatusResult = {
+  success: true,
+  errors_count: 0,
+  unbound_count: 0,
+  errors: [],
+  unbound: [],
+}
 
 const STAGES = [
   { key: 'new', label: 'Новые', tone: 'red' },
@@ -92,7 +112,10 @@ export function AssemblySellerPage() {
   const syncInFlightRef = useRef(false)
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
-  const [markingErrorOrder, setMarkingErrorOrder] = useState<AssemblyOrder | null>(null)
+  const [markingStatus, setMarkingStatus] = useState<MarkingStatusResult>(EMPTY_MARKING_STATUS)
+  const [markingListKind, setMarkingListKind] = useState<MarkingPanelKind | null>(null)
+  const [scanBusy, setScanBusy] = useState(false)
+  const verifyInFlightRef = useRef(false)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
   const [pickListPreviewStage, setPickListPreviewStage] = useState<'new' | 'confirm' | null>(null)
@@ -154,41 +177,60 @@ export function AssemblySellerPage() {
     void runBackgroundSync()
   }, [id, runBackgroundSync])
 
+  const refreshMarkingStatus = useCallback(async () => {
+    if (!id) return
+    try {
+      setMarkingStatus(await fetchMarkingStatus(id))
+    } catch {
+      // Фоновое обновление панелей ЧЗ — без алертов
+    }
+  }, [id])
+
+  const runMarkingVerify = useCallback(async () => {
+    if (!id || verifyInFlightRef.current) return
+    verifyInFlightRef.current = true
+    try {
+      await verifyMarking(id)
+      await refreshMarkingStatus()
+    } catch {
+      // Фоновая проверка WB — без алертов во время скана
+    } finally {
+      verifyInFlightRef.current = false
+    }
+  }, [id, refreshMarkingStatus])
+
   useEffect(() => {
     scanPhaseRef.current = scanPhase
     if (scanPhase === 'marking') {
       markingBufferRef.current = ''
       setMarkingValue('')
-      window.setTimeout(() => markingRef.current?.focus(), 0)
-    } else {
-      window.setTimeout(() => scanRef.current?.focus(), 0)
+      markingRef.current?.focus()
+    } else if (!scanBusy) {
+      scanRef.current?.focus()
     }
-  }, [scanPhase])
+  }, [scanPhase, scanBusy])
 
   useEffect(() => {
-    if (!id || !data || stage !== 'confirm') return
-    const pendingIds = data.orders
-      .filter((order) => order.marking_verify_status === 'pending')
-      .map((order) => order.id)
-    if (pendingIds.length === 0) return
+    if (!id || stage !== 'confirm') return
 
-    const refreshPending = async () => {
-      try {
-        const result = await verifyMarking(id, pendingIds)
-        const errored = result.results?.find((item) => item.status === 'error')
-        if (errored?.order) {
-          setMarkingErrorOrder(errored.order as unknown as AssemblyOrder)
-        }
-        await load({ silent: true })
-      } catch {
-        // Фоновый опрос — не перекрываем основной UI ошибками
-      }
+    void refreshMarkingStatus()
+    const statusTimer = window.setInterval(() => void refreshMarkingStatus(), MARKING_STATUS_POLL_MS)
+
+    let verifyInterval: number | undefined
+    const verifyBootstrap = window.setTimeout(() => {
+      void runMarkingVerify()
+      verifyInterval = window.setInterval(
+        () => void runMarkingVerify(),
+        MARKING_VERIFY_INTERVAL_MS,
+      )
+    }, MARKING_VERIFY_INITIAL_MS)
+
+    return () => {
+      window.clearInterval(statusTimer)
+      window.clearTimeout(verifyBootstrap)
+      if (verifyInterval) window.clearInterval(verifyInterval)
     }
-
-    void refreshPending()
-    const interval = window.setInterval(() => void refreshPending(), 8000)
-    return () => window.clearInterval(interval)
-  }, [id, data, stage, load])
+  }, [id, stage, refreshMarkingStatus, runMarkingVerify])
 
   useEffect(() => {
     if (!id || stage !== 'complete') return
@@ -513,6 +555,16 @@ export function AssemblySellerPage() {
 
   function handleSendAllReadyToDelivery() {
     if (!data) return
+    if (markingQueueBlocked) {
+      setModal({
+        kind: 'block',
+        title: 'Сначала закройте ЧЗ',
+        message:
+          'Есть ошибки ЧЗ или товары без привязки. Откройте панели «Ошибки ЧЗ» и «Без ЧЗ», ' +
+          'завершите сборку, затем передавайте в доставку.',
+      })
+      return
+    }
     const ready = data.orders.filter((order) => orderCanDeliver(order))
     if (ready.length === 0) {
       setModal({
@@ -579,74 +631,70 @@ export function AssemblySellerPage() {
 
   async function handleBarcodeSubmit(e?: FormEvent) {
     e?.preventDefault()
-    if (!id || !scanValue.trim() || scanPhaseRef.current === 'marking') return
+    if (!id || !scanValue.trim() || scanPhaseRef.current === 'marking' || scanBusy) return
+    const barcode = scanValue.trim()
     setError('')
     setSuccess('')
-    setLoading(true)
+    setScanBusy(true)
+    scanRef.current?.blur()
     try {
-      const result = await scanOrderBarcode(id, scanValue.trim())
+      const result = await scanOrderBarcode(id, barcode)
       if (result.action === 'await_marking') {
-        setPendingOrder(result.order)
-        scanPhaseRef.current = 'marking'
-        setScanPhase('marking')
-        setScanValue('')
-        const sticker = formatStickerNumber(result.order)
-        setSuccess(
-          sticker
-            ? `Шаг 3: отсканируйте ЧЗ. Номер стикера: ${sticker}`
-            : 'Шаг 3: отсканируйте код Честного знака (DataMatrix)',
-        )
-        void load({ silent: true })
+        flushSync(() => {
+          scanPhaseRef.current = 'marking'
+          setScanPhase('marking')
+          setPendingOrder(result.order)
+          setScanValue('')
+        })
+        markingRef.current?.focus()
+        void refreshMarkingStatus()
       } else {
         await finishPrint(result.order)
-        await load({ silent: true })
+        void refreshMarkingStatus()
+        void load({ silent: true })
       }
     } catch (err) {
+      setScanValue('')
       setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
+      scanRef.current?.focus()
     } finally {
-      setLoading(false)
-      if (scanPhaseRef.current === 'barcode') {
-        window.setTimeout(() => scanRef.current?.focus(), 0)
-      } else {
-        window.setTimeout(() => markingRef.current?.focus(), 0)
-      }
+      setScanBusy(false)
     }
   }
 
   async function handleMarkingSubmit(e?: FormEvent, rawCode?: string) {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
-    if (!id || !pendingOrder || !code) return
+    if (!id || !pendingOrder || !code || scanBusy) return
     setSuccess('')
     setError('')
-    setLoading(true)
+    setScanBusy(true)
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
-      const order = result.order
-      await finishPrint(order)
-      if (order.marking_verify_status === 'error') {
-        setMarkingErrorOrder(order as unknown as AssemblyOrder)
-      }
-      await load({ silent: true })
+      await finishPrint(result.order)
+      window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
+      void refreshMarkingStatus()
+      void load({ silent: true })
     } catch (err) {
       setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
       markingRef.current?.focus()
     } finally {
-      setLoading(false)
+      setScanBusy(false)
     }
   }
 
-  async function handleReplaceFromErrorModal() {
-    if (!id || !markingErrorOrder) return
+  async function handleReplaceOrderFromList(order: AssemblyOrder) {
+    if (!id) return
     setLoading(true)
     setError('')
     try {
-      const result = await replaceOrderItem(id, markingErrorOrder.id)
+      const result = await replaceOrderItem(id, order.id)
       setSuccess(result.message)
-      setMarkingErrorOrder(null)
-      await load()
+      setMarkingListKind(null)
+      await refreshMarkingStatus()
+      await load({ silent: true })
     } catch (err) {
-      setError(assemblyErrorMessage(err, 'Ошибка замены товара', markingErrorOrder))
+      setError(assemblyErrorMessage(err, 'Ошибка замены товара', order))
     } finally {
       setLoading(false)
     }
@@ -660,7 +708,8 @@ export function AssemblySellerPage() {
       const result = await replaceOrderItem(id, pendingOrder.id)
       setSuccess(result.message)
       resetScanFlow()
-      await load()
+      await refreshMarkingStatus()
+      await load({ silent: true })
     } catch (err) {
       setError(assemblyErrorMessage(err, 'Ошибка замены товара', pendingOrder))
     } finally {
@@ -671,7 +720,8 @@ export function AssemblySellerPage() {
   function handleScanKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault()
-      handleBarcodeSubmit()
+      e.currentTarget.blur()
+      void handleBarcodeSubmit()
     }
   }
 
@@ -719,6 +769,8 @@ export function AssemblySellerPage() {
   const displayPickList =
     pickListPreviewStage === stage ? pickListPreview : pickListPreview ?? data.active_pick_list
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
+  const markingQueueBlocked =
+    stage === 'confirm' && (markingStatus.errors_count > 0 || markingStatus.unbound_count > 0)
   const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -726,7 +778,12 @@ export function AssemblySellerPage() {
     !markingInProgress &&
       (readyToDeliverCount > 0 || Boolean(lastPrinted && orderCanDeliver(lastPrinted))),
   )
-  const markingErrorSticker = markingErrorOrder ? formatStickerNumber(markingErrorOrder) : ''
+  const markingListOrders =
+    markingListKind === 'errors'
+      ? markingStatus.errors
+      : markingListKind === 'unbound'
+        ? markingStatus.unbound
+        : []
 
   return (
     <>
@@ -786,7 +843,17 @@ export function AssemblySellerPage() {
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
-            <button type="button" className="btn btn--primary" onClick={handleSendAllReadyToDelivery} disabled={loading}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSendAllReadyToDelivery}
+              disabled={loading || markingQueueBlocked}
+              title={
+                markingQueueBlocked
+                  ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
+                  : undefined
+              }
+            >
               Все готовые в доставку ({readyToDeliverCount})
             </button>
           )}
@@ -813,6 +880,14 @@ export function AssemblySellerPage() {
           ))}
         </ol>
       </section>
+
+      {stage === 'confirm' && (
+        <AssemblyMarkingPanels
+          errorsCount={markingStatus.errors_count}
+          unboundCount={markingStatus.unbound_count}
+          onOpenList={setMarkingListKind}
+        />
+      )}
 
       <section className="assembly-pipeline">
         {STAGES.map((s) => {
@@ -942,17 +1017,15 @@ export function AssemblySellerPage() {
                         order.marking_verify_status === 'pending' ? (
                           <span className="marking-badge marking-badge--pending" title="Проверка ЧЗ в WB">⏳</span>
                         ) : order.marking_verify_status === 'error' ? (
-                          <button
-                            type="button"
+                          <span
                             className="marking-badge marking-badge--error"
                             title={appendStickerHint(
                               order.marking_verify_error || 'ЧЗ отклонён',
                               order,
                             )}
-                            onClick={() => setMarkingErrorOrder(order)}
                           >
                             ✕
-                          </button>
+                          </span>
                         ) : order.marking_bound ? (
                         <span className="marking-badge marking-badge--ok">✓</span>
                       ) : (
@@ -1001,7 +1074,12 @@ export function AssemblySellerPage() {
                         type="button"
                         className="btn btn--small btn--secondary"
                           onClick={() => handleSendToDelivery(order)}
-                        disabled={loading}
+                        disabled={loading || markingQueueBlocked}
+                        title={
+                          markingQueueBlocked
+                            ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
+                            : undefined
+                        }
                       >
                         В доставку
                       </button>
@@ -1097,6 +1175,7 @@ export function AssemblySellerPage() {
                     onKeyDown={handleScanKeyDown}
                     placeholder="Баркод заказа..."
                     autoComplete="off"
+                    disabled={scanBusy}
                   />
                 </form>
               </>
@@ -1135,6 +1214,7 @@ export function AssemblySellerPage() {
                       autoCapitalize="off"
                       autoCorrect="off"
                       spellCheck={false}
+                      disabled={scanBusy}
                   />
                 </form>
                 <div className="assembly-scan-actions">
@@ -1157,7 +1237,12 @@ export function AssemblySellerPage() {
                     type="button"
                     className="btn btn--primary btn--small"
                     onClick={() => handleSendToDelivery(lastPrinted)}
-                    disabled={loading}
+                    disabled={loading || markingQueueBlocked}
+                    title={
+                      markingQueueBlocked
+                        ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
+                        : undefined
+                    }
                   >
                     Подтвердить и в доставку
                   </button>
@@ -1200,38 +1285,14 @@ export function AssemblySellerPage() {
         <AssemblyModal modal={modal} onClose={() => setModal(null)} loading={loading} />
       )}
 
-      {markingErrorOrder && (
-        <div className="assembly-marking-modal-backdrop" role="presentation" onClick={() => setMarkingErrorOrder(null)}>
-          <div
-            className="assembly-marking-modal assembly-marking-modal--error"
-            role="alertdialog"
-            aria-labelledby="marking-error-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="marking-error-title">Ошибка проверки Честного знака</h2>
-            {markingErrorSticker && (
-              <p className="assembly-marking-modal__sticker">
-                Номер стикера: <strong>{markingErrorSticker}</strong>
-              </p>
-            )}
-            <p className="assembly-marking-modal__message">
-              {markingErrorOrder.marking_verify_error || 'WB отклонил код ЧЗ. Замените товар и отсканируйте другой экземпляр.'}
-            </p>
-            <dl className="assembly-marking-modal__details">
-              <div><dt>Заказ WB</dt><dd>#{markingErrorOrder.wb_order_id}</dd></div>
-              <div><dt>Баркод</dt><dd><code>{markingErrorOrder.barcode}</code></dd></div>
-              <div><dt>Ячейка</dt><dd>{markingErrorOrder.cell_number || '—'}</dd></div>
-            </dl>
-            <div className="assembly-marking-modal__actions">
-              <button type="button" className="btn btn--primary" onClick={() => void handleReplaceFromErrorModal()} disabled={loading}>
-                Заменить товар
-              </button>
-              <button type="button" className="btn btn--secondary" onClick={() => setMarkingErrorOrder(null)}>
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
+      {markingListKind && (
+        <AssemblyMarkingListModal
+          kind={markingListKind}
+          orders={markingListOrders}
+          loading={loading}
+          onClose={() => setMarkingListKind(null)}
+          onReplace={markingListKind === 'errors' ? (order) => void handleReplaceOrderFromList(order) : undefined}
+        />
       )}
     </>
   )

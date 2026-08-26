@@ -601,6 +601,121 @@
   color: #b45309;
 }
 
+.assembly-marking-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.assembly-marking-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 5.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.assembly-marking-panel:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.assembly-marking-panel--ok {
+  background: #ecfdf5;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.assembly-marking-panel--alert {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.assembly-marking-panel__count {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.assembly-marking-panel__label {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.assembly-marking-modal--list {
+  width: min(720px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.assembly-marking-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.assembly-marking-modal__empty,
+.assembly-marking-modal__hint {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.assembly-marking-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.assembly-marking-list__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.assembly-marking-list__body {
+  min-width: 0;
+}
+
+.assembly-marking-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+
+.assembly-marking-list__sticker {
+  margin-top: 0.35rem;
+  font-size: 0.92rem;
+}
+
+.assembly-marking-list__sticker strong {
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+}
+
+.assembly-marking-list__error {
+  margin: 0.35rem 0 0;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
 @media print {
   .sidebar,
   .topbar,

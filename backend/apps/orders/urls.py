@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+  AssemblyMarkingStatusView,
   AssemblyBindMarkingView,
   AssemblyDeleteOrderView,
   AssemblyDeletePickListView,
@@ -70,6 +71,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/bind-marking/",
       AssemblyBindMarkingView.as_view(),
       name="assembly-bind-marking",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/marking-status/",
+      AssemblyMarkingStatusView.as_view(),
+      name="assembly-marking-status",
     ),
     path(
       "assembly/sellers/<int:seller_id>/verify-marking/",

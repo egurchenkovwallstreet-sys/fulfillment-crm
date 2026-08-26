@@ -47,6 +47,7 @@ from .services.assembly import (
   scan_order_barcode,
   start_assembly,
 )
+from .services.marking_queue import get_marking_queue_status
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
@@ -542,14 +543,6 @@ class AssemblyBindMarkingView(APIView):
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 
-    order_id = serializer.validated_data["order_id"]
-    try:
-      verify_marking_orders(seller, [order_id], user=request.user)
-    except AssemblyError:
-      pass
-
-    result["order"] = Order.objects.get(pk=order_id)
-
     order_data = OrderPrintSerializer(result["order"]).data
     payload = {
       "success": True,
@@ -559,6 +552,25 @@ class AssemblyBindMarkingView(APIView):
     if result.get("message"):
       payload["message"] = result["message"]
     return Response(payload)
+
+
+class AssemblyMarkingStatusView(APIView):
+  """Счётчики и списки очереди ЧЗ (ошибки / без привязки)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    status_data = get_marking_queue_status(seller)
+    return Response({
+      "success": True,
+      "errors_count": status_data["errors_count"],
+      "unbound_count": status_data["unbound_count"],
+      "errors": OrderAssemblySerializer(status_data["errors"], many=True).data,
+      "unbound": OrderAssemblySerializer(status_data["unbound"], many=True).data,
+    })
 
 
 class AssemblyVerifyMarkingView(APIView):

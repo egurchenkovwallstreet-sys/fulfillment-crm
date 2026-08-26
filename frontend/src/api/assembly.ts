@@ -243,6 +243,18 @@ export function bindMarking(sellerId: number, orderId: number, markingCode: stri
   })
 }
 
+export interface MarkingStatusResult {
+  success: boolean
+  errors_count: number
+  unbound_count: number
+  errors: AssemblyOrder[]
+  unbound: AssemblyOrder[]
+}
+
+export function fetchMarkingStatus(sellerId: number) {
+  return apiFetch<MarkingStatusResult>(`/api/orders/assembly/sellers/${sellerId}/marking-status/`)
+}
+
 export function verifyMarking(sellerId: number, orderIds?: number[]) {
   return apiFetch<VerifyMarkingResult>(`/api/orders/assembly/sellers/${sellerId}/verify-marking/`, {
     method: 'POST',
