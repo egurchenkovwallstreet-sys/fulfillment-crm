@@ -18,6 +18,7 @@ import {
   type PickList,
   type PrintOrder,
 } from '../api/assembly'
+import { ApiError } from '../api/client'
 import { syncOrders } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
@@ -36,9 +37,9 @@ import {
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
-  openFbsStickerPrintWindow,
 } from '../utils/printService'
 import { downloadPickListPdf } from '../utils/pickListPrint'
+import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import './AssemblyPage.css'
 
@@ -52,12 +53,26 @@ function showAssemblyButton(order: AssemblyOrder): boolean {
   return order.can_send_to_assembly ?? false
 }
 
+function assemblyErrorMessage(
+  err: unknown,
+  fallback: string,
+  contextOrder?: PrintOrder | AssemblyOrder | null,
+): string {
+  const base = err instanceof Error ? err.message : fallback
+  const order =
+    err instanceof ApiError && err.order && typeof err.order === 'object'
+      ? (err.order as PrintOrder)
+      : contextOrder
+  return appendStickerHint(base, order ?? undefined)
+}
+
 export function AssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
   const id = Number(sellerId)
   const scanRef = useRef<HTMLInputElement>(null)
   const markingRef = useRef<HTMLInputElement>(null)
   const markingBufferRef = useRef('')
+  const scanPhaseRef = useRef<ScanPhase>('barcode')
 
   const [data, setData] = useState<AssemblySellerDetail | null>(null)
   const [stage, setStage] = useState('new')
@@ -88,7 +103,7 @@ export function AssemblySellerPage() {
     if (silent) {
       setRefreshing(true)
     } else {
-      setLoading(true)
+    setLoading(true)
     }
     setError('')
     try {
@@ -99,7 +114,7 @@ export function AssemblySellerPage() {
       if (silent) {
         setRefreshing(false)
       } else {
-        setLoading(false)
+      setLoading(false)
       }
     }
   }, [id, stage])
@@ -140,12 +155,13 @@ export function AssemblySellerPage() {
   }, [id, runBackgroundSync])
 
   useEffect(() => {
+    scanPhaseRef.current = scanPhase
     if (scanPhase === 'marking') {
       markingBufferRef.current = ''
       setMarkingValue('')
-      markingRef.current?.focus()
+      window.setTimeout(() => markingRef.current?.focus(), 0)
     } else {
-      scanRef.current?.focus()
+      window.setTimeout(() => scanRef.current?.focus(), 0)
     }
   }, [scanPhase])
 
@@ -192,30 +208,30 @@ export function AssemblySellerPage() {
   }, [id, stage, load])
 
   function resetScanFlow() {
+    scanPhaseRef.current = 'barcode'
     setScanPhase('barcode')
     setPendingOrder(null)
     markingBufferRef.current = ''
     setMarkingValue('')
     setScanValue('')
-    scanRef.current?.focus()
+    window.setTimeout(() => scanRef.current?.focus(), 0)
   }
 
-  async function printSticker(base64: string, printWindow?: Window | null) {
-    const channel = await printFbsSticker(base64, true, printWindow)
+  async function printSticker(base64: string) {
+    const channel = await printFbsSticker(base64, true)
     if (channel === 'bridge') {
       setBridgeOk(true)
     }
     return channel
   }
 
-  async function finishPrint(order: PrintOrder, printWindow?: Window | null) {
+  async function finishPrint(order: PrintOrder) {
     setStickerPreview(order.sticker_file)
     setLastPrinted(order as unknown as AssemblyOrder)
-    const channel = await printSticker(order.sticker_file, printWindow)
+    const channel = await printSticker(order.sticker_file)
     const via = channel === 'bridge' ? 'Xprinter (мост)' : 'Chrome'
-    const printHint = channel === 'browser' ? ' Нажмите Enter в диалоге печати.' : ''
     setSuccess(
-      `Шаг 2: стикер WB #${order.wb_order_id} → ${via}.${printHint} Передайте в доставку (шаг 4).`,
+      `Стикер WB #${order.wb_order_id} → ${via}. Передайте в доставку (шаг 4).`,
     )
     resetScanFlow()
     setStage('confirm')
@@ -401,6 +417,16 @@ export function AssemblySellerPage() {
 
   function requestStageChange(nextStage: StageKey) {
     if (!data) return
+    if ((scanPhaseRef.current === 'marking' || pendingOrder) && nextStage !== 'confirm') {
+      setModal({
+        kind: 'block',
+        title: 'Сначала завершите скан ЧЗ',
+        message:
+          'Сейчас открыт шаг 3 — Честный знак. Отсканируйте DataMatrix или нажмите «Отмена», ' +
+          'прежде чем переходить на другую вкладку.',
+      })
+      return
+    }
     const gate = canSwitchToStage(nextStage, data.counts)
     if (!gate.ok) {
       setModal({ kind: 'block', title: 'Переход заблокирован', message: gate.reason })
@@ -514,10 +540,10 @@ export function AssemblySellerPage() {
     const errors: string[] = []
 
     for (const order of ready) {
-      try {
+    try {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
-        if (result.supply_barcode_file) {
+      if (result.supply_barcode_file) {
           await printSupplySticker(result.supply_barcode_file)
         }
       } catch (err) {
@@ -553,29 +579,37 @@ export function AssemblySellerPage() {
 
   async function handleBarcodeSubmit(e?: FormEvent) {
     e?.preventDefault()
-    if (!id || !scanValue.trim()) return
-    const printWindow = openFbsStickerPrintWindow()
+    if (!id || !scanValue.trim() || scanPhaseRef.current === 'marking') return
     setError('')
     setSuccess('')
     setLoading(true)
     try {
       const result = await scanOrderBarcode(id, scanValue.trim())
       if (result.action === 'await_marking') {
-        printWindow?.close()
         setPendingOrder(result.order)
+        scanPhaseRef.current = 'marking'
         setScanPhase('marking')
         setScanValue('')
-        setSuccess('Шаг 3: отсканируйте код Честного знака (DataMatrix)')
+        const sticker = formatStickerNumber(result.order)
+        setSuccess(
+          sticker
+            ? `Шаг 3: отсканируйте ЧЗ. Номер стикера: ${sticker}`
+            : 'Шаг 3: отсканируйте код Честного знака (DataMatrix)',
+        )
+        void load({ silent: true })
       } else {
-        await finishPrint(result.order, printWindow)
+        await finishPrint(result.order)
+        await load({ silent: true })
       }
-      await load()
     } catch (err) {
-      printWindow?.close()
-      setError(err instanceof Error ? err.message : 'Ошибка сканирования баркода')
+      setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
     } finally {
       setLoading(false)
-      if (scanPhase === 'barcode') scanRef.current?.focus()
+      if (scanPhaseRef.current === 'barcode') {
+        window.setTimeout(() => scanRef.current?.focus(), 0)
+      } else {
+        window.setTimeout(() => markingRef.current?.focus(), 0)
+      }
     }
   }
 
@@ -586,21 +620,16 @@ export function AssemblySellerPage() {
     setSuccess('')
     setError('')
     setLoading(true)
-    const printWindow = openFbsStickerPrintWindow()
     try {
       const result = await bindMarking(id, pendingOrder.id, code)
       const order = result.order
-      if (!printWindow) {
-        setError('Разрешите всплывающие окна в Chrome для автоматической печати стикера')
-      }
-      await finishPrint(order, printWindow)
+      await finishPrint(order)
       if (order.marking_verify_status === 'error') {
         setMarkingErrorOrder(order as unknown as AssemblyOrder)
       }
       await load({ silent: true })
     } catch (err) {
-      printWindow?.close()
-      setError(err instanceof Error ? err.message : 'Ошибка привязки Честного знака')
+      setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
       markingRef.current?.focus()
     } finally {
       setLoading(false)
@@ -617,7 +646,7 @@ export function AssemblySellerPage() {
       setMarkingErrorOrder(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка замены товара')
+      setError(assemblyErrorMessage(err, 'Ошибка замены товара', markingErrorOrder))
     } finally {
       setLoading(false)
     }
@@ -633,7 +662,7 @@ export function AssemblySellerPage() {
       resetScanFlow()
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка замены товара')
+      setError(assemblyErrorMessage(err, 'Ошибка замены товара', pendingOrder))
     } finally {
       setLoading(false)
     }
@@ -649,7 +678,7 @@ export function AssemblySellerPage() {
   function handleMarkingKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     const result = applyMarkingScanKey(markingBufferRef.current, e)
     if (!result.handled) return
-    e.preventDefault()
+      e.preventDefault()
     markingBufferRef.current = result.next
     setMarkingValue(result.next)
     if (result.submit) void handleMarkingSubmit(undefined, result.next)
@@ -690,11 +719,14 @@ export function AssemblySellerPage() {
   const displayPickList =
     pickListPreviewStage === stage ? pickListPreview : pickListPreview ?? data.active_pick_list
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
+  const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
     scanPhase,
-    readyToDeliverCount > 0 || Boolean(lastPrinted && orderCanDeliver(lastPrinted)),
+    !markingInProgress &&
+      (readyToDeliverCount > 0 || Boolean(lastPrinted && orderCanDeliver(lastPrinted))),
   )
+  const markingErrorSticker = markingErrorOrder ? formatStickerNumber(markingErrorOrder) : ''
 
   return (
     <>
@@ -735,7 +767,7 @@ export function AssemblySellerPage() {
                 disabled={loading || ordersBusy}
               >
                 Сформировать лист подбора
-              </button>
+            </button>
               {displayPickList && pickListPreviewStage === stage && (
                 <button
                   type="button"
@@ -744,7 +776,7 @@ export function AssemblySellerPage() {
                   disabled={loading}
                 >
                   Скачать PDF (A4)
-                </button>
+            </button>
               )}
             </>
           )}
@@ -821,7 +853,7 @@ export function AssemblySellerPage() {
         </section>
       )}
 
-      {stage === 'confirm' && readyToDeliverCount > 0 && (
+      {stage === 'confirm' && readyToDeliverCount > 0 && scanPhase === 'barcode' && (
         <section className="panel assembly-step-card assembly-step-card--delivery">
           <h2 className="section-title">Шаг 4 — готово к доставке: {readyToDeliverCount}</h2>
           <p>Стикер напечатан{readyToDeliverCount > 1 ? 'ы' : ''}, ЧЗ привязан (если нужен). Подтвердите передачу в WB.</p>
@@ -890,9 +922,9 @@ export function AssemblySellerPage() {
               ) : data.orders.map((order) => {
                 const blockReason = orderBlockReason(order)
                 return (
-                  <tr key={order.id}>
-                    <td>{order.wb_order_id}</td>
-                    <td><code>{order.barcode}</code></td>
+                <tr key={order.id}>
+                  <td>{order.wb_order_id}</td>
+                  <td><code>{order.barcode}</code></td>
                     <td>
                       <ProductPhotoThumb
                         url={order.photo_url ?? ''}
@@ -904,25 +936,28 @@ export function AssemblySellerPage() {
                         {order.tech_size || '—'}
                       </strong>
                     </td>
-                    <td>{order.cell_number || '—'}</td>
-                    <td>
-                      {order.requires_marking ? (
+                  <td>{order.cell_number || '—'}</td>
+                  <td>
+                    {order.requires_marking ? (
                         order.marking_verify_status === 'pending' ? (
                           <span className="marking-badge marking-badge--pending" title="Проверка ЧЗ в WB">⏳</span>
                         ) : order.marking_verify_status === 'error' ? (
                           <button
                             type="button"
                             className="marking-badge marking-badge--error"
-                            title={order.marking_verify_error || 'ЧЗ отклонён'}
+                            title={appendStickerHint(
+                              order.marking_verify_error || 'ЧЗ отклонён',
+                              order,
+                            )}
                             onClick={() => setMarkingErrorOrder(order)}
                           >
                             ✕
                           </button>
                         ) : order.marking_bound ? (
-                          <span className="marking-badge marking-badge--ok">✓</span>
-                        ) : (
-                          <span className="marking-badge marking-badge--required">ЧЗ</span>
-                        )
+                        <span className="marking-badge marking-badge--ok">✓</span>
+                      ) : (
+                        <span className="marking-badge marking-badge--required">ЧЗ</span>
+                      )
                       ) : '—'}
                     </td>
                     <td>
@@ -936,8 +971,8 @@ export function AssemblySellerPage() {
                       <div>{order.wb_stage_display || order.status_display}</div>
                       {blockReason && stage === 'confirm' && (
                         <div className="assembly-block-reason">{blockReason}</div>
-                      )}
-                    </td>
+                    )}
+                  </td>
                     <td>
                       {order.has_sticker ? (
                         <button
@@ -950,27 +985,27 @@ export function AssemblySellerPage() {
                         </button>
                       ) : '—'}
                     </td>
-                    <td className="assembly-table__actions">
+                  <td className="assembly-table__actions">
                       {showAssemblyButton(order) && stage !== 'complete' && (
-                        <button
-                          type="button"
-                          className="btn btn--small btn--primary"
-                          onClick={() => handleSendToAssembly(order.id)}
-                          disabled={loading}
-                        >
-                          На сборку
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => handleSendToAssembly(order.id)}
+                        disabled={loading}
+                      >
+                        На сборку
+                      </button>
+                    )}
                       {orderCanDeliver(order) && stage === 'confirm' && (
-                        <button
-                          type="button"
-                          className="btn btn--small btn--secondary"
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
                           onClick={() => handleSendToDelivery(order)}
-                          disabled={loading}
-                        >
-                          В доставку
-                        </button>
-                      )}
+                        disabled={loading}
+                      >
+                        В доставку
+                      </button>
+                    )}
                       <button
                         type="button"
                         className="btn btn--small btn--ghost assembly-order-delete"
@@ -980,8 +1015,8 @@ export function AssemblySellerPage() {
                       >
                         Удалить
                       </button>
-                    </td>
-                  </tr>
+                  </td>
+                </tr>
                 )
               })}
             </tbody>
@@ -1002,16 +1037,16 @@ export function AssemblySellerPage() {
                     Скачать PDF (A4)
                   </button>
                   {data.active_pick_list && !pickListPreview && (
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--small"
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--small"
                     onClick={handleDeletePickList}
-                    disabled={loading}
-                  >
+                  disabled={loading}
+                >
                     Удалить лист подбора
-                  </button>
+                </button>
                   )}
-                </div>
+              </div>
               </div>
               {pickListPreviewStage === stage && pickListPreview && (
                 <p className="print-agent__hint">
@@ -1045,74 +1080,79 @@ export function AssemblySellerPage() {
           )}
 
           {stage === 'confirm' && (
-            <section className="panel assembly-scan-panel">
-              {scanPhase === 'barcode' ? (
-                <>
+          <section className={`panel assembly-scan-panel${scanPhase === 'marking' ? ' assembly-scan-panel--marking-active' : ''}`}>
+            {scanPhase === 'barcode' ? (
+              <>
                   <h2 className="section-title">Шаг 2: скан баркода</h2>
-                  <p className="assembly-scan-hint">
+                <p className="assembly-scan-hint">
                     Сверка с листом подбора. Если товар с ЧЗ — после скана откроется шаг 3.
-                  </p>
-                  <form onSubmit={handleBarcodeSubmit}>
-                    <input
-                      ref={scanRef}
-                      type="text"
-                      className="assembly-scan-input"
-                      value={scanValue}
-                      onChange={(e) => setScanValue(e.target.value)}
-                      onKeyDown={handleScanKeyDown}
-                      placeholder="Баркод заказа..."
-                      autoComplete="off"
-                    />
-                  </form>
-                </>
-              ) : (
-                <>
+                </p>
+                <form onSubmit={handleBarcodeSubmit}>
+                  <input
+                    ref={scanRef}
+                    type="text"
+                    className="assembly-scan-input"
+                    value={scanValue}
+                    onChange={(e) => setScanValue(e.target.value)}
+                    onKeyDown={handleScanKeyDown}
+                    placeholder="Баркод заказа..."
+                    autoComplete="off"
+                  />
+                </form>
+              </>
+            ) : (
+              <>
                   <h2 className="section-title assembly-scan-panel--marking">Шаг 3: Честный знак</h2>
-                  {pendingOrder && (
-                    <div className="assembly-pending-order">
-                      <p>Заказ WB <strong>#{pendingOrder.wb_order_id}</strong></p>
-                      <p>Баркод: <code>{pendingOrder.barcode}</code></p>
-                    </div>
-                  )}
-                  <p className="assembly-scan-hint">
+                {pendingOrder && (
+                  <div className="assembly-pending-order">
+                    <p>Заказ WB <strong>#{pendingOrder.wb_order_id}</strong></p>
+                    <p>Баркод: <code>{pendingOrder.barcode}</code></p>
+                    {formatStickerNumber(pendingOrder) && (
+                      <p className="assembly-pending-order__sticker">
+                        Номер стикера: <strong>{formatStickerNumber(pendingOrder)}</strong>
+                      </p>
+                    )}
+                  </div>
+                )}
+                <p className="assembly-scan-hint">
                     Отсканируйте DataMatrix. Код уйдёт в WB, стикер FBS напечатается сразу.
                     Проверка в «Честном знаке» — в фоне (несколько минут); в доставку — только после подтверждения WB.
-                  </p>
-                  <form onSubmit={handleMarkingSubmit}>
-                    <input
-                      ref={markingRef}
-                      type="text"
-                      className="assembly-scan-input assembly-scan-input--marking"
-                      value={markingValue}
+                </p>
+                <form onSubmit={handleMarkingSubmit}>
+                  <input
+                    ref={markingRef}
+                    type="text"
+                    className="assembly-scan-input assembly-scan-input--marking"
+                    value={markingValue}
                       onChange={(e) => {
                         markingBufferRef.current = e.target.value
                         setMarkingValue(e.target.value)
                       }}
-                      onKeyDown={handleMarkingKeyDown}
+                    onKeyDown={handleMarkingKeyDown}
                       onPaste={handleMarkingPaste}
-                      placeholder="Код Честного знака (DataMatrix)..."
-                      autoComplete="off"
+                    placeholder="Код Честного знака (DataMatrix)..."
+                    autoComplete="off"
                       autoCapitalize="off"
                       autoCorrect="off"
                       spellCheck={false}
-                    />
-                  </form>
-                  <div className="assembly-scan-actions">
+                  />
+                </form>
+                <div className="assembly-scan-actions">
                     <button type="button" className="btn btn--secondary" onClick={handleReplaceOrder} disabled={loading}>
-                      Заменить товар
-                    </button>
+                    Заменить товар
+                  </button>
                     <button type="button" className="btn btn--secondary" onClick={resetScanFlow} disabled={loading}>
-                      Отмена
-                    </button>
-                  </div>
-                </>
-              )}
+                    Отмена
+                  </button>
+                </div>
+              </>
+            )}
 
               {lastPrinted && scanPhase === 'barcode' && orderCanDeliver(lastPrinted) && (
                 <div className="assembly-last-print assembly-last-print--ready">
-                  <p>
+                <p>
                     <strong>Шаг 4:</strong> WB #{lastPrinted.wb_order_id} готов к доставке
-                  </p>
+                </p>
                   <button
                     type="button"
                     className="btn btn--primary btn--small"
@@ -1121,18 +1161,18 @@ export function AssemblySellerPage() {
                   >
                     Подтвердить и в доставку
                   </button>
-                </div>
-              )}
+              </div>
+            )}
 
               {stickerPreview && (
-                <div className="assembly-sticker-preview">
-                  <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
+              <div className="assembly-sticker-preview">
+                <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
                   <button type="button" className="btn btn--secondary" onClick={() => void printSticker(stickerPreview)}>
-                    Печать ещё раз
-                  </button>
-                </div>
-              )}
-            </section>
+                  Печать ещё раз
+                </button>
+              </div>
+            )}
+          </section>
           )}
 
           {stage === 'new' && (
@@ -1169,6 +1209,11 @@ export function AssemblySellerPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="marking-error-title">Ошибка проверки Честного знака</h2>
+            {markingErrorSticker && (
+              <p className="assembly-marking-modal__sticker">
+                Номер стикера: <strong>{markingErrorSticker}</strong>
+              </p>
+            )}
             <p className="assembly-marking-modal__message">
               {markingErrorOrder.marking_verify_error || 'WB отклонил код ЧЗ. Замените товар и отсканируйте другой экземпляр.'}
             </p>

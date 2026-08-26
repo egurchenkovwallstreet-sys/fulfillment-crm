@@ -1,15 +1,33 @@
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from './tokens'
 
-async function extractError(response: Response): Promise<string> {
+export class ApiError extends Error {
+  readonly code?: string
+  readonly payload?: Record<string, unknown>
+
+  constructor(message: string, payload?: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+    this.payload = payload
+    this.code = typeof payload?.code === 'string' ? payload.code : undefined
+  }
+
+  get order(): unknown {
+    return this.payload?.order
+  }
+}
+
+async function extractError(response: Response): Promise<ApiError> {
   try {
     const data = await response.json()
-    if (data.detail) return String(data.detail)
+    if (data.detail) {
+      return new ApiError(String(data.detail), data)
+    }
     const firstKey = Object.keys(data)[0]
-    if (firstKey) return `${firstKey}: ${data[firstKey]}`
+    if (firstKey) return new ApiError(`${firstKey}: ${data[firstKey]}`, data)
   } catch {
     // ignore
   }
-  return `Ошибка ${response.status}`
+  return new ApiError(`Ошибка ${response.status}`)
 }
 
 async function refreshAccessToken(): Promise<boolean> {
@@ -56,7 +74,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   }
 
   if (!response.ok) {
-    throw new Error(await extractError(response))
+    throw await extractError(response)
   }
 
   if (response.status === 204) {

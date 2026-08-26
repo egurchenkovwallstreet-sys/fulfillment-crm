@@ -1,4 +1,5 @@
 import type { AssemblyOrder } from '../api/assembly'
+import { appendStickerHint } from './stickerLabel'
 
 export type WorkflowStepId = 1 | 2 | 3 | 4
 
@@ -60,7 +61,10 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
       return 'WB проверяет ЧЗ (несколько минут) — в доставку после подтверждения'
     }
     if (order.marking_verify_status === 'error') {
-      return order.marking_verify_error || 'ЧЗ отклонён WB — замените товар'
+      return appendStickerHint(
+        order.marking_verify_error || 'ЧЗ отклонён WB — замените товар',
+        order,
+      )
     }
     return 'Привяжите Честный знак (DataMatrix)'
   }

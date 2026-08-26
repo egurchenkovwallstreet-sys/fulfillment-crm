@@ -7,10 +7,7 @@ import {
 import {
   printFbsSticker as browserPrintFbsSticker,
   printSupplySticker as browserPrintSupplySticker,
-  openFbsStickerPrintWindow,
 } from './browserPrint'
-
-export { openFbsStickerPrintWindow }
 
 export type PrintChannel = 'bridge' | 'browser'
 
@@ -36,16 +33,11 @@ async function printViaBridge(jobType: PrintJobType, base64: string): Promise<bo
   }
 }
 
-export async function printFbsSticker(
-  base64: string,
-  autoPrint = true,
-  printWindow?: Window | null,
-): Promise<PrintChannel> {
+export async function printFbsSticker(base64: string, autoPrint = true): Promise<PrintChannel> {
   if (await printViaBridge('fbs_sticker', base64)) {
-    printWindow?.close()
     return 'bridge'
   }
-  browserPrintFbsSticker(base64, autoPrint, printWindow)
+  browserPrintFbsSticker(base64, autoPrint)
   return 'browser'
 }
 

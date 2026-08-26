@@ -62,6 +62,13 @@ from .services.pick_list import PickListError, delete_active_pick_list, generate
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
+def _assembly_error_response(exc: AssemblyError, *, status_code=status.HTTP_400_BAD_REQUEST):
+  payload = {"detail": str(exc), "code": exc.code}
+  if exc.order is not None:
+    payload["order"] = OrderPrintSerializer(exc.order).data
+  return Response(payload, status=status_code)
+
+
 def _dashboard_stats_from_counts(counts: dict) -> dict:
   return {
     "new_orders": int(counts.get("new", 0) or 0),
@@ -396,10 +403,7 @@ class AssemblyStartView(APIView):
     try:
       result = start_assembly(seller, user=request.user)
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     return Response({
       "success": True,
@@ -472,10 +476,7 @@ class AssemblyDeleteOrderView(APIView):
         user=request.user,
       )
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     order = result["order"]
     return Response({
@@ -505,10 +506,7 @@ class AssemblyScanPrintView(APIView):
         user=request.user,
       )
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     order_data = OrderPrintSerializer(result["order"]).data
     payload = {
@@ -542,10 +540,7 @@ class AssemblyBindMarkingView(APIView):
         user=request.user,
       )
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     order_id = serializer.validated_data["order_id"]
     try:
@@ -582,10 +577,7 @@ class AssemblyVerifyMarkingView(APIView):
     try:
       results = verify_marking_orders(seller, order_ids or None, user=request.user)
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     orders_by_id = {
       order.id: OrderPrintSerializer(order).data
@@ -619,10 +611,7 @@ class AssemblyReplaceOrderView(APIView):
         user=request.user,
       )
     except AssemblyError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     return Response({
       "success": True,
@@ -654,10 +643,7 @@ class AssemblyReprintStickerView(APIView):
       try:
         fetch_stickers_for_orders(seller, [order], user=request.user)
       except AssemblyError as exc:
-        return Response(
-          {"detail": str(exc), "code": exc.code},
-          status=status.HTTP_400_BAD_REQUEST,
-        )
+        return _assembly_error_response(exc)
       order.refresh_from_db()
 
     if not order.sticker_file:
@@ -695,10 +681,7 @@ class AssemblySendToAssemblyView(APIView):
         user=request.user,
       )
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     payload = {
       "success": True,
@@ -730,10 +713,7 @@ class AssemblySendToDeliveryView(APIView):
         user=request.user,
       )
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     payload = {
       "success": True,
@@ -772,10 +752,7 @@ class AssemblySendAllToAssemblyView(APIView):
         user=request.user,
       )
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     return Response({"success": True, **result})
 
@@ -871,10 +848,7 @@ class SupplyDeliverView(APIView):
     try:
       result = send_supply_to_delivery(supply.seller, supply.id, user=request.user)
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     payload = {
       "success": True,
@@ -906,10 +880,7 @@ class SupplyBulkDeliverView(APIView):
         user=request.user,
       )
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     return Response({
       "success": True,
@@ -930,9 +901,6 @@ class SupplyBarcodeView(APIView):
     try:
       result = fetch_supply_barcode(supply.seller, supply.id)
     except SupplyFlowError as exc:
-      return Response(
-        {"detail": str(exc), "code": exc.code},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
+      return _assembly_error_response(exc)
 
     return Response({"success": True, **result})

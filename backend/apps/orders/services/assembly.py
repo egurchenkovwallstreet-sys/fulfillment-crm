@@ -19,9 +19,33 @@ from apps.warehouse.services.marking_lookup import resolve_product_requires_mark
 
 
 class AssemblyError(Exception):
-  def __init__(self, message: str, *, code: str = "error"):
+  def __init__(self, message: str, *, code: str = "error", order: Order | None = None):
     super().__init__(message)
     self.code = code
+    self.order = order
+
+
+def format_sticker_number(order: Order) -> str:
+  part_a = (order.sticker_part_a or "").strip()
+  part_b = (order.sticker_part_b or "").strip()
+  if part_a and part_b:
+    return f"{part_a} / {part_b}"
+  return part_a or part_b
+
+
+def _sticker_hint(order: Order) -> str:
+  number = format_sticker_number(order)
+  if not number:
+    return ""
+  return f" Номер стикера: {number}."
+
+
+def _marking_error(message: str, order: Order, *, code: str) -> AssemblyError:
+  text = message.rstrip(".")
+  hint = _sticker_hint(order)
+  if hint and hint.strip() not in text:
+    text = f"{text}.{hint}"
+  return AssemblyError(text, code=code, order=order)
 
 
 def _get_client(seller: Seller) -> WBClient:
@@ -34,31 +58,94 @@ def _get_client(seller: Seller) -> WBClient:
   return WBClient(token)
 
 
+def _match_order_by_scan(orders_qs, scan_value: str) -> Order | None:
+  order = orders_qs.filter(barcode=scan_value).first()
+  if not order and scan_value.isdigit():
+    order = orders_qs.filter(wb_order_id=int(scan_value)).first()
+  return order
+
+
+def _is_marking_retry_order(order: Order) -> bool:
+  return (
+    order.status in (Order.Status.LABEL_PRINTED, Order.Status.MARKED)
+    and (order.marking_verify_status or "").strip() == "error"
+  )
+
+
+def _reset_marking_for_retry(order: Order, seller: Seller, *, user=None) -> None:
+  """После отклонения ЧЗ WB — снова ждём скан DataMatrix по тому же баркоду."""
+  if order.marking_code:
+    client = _get_client(seller)
+    try:
+      client.delete_order_meta(order.wb_order_id, key="sgtin")
+    except WBApiError as exc:
+      raise _marking_error(
+        f"Не удалось снять привязку ЧЗ в WB: {parse_wb_marking_error(exc)}",
+        order,
+        code="wb_unbind_failed",
+      ) from exc
+
+  order.marking_code = ""
+  order.marking_bound = False
+  order.marking_verify_status = ""
+  order.marking_verify_error = ""
+  order.status = Order.Status.ASSEMBLED
+  order.save(
+    update_fields=[
+      "marking_code",
+      "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
+      "status",
+      "updated_at",
+    ],
+  )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=(
+      f"Повторная привязка ЧЗ после ошибки WB — заказ #{order.wb_order_id}"
+      f"{_sticker_hint(order)}"
+    ),
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
+
+
 def _find_active_order(seller: Seller, scan_value: str) -> Order:
   scan_value = scan_value.strip()
   if not scan_value:
     raise AssemblyError("Пустой штрихкод")
 
-  orders_qs = filter_orders_for_seller(
+  base_qs = filter_orders_for_seller(
     Order.objects.filter(
       seller=seller,
       assembly_hidden=False,
-      status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
     ).select_related("product"),
     seller,
   )
 
-  order = orders_qs.filter(barcode=scan_value).first()
-  if not order and scan_value.isdigit():
-    order = orders_qs.filter(wb_order_id=int(scan_value)).first()
+  active_qs = base_qs.filter(
+    status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
+  )
+  order = _match_order_by_scan(active_qs, scan_value)
+  if order:
+    return order
 
-  if not order:
-    raise AssemblyError(
-      "Заказ не найден в текущей сборке. "
-      "Проверьте баркод или обновите заказы из WB.",
-      code="order_not_found",
-    )
-  return order
+  retry_qs = base_qs.filter(
+    status__in=[Order.Status.LABEL_PRINTED, Order.Status.MARKED],
+    marking_verify_status="error",
+  )
+  order = _match_order_by_scan(retry_qs, scan_value)
+  if order:
+    return order
+
+  raise AssemblyError(
+    "Заказ не найден в текущей сборке. "
+    "Проверьте баркод или обновите заказы из WB.",
+    code="order_not_found",
+  )
 
 
 def _order_requires_marking(order: Order) -> bool:
@@ -148,6 +235,15 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   """
   order = _find_active_order(seller, scan_value)
 
+  if _is_marking_retry_order(order):
+    if not _order_requires_marking(order):
+      raise AssemblyError(
+        "Заказ с ошибкой ЧЗ не требует маркировки — обратитесь к администратору",
+        code="marking_retry_invalid",
+        order=order,
+      )
+    _reset_marking_for_retry(order, seller, user=user)
+
   if not order.has_sticker or not order.sticker_file:
     raise AssemblyError(
       f"Стикер для заказа WB #{order.wb_order_id} ещё не загружен. "
@@ -220,9 +316,10 @@ def bind_marking_and_print(
     raise AssemblyError("Заказ не найден", code="order_not_found") from exc
 
   if order.status not in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED):
-    raise AssemblyError(
+    raise _marking_error(
       f"Заказ WB #{order.wb_order_id} не ожидает привязку ЧЗ "
-      f"(статус: {order.get_status_display()}). Нажмите «Заменить товар» для сброса.",
+      f"(статус: {order.get_status_display()}). Нажмите «Заменить товар» для сброса",
+      order,
       code="invalid_status",
     )
 
@@ -230,27 +327,30 @@ def bind_marking_and_print(
     raise AssemblyError(
       "Для этого заказа маркировка ЧЗ не требуется",
       code="marking_not_required",
+      order=order,
     )
 
   wb_status = (order.wb_supplier_status or "").strip()
   if wb_status != WB_SUPPLIER_ASSEMBLY:
-    raise AssemblyError(
+    raise _marking_error(
       f"Заказ WB #{order.wb_order_id} не на сборке в WB "
       f"(статус: {wb_status or 'new'}). "
       "WB принимает ЧЗ только для заказов в статусе confirm. "
-      "Сначала отправьте заказ на сборку («На сборку» / «Все на сборку»).",
+      "Сначала отправьте заказ на сборку («На сборку» / «Все на сборку»)",
+      order,
       code="wb_not_confirm",
     )
 
   if not order.has_sticker or not order.sticker_file:
-    raise AssemblyError(
+    raise _marking_error(
       "Стикер не загружен — начните сборку заново",
+      order,
       code="no_sticker",
     )
 
   normalized, validation_error = validate_marking_code(marking_code)
   if validation_error:
-    raise AssemblyError(validation_error, code="invalid_marking_code")
+    raise _marking_error(validation_error, order, code="invalid_marking_code")
 
   duplicate = (
     Order.objects.filter(marking_code=normalized)
@@ -259,9 +359,10 @@ def bind_marking_and_print(
     .exists()
   )
   if duplicate:
-    raise AssemblyError(
+    raise _marking_error(
       "Этот код ЧЗ уже использован для другого заказа в CRM. "
-      "Возьмите другой экземпляр товара.",
+      "Возьмите другой экземпляр товара",
+      order,
       code="duplicate_marking",
     )
 
@@ -276,7 +377,7 @@ def bind_marking_and_print(
       message=f"Ошибка привязки ЧЗ WB #{order.wb_order_id}: {exc}",
       details={"order_id": order.id, "status_code": exc.status_code},
     )
-    raise AssemblyError(parse_wb_marking_error(exc), code="wb_bind_failed") from exc
+    raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
 
   order.marking_code = normalized
   order.marking_bound = False
@@ -343,9 +444,10 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
     try:
       client.delete_order_meta(order.wb_order_id, key="sgtin")
     except WBApiError as exc:
-      raise AssemblyError(
+      raise _marking_error(
         f"Не удалось снять привязку ЧЗ в WB: {parse_wb_marking_error(exc)}. "
-        "Проверьте заказ в личном кабинете WB.",
+        "Проверьте заказ в личном кабинете WB",
+        order,
         code="wb_unbind_failed",
       ) from exc
 
@@ -417,9 +519,10 @@ def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> d
     try:
       client.delete_order_meta(order.wb_order_id, key="sgtin")
     except WBApiError as exc:
-      raise AssemblyError(
+      raise _marking_error(
         f"Не удалось снять привязку ЧЗ в WB: {parse_wb_marking_error(exc)}. "
-        "Проверьте заказ в личном кабинете WB.",
+        "Проверьте заказ в личном кабинете WB",
+        order,
         code="wb_unbind_failed",
       ) from exc
 

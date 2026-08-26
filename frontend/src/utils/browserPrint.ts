@@ -11,17 +11,7 @@ export const PRINT_SIZES = {
 } as const
 
 function autoPrintScript(): string {
-  return `
-    function doPrint() {
-      window.focus();
-      window.print();
-      window.onafterprint = function () { window.close(); };
-    }
-    var img = document.querySelector('img');
-    if (img && img.complete) doPrint();
-    else if (img) img.onload = doPrint;
-    else window.onload = doPrint;
-  `
+  return 'window.onload = function () { window.print(); window.close(); };'
 }
 
 function fbsStickerHtml(base64: string, autoPrint: boolean): string {
@@ -56,29 +46,13 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
 </html>`
 }
 
-/** Открыть окно печати в момент нажатия Enter (до async), чтобы Chrome не блокировал диалог. */
-export function openFbsStickerPrintWindow(): Window | null {
-  return window.open('', '_blank')
-}
-
-export function printFbsStickerToWindow(win: Window, base64: string, autoPrint = true): boolean {
-  win.document.open()
+/** Стикер FBS 58×40 мм (PNG base64 от WB API). Как в инвентаризации: окно → print → close. */
+export function printFbsSticker(base64: string, autoPrint = true): boolean {
+  const win = window.open('', '_blank', 'width=420,height=640')
+  if (!win) return false
   win.document.write(fbsStickerHtml(base64, autoPrint))
   win.document.close()
-  if (autoPrint) {
-    win.focus()
-  }
   return true
-}
-
-/** Стикер FBS 58×40 мм (PNG base64 от WB API). */
-export function printFbsSticker(base64: string, autoPrint = true, printWindow?: Window | null): boolean {
-  if (printWindow) {
-    return printFbsStickerToWindow(printWindow, base64, autoPrint)
-  }
-  const win = openFbsStickerPrintWindow()
-  if (!win) return false
-  return printFbsStickerToWindow(win, base64, autoPrint)
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */
