@@ -22,6 +22,14 @@ from .views import (
   StockDistributeView,
 )
 from .views_pricing import PriceGroupListView, SellerPricingView
+from .views_xl_intake import (
+  XlIntakeConnectWbView,
+  XlIntakeExcelView,
+  XlIntakeSaveView,
+  XlIntakeScanView,
+  XlIntakeSessionDetailView,
+  XlIntakeSessionListCreateView,
+)
 
 urlpatterns = [
   path("sellers/", SellerListView.as_view(), name="warehouse_sellers"),
@@ -78,6 +86,32 @@ urlpatterns = [
     "sellers/<int:seller_id>/stock-distribute/",
     StockDistributeView.as_view(),
     name="stock_distribute",
+  ),
+  path("xl-intake/sessions/", XlIntakeSessionListCreateView.as_view(), name="xl_intake_sessions"),
+  path(
+    "xl-intake/sessions/<int:session_id>/",
+    XlIntakeSessionDetailView.as_view(),
+    name="xl_intake_session_detail",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/scan/",
+    XlIntakeScanView.as_view(),
+    name="xl_intake_scan",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/save/",
+    XlIntakeSaveView.as_view(),
+    name="xl_intake_save",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/excel/",
+    XlIntakeExcelView.as_view(),
+    name="xl_intake_excel",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/connect-wb/",
+    XlIntakeConnectWbView.as_view(),
+    name="xl_intake_connect_wb",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
   path(

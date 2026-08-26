@@ -1,6 +1,6 @@
 # Схема базы данных
 
-Актуально на 16.08.2026. Соответствует моделям Django в `backend/apps/`.
+**Актуально на 27.08.2026.** Соответствует моделям Django в `backend/apps/`.
 
 ## ER-диаграмма (основные сущности)
 
@@ -86,6 +86,9 @@ erDiagram
 
 ### orders_supply
 Поставка WB. Списание остатков после подтверждения.
+
+### warehouse_xlintakesession / warehouse_xlintakeline
+Приёмка в XL: поштучный скан до подключения API WB. Строка — уникальный баркод, `sort_order` (1, 2, 3…), `quantity`.
 
 ### integrations_auditlog
 Лог всех действий и ошибок API.

@@ -199,6 +199,12 @@
   color: #fff;
 }
 
+.sidebar__link--xl.sidebar__link--active,
+.sidebar__link--xl:hover {
+  background: rgba(37, 99, 235, 0.28);
+  color: #fff;
+}
+
 .sidebar__user {
   display: flex;
   flex-direction: column;

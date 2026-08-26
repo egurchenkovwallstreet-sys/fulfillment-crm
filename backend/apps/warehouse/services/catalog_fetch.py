@@ -129,14 +129,19 @@ def _assign_cell_numbers(items: list[CatalogBarcodeItem], start_from: int = 1) -
     num += 1
 
 
-def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
-  """Индекс баркод → данные карточки WB для селлера."""
+def fetch_seller_catalog_items(seller: Seller) -> list[CatalogBarcodeItem]:
+  """Карточки WB селлера, размеры внутри артикула уже по возрастанию."""
   try:
     cards = fetch_all_seller_cards(_get_token(seller))
   except WBApiError as exc:
     raise CatalogError(str(exc)) from exc
+  return _parse_cards_to_items(cards)
+
+
+def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
+  """Индекс баркод → данные карточки WB для селлера."""
   index: dict[str, CatalogBarcodeItem] = {}
-  for item in _parse_cards_to_items(cards):
+  for item in fetch_seller_catalog_items(seller):
     index[item.barcode] = item
   return index
 

@@ -155,3 +155,61 @@ class StockOperation(models.Model):
     verbose_name = "Складская операция"
     verbose_name_plural = "Складские операции"
     ordering = ["-created_at"]
+
+
+class XlIntakeSession(models.Model):
+  class Status(models.TextChoices):
+    SCANNING = "scanning", "Сканирование"
+    SAVED = "saved", "Сохранена"
+    APPLIED = "applied", "Ячейки созданы"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="xl_intake_sessions",
+  )
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.SCANNING,
+    db_index=True,
+  )
+  created_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    related_name="xl_intake_sessions",
+  )
+  unmatched = models.JSONField("Баркоды не найдены в ЛК WB", default=list, blank=True)
+  warehouse_sync_warning = models.CharField(max_length=500, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  saved_at = models.DateTimeField(null=True, blank=True)
+  applied_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "XL-приёмка"
+    verbose_name_plural = "XL-приёмки"
+    ordering = ["-created_at"]
+
+  def __str__(self):
+    return f"XL #{self.pk} · {self.seller}"
+
+
+class XlIntakeLine(models.Model):
+  session = models.ForeignKey(
+    XlIntakeSession,
+    on_delete=models.CASCADE,
+    related_name="lines",
+  )
+  barcode = models.CharField("Баркод", max_length=100)
+  quantity = models.PositiveIntegerField("Количество", default=0)
+  sort_order = models.PositiveIntegerField("Порядковый номер баркода")
+
+  class Meta:
+    verbose_name = "Строка XL-приёмки"
+    verbose_name_plural = "Строки XL-приёмки"
+    unique_together = [("session", "barcode")]
+    ordering = ["sort_order"]
+
+  def __str__(self):
+    return f"{self.barcode} × {self.quantity}"

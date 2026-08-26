@@ -45,6 +45,16 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
+            <NavLink
+              to="/intake-xl"
+              className={({ isActive }) =>
+                `sidebar__link sidebar__link--xl${isActive ? ' sidebar__link--active' : ''}`
+              }
+            >
+              Приёмка в XL
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/cells" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Ячейки
             </NavLink>

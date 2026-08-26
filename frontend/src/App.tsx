@@ -16,6 +16,7 @@ import { SellerCabinetPage } from './pages/SellerCabinetPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
 import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
+import { XlIntakePage } from './pages/XlIntakePage'
 
 function HomeRedirect() {
   const { isSeller } = useAuth()
@@ -50,6 +51,8 @@ function AppRoutes() {
             <Route path="/warehouse" element={<WarehouseHubPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/intake" element={<IntakePage />} />
+            <Route path="/intake-xl" element={<XlIntakePage />} />
+            <Route path="/intake-xl/:sessionId" element={<XlIntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />

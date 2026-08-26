@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 
-from .models import Cell, PriceGroup, Product, StockOperation
+from .models import Cell, PriceGroup, Product, StockOperation, XlIntakeLine, XlIntakeSession
 from .services.cell_delete import force_delete_cells
 
 
@@ -70,3 +70,17 @@ class ProductAdmin(admin.ModelAdmin):
 class StockOperationAdmin(admin.ModelAdmin):
   list_display = ("product", "operation_type", "quantity", "created_at")
   list_filter = ("operation_type",)
+
+
+class XlIntakeLineInline(admin.TabularInline):
+  model = XlIntakeLine
+  extra = 0
+  readonly_fields = ("barcode", "quantity", "sort_order")
+
+
+@admin.register(XlIntakeSession)
+class XlIntakeSessionAdmin(admin.ModelAdmin):
+  list_display = ("id", "seller", "status", "created_at", "saved_at", "applied_at")
+  list_filter = ("status",)
+  search_fields = ("seller__company_name",)
+  inlines = [XlIntakeLineInline]
