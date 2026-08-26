@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 PAGE_LIMIT = 1000
 REQUEST_INTERVAL_SEC = 0.1
+# PATCH .../supplies/{id}/orders — не более 100 заказов за запрос (WB API)
+SUPPLY_ORDERS_BATCH_SIZE = 100
 
 
 class WBApiError(Exception):
@@ -368,11 +370,15 @@ class WBClient:
     """PATCH /api/marketplace/v3/supplies/{supplyId}/orders — добавить заказы в поставку."""
     if not order_ids:
       raise WBApiError("Не переданы ID заказов")
-    self._request(
-      "PATCH",
-      f"/api/marketplace/v3/supplies/{supply_id}/orders",
-      json={"orders": order_ids},
-    )
+    for offset in range(0, len(order_ids), SUPPLY_ORDERS_BATCH_SIZE):
+      batch = order_ids[offset : offset + SUPPLY_ORDERS_BATCH_SIZE]
+      self._request(
+        "PATCH",
+        f"/api/marketplace/v3/supplies/{supply_id}/orders",
+        json={"orders": batch},
+      )
+      if offset + SUPPLY_ORDERS_BATCH_SIZE < len(order_ids):
+        time.sleep(REQUEST_INTERVAL_SEC)
 
   def deliver_supply(self, supply_id: str) -> None:
     """PATCH /api/v3/supplies/{supplyId}/deliver — передать поставку в доставку."""
