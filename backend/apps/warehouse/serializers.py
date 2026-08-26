@@ -188,3 +188,39 @@ class StockFileApplySerializer(serializers.Serializer):
         "warehouse_id": "Склад WB не найден у этого селлера",
       })
     return attrs
+
+
+class InventorySerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  barcode = serializers.CharField(max_length=100)
+  quantity = serializers.IntegerField(min_value=0)
+  warehouse_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    min_length=1,
+  )
+  cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
+  cell_id = serializers.IntegerField(required=False, allow_null=True)
+  name = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+  def validate_seller_id(self, value):
+    if not Seller.objects.filter(pk=value, is_active=True).exists():
+      raise serializers.ValidationError("Селлер не найден или неактивен")
+    return value
+
+  def validate(self, attrs):
+    from apps.sellers.models import SellerWarehouse
+
+    seller_id = attrs["seller_id"]
+    warehouse_ids = list(dict.fromkeys(attrs["warehouse_ids"]))
+    attrs["warehouse_ids"] = warehouse_ids
+
+    found = SellerWarehouse.objects.filter(
+      seller_id=seller_id,
+      pk__in=warehouse_ids,
+      is_enabled=True,
+    ).count()
+    if found != len(warehouse_ids):
+      raise serializers.ValidationError({
+        "warehouse_ids": "Один или несколько складов не найдены или отключены",
+      })
+    return attrs

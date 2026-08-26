@@ -374,11 +374,14 @@ export function WarehouseHubPage() {
 
   return (
     <>
-      <header className="topbar">
+      <header className="topbar whub-header">
         <div>
           <h1>Склад</h1>
           <p>Подключение селлера, приёмка и перераспределение остатков FBS</p>
         </div>
+        <Link to="/inventory" className="btn btn--danger">
+          Инвентаризация
+        </Link>
       </header>
 
       <div className="whub-tabs">

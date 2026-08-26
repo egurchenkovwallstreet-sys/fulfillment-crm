@@ -6,6 +6,7 @@ import { AdminBillingPage } from './pages/AdminBillingPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { InventoryPage } from './pages/InventoryPage'
 import { IntakePage } from './pages/IntakePage'
 import { CellInventoryPage } from './pages/CellInventoryPage'
 import { LoginPage } from './pages/LoginPage'
@@ -47,6 +48,7 @@ function AppRoutes() {
           </Route>
           <Route element={<ManagerRoute />}>
             <Route path="/warehouse" element={<WarehouseHubPage />} />
+            <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/intake" element={<IntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />

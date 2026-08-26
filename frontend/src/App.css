@@ -175,6 +175,30 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.btn--danger {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn--danger:hover {
+  background: #b91c1c;
+}
+
+.btn--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sidebar__link--inventory {
+  color: #fecaca;
+}
+
+.sidebar__link--inventory.sidebar__link--active,
+.sidebar__link--inventory:hover {
+  background: rgba(220, 38, 38, 0.25);
+  color: #fff;
+}
+
 .sidebar__user {
   display: flex;
   flex-direction: column;

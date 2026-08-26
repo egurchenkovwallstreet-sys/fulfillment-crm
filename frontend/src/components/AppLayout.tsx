@@ -30,6 +30,16 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
+            <NavLink
+              to="/inventory"
+              className={({ isActive }) =>
+                `sidebar__link sidebar__link--inventory${isActive ? ' sidebar__link--active' : ''}`
+              }
+            >
+              Инвентаризация
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/intake" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Приёмка
             </NavLink>

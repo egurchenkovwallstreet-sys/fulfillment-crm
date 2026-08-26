@@ -11,6 +11,7 @@ from .models import Cell, Product, StockOperation
 from .serializers import (
   CellSerializer,
   IntakeSerializer,
+  InventorySerializer,
   MoveCellSerializer,
   OnboardingConfirmSerializer,
   OnboardingExcludeSerializer,
@@ -27,6 +28,7 @@ from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
 from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
 from .services.intake import IntakeError, perform_intake
+from .services.inventory import perform_inventory
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
   StockFileImportError,
@@ -298,6 +300,103 @@ class IntakeHistoryView(APIView):
       .order_by("-created_at")[:30]
     )
     return Response(StockOperationSerializer(ops, many=True).data)
+
+
+class InventoryLookupView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request):
+    barcode = request.query_params.get("barcode", "").strip()
+    seller_id = request.query_params.get("seller_id")
+
+    if not barcode or not seller_id:
+      return Response(
+        {"detail": "Укажите barcode и seller_id"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    product = (
+      Product.objects.filter(seller_id=seller_id, barcode=barcode)
+      .select_related("cell", "seller")
+      .first()
+    )
+
+    if product:
+      marking = refresh_product_marking(product, product.seller)
+      return Response({
+        "exists": True,
+        "product": ProductSerializer(product).data,
+        "marking": {
+          "requires_marking": product.requires_marking,
+          "wb_found": marking.wb_found,
+          "title": marking.title,
+          "warning": marking.warning,
+        },
+      })
+
+    marking = lookup_marking_for_barcode(seller, barcode)
+    return Response({
+      "exists": False,
+      "barcode": barcode,
+      "marking": {
+        "requires_marking": marking.requires_marking,
+        "wb_found": marking.wb_found,
+        "title": marking.title,
+        "warning": marking.warning,
+      },
+    })
+
+
+class InventoryView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    serializer = InventorySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+
+    try:
+      result = perform_inventory(
+        seller=seller,
+        barcode=data["barcode"],
+        quantity=data["quantity"],
+        warehouse_ids=data["warehouse_ids"],
+        user=request.user,
+        cell_mode=data.get("cell_mode", "auto"),
+        cell_id=data.get("cell_id"),
+        name=data.get("name", ""),
+      )
+    except IntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+      {
+        "success": True,
+        "verified": result.verified,
+        "fulfillment_quantity": result.fulfillment_quantity,
+        "wb_total_sent": result.wb_total_sent,
+        "wb_total_actual": result.wb_total_actual,
+        "wb_total_difference": result.wb_total_difference,
+        "warehouses": [
+          {
+            "warehouse_id": line.warehouse_id,
+            "warehouse_name": line.warehouse_name,
+            "wb_warehouse_id": line.wb_warehouse_id,
+            "sent_amount": line.sent_amount,
+            "wb_actual": line.wb_actual,
+            "difference": line.difference,
+          }
+          for line in result.warehouses
+        ],
+        "product": ProductSerializer(result.product).data,
+        "print_cell_label": result.print_cell_label,
+        "cell_label": result.cell_label,
+      },
+      status=status.HTTP_201_CREATED,
+    )
 
 
 class OnboardingPreviewView(APIView):

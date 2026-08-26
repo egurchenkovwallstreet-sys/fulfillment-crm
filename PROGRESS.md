@@ -133,6 +133,11 @@
 | 24.08.2026 | **Админ `/billing`** | ✅ | все селлеры + итого, 4 недели, таблица |
 | 24.08.2026 | **§9 + §10 в сборке FBS** | ✅ | QR поставки, блокировка шагов, автосписание |
 | 24.08.2026 | **Аудит реализации vs ТЗ** | ✅ | Журнал приведён к коду; очередь — §11 |
+| 25.08.2026 | **Сборка FBS: лист подбора, удаление заказа, PDF** | ✅ | `bf1c0a9`, `b193547`; `assembly_hidden`, preview pick list |
+| 25.08.2026 | **Одна поставка WB на склад + артикул/размер в листе** | ✅ | `a243096`, `Supply.wb_warehouse_id` |
+| 25.08.2026 | **Агент печати: install-agent.bat** | ✅ | `0b67b58`, `/print-agent` |
+| 25.08.2026 | **Списание остатков при доставке через ЛК WB** | ✅ | `5555e25`, `supply_sync.py`, `deduct_pending_delivery_stock` |
+| 26.08.2026 | **Fix счётчика «В доставке» 303→209** | ✅ | `c723f7b`, delivery-v14, `reconcile_stale_delivery_orders` |
 
 ---
 
@@ -154,8 +159,9 @@
 - **integrations** — AuditLog, `wb_client.py`, **`wb_statistics_client.py`**, Celery
 - **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
   - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
-  - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v11`
-  - `services/supply_flow.py` — поштучная отправка на сборку/в доставку
+  - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v14`
+  - `services/supply_sync.py` — импорт поставок WB (в т.ч. из ЛК), scanDt, списание
+  - `services/supply_flow.py` — одна поставка/склад, `delivery_stage_orders_queryset`
   - `services/assembly.py` — `get_seller_wb_tab_counts()` (кэш live API)
 
 ### API endpoints (работают)
@@ -254,8 +260,10 @@
 - [x] **Отгрузки WB:** все заказы из поставок (не только CRM)
 - [x] **Админ `/billing`:** сводка по всем селлерам
 - [x] **§9 Поставки** в «Сборке FBS» (лист → скан → ЧЗ → QR)
-- [x] **§10 Списание остатков** при «В доставку» и sync `done=true`
-- [x] **§7 Агент печати Xprinter** (`.exe` + страница `/print-agent`)
+- [x] **§10 Списание остатков** при «В доставку», sync `done=true` **и доставке через ЛК WB**
+- [x] **§7 Агент печати Xprinter** (`.exe` + `install-agent.bat` + `/print-agent`)
+- [x] **Лист подбора:** отдельная кнопка, PDF A4, артикул WB + размер, одна поставка/склад
+- [x] **Счётчик «В доставке» = ЛК WB** (delivery-v14, reconcile stale waiting)
 - [x] **Хаб `/warehouse`:** каталог WB, онбординг ячеек, перенос остатков FBS
 
 ---
@@ -264,8 +272,10 @@
 
 | Проблема | Статус | Что делать |
 |----------|--------|------------|
-| Расхождение счётчиков CRM vs WB | ✅ **Решено** | delivery-v11 |
+| Расхождение счётчиков CRM vs WB | ✅ **Решено** | delivery-v14 |
+| Счётчик «В доставке» 303 vs 209 (ИП Мазирка) | ✅ **Решено** | live API `wb_count_delivery` + `reconcile_stale_delivery_orders` |
 | Список «Новые» в сборке ≠ счётчик WB | ✅ **Решено** | reconcile_stale_new_orders + sync при входе |
+| Остатки не списываются при доставке через ЛК WB | ✅ **Решено** | `supply_sync.py` + `deduct_pending_delivery_stock` |
 | Админка без порта → 404 | ℹ️ | Только `:8080/admin` или `:8001/admin` |
 | Заказы без ячейки (—) | ℹ️ | Сначала приёмка товара с тем же баркодом |
 | WB_TOKEN_ENCRYPTION_KEY пустой | ⚠️ | Задать в `.env` на сервере |
@@ -290,6 +300,7 @@
 | **24.08.2026** | **Кабинет селлера + Statistics API + отгрузки** | Ассистент |
 | **24.08.2026** | **Тарифы + суммы отгрузок + админ `/billing`** | Ассистент |
 | **24.08.2026** | **Аудит ТЗ vs код: операционка закрыта, очередь — §11 возвраты** | Ассистент |
+| **25–26.08.2026** | **Доставка WB: списание из ЛК, счётчик 303→209, лист подбора, поставка/склад** | Ассистент |
 
 ---
 
@@ -315,7 +326,14 @@
 - `45fbae5` — WB product refresh + fix barcode lookup
 - `6c8e96c` — Cell label printing, /cells page
 - `8f0d7de` — Label 75×120 mm
+- `0b67b58` — Print agent install-agent.bat
+- `bf1c0a9` — FBS: delete order, pick list PDF, fix pick list generation
+- `b193547` — Standalone pick list preview and PDF by warehouse
+- `a243096` — One WB supply per warehouse; pick list with article and size
+- `5555e25` — Stock deduction for orders sent to delivery via WB LK
+- `c723f7b` — Fix delivery counter: complete+waiting from live API (delivery-v14)
 
 ---
 
-**Конец файла PROGRESS.md**
+**Конец документа PROGRESS.md**  
+**Детали 25–26.08.2026:** [тз и прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md](тз%20и%20прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md)

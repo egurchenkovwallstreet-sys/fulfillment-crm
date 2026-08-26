@@ -5,6 +5,8 @@ from .views import (
   IntakeHistoryView,
   IntakeLookupView,
   IntakeView,
+  InventoryLookupView,
+  InventoryView,
   OnboardingConfirmView,
   OnboardingExcludeView,
   OnboardingPreviewView,
@@ -35,6 +37,8 @@ urlpatterns = [
   path("intake/lookup/", IntakeLookupView.as_view(), name="intake_lookup"),
   path("intake/", IntakeView.as_view(), name="intake"),
   path("intake/history/", IntakeHistoryView.as_view(), name="intake_history"),
+  path("inventory/lookup/", InventoryLookupView.as_view(), name="inventory_lookup"),
+  path("inventory/", InventoryView.as_view(), name="inventory"),
   path(
     "onboarding/<int:seller_id>/preview/",
     OnboardingPreviewView.as_view(),

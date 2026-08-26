@@ -166,3 +166,62 @@ export function submitIntake(payload: IntakePayload) {
 export function fetchIntakeHistory() {
   return apiFetch<IntakeHistoryItem[]>('/api/warehouse/intake/history/')
 }
+
+export type InventoryLookup = {
+  exists: boolean
+  barcode?: string
+  product?: Product
+  marking?: {
+    requires_marking: boolean
+    wb_found: boolean
+    title?: string
+    warning?: string
+  }
+}
+
+export type InventoryWarehouseLine = {
+  warehouse_id: number
+  warehouse_name: string
+  wb_warehouse_id: number
+  sent_amount: number
+  wb_actual: number
+  difference: number
+}
+
+export type InventoryPayload = {
+  seller_id: number
+  barcode: string
+  quantity: number
+  warehouse_ids: number[]
+  cell_mode: 'auto' | 'manual'
+  cell_id?: number | null
+  name?: string
+}
+
+export type InventoryResponse = {
+  success: boolean
+  verified: boolean
+  fulfillment_quantity: number
+  wb_total_sent: number
+  wb_total_actual: number
+  wb_total_difference: number
+  warehouses: InventoryWarehouseLine[]
+  product: Product
+  print_cell_label?: boolean
+  cell_label?: CellLabelData | null
+}
+
+export function lookupInventoryBarcode(sellerId: number, barcode: string) {
+  const params = new URLSearchParams({
+    seller_id: String(sellerId),
+    barcode,
+  })
+  return apiFetch<InventoryLookup>(`/api/warehouse/inventory/lookup/?${params}`)
+}
+
+export function submitInventory(payload: InventoryPayload) {
+  return apiFetch<InventoryResponse>('/api/warehouse/inventory/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
