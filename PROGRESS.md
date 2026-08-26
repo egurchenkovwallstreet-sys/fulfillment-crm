@@ -81,8 +81,8 @@
 | §6 Заказы FBS, синхронизация | ✅ | Sync new + архив 30 дн. + статусы, Celery 15 мин |
 | §6.3 Счётчики как в ЛК WB | ✅ | **31/0/147 совпадает**; live API + кэш Seller; delivery-v11 |
 | §6 Лист подбора | ✅ | Группировка по ячейкам, UI, печать |
-| §7 Сборка и печать этикеток FBS | ✅ | ЧЗ, bind sgtin, поштучная сборка/доставка; агент Xprinter `.exe` |
-| §8 Честный знак (DataMatrix) | ✅ | Приёмка (needKiz) + сборка (bind + опрос WB) + блокировка «В доставку» |
+| §7 Сборка и печать этикеток FBS | ✅ | ЧЗ, панели очереди, быстрый баркод→ЧЗ; печать Chrome/агент |
+| §8 Честный знак (DataMatrix) | ✅ | Фоновая проверка 3+3 сек; панели «Ошибки»/«Без ЧЗ»; блок доставки |
 | §9 Поставки и ШК | ✅ | Весь цикл в «Сборке FBS»: лист → скан → ЧЗ → QR поставки, блокировка шагов |
 | §10 Списание остатков | ✅ | Авто при «В доставку» + при sync поставок `done=true` |
 | §11 Возвраты | ❌ | **Следующий операционный модуль** |
@@ -179,7 +179,9 @@
 | POST | `/api/orders/assembly/sellers/<id>/send-to-delivery/` | Один заказ → доставка WB |
 | POST | `/api/orders/assembly/sellers/<id>/start/` | Лист подбора + стикеры |
 | POST | `/api/orders/assembly/sellers/<id>/scan-print/` | Скан → печать / ЧЗ |
-| GET/POST | `/api/warehouse/intake/*` | Приёмка |
+| GET | `/api/orders/assembly/sellers/<id>/marking-status/` | Панели «Ошибки ЧЗ» / «Без ЧЗ» |
+| POST | `/api/orders/assembly/sellers/<id>/verify-marking/` | Фоновый опрос статуса ЧЗ в WB |
+| GET/POST | `/api/warehouse/inventory/*` | Инвентаризация склада |
 | GET/POST | `/api/warehouse/onboarding/<id>/*` | Мастер склада: превью каталога WB, подтверждение |
 | GET | `/api/warehouse/sellers/<id>/stock-overview/` | Остатки по складам FBS |
 | POST | `/api/warehouse/sellers/<id>/stock-transfer/` | Перенос остатка между складами WB |
@@ -196,7 +198,8 @@
 
 ### Frontend (React)
 - `/` — дашборд: **Новые / На сборке / В доставке** — совпадает с ЛК WB
-- `/assembly/:sellerId` — вкладки стадий, склады WB, «На сборку», «Все на сборку», «В доставку»
+- `/assembly/:sellerId` — вкладки стадий, склады WB, панели ЧЗ, скан баркод→ЧЗ→стикер
+- `/inventory` — **инвентаризация:** скан баркодов, сверка CRM/WB, печать этикетки ячейки
 - `/cabinet` — **кабинет селлера:** заказы д/н/м, стадии WB, отгрузки (4 нед., ₽), остатки
 - `/cabinet/:barcode` — детализация товара (график 7 дней)
 - `/billing` — **админ:** статистика отгрузок всех селлеров + итого
@@ -301,6 +304,7 @@
 | **24.08.2026** | **Тарифы + суммы отгрузок + админ `/billing`** | Ассистент |
 | **24.08.2026** | **Аудит ТЗ vs код: операционка закрыта, очередь — §11 возвраты** | Ассистент |
 | **25–26.08.2026** | **Доставка WB: списание из ЛК, счётчик 303→209, лист подбора, поставка/склад** | Ассистент |
+| **26.08.2026** | **Инвентаризация склада, лимит WB 100, ЧЗ: панели, фон, повторный скан** | Ассистент |
 
 ---
 
@@ -332,8 +336,14 @@
 - `a243096` — One WB supply per warehouse; pick list with article and size
 - `5555e25` — Stock deduction for orders sent to delivery via WB LK
 - `c723f7b` — Fix delivery counter: complete+waiting from live API (delivery-v14)
+- `a739e02` — Warehouse inventory with WB stock verification
+- `d90766f` — Inventory UI: cell label print, barcode focus
+- `2cdaeec` — Bulk assembly: batch WB supply orders in chunks of 100
+- `8451972` — Marking retry after WB error, sticker number on errors, Chrome print
+- `440585b` — Marking queue panels, background verify 3s, fast barcode→ЧЗ
 
 ---
 
 **Конец документа PROGRESS.md**  
-**Детали 25–26.08.2026:** [тз и прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md](тз%20и%20прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md)
+**Детали 25–26.08.2026:** [тз и прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md](тз%20и%20прогрес/2026-08-25-26-сборка-fbs-доставка-остатки.md)  
+**Детали 26.08.2026 (ЧЗ, инвентаризация):** [тз и прогрес/2026-08-26-сборка-fbs-чз-панели-инвентаризация.md](тз%20и%20прогрес/2026-08-26-сборка-fbs-чз-панели-инвентаризация.md)
