@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
   fetchFreeCells,
@@ -13,6 +13,7 @@ import {
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { printCellLabel } from '../utils/cellLabelPrint'
 import './InventoryPage.css'
 
 type VerifyModal = {
@@ -22,6 +23,7 @@ type VerifyModal = {
 
 export function InventoryPage() {
   const barcodeRef = useRef<HTMLInputElement>(null)
+  const quantityRef = useRef<HTMLInputElement>(null)
   const [sellers, setSellers] = useState<Seller[]>([])
   const [warehouses, setWarehouses] = useState<SellerWarehouse[]>([])
   const [cells, setCells] = useState<Cell[]>([])
@@ -39,6 +41,34 @@ export function InventoryPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionCount, setSessionCount] = useState(0)
+
+  const sellerName = sellers.find((s) => s.id === sellerId)?.company_name ?? ''
+
+  const cellLabelData = useMemo((): CellLabelData | null => {
+    if (!lookup || !barcode.trim()) return null
+    if (lookup.exists && lookup.product) {
+      return {
+        product_id: lookup.product.id,
+        seller_name: lookup.product.seller_name || sellerName,
+        cell_number: lookup.product.cell_number,
+        barcode: lookup.product.barcode,
+      }
+    }
+    if (!lookup.exists && cellMode === 'manual' && cellId) {
+      const cell = cells.find((item) => item.id === cellId)
+      if (!cell) return null
+      return {
+        seller_name: sellerName,
+        cell_number: cell.number,
+        barcode: barcode.trim(),
+      }
+    }
+    return null
+  }, [lookup, barcode, cellMode, cellId, cells, sellerName])
+
+  const focusBarcode = useCallback(() => {
+    window.setTimeout(() => barcodeRef.current?.focus(), 30)
+  }, [])
 
   const loadWarehouses = useCallback(async (id: number) => {
     try {
@@ -69,6 +99,10 @@ export function InventoryPage() {
       .catch(() => setCells([]))
   }, [sellerId, sessionActive, loadWarehouses])
 
+  useEffect(() => {
+    if (sessionActive) focusBarcode()
+  }, [sessionActive, focusBarcode])
+
   function toggleWarehouse(id: number, checked: boolean) {
     setWarehouseIds((prev) => {
       if (checked) return prev.includes(id) ? prev : [...prev, id]
@@ -83,7 +117,7 @@ export function InventoryPage() {
     setLookup(null)
     setCellMode('auto')
     setCellId('')
-    barcodeRef.current?.focus()
+    focusBarcode()
   }
 
   function startSession() {
@@ -107,6 +141,16 @@ export function InventoryPage() {
     setVerifyModal(null)
     resetBarcodeForm()
     setError('')
+  }
+
+  function handlePrintCellLabel() {
+    if (!cellLabelData) return
+    printCellLabel(cellLabelData, true)
+  }
+
+  function closeVerifyModal() {
+    setVerifyModal(null)
+    focusBarcode()
   }
 
   async function handleSyncWarehouses() {
@@ -140,9 +184,11 @@ export function InventoryPage() {
         setCellId('')
         setQuantityInput('')
       }
+      window.setTimeout(() => quantityRef.current?.focus(), 50)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка поиска')
       setLookup(null)
+      focusBarcode()
     } finally {
       setLoading(false)
     }
@@ -201,7 +247,6 @@ export function InventoryPage() {
   }
 
   const selectedWarehouses = warehouses.filter((wh) => warehouseIds.includes(wh.id))
-  const sellerName = sellers.find((s) => s.id === sellerId)?.company_name ?? ''
 
   return (
     <div className="page inventory-page">
@@ -212,7 +257,7 @@ export function InventoryPage() {
             Фактический пересчёт на фулфилменте → остаток в CRM → выбранные склады FBS в ЛК WB
           </p>
         </div>
-        <Link to="/warehouse" className="btn btn--secondary">
+        <Link to="/warehouse" className="btn btn--secondary inventory-btn">
           ← Склад
         </Link>
       </header>
@@ -223,9 +268,10 @@ export function InventoryPage() {
         <section className="panel inventory-setup">
           <h2>Начало инвентаризации</h2>
           <div className="inventory-setup__grid">
-            <label>
+            <label className="inventory-field">
               Селлер
               <select
+                className="inventory-control"
                 value={sellerId}
                 onChange={(e) => {
                   setSellerId(e.target.value ? Number(e.target.value) : '')
@@ -243,7 +289,7 @@ export function InventoryPage() {
                 <strong>FBS-склады для остатков в WB</strong>
                 <button
                   type="button"
-                  className="btn btn--secondary btn--small"
+                  className="btn btn--secondary inventory-btn inventory-btn--compact"
                   disabled={!sellerId || loading}
                   onClick={() => void handleSyncWarehouses()}
                 >
@@ -277,7 +323,7 @@ export function InventoryPage() {
           </div>
           <button
             type="button"
-            className="btn btn--danger"
+            className="btn btn--danger inventory-btn inventory-btn--large"
             disabled={!sellerId || warehouseIds.length < 1 || loading}
             onClick={startSession}
           >
@@ -296,7 +342,11 @@ export function InventoryPage() {
               </div>
               <div className="inventory-session__actions">
                 <span className="inventory-session__count">Позиций: {sessionCount}</span>
-                <button type="button" className="btn btn--danger" onClick={finishSession}>
+                <button
+                  type="button"
+                  className="btn btn--danger inventory-btn"
+                  onClick={finishSession}
+                >
                   Завершить инвентаризацию
                 </button>
               </div>
@@ -304,43 +354,54 @@ export function InventoryPage() {
           </section>
 
           <form className="panel inventory-form" onSubmit={(e) => void handleSubmit(e)}>
-            <label>
-              Баркод
-              <input
-                ref={barcodeRef}
-                type="text"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                onKeyDown={handleBarcodeKeyDown}
-                placeholder="Сканируйте или введите"
-                autoComplete="off"
-              />
-            </label>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              disabled={loading || !barcode.trim()}
-              onClick={() => void handleLookup()}
-            >
-              Найти товар
-            </button>
+            <div className="inventory-scan">
+              <label className="inventory-field inventory-field--barcode">
+                Баркод
+                <input
+                  ref={barcodeRef}
+                  className="inventory-control inventory-control--barcode"
+                  type="text"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  onKeyDown={handleBarcodeKeyDown}
+                  placeholder="Наведите сканер и отсканируйте баркод"
+                  autoComplete="off"
+                  autoFocus
+                  inputMode="numeric"
+                />
+              </label>
+              <button
+                type="button"
+                className="btn btn--secondary inventory-btn inventory-btn--lookup"
+                disabled={loading || !barcode.trim()}
+                onClick={() => void handleLookup()}
+              >
+                Найти товар
+              </button>
+            </div>
 
             {lookup && (
               <div className="inventory-product">
                 {lookup.exists && lookup.product ? (
-                  <>
-                    <p>
+                  <div className="inventory-product-card">
+                    <div className="inventory-product-card__main">
                       <strong>{lookup.product.name || '—'}</strong>
-                      <br />
-                      Ячейка №{lookup.product.cell_number} · в CRM сейчас: {lookup.product.quantity} шт.
-                    </p>
-                  </>
+                      <span className="inventory-product-card__meta">
+                        В CRM сейчас: {lookup.product.quantity} шт.
+                      </span>
+                    </div>
+                    <div className="inventory-cell-badge">
+                      <span className="inventory-cell-badge__label">Ячейка</span>
+                      <span className="inventory-cell-badge__number">№{lookup.product.cell_number}</span>
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <p className="inventory-hint">Новый баркод — будет создан товар и ячейка</p>
-                    <label>
+                    <label className="inventory-field">
                       Название (необязательно)
                       <input
+                        className="inventory-control"
                         type="text"
                         value={productName}
                         onChange={(e) => setProductName(e.target.value)}
@@ -367,6 +428,7 @@ export function InventoryPage() {
                       </label>
                       {cellMode === 'manual' && (
                         <select
+                          className="inventory-control"
                           value={cellId}
                           onChange={(e) => setCellId(e.target.value ? Number(e.target.value) : '')}
                         >
@@ -378,13 +440,33 @@ export function InventoryPage() {
                           ))}
                         </select>
                       )}
+                      {cellMode === 'manual' && cellId && (
+                        <div className="inventory-cell-badge inventory-cell-badge--inline">
+                          <span className="inventory-cell-badge__label">Выбрана</span>
+                          <span className="inventory-cell-badge__number">
+                            №{cells.find((cell) => cell.id === cellId)?.number}
+                          </span>
+                        </div>
+                      )}
                     </fieldset>
                   </>
                 )}
 
-                <label>
+                {cellLabelData && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary inventory-btn inventory-btn--print"
+                    onClick={handlePrintCellLabel}
+                  >
+                    Распечатать номер ячейки
+                  </button>
+                )}
+
+                <label className="inventory-field">
                   Фактическое количество на фулфилменте
                   <input
+                    ref={quantityRef}
+                    className="inventory-control inventory-control--quantity"
                     type="number"
                     min={0}
                     step={1}
@@ -394,7 +476,11 @@ export function InventoryPage() {
                   />
                 </label>
 
-                <button type="submit" className="btn btn--danger" disabled={loading}>
+                <button
+                  type="submit"
+                  className="btn btn--danger inventory-btn inventory-btn--large"
+                  disabled={loading}
+                >
                   {loading ? 'Обработка…' : 'Провести инвентаризацию'}
                 </button>
               </div>
@@ -404,7 +490,7 @@ export function InventoryPage() {
       )}
 
       {verifyModal && (
-        <div className="inventory-modal-backdrop" onClick={() => setVerifyModal(null)}>
+        <div className="inventory-modal-backdrop" onClick={closeVerifyModal}>
           <div
             className={`inventory-modal inventory-modal--${verifyModal.kind}`}
             onClick={(e) => e.stopPropagation()}
@@ -488,8 +574,8 @@ export function InventoryPage() {
 
             <button
               type="button"
-              className="btn btn--primary inventory-modal__close"
-              onClick={() => setVerifyModal(null)}
+              className="btn btn--primary inventory-btn inventory-btn--large inventory-modal__close"
+              onClick={closeVerifyModal}
             >
               Продолжить
             </button>
@@ -500,7 +586,10 @@ export function InventoryPage() {
       {labelPrompt && (
         <CellLabelPrompt
           label={labelPrompt}
-          onClose={() => setLabelPrompt(null)}
+          onClose={() => {
+            setLabelPrompt(null)
+            focusBarcode()
+          }}
         />
       )}
     </div>
