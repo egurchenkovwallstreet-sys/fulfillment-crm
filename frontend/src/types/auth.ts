@@ -10,6 +10,10 @@ export type User = {
   role_display: string
   seller: number | null
   seller_name: string | null
+  wb_enabled?: boolean
+  ozon_enabled?: boolean
+  has_wb_token?: boolean
+  has_ozon_api?: boolean
 }
 
 export type LoginResponse = {

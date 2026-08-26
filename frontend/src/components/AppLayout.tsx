@@ -1,25 +1,50 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useMarketplace } from '../context/MarketplaceContext'
 import { ROLE_LABELS } from '../types/auth'
 import '../App.css'
 
 export function AppLayout() {
   const { user, logout, isAdmin, isManager, isSeller } = useAuth()
+  const { marketplace, setMarketplace, showSwitcher } = useMarketplace()
 
   if (!user) return null
 
   const roleLabel = ROLE_LABELS[user.role]
+  const mpLabel = marketplace === 'ozon' ? 'Ozon FBS' : 'Wildberries FBS'
 
   return (
-    <div className="layout">
+    <div className={`layout layout--${marketplace}`} data-marketplace={marketplace}>
       <aside className="sidebar">
         <div className="sidebar__brand">
           <span className="sidebar__logo">FF</span>
           <div>
             <strong>Fulfillment CRM</strong>
-            <small>WMS · Wildberries FBS</small>
+            <small>WMS · {mpLabel}</small>
           </div>
         </div>
+        {showSwitcher && (
+          <div className="mp-switcher" role="tablist" aria-label="Маркетплейс">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={marketplace === 'wb'}
+              className={`mp-switcher__btn${marketplace === 'wb' ? ' mp-switcher__btn--active' : ''}`}
+              onClick={() => setMarketplace('wb')}
+            >
+              WB
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={marketplace === 'ozon'}
+              className={`mp-switcher__btn${marketplace === 'ozon' ? ' mp-switcher__btn--active' : ''}`}
+              onClick={() => setMarketplace('ozon')}
+            >
+              Ozon
+            </button>
+          </div>
+        )}
         <nav className="sidebar__nav">
           <NavLink to="/" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`} end>
             Дашборд
@@ -96,7 +121,7 @@ export function AppLayout() {
         </div>
       </aside>
       <div className="main">
-        <Outlet />
+        <Outlet key={marketplace} />
       </div>
     </div>
   )

@@ -752,6 +752,31 @@ export function AssemblySellerPage() {
 
   if (!data) return null
 
+  if (data.marketplace === 'ozon') {
+    return (
+      <>
+        <header className="topbar">
+          <div>
+            <p>
+              <Link to="/assembly">← Селлеры Ozon</Link>
+            </p>
+            <h1>{data.seller.company_name}</h1>
+            <p>Сборка FBS Ozon</p>
+          </div>
+        </header>
+        <section className="panel">
+          <p>{data.message || 'Сборка отправлений Ozon — шаг 4 плана.'}</p>
+          <p>
+            Новые: <strong>{data.counts.new ?? 0}</strong>
+            {' · '}
+            В доставке: <strong>{data.counts.in_delivery ?? 0}</strong>
+          </p>
+          <p>Ключи API и счётчики уже работают. Скан, этикетка, ЧЗ и акт появятся следующим этапом.</p>
+        </section>
+      </>
+    )
+  }
+
   const counts = data.counts
   const assemblyEligible = data.assembly_eligible
 

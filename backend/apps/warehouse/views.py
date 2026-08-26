@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller
 
 from .models import Cell, Product, StockOperation
@@ -50,7 +51,8 @@ class SellerListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
-    sellers = Seller.objects.filter(is_active=True).order_by("company_name")
+    marketplace = parse_marketplace(request)
+    sellers = filter_sellers_qs(Seller.objects.filter(is_active=True), marketplace).order_by("company_name")
     return Response(SellerBriefSerializer(sellers, many=True).data)
 
 
@@ -66,7 +68,10 @@ class CellListView(APIView):
       )
 
     free_only = request.query_params.get("free") == "1"
-    cells = cells_queryset_ordered(Cell.objects.filter(seller_id=seller_id))
+    marketplace = parse_marketplace(request)
+    cells = cells_queryset_ordered(
+      Cell.objects.filter(seller_id=seller_id, marketplace=marketplace)
+    )
     if free_only:
       cells = cells.filter(is_occupied=False)
     return Response(CellSerializer(cells, many=True).data)
@@ -78,8 +83,9 @@ class SellerProductsView(APIView):
 
   def get(self, request, seller_id):
     seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    marketplace = parse_marketplace(request)
     products = (
-      Product.objects.filter(seller=seller)
+      Product.objects.filter(seller=seller, marketplace=marketplace)
       .select_related("cell", "seller")
       .order_by("cell__number")
     )
@@ -197,7 +203,11 @@ class IntakeLookupView(APIView):
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     product = (
-      Product.objects.filter(seller_id=seller_id, barcode=barcode)
+      Product.objects.filter(
+        seller_id=seller_id,
+        barcode=barcode,
+        marketplace=parse_marketplace(request),
+      )
       .select_related("cell", "seller")
       .first()
     )
@@ -239,7 +249,8 @@ class IntakeView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request):
-    serializer = IntakeSerializer(data=request.data)
+    marketplace = parse_marketplace(request)
+    serializer = IntakeSerializer(data=request.data, context={"marketplace": marketplace})
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
 
@@ -251,18 +262,21 @@ class IntakeView(APIView):
         barcode=data["barcode"],
         quantity=data.get("quantity", 0),
         user=request.user,
-        wb_warehouse_id=data["wb_warehouse_id"],
+        wb_warehouse_id=data.get("wb_warehouse_id"),
         stock_mode=data.get("stock_mode", "intake"),
         verified_stock_match=data.get("verified_stock_match", False),
         cell_mode=data.get("cell_mode", "auto"),
         cell_id=data.get("cell_id"),
         name=data.get("name", ""),
+        marketplace=marketplace,
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     qty = result.product.quantity
-    if result.stock_mode == "sync_from_wb":
+    if marketplace == OZON:
+      message = f"Принято {data.get('quantity', 0)} шт. на склад Ozon (CRM)"
+    elif result.stock_mode == "sync_from_wb":
       message = (
         f"Остаток CRM установлен по ЛК WB: {qty} шт. "
         f"(склад {result.wb_sync.get('warehouse_name') if result.wb_sync else ''})"
@@ -316,8 +330,9 @@ class InventoryLookupView(APIView):
       )
 
     seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    marketplace = parse_marketplace(request)
     product = (
-      Product.objects.filter(seller_id=seller_id, barcode=barcode)
+      Product.objects.filter(seller_id=seller_id, barcode=barcode, marketplace=marketplace)
       .select_related("cell", "seller")
       .first()
     )
@@ -352,7 +367,8 @@ class InventoryView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request):
-    serializer = InventorySerializer(data=request.data)
+    marketplace = parse_marketplace(request)
+    serializer = InventorySerializer(data=request.data, context={"marketplace": marketplace})
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
 
@@ -363,11 +379,12 @@ class InventoryView(APIView):
         seller=seller,
         barcode=data["barcode"],
         quantity=data["quantity"],
-        warehouse_ids=data["warehouse_ids"],
+        warehouse_ids=data.get("warehouse_ids") or [],
         user=request.user,
         cell_mode=data.get("cell_mode", "auto"),
         cell_id=data.get("cell_id"),
         name=data.get("name", ""),
+        marketplace=marketplace,
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

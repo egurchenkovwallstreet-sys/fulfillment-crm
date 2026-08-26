@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import { getAccessToken } from './tokens'
+import { getStoredMarketplace } from '../utils/marketplace'
 
 export type XlIntakeStatus = 'scanning' | 'saved' | 'applied'
 
@@ -77,7 +78,9 @@ export function connectXlWb(sessionId: number, token: string) {
 export async function downloadXlExcel(sessionId: number) {
   const token = getAccessToken()
   const response = await fetch(`/api/warehouse/xl-intake/sessions/${sessionId}/excel/`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: token
+      ? { Authorization: `Bearer ${token}`, 'X-Marketplace': getStoredMarketplace() }
+      : { 'X-Marketplace': getStoredMarketplace() },
   })
   if (!response.ok) {
     let detail = `Ошибка ${response.status}`

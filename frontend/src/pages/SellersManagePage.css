@@ -64,7 +64,26 @@
   color: #64748b;
 }
 
-.btn--sm {
-  padding: 0.35rem 0.65rem;
-  font-size: 0.85rem;
+.sellers-mp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sellers-tag--wb {
+  background: #fce7f6;
+  color: #9d174d;
+}
+
+.sellers-tag--ozon {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.sellers-ozon-hint {
+  margin: 0 0 0.75rem;
+  color: #64748b;
+  font-size: 0.9rem;
 }

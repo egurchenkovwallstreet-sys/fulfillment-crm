@@ -5,6 +5,7 @@ from .views import (
   SellerWarehouseSyncView,
   SellerWarehouseToggleView,
 )
+from .views_ozon import SellerMarketplaceFlagsView, SellerOzonKeysView
 from .views_cabinet import (
   AdminBillingDashboardView,
   SellerCabinetBarcodeView,
@@ -24,6 +25,16 @@ urlpatterns = [
     "manage/<int:seller_id>/invite/",
     SellerInviteView.as_view(),
     name="seller-invite",
+  ),
+  path(
+    "manage/<int:seller_id>/marketplaces/",
+    SellerMarketplaceFlagsView.as_view(),
+    name="seller-marketplaces",
+  ),
+  path(
+    "manage/<int:seller_id>/ozon-keys/",
+    SellerOzonKeysView.as_view(),
+    name="seller-ozon-keys",
   ),
   path("cabinet/", SellerCabinetView.as_view(), name="seller-cabinet"),
   path(

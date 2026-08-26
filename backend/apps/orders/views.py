@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
@@ -154,14 +155,19 @@ class OrderStatsView(APIView):
     ).count()
 
     from apps.warehouse.models import Product
+    from apps.orders.services.ozon_counts import _stage_totals_ozon
 
+    marketplace = parse_marketplace(request)
     counts_synced_at = None
-    stats_source = "wb_api_cache"
+    stats_source = "ozon_api_cache" if marketplace == OZON else "wb_api_cache"
 
     if user.role == "seller" and user.seller_id:
       seller = Seller.objects.filter(pk=user.seller_id).first()
       if seller:
-        counts, latest_sync = _stage_totals_for_sellers([seller])
+        if marketplace == OZON:
+          counts, latest_sync = _stage_totals_ozon([seller] if seller.ozon_enabled else [])
+        else:
+          counts, latest_sync = _stage_totals_for_sellers([seller] if seller.wb_enabled else [])
         new_orders = counts["new"]
         in_assembly = counts["in_picking"]
         in_delivery = counts["in_delivery"]
@@ -169,8 +175,11 @@ class OrderStatsView(APIView):
       else:
         new_orders = in_assembly = in_delivery = 0
     else:
-      sellers_qs = Seller.objects.filter(is_active=True)
-      counts, latest_sync = _stage_totals_for_sellers(sellers_qs)
+      sellers_qs = filter_sellers_qs(Seller.objects.filter(is_active=True), marketplace)
+      if marketplace == OZON:
+        counts, latest_sync = _stage_totals_ozon(sellers_qs)
+      else:
+        counts, latest_sync = _stage_totals_for_sellers(sellers_qs)
       new_orders = counts["new"]
       in_assembly = counts["in_picking"]
       in_delivery = counts["in_delivery"]
@@ -189,9 +198,12 @@ class OrderStatsView(APIView):
     }
 
     if user.role in ("admin", "manager"):
-      data["sellers_count"] = Seller.objects.filter(is_active=True).count()
+      data["sellers_count"] = filter_sellers_qs(
+        Seller.objects.filter(is_active=True),
+        marketplace,
+      ).count()
 
-    products_qs = Product.objects.all()
+    products_qs = Product.objects.filter(marketplace=marketplace)
     if user.role == "seller" and user.seller_id:
       products_qs = products_qs.filter(seller_id=user.seller_id)
     data["sku_count"] = products_qs.count()
@@ -204,10 +216,54 @@ class OrderSyncView(APIView):
 
   def post(self, request):
     user = request.user
+    marketplace = parse_marketplace(request)
     serializer = OrderSyncSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     seller_id = serializer.validated_data.get("seller_id")
     sync_mode = serializer.validated_data.get("mode", "full")
+
+    if marketplace == OZON:
+      from apps.orders.services.ozon_counts import (
+        OzonCountsError,
+        _stage_totals_ozon,
+        refresh_ozon_counts,
+      )
+
+      if user.role == "seller":
+        sellers = Seller.objects.filter(pk=user.seller_id, ozon_enabled=True)
+      elif seller_id:
+        sellers = Seller.objects.filter(pk=seller_id, is_active=True, ozon_enabled=True)
+      else:
+        sellers = Seller.objects.filter(is_active=True, ozon_enabled=True)
+
+      errors = []
+      refreshed = 0
+      for seller in sellers:
+        if not seller.ozon_client_id or not seller.ozon_api_key_encrypted:
+          continue
+        try:
+          refresh_ozon_counts(seller)
+          refreshed += 1
+        except OzonCountsError as exc:
+          errors.append({"seller_id": seller.id, "error": str(exc)})
+
+      counts, _latest = _stage_totals_ozon(sellers)
+      return Response({
+        "success": True,
+        "marketplace": OZON,
+        "refreshed": refreshed,
+        "errors": errors,
+        "dashboard_stats": {
+          "new_orders": counts["new"],
+          "in_assembly": counts["in_picking"],
+          "in_delivery": counts["in_delivery"],
+        },
+        "message": (
+          "Счётчики Ozon обновлены. Сборка отправлений — следующий шаг."
+          if refreshed
+          else "Нет селлеров с ключами Ozon. Добавьте Client-Id и Api-Key в «Селлеры»."
+        ),
+      })
 
     if user.role == "seller":
       if not user.seller_id:
@@ -304,11 +360,28 @@ class AssemblySellerListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
-    sellers = Seller.objects.filter(is_active=True).order_by("company_name")
+    marketplace = parse_marketplace(request)
+    sellers = filter_sellers_qs(
+      Seller.objects.filter(is_active=True),
+      marketplace,
+    ).order_by("company_name")
     payload = []
     for seller in sellers:
-      tab_counts = get_seller_wb_tab_counts(seller)
-      stage_counts = get_seller_stage_counts(seller)
+      if marketplace == OZON:
+        from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
+
+        tab_counts = get_seller_ozon_tab_counts(seller)
+        stage_counts = {
+          "assembled": 0,
+          "label_printed": 0,
+          "marked": 0,
+          "in_supply": 0,
+          "shipped": 0,
+          "cancelled": 0,
+        }
+      else:
+        tab_counts = get_seller_wb_tab_counts(seller)
+        stage_counts = get_seller_stage_counts(seller)
       total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
       payload.append({
         "id": seller.id,
@@ -318,6 +391,8 @@ class AssemblySellerListView(APIView):
         "in_picking": tab_counts["in_picking"],
         "in_delivery": tab_counts["in_delivery"],
         "total_active": total_active,
+        "marketplace": marketplace,
+        "has_ozon_api": bool(seller.ozon_client_id and seller.ozon_api_key_encrypted),
       })
     return Response(SellerAssemblyCountersSerializer(payload, many=True).data)
 
@@ -330,6 +405,30 @@ class AssemblySellerDetailView(APIView):
     seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
+
+    marketplace = parse_marketplace(request)
+    if marketplace == OZON:
+      from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
+
+      tab_counts = get_seller_ozon_tab_counts(seller)
+      return Response({
+        "seller": {"id": seller.id, "company_name": seller.company_name},
+        "marketplace": OZON,
+        "ozon_assembly_ready": False,
+        "message": (
+          "Сборка FBS Ozon (скан, этикетка, ЧЗ, акт) — шаг 4 плана. "
+          "Сейчас обновляются счётчики новых / в доставке."
+        ),
+        "counts": {
+          "new": tab_counts["new"],
+          "in_picking": tab_counts["in_picking"],
+          "in_delivery": tab_counts["in_delivery"],
+        },
+        "orders": [],
+        "pick_list": None,
+        "supplies_forming": 0,
+        "warehouses": [],
+      })
 
     stage_counts = get_seller_stage_counts(seller)
     tab_counts = get_seller_wb_tab_counts(seller)

@@ -3,6 +3,8 @@ import {
   createSeller,
   fetchSellerInvite,
   fetchSellersManage,
+  saveSellerOzonKeys,
+  updateSellerMarketplaces,
   type SellerManageItem,
 } from '../api/sellerAdmin'
 import { copyToClipboard } from '../utils/copyToClipboard'
@@ -19,10 +21,16 @@ export function SellersManagePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [companyName, setCompanyName] = useState('')
+  const [createWb, setCreateWb] = useState(true)
+  const [createOzon, setCreateOzon] = useState(false)
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
   const [tariffSeller, setTariffSeller] = useState<SellerManageItem | null>(null)
+  const [ozonSellerId, setOzonSellerId] = useState<number | null>(null)
+  const [ozonClientId, setOzonClientId] = useState('')
+  const [ozonApiKey, setOzonApiKey] = useState('')
+  const [savingOzon, setSavingOzon] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,11 +51,19 @@ export function SellersManagePage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
     if (!companyName.trim()) return
+    if (!createWb && !createOzon) {
+      setError('Выберите хотя бы один маркетплейс')
+      return
+    }
     setCreating(true)
     setMessage('')
     setError('')
     try {
-      const created = await createSeller({ company_name: companyName.trim() })
+      const created = await createSeller({
+        company_name: companyName.trim(),
+        wb_enabled: createWb,
+        ozon_enabled: createOzon,
+      })
       setCompanyName('')
       setMessage(`Селлер «${created.company_name}» создан. Скопируйте ссылку для регистрации.`)
       await load()
@@ -102,6 +118,14 @@ export function SellersManagePage() {
             placeholder="ИП / название компании"
             required
           />
+          <label className="sellers-mp-check">
+            <input type="checkbox" checked={createWb} onChange={(e) => setCreateWb(e.target.checked)} />
+            WB
+          </label>
+          <label className="sellers-mp-check">
+            <input type="checkbox" checked={createOzon} onChange={(e) => setCreateOzon(e.target.checked)} />
+            Ozon
+          </label>
           <button type="submit" className="btn btn--primary" disabled={creating}>
             {creating ? 'Создание…' : 'Создать'}
           </button>
@@ -118,8 +142,10 @@ export function SellersManagePage() {
               <thead>
                 <tr>
                   <th>Компания</th>
+                  <th>Маркетплейсы</th>
                   <th>Аккаунт</th>
                   <th>WB: новые / сборка / доставка</th>
+                  <th>Ozon: новые / сборка / доставка</th>
                   <th>Тариф</th>
                   <th>Ссылка</th>
                 </tr>
@@ -132,6 +158,47 @@ export function SellersManagePage() {
                       {!seller.is_active && <span className="sellers-tag sellers-tag--muted">неактивен</span>}
                     </td>
                     <td>
+                      {seller.wb_enabled && <span className="sellers-tag sellers-tag--wb">WB</span>}
+                      {seller.ozon_enabled && <span className="sellers-tag sellers-tag--ozon">Ozon</span>}
+                      {!seller.wb_enabled && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() =>
+                            updateSellerMarketplaces(seller.id, { wb_enabled: true }).then(load)
+                          }
+                        >
+                          + WB
+                        </button>
+                      )}
+                      {!seller.ozon_enabled && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => {
+                            setOzonSellerId(seller.id)
+                            setOzonClientId(seller.ozon_client_id || '')
+                            setOzonApiKey('')
+                          }}
+                        >
+                          + Ozon
+                        </button>
+                      )}
+                      {seller.ozon_enabled && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => {
+                            setOzonSellerId(seller.id)
+                            setOzonClientId(seller.ozon_client_id || '')
+                            setOzonApiKey('')
+                          }}
+                        >
+                          {seller.has_ozon_api ? 'Ключи Ozon' : 'Ключи Ozon'}
+                        </button>
+                      )}
+                    </td>
+                    <td>
                       {seller.has_account ? (
                         <span className="sellers-tag sellers-tag--ok">{seller.username}</span>
                       ) : (
@@ -140,6 +207,9 @@ export function SellersManagePage() {
                     </td>
                     <td>
                       {seller.wb_count_new} / {seller.wb_count_assembly} / {seller.wb_count_delivery}
+                    </td>
+                    <td>
+                      {seller.ozon_count_new} / {seller.ozon_count_assembly} / {seller.ozon_count_delivery}
                     </td>
                     <td>
                       <button
@@ -174,6 +244,59 @@ export function SellersManagePage() {
           </div>
         )}
       </section>
+
+      {ozonSellerId !== null && (
+        <section className="panel sellers-create-panel">
+          <h2 className="section-title">Ключи Ozon Seller API</h2>
+          <p className="sellers-ozon-hint">
+            ЛК seller.ozon.ru → Настройки → API-ключи: скопируйте Client-Id и Api-Key.
+          </p>
+          <form
+            className="sellers-create-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setSavingOzon(true)
+              setError('')
+              setMessage('')
+              try {
+                const result = await saveSellerOzonKeys(ozonSellerId, {
+                  client_id: ozonClientId.trim(),
+                  api_key: ozonApiKey.trim(),
+                })
+                setMessage(result.detail)
+                setOzonSellerId(null)
+                setOzonApiKey('')
+                await load()
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Не удалось сохранить ключи Ozon')
+              } finally {
+                setSavingOzon(false)
+              }
+            }}
+          >
+            <input
+              type="text"
+              value={ozonClientId}
+              onChange={(e) => setOzonClientId(e.target.value)}
+              placeholder="Client-Id"
+              required
+            />
+            <input
+              type="password"
+              value={ozonApiKey}
+              onChange={(e) => setOzonApiKey(e.target.value)}
+              placeholder="Api-Key"
+              required
+            />
+            <button type="submit" className="btn btn--primary" disabled={savingOzon}>
+              {savingOzon ? 'Проверка…' : 'Сохранить и проверить'}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => setOzonSellerId(null)}>
+              Отмена
+            </button>
+          </form>
+        </section>
+      )}
 
       {tariffSeller && (
         <SellerTariffModal

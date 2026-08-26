@@ -6,15 +6,31 @@ from .models import Cell, Product, StockOperation
 
 
 class SellerBriefSerializer(serializers.ModelSerializer):
+  has_wb_token = serializers.SerializerMethodField()
+  has_ozon_api = serializers.SerializerMethodField()
+
   class Meta:
     model = Seller
-    fields = ("id", "company_name")
+    fields = (
+      "id",
+      "company_name",
+      "wb_enabled",
+      "ozon_enabled",
+      "has_wb_token",
+      "has_ozon_api",
+    )
+
+  def get_has_wb_token(self, obj: Seller) -> bool:
+    return bool(obj.wb_api_token_encrypted)
+
+  def get_has_ozon_api(self, obj: Seller) -> bool:
+    return bool(obj.ozon_client_id and obj.ozon_api_key_encrypted)
 
 
 class CellSerializer(serializers.ModelSerializer):
   class Meta:
     model = Cell
-    fields = ("id", "number", "is_occupied")
+    fields = ("id", "number", "is_occupied", "marketplace")
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -38,6 +54,7 @@ class ProductSerializer(serializers.ModelSerializer):
       "tech_size",
       "wb_size",
       "photo_url",
+      "marketplace",
     )
 
 
@@ -62,7 +79,7 @@ class StockOperationSerializer(serializers.ModelSerializer):
 
 class IntakeSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField()
-  wb_warehouse_id = serializers.IntegerField()
+  wb_warehouse_id = serializers.IntegerField(required=False, allow_null=True)
   barcode = serializers.CharField(max_length=100)
   quantity = serializers.IntegerField(min_value=0, default=0)
   stock_mode = serializers.ChoiceField(
@@ -80,10 +97,17 @@ class IntakeSerializer(serializers.Serializer):
     return value
 
   def validate(self, attrs):
+    from apps.integrations.marketplace import OZON
     from apps.sellers.models import SellerWarehouse
 
+    marketplace = self.context.get("marketplace") or "wb"
+    if marketplace == OZON:
+      return attrs
+
     seller_id = attrs["seller_id"]
-    wh_id = attrs["wb_warehouse_id"]
+    wh_id = attrs.get("wb_warehouse_id")
+    if not wh_id:
+      raise serializers.ValidationError({"wb_warehouse_id": "Укажите склад WB"})
     if not SellerWarehouse.objects.filter(pk=wh_id, seller_id=seller_id).exists():
       raise serializers.ValidationError({"wb_warehouse_id": "Склад WB не найден у этого селлера"})
 
@@ -196,7 +220,8 @@ class InventorySerializer(serializers.Serializer):
   quantity = serializers.IntegerField(min_value=0)
   warehouse_ids = serializers.ListField(
     child=serializers.IntegerField(),
-    min_length=1,
+    required=False,
+    allow_empty=True,
   )
   cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
   cell_id = serializers.IntegerField(required=False, allow_null=True)
@@ -208,11 +233,19 @@ class InventorySerializer(serializers.Serializer):
     return value
 
   def validate(self, attrs):
+    from apps.integrations.marketplace import OZON
     from apps.sellers.models import SellerWarehouse
 
+    marketplace = self.context.get("marketplace") or "wb"
+    if marketplace == OZON:
+      attrs["warehouse_ids"] = []
+      return attrs
+
     seller_id = attrs["seller_id"]
-    warehouse_ids = list(dict.fromkeys(attrs["warehouse_ids"]))
+    warehouse_ids = list(dict.fromkeys(attrs.get("warehouse_ids") or []))
     attrs["warehouse_ids"] = warehouse_ids
+    if not warehouse_ids:
+      raise serializers.ValidationError({"warehouse_ids": "Выберите хотя бы один склад WB"})
 
     found = SellerWarehouse.objects.filter(
       seller_id=seller_id,

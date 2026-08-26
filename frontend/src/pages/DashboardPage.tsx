@@ -9,6 +9,7 @@ import {
   type OrderStats,
 } from '../api/orders'
 import { useAuth } from '../context/AuthContext'
+import { useMarketplace } from '../context/MarketplaceContext'
 
 const STATS_POLL_MS = 60_000
 
@@ -28,6 +29,7 @@ function statsFromSync(sync: DashboardStats): Partial<OrderStats> {
 
 export function DashboardPage() {
   const { user, isAdmin, isManager, isSeller } = useAuth()
+  const { marketplace } = useMarketplace()
   const location = useLocation()
   const [stats, setStats] = useState<OrderStats>({
     orders_today: 0,
@@ -95,15 +97,19 @@ export function DashboardPage() {
 
   const syncedLabel = stats.counts_synced_at
     ? `Сохранено в БД: ${new Date(stats.counts_synced_at).toLocaleString('ru-RU')}`
-    : stats.stats_source === 'cache'
-      ? 'Данные из кэша WB'
-      : 'Нажмите «Обновить данные WB» для актуальных цифр'
+      : stats.stats_source === 'cache'
+      ? marketplace === 'ozon'
+        ? 'Данные из кэша Ozon'
+        : 'Данные из кэша WB'
+      : marketplace === 'ozon'
+        ? 'Нажмите «Обновить данные Ozon» для актуальных цифр'
+        : 'Нажмите «Обновить данные WB» для актуальных цифр'
 
   return (
     <>
       <header className="topbar">
         <div>
-          <h1>Дашборд склада</h1>
+          <h1>Дашборд склада {marketplace === 'ozon' ? 'Ozon' : 'WB'}</h1>
           <p>
             {isSeller && user.seller_name
               ? `Кабинет селлера: ${user.seller_name}`
@@ -119,7 +125,13 @@ export function DashboardPage() {
           onClick={handleSync}
           disabled={syncing}
         >
-          {syncing ? 'Синхронизация WB…' : 'Обновить данные WB'}
+          {syncing
+            ? marketplace === 'ozon'
+              ? 'Синхронизация Ozon…'
+              : 'Синхронизация WB…'
+            : marketplace === 'ozon'
+              ? 'Обновить данные Ozon'
+              : 'Обновить данные WB'}
         </button>
       </header>
 
@@ -130,7 +142,7 @@ export function DashboardPage() {
         <StatCard
           label="Новые заказы"
           value={String(stats.new_orders)}
-          hint={isSeller ? 'Ваши новые заказы' : 'Статус «Новый» в WB'}
+          hint={isSeller ? 'Ваши новые заказы' : marketplace === 'ozon' ? 'awaiting_packaging' : 'Статус «Новый» в WB'}
           tone="red"
         />
         {isAdmin && (
@@ -146,13 +158,13 @@ export function DashboardPage() {
             <StatCard
               label="На сборке"
               value={String(stats.in_assembly ?? stats.in_picking)}
-              hint="Статус «На сборке» в WB"
+              hint={marketplace === 'ozon' ? 'Сборка в CRM (шаг 4)' : 'Статус «На сборке» в WB'}
               tone="orange"
             />
             <StatCard
               label="В доставке"
               value={String(stats.in_delivery ?? 0)}
-              hint="Статус «В доставке» в WB"
+              hint={marketplace === 'ozon' ? 'awaiting_deliver' : 'Статус «В доставке» в WB'}
               tone="blue"
             />
           </>
@@ -198,8 +210,11 @@ export function DashboardPage() {
             <li className="checklist__item checklist__item--done">Авторизация JWT + роли</li>
             <li className="checklist__item checklist__item--done">Модуль приёмки товара</li>
             <li className="checklist__item checklist__item--done">Модуль заказов и листа подбора</li>
-            <li className="checklist__item">Интеграция Wildberries FBS (токены)</li>
-            <li className="checklist__item">Печать этикеток Xprinter</li>
+            <li className="checklist__item checklist__item--done">Интеграция Wildberries FBS (токены)</li>
+            <li className="checklist__item checklist__item--done">Печать этикеток Xprinter</li>
+            <li className={marketplace === 'ozon' ? 'checklist__item' : 'checklist__item checklist__item--done'}>
+              Ozon FBS: каркас вкладок и ключей
+            </li>
           </ul>
         </div>
       </section>

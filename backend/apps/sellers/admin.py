@@ -12,8 +12,16 @@ class SellerWarehouseInline(admin.TabularInline):
 
 @admin.register(Seller)
 class SellerAdmin(admin.ModelAdmin):
-  list_display = ("company_name", "is_active", "wb_count_new", "wb_count_assembly", "wb_count_delivery")
-  list_filter = ("is_active",)
+  list_display = (
+    "company_name",
+    "is_active",
+    "wb_enabled",
+    "ozon_enabled",
+    "wb_count_new",
+    "wb_count_assembly",
+    "wb_count_delivery",
+  )
+  list_filter = ("is_active", "wb_enabled", "ozon_enabled")
   search_fields = ("company_name",)
   inlines = [SellerWarehouseInline]
 

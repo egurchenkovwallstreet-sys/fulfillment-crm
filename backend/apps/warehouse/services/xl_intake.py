@@ -8,6 +8,7 @@ from django.db.models import Max
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
+from apps.integrations.marketplace import WB, normalize_marketplace
 from apps.integrations.wb_crypto import encrypt_token
 from apps.sellers.models import Seller
 from apps.sellers.services.invite import ensure_seller_invite
@@ -59,6 +60,7 @@ def serialize_session(
     "seller_id": session.seller_id,
     "seller_name": session.seller.company_name,
     "has_wb_token": bool(session.seller.wb_api_token_encrypted),
+    "marketplace": session.marketplace or WB,
     "unique_count": unique_count,
     "total_quantity": total_quantity,
     "last_barcode": last.barcode if last else "",
@@ -74,26 +76,32 @@ def serialize_session(
 
 
 @transaction.atomic
-def create_session(*, company_name: str, user=None) -> XlIntakeSession:
+def create_session(*, company_name: str, user=None, marketplace: str = WB) -> XlIntakeSession:
   name = (company_name or "").strip()
   if not name:
     raise XlIntakeError("Укажите название ИП / компании")
-  seller = Seller.objects.create(company_name=name)
+  mp = normalize_marketplace(marketplace)
+  seller = Seller.objects.create(
+    company_name=name,
+    wb_enabled=mp == WB,
+    ozon_enabled=mp != WB,
+  )
   ensure_seller_invite(seller)
-  session = XlIntakeSession.objects.create(seller=seller, created_by=user)
+  session = XlIntakeSession.objects.create(seller=seller, created_by=user, marketplace=mp)
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.INTAKE,
-    message=f"XL-приёмка #{session.id}: создан клиент «{name}» без токена WB",
-    details={"session_id": session.id},
+    message=f"XL-приёмка #{session.id}: создан клиент «{name}» без токена ({mp})",
+    details={"session_id": session.id, "marketplace": mp},
   )
   return session
 
 
 @transaction.atomic
-def create_session_for_seller(*, seller: Seller, user=None) -> XlIntakeSession:
-  session = XlIntakeSession.objects.create(seller=seller, created_by=user)
+def create_session_for_seller(*, seller: Seller, user=None, marketplace: str = WB) -> XlIntakeSession:
+  mp = normalize_marketplace(marketplace)
+  session = XlIntakeSession.objects.create(seller=seller, created_by=user, marketplace=mp)
   AuditLog.objects.create(
     user=user,
     seller=seller,
@@ -263,7 +271,7 @@ def apply_after_wb(
       qty = qty_by_barcode[item.barcode]
       product = (
         Product.objects.select_related("cell")
-        .filter(seller=seller, barcode=item.barcode)
+        .filter(seller=seller, barcode=item.barcode, marketplace=session.marketplace)
         .first()
       )
       if product:
@@ -272,12 +280,13 @@ def apply_after_wb(
         product.save()
         updated_products += 1
       else:
-        cell = create_cell_with_next_number(seller)
+        cell = create_cell_with_next_number(seller, session.marketplace)
         product = Product.objects.create(
           seller=seller,
           barcode=item.barcode,
           cell=cell,
           quantity=qty,
+          marketplace=session.marketplace,
         )
         _apply_card_fields(product, item)
         product.save()

@@ -14,9 +14,12 @@ import {
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { useMarketplace } from '../context/MarketplaceContext'
 import './IntakePage.css'
 
 export function IntakePage() {
+  const { marketplace } = useMarketplace()
+  const isOzon = marketplace === 'ozon'
   const barcodeRef = useRef<HTMLInputElement>(null)
   const [sellers, setSellers] = useState<Seller[]>([])
   const [cells, setCells] = useState<Cell[]>([])
@@ -104,13 +107,17 @@ export function IntakePage() {
     setError('')
     setSuccess('')
     setVerifiedStockMatch(false)
-    if (!sellerId || !warehouseId || !barcode.trim()) {
-      setError('Выберите селлера, склад FBS и отсканируйте баркод')
+    if (!sellerId || !barcode.trim() || (!isOzon && !warehouseId)) {
+      setError(isOzon ? 'Выберите селлера и отсканируйте баркод' : 'Выберите селлера, склад FBS и отсканируйте баркод')
       return
     }
     setLoading(true)
     try {
-      const result = await lookupBarcode(Number(sellerId), barcode.trim(), Number(warehouseId))
+      const result = await lookupBarcode(
+        Number(sellerId),
+        barcode.trim(),
+        isOzon ? undefined : Number(warehouseId),
+      )
       setLookup(result)
       if (!result.exists) {
         setCellMode('auto')
@@ -139,8 +146,8 @@ export function IntakePage() {
     setError('')
     setSuccess('')
 
-    if (!sellerId || !warehouseId || !barcode.trim()) {
-      setError('Укажите селлера, склад FBS и баркод')
+    if (!sellerId || !barcode.trim() || (!isOzon && !warehouseId)) {
+      setError(isOzon ? 'Укажите селлера и баркод' : 'Укажите селлера, склад FBS и баркод')
       return
     }
     if (!lookup) {
@@ -165,10 +172,10 @@ export function IntakePage() {
     try {
       const result = await submitIntake({
         seller_id: Number(sellerId),
-        wb_warehouse_id: Number(warehouseId),
+        wb_warehouse_id: isOzon ? undefined : Number(warehouseId),
         barcode: barcode.trim(),
         quantity,
-        stock_mode: stockMode,
+        stock_mode: isOzon ? 'intake' : stockMode,
         verified_stock_match: stockMode === 'sync_from_wb' ? verifiedStockMatch : false,
         cell_mode: lookup.exists ? 'auto' : cellMode,
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
@@ -244,6 +251,7 @@ export function IntakePage() {
               </select>
             </label>
 
+            {!isOzon && (
             <div className="intake-warehouses">
               <div className="intake-warehouses__head">
                 <span className="intake-field__label">Склад FBS (точка отгрузки WB)</span>
@@ -276,7 +284,9 @@ export function IntakePage() {
                 ))}
               </select>
             </div>
+            )}
 
+            {!isOzon && (
             <fieldset className="intake-stock-mode">
               <legend>Остатки</legend>
               <label>
@@ -306,6 +316,7 @@ export function IntakePage() {
                 <strong>Сверка с WB</strong> — установить остаток CRM по ЛК WB
               </label>
             </fieldset>
+            )}
 
             <label className="intake-field">
               Баркод (сканер)
@@ -317,7 +328,7 @@ export function IntakePage() {
                 onKeyDown={handleBarcodeKeyDown}
                 placeholder="Наведите сканер и отсканируйте"
                 autoComplete="off"
-                disabled={!warehouseId}
+                disabled={!sellerId || (!isOzon && !warehouseId)}
               />
             </label>
 
@@ -325,7 +336,7 @@ export function IntakePage() {
               type="button"
               className="btn btn--secondary"
               onClick={handleLookup}
-              disabled={loading || !warehouseId}
+              disabled={loading || !sellerId || (!isOzon && !warehouseId)}
             >
               {loading ? 'Поиск…' : 'Найти товар (Enter)'}
             </button>

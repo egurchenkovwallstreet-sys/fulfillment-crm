@@ -13,6 +13,7 @@ import {
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { useMarketplace } from '../context/MarketplaceContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import './InventoryPage.css'
 
@@ -22,6 +23,8 @@ type VerifyModal = {
 }
 
 export function InventoryPage() {
+  const { marketplace } = useMarketplace()
+  const isOzon = marketplace === 'ozon'
   const barcodeRef = useRef<HTMLInputElement>(null)
   const quantityRef = useRef<HTMLInputElement>(null)
   const [sellers, setSellers] = useState<Seller[]>([])
@@ -126,7 +129,7 @@ export function InventoryPage() {
       setError('Выберите селлера')
       return
     }
-    if (warehouseIds.length < 1) {
+    if (!isOzon && warehouseIds.length < 1) {
       setError('Выберите хотя бы один FBS-склад')
       return
     }
@@ -225,7 +228,7 @@ export function InventoryPage() {
         seller_id: Number(sellerId),
         barcode: barcode.trim(),
         quantity,
-        warehouse_ids: warehouseIds,
+        warehouse_ids: isOzon ? [] : warehouseIds,
         cell_mode: lookup.exists ? 'auto' : cellMode,
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
         name: productName,
@@ -324,7 +327,7 @@ export function InventoryPage() {
           <button
             type="button"
             className="btn btn--danger inventory-btn inventory-btn--large"
-            disabled={!sellerId || warehouseIds.length < 1 || loading}
+            disabled={!sellerId || (!isOzon && warehouseIds.length < 1) || loading}
             onClick={startSession}
           >
             Начать инвентаризацию

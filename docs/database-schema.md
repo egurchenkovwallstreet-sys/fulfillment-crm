@@ -44,12 +44,16 @@ erDiagram
 |------|-----|----------|
 | company_name | varchar | ИП / название |
 | wb_api_token_encrypted | text | Зашифрованный токен WB |
+| wb_enabled / ozon_enabled | bool | Назначенные маркетплейсы |
+| ozon_client_id | varchar | Client-Id Ozon |
+| ozon_api_key_encrypted | text | Зашифрованный Api-Key Ozon |
 | is_active | bool | Активен |
 
 ### warehouse_cell
 | Поле | Тип | Описание |
 |------|-----|----------|
-| number | varchar, unique | Номер ячейки |
+| marketplace | wb / ozon | Маркетплейс (нумерация своя) |
+| number | varchar | Номер ячейки, unique (seller, marketplace, number) |
 | is_occupied | bool | Занята |
 
 ### warehouse_pricegroup

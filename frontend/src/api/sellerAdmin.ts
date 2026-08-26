@@ -9,15 +9,25 @@ export type SellerManageItem = {
   has_account: boolean
   username: string | null
   invite_token: string | null
+  wb_enabled: boolean
+  ozon_enabled: boolean
+  has_wb_token: boolean
+  has_ozon_api: boolean
+  ozon_client_id: string
   wb_count_new: number
   wb_count_assembly: number
   wb_count_delivery: number
+  ozon_count_new: number
+  ozon_count_assembly: number
+  ozon_count_delivery: number
   created_at: string
 }
 
 export type SellerCreatePayload = {
   company_name: string
   is_active?: boolean
+  wb_enabled?: boolean
+  ozon_enabled?: boolean
 }
 
 export type SellerInviteResponse = {
@@ -41,6 +51,28 @@ export async function createSeller(payload: SellerCreatePayload): Promise<Seller
 export async function fetchSellerInvite(sellerId: number): Promise<SellerInviteResponse> {
   return apiFetch<SellerInviteResponse>(`/api/sellers/manage/${sellerId}/invite/`, {
     method: 'POST',
+  })
+}
+
+export async function updateSellerMarketplaces(
+  sellerId: number,
+  payload: { wb_enabled?: boolean; ozon_enabled?: boolean },
+) {
+  return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/marketplaces/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function saveSellerOzonKeys(sellerId: number, payload: { client_id: string; api_key: string }) {
+  return apiFetch<{
+    success: boolean
+    ping_ok: boolean
+    detail: string
+    seller: SellerManageItem
+  }>(`/api/sellers/manage/${sellerId}/ozon-keys/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

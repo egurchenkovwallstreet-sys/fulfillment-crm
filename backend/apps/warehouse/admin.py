@@ -25,8 +25,8 @@ def admin_force_delete_cells(modeladmin, request, queryset):
 
 @admin.register(Cell)
 class CellAdmin(admin.ModelAdmin):
-  list_display = ("seller", "number", "is_occupied", "created_at")
-  list_filter = ("seller", "is_occupied")
+  list_display = ("seller", "marketplace", "number", "is_occupied", "created_at")
+  list_filter = ("seller", "marketplace", "is_occupied")
   search_fields = ("number", "seller__company_name")
   actions = [admin_force_delete_cells]
 
@@ -80,7 +80,7 @@ class XlIntakeLineInline(admin.TabularInline):
 
 @admin.register(XlIntakeSession)
 class XlIntakeSessionAdmin(admin.ModelAdmin):
-  list_display = ("id", "seller", "status", "created_at", "saved_at", "applied_at")
-  list_filter = ("status",)
+  list_display = ("id", "seller", "marketplace", "status", "created_at", "saved_at", "applied_at")
+  list_filter = ("status", "marketplace")
   search_fields = ("seller__company_name",)
   inlines = [XlIntakeLineInline]

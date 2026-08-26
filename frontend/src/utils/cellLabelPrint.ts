@@ -5,6 +5,8 @@ export type CellLabelData = {
   seller_name: string
   cell_number: string
   barcode: string
+  marketplace?: 'wb' | 'ozon' | string
+  marketplace_label?: string
 }
 
 function escapeHtml(value: string): string {
@@ -40,6 +42,9 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   const cellNumber = escapeHtml(data.cell_number || '—')
   const barcodeText = escapeHtml(data.barcode || '—')
   const barcodeSvg = renderBarcodeSvg(data.barcode)
+  const mpLabel = escapeHtml(
+    data.marketplace_label || (data.marketplace === 'ozon' ? 'OZON' : 'ВБ'),
+  )
 
   win.document.write(`<!DOCTYPE html>
 <html lang="ru">
@@ -66,15 +71,23 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
     .zone-top {
       flex: 0 0 20%;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 0 4mm;
+      padding: 1.5mm 4mm 0;
+      gap: 1mm;
+    }
+    .mp-badge {
+      font-size: 9pt;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      line-height: 1;
     }
     .seller {
-      font-size: 11pt;
-      font-weight: 700;
+      font-size: 16pt;
+      font-weight: 800;
       text-align: center;
-      line-height: 1.15;
+      line-height: 1.1;
       word-break: break-word;
     }
     .zone-middle {
@@ -110,7 +123,10 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
 </head>
 <body>
   <article class="label">
-    <header class="zone-top"><div class="seller">${seller}</div></header>
+    <header className="zone-top">
+      <div class="mp-badge">${mpLabel}</div>
+      <div class="seller">${seller}</div>
+    </header>
     <main class="zone-middle"><div class="cell-number" id="cellNum">${cellNumber}</div></main>
     <footer class="zone-bottom">
       <div class="barcode-svg">${barcodeSvg}</div>

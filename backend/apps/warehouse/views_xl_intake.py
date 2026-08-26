@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.integrations.marketplace import parse_marketplace
 from apps.sellers.models import Seller
 from apps.warehouse.models import XlIntakeSession
 from apps.warehouse.services.xl_intake import (
@@ -32,8 +33,10 @@ class XlIntakeSessionListCreateView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
+    marketplace = parse_marketplace(request)
     sessions = (
-      XlIntakeSession.objects.select_related("seller")
+      XlIntakeSession.objects.filter(marketplace=marketplace)
+      .select_related("seller")
       .prefetch_related("lines")
       .order_by("-created_at")[:100]
     )
@@ -42,12 +45,21 @@ class XlIntakeSessionListCreateView(APIView):
   def post(self, request):
     company_name = str(request.data.get("company_name") or "").strip()
     seller_id = request.data.get("seller_id")
+    marketplace = parse_marketplace(request)
     try:
       if seller_id:
         seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
-        session = create_session_for_seller(seller=seller, user=request.user)
+        session = create_session_for_seller(
+          seller=seller,
+          user=request.user,
+          marketplace=marketplace,
+        )
       else:
-        session = create_session(company_name=company_name, user=request.user)
+        session = create_session(
+          company_name=company_name,
+          user=request.user,
+          marketplace=marketplace,
+        )
     except XlIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(serialize_session(session), status=status.HTTP_201_CREATED)

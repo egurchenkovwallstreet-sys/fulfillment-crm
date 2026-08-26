@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { AdminRoute, ManagerRoute, ProtectedRoute, SellerRoute } from './components/ProtectedRoute'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { MarketplaceProvider } from './context/MarketplaceContext'
 import { AdminBillingPage } from './pages/AdminBillingPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
@@ -74,7 +75,9 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <MarketplaceProvider>
+          <AppRoutes />
+        </MarketplaceProvider>
       </AuthProvider>
     </BrowserRouter>
   )

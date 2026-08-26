@@ -17,6 +17,8 @@ export interface SellerAssemblyCounters {
   shipped: number
   cancelled?: number
   total_active: number
+  marketplace?: string
+  has_ozon_api?: boolean
 }
 
 export interface AssemblyOrder {
@@ -47,11 +49,15 @@ export interface AssemblyOrder {
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   counts: Record<string, number>
-  assembly_eligible: number
+  assembly_eligible?: number
   supplies_forming: number
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
-  active_pick_list: PickList | null
+  active_pick_list?: PickList | null
+  pick_list?: PickList | null
+  marketplace?: string
+  ozon_assembly_ready?: boolean
+  message?: string
 }
 
 export interface StartAssemblyResult {

@@ -14,4 +14,7 @@ class MeView(APIView):
   permission_classes = [IsAuthenticated]
 
   def get(self, request):
-    return Response(UserSerializer(request.user).data)
+    user = request.user
+    if user.seller_id:
+      user = type(user).objects.select_related("seller").get(pk=user.pk)
+    return Response(UserSerializer(user).data)

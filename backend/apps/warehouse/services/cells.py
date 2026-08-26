@@ -1,7 +1,8 @@
-"""Ячейки селлера — нумерация с 1 по возрастанию для каждого селлера."""
+"""Ячейки селлера — нумерация с 1 по возрастанию для каждого селлера и маркетплейса."""
 from django.db.models import IntegerField, Max, QuerySet
 from django.db.models.functions import Cast
 
+from apps.integrations.marketplace import WB, normalize_marketplace
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell
 
@@ -13,9 +14,10 @@ def cells_queryset_ordered(qs: QuerySet | None = None) -> QuerySet:
   ).order_by("number_sort")
 
 
-def _next_cell_number(seller: Seller) -> str:
+def _next_cell_number(seller: Seller, marketplace: str = WB) -> str:
+  mp = normalize_marketplace(marketplace)
   agg = (
-    Cell.objects.filter(seller=seller)
+    Cell.objects.filter(seller=seller, marketplace=mp)
     .annotate(number_sort=Cast("number", IntegerField()))
     .aggregate(max_num=Max("number_sort"))
   )
@@ -23,10 +25,13 @@ def _next_cell_number(seller: Seller) -> str:
   return str(max_num + 1)
 
 
-def first_free_cell(seller: Seller) -> Cell:
-  """Свободная ячейка селлера или новая с следующим номером."""
+def first_free_cell(seller: Seller, marketplace: str = WB) -> Cell:
+  """Свободная ячейка селлера на маркетплейсе или новая с следующим номером."""
+  mp = normalize_marketplace(marketplace)
   free = (
-    cells_queryset_ordered(Cell.objects.filter(seller=seller, is_occupied=False))
+    cells_queryset_ordered(
+      Cell.objects.filter(seller=seller, marketplace=mp, is_occupied=False)
+    )
     .select_for_update()
     .first()
   )
@@ -35,16 +40,19 @@ def first_free_cell(seller: Seller) -> Cell:
 
   return Cell.objects.create(
     seller=seller,
-    number=_next_cell_number(seller),
+    marketplace=mp,
+    number=_next_cell_number(seller, mp),
     is_occupied=False,
   )
 
 
-def create_cell_with_next_number(seller: Seller) -> Cell:
+def create_cell_with_next_number(seller: Seller, marketplace: str = WB) -> Cell:
   """Новая ячейка со следующим порядковым номером (для пакетного импорта)."""
+  mp = normalize_marketplace(marketplace)
   return Cell.objects.create(
     seller=seller,
-    number=_next_cell_number(seller),
+    marketplace=mp,
+    number=_next_cell_number(seller, mp),
     is_occupied=False,
   )
 

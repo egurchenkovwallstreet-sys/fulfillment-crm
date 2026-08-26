@@ -2,6 +2,9 @@ from decimal import Decimal
 
 from django.db import models
 
+from apps.integrations.marketplace import CHOICES as MARKETPLACE_CHOICES
+from apps.integrations.marketplace import WB as MARKETPLACE_WB
+
 
 class PriceGroup(models.Model):
   name = models.CharField("Название группы", max_length=100)
@@ -29,6 +32,13 @@ class Cell(models.Model):
     related_name="cells",
     verbose_name="Селлер",
   )
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
+  )
   number = models.CharField("Номер ячейки", max_length=50)
   is_occupied = models.BooleanField("Занята", default=False)
   created_at = models.DateTimeField(auto_now_add=True)
@@ -37,10 +47,10 @@ class Cell(models.Model):
     verbose_name = "Ячейка"
     verbose_name_plural = "Ячейки"
     ordering = ["number"]
-    unique_together = [("seller", "number")]
+    unique_together = [("seller", "marketplace", "number")]
 
   def __str__(self):
-    return f"{self.seller_id}: №{self.number}"
+    return f"{self.seller_id}/{self.marketplace}: №{self.number}"
 
 
 class Product(models.Model):
@@ -80,13 +90,20 @@ class Product(models.Model):
   wb_size = models.CharField("Размер (RU)", max_length=50, blank=True)
   photo_url = models.URLField("Фото WB", max_length=500, blank=True)
   quantity = models.PositiveIntegerField("Остаток", default=0)
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
+  )
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 
   class Meta:
     verbose_name = "Товар"
     verbose_name_plural = "Товары"
-    unique_together = [("seller", "barcode")]
+    unique_together = [("seller", "marketplace", "barcode")]
     indexes = [
       models.Index(fields=["barcode"]),
       models.Index(fields=["seller", "barcode"]),
@@ -179,6 +196,13 @@ class XlIntakeSession(models.Model):
     on_delete=models.SET_NULL,
     null=True,
     related_name="xl_intake_sessions",
+  )
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
   )
   unmatched = models.JSONField("Баркоды не найдены в ЛК WB", default=list, blank=True)
   warehouse_sync_warning = models.CharField(max_length=500, blank=True)

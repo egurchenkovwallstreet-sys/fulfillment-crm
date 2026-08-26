@@ -55,7 +55,7 @@ export type IntakeHistoryItem = {
 
 export type IntakePayload = {
   seller_id: number
-  wb_warehouse_id: number
+  wb_warehouse_id?: number
   barcode: string
   quantity: number
   stock_mode: StockMode
@@ -70,6 +70,8 @@ export type CellLabelData = {
   seller_name: string
   cell_number: string
   barcode: string
+  marketplace?: string
+  marketplace_label?: string
 }
 
 export type IntakeResponse = {

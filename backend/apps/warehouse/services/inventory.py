@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from django.db import transaction
 
 from apps.integrations.models import AuditLog
+from apps.integrations.marketplace import OZON, WB, normalize_marketplace
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
@@ -98,18 +99,20 @@ def perform_inventory(
   cell_mode: str = "auto",
   cell_id: int | None = None,
   name: str = "",
+  marketplace: str = WB,
 ) -> InventoryResult:
+  mp = normalize_marketplace(marketplace)
   barcode = barcode.strip()
   if not barcode:
     raise IntakeError("Баркод не может быть пустым")
   if quantity < 0:
     raise IntakeError("Количество не может быть отрицательным")
 
-  warehouses = _resolve_warehouses(seller, warehouse_ids)
+  warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
   targets = (
     even_split_quantity(quantity, len(warehouses))
     if len(warehouses) > 1
-    else [quantity]
+    else ([quantity] if warehouses else [])
   )
   sent_by_warehouse = {
     warehouse.id: target
@@ -118,7 +121,7 @@ def perform_inventory(
 
   product = (
     Product.objects.select_for_update()
-    .filter(seller=seller, barcode=barcode)
+    .filter(seller=seller, barcode=barcode, marketplace=mp)
     .select_related("cell", "seller")
     .first()
   )
@@ -130,39 +133,41 @@ def perform_inventory(
   else:
     if quantity == 0:
       raise IntakeError("Новый баркод нельзя инвентаризировать с нулевым количеством")
-    cell = _assign_cell(seller, cell_mode, cell_id)
-    marking = lookup_marking_for_barcode(seller, barcode)
+    cell = _assign_cell(seller, cell_mode, cell_id, mp)
+    marking = lookup_marking_for_barcode(seller, barcode) if mp == WB else None
     product = Product.objects.create(
       seller=seller,
       barcode=barcode,
-      name=name.strip() or marking.title,
+      name=name.strip() or (marking.title if marking else ""),
       cell=cell,
       quantity=quantity,
-      requires_marking=marking.requires_marking if marking.wb_found else False,
+      marketplace=mp,
+      requires_marking=(marking.requires_marking if marking and marking.wb_found else False),
     )
     refresh_cell_occupied(cell)
     is_new = True
 
-  for warehouse, target in zip(warehouses, targets, strict=True):
-    try:
-      set_wb_stock_absolute(seller, warehouse, barcode, target)
-    except WBStockError as exc:
-      raise IntakeError(str(exc)) from exc
+  if mp != OZON:
+    for warehouse, target in zip(warehouses, targets, strict=True):
+      try:
+        set_wb_stock_absolute(seller, warehouse, barcode, target)
+      except WBStockError as exc:
+        raise IntakeError(str(exc)) from exc
 
-    ProductWarehouseStock.objects.update_or_create(
-      product=product,
-      seller_warehouse=warehouse,
-      defaults={"quantity": target},
-    )
+      ProductWarehouseStock.objects.update_or_create(
+        product=product,
+        seller_warehouse=warehouse,
+        defaults={"quantity": target},
+      )
 
-  selected_ids = {wh.id for wh in warehouses}
-  for warehouse in get_enabled_seller_warehouses(seller):
-    if warehouse.id in selected_ids:
-      continue
-    ProductWarehouseStock.objects.filter(
-      product=product,
-      seller_warehouse=warehouse,
-    ).update(quantity=0)
+    selected_ids = {wh.id for wh in warehouses}
+    for warehouse in get_enabled_seller_warehouses(seller):
+      if warehouse.id in selected_ids:
+        continue
+      ProductWarehouseStock.objects.filter(
+        product=product,
+        seller_warehouse=warehouse,
+      ).update(quantity=0)
 
   warehouse_labels = ", ".join(
     f"{wh.name or wh.wb_warehouse_id}={sent_by_warehouse[wh.id]}"
@@ -173,13 +178,23 @@ def perform_inventory(
     operation_type=StockOperation.OperationType.ADJUSTMENT,
     quantity=quantity,
     performed_by=user,
-    comment=f"Инвентаризация: {quantity} шт. → WB ({warehouse_labels})",
+    comment=(
+      f"Инвентаризация Ozon: {quantity} шт."
+      if mp == OZON
+      else f"Инвентаризация: {quantity} шт. → WB ({warehouse_labels})"
+    ),
   )
 
-  lines = _verify_inventory(seller, warehouses, barcode, sent_by_warehouse)
-  wb_total_sent = sum(line.sent_amount for line in lines)
-  wb_total_actual = sum(line.wb_actual for line in lines)
-  verified = all(line.difference == 0 for line in lines)
+  if mp == OZON:
+    lines = []
+    wb_total_sent = quantity
+    wb_total_actual = quantity
+    verified = True
+  else:
+    lines = _verify_inventory(seller, warehouses, barcode, sent_by_warehouse)
+    wb_total_sent = sum(line.sent_amount for line in lines)
+    wb_total_actual = sum(line.wb_actual for line in lines)
+    verified = all(line.difference == 0 for line in lines)
 
   AuditLog.objects.create(
     user=user,

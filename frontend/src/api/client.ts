@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from './tokens'
+import { getStoredMarketplace } from '../utils/marketplace'
 
 export class ApiError extends Error {
   readonly code?: string
@@ -62,6 +63,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
+  headers.set('X-Marketplace', getStoredMarketplace())
 
   let response = await fetch(path, { ...options, headers })
 

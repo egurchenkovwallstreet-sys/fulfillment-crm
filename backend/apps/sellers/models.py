@@ -7,6 +7,10 @@ class Seller(models.Model):
   company_name = models.CharField("ИП / название компании", max_length=255)
   wb_api_token_encrypted = models.TextField("WB API токен (зашифрован)", blank=True)
   is_active = models.BooleanField("Активен", default=True)
+  wb_enabled = models.BooleanField("Wildberries", default=True)
+  ozon_enabled = models.BooleanField("Ozon", default=False)
+  ozon_client_id = models.CharField("Ozon Client-Id", max_length=64, blank=True)
+  ozon_api_key_encrypted = models.TextField("Ozon Api-Key (зашифрован)", blank=True)
   wb_count_new = models.PositiveIntegerField("WB: новые", default=0)
   wb_count_assembly = models.PositiveIntegerField("WB: на сборке", default=0)
   wb_count_delivery = models.PositiveIntegerField("WB: в доставке", default=0)
@@ -16,6 +20,10 @@ class Seller(models.Model):
     default=list,
     blank=True,
   )
+  ozon_count_new = models.PositiveIntegerField("Ozon: новые", default=0)
+  ozon_count_assembly = models.PositiveIntegerField("Ozon: на сборке", default=0)
+  ozon_count_delivery = models.PositiveIntegerField("Ozon: в доставке", default=0)
+  ozon_counts_synced_at = models.DateTimeField("Ozon: счётчики обновлены", null=True, blank=True)
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 

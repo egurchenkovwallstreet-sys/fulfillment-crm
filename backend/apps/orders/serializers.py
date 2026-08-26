@@ -231,6 +231,8 @@ class SellerAssemblyCountersSerializer(serializers.Serializer):
   shipped = serializers.IntegerField()
   cancelled = serializers.IntegerField(required=False)
   total_active = serializers.IntegerField()
+  marketplace = serializers.CharField(required=False)
+  has_ozon_api = serializers.BooleanField(required=False)
 
 
 class OrderSyncSerializer(serializers.Serializer):

@@ -182,5 +182,7 @@ WB_CONTENT_API_BASE_URL = env(
 )
 WB_SYNC_INTERVAL_MINUTES = env.int("WB_SYNC_INTERVAL_MINUTES", default=15)
 
+OZON_API_BASE_URL = env("OZON_API_BASE_URL", default="https://api-seller.ozon.ru")
+
 # Encryption key for WB tokens (Fernet)
 WB_TOKEN_ENCRYPTION_KEY = env("WB_TOKEN_ENCRYPTION_KEY", default="")

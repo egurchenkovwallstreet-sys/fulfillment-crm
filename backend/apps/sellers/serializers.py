@@ -36,6 +36,8 @@ class SellerManageSerializer(serializers.ModelSerializer):
   has_account = serializers.SerializerMethodField()
   invite_token = serializers.SerializerMethodField()
   username = serializers.SerializerMethodField()
+  has_wb_token = serializers.SerializerMethodField()
+  has_ozon_api = serializers.SerializerMethodField()
 
   class Meta:
     model = Seller
@@ -46,9 +48,17 @@ class SellerManageSerializer(serializers.ModelSerializer):
       "has_account",
       "username",
       "invite_token",
+      "wb_enabled",
+      "ozon_enabled",
+      "has_wb_token",
+      "has_ozon_api",
+      "ozon_client_id",
       "wb_count_new",
       "wb_count_assembly",
       "wb_count_delivery",
+      "ozon_count_new",
+      "ozon_count_assembly",
+      "ozon_count_delivery",
       "created_at",
     )
     read_only_fields = (
@@ -56,9 +66,15 @@ class SellerManageSerializer(serializers.ModelSerializer):
       "has_account",
       "username",
       "invite_token",
+      "has_wb_token",
+      "has_ozon_api",
+      "ozon_client_id",
       "wb_count_new",
       "wb_count_assembly",
       "wb_count_delivery",
+      "ozon_count_new",
+      "ozon_count_assembly",
+      "ozon_count_delivery",
       "created_at",
     )
 
@@ -77,11 +93,25 @@ class SellerManageSerializer(serializers.ModelSerializer):
       return str(invite.token)
     return None
 
+  def get_has_wb_token(self, obj: Seller) -> bool:
+    return bool(obj.wb_api_token_encrypted)
+
+  def get_has_ozon_api(self, obj: Seller) -> bool:
+    return bool(obj.ozon_client_id and obj.ozon_api_key_encrypted)
+
 
 class SellerCreateSerializer(serializers.ModelSerializer):
+  wb_enabled = serializers.BooleanField(default=True)
+  ozon_enabled = serializers.BooleanField(default=False)
+
   class Meta:
     model = Seller
-    fields = ("company_name", "is_active")
+    fields = ("company_name", "is_active", "wb_enabled", "ozon_enabled")
+
+  def validate(self, attrs):
+    if not attrs.get("wb_enabled", True) and not attrs.get("ozon_enabled", False):
+      raise serializers.ValidationError("Выберите хотя бы один маркетплейс: WB или Ozon")
+    return attrs
 
   def create(self, validated_data):
     from apps.sellers.services.invite import ensure_seller_invite

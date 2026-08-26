@@ -17,11 +17,13 @@ import {
   type StockOverviewProduct,
 } from '../api/warehouseHub'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
+import { useMarketplace } from '../context/MarketplaceContext'
 import './WarehouseHubPage.css'
 
 type TabId = 'onboarding' | 'import' | 'intake' | 'transfer'
 
 export function WarehouseHubPage() {
+  const { marketplace } = useMarketplace()
   const [tab, setTab] = useState<TabId>('onboarding')
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
@@ -383,6 +385,13 @@ export function WarehouseHubPage() {
           Инвентаризация
         </Link>
       </header>
+
+      {marketplace === 'ozon' && (
+        <div className="dashboard-sync-msg">
+          Каталог и склады Ozon — шаг 3 плана. Сейчас на вкладке Ozon работают приёмка, XL и ячейки.
+          Онбординг карточек ниже пока только для WB.
+        </div>
+      )}
 
       <div className="whub-tabs">
         <button

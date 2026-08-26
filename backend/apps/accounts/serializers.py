@@ -8,6 +8,10 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
   role_display = serializers.CharField(source="get_role_display", read_only=True)
   seller_name = serializers.SerializerMethodField()
+  wb_enabled = serializers.SerializerMethodField()
+  ozon_enabled = serializers.SerializerMethodField()
+  has_wb_token = serializers.SerializerMethodField()
+  has_ozon_api = serializers.SerializerMethodField()
 
   class Meta:
     model = User
@@ -21,6 +25,10 @@ class UserSerializer(serializers.ModelSerializer):
       "role_display",
       "seller",
       "seller_name",
+      "wb_enabled",
+      "ozon_enabled",
+      "has_wb_token",
+      "has_ozon_api",
     )
     read_only_fields = fields
 
@@ -28,6 +36,29 @@ class UserSerializer(serializers.ModelSerializer):
     if obj.seller_id:
       return obj.seller.company_name
     return None
+
+  def _seller(self, obj):
+    return obj.seller if obj.seller_id else None
+
+  def get_wb_enabled(self, obj):
+    seller = self._seller(obj)
+    if obj.role == "seller":
+      return bool(seller and seller.wb_enabled)
+    return True
+
+  def get_ozon_enabled(self, obj):
+    seller = self._seller(obj)
+    if obj.role == "seller":
+      return bool(seller and seller.ozon_enabled)
+    return True
+
+  def get_has_wb_token(self, obj):
+    seller = self._seller(obj)
+    return bool(seller and seller.wb_api_token_encrypted)
+
+  def get_has_ozon_api(self, obj):
+    seller = self._seller(obj)
+    return bool(seller and seller.ozon_client_id and seller.ozon_api_key_encrypted)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
