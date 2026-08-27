@@ -24,7 +24,7 @@ function renderBarcodeSvg(barcode: string): string {
     JsBarcode(svg, barcode, {
       format: 'CODE128',
       width: 1.6,
-      height: 32,
+      height: 36,
       displayValue: false,
       margin: 0,
     })
@@ -35,7 +35,7 @@ function renderBarcodeSvg(barcode: string): string {
 }
 
 export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
-  const win = window.open('', '_blank', 'width=420,height=640')
+  const win = window.open('', '_blank', 'width=420,height=900')
   if (!win) return false
 
   const seller = escapeHtml(data.seller_name || '—')
@@ -54,48 +54,28 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: 75mm 120mm; margin: 0; }
-    html, body { width: 75mm; height: 120mm; }
+    html, body { width: 75mm; background: #fff; }
     body {
       font-family: Arial, Helvetica, sans-serif;
-      background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .label {
       width: 75mm;
       height: 120mm;
-      display: flex;
-      flex-direction: column;
       overflow: hidden;
+      page-break-after: always;
+      break-after: page;
     }
-    .zone-top {
-      flex: 0 0 20%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5mm 4mm 0;
-      gap: 1mm;
+    .label:last-child {
+      page-break-after: auto;
+      break-after: auto;
     }
-    .mp-badge {
-      font-size: 9pt;
-      font-weight: 800;
-      letter-spacing: 0.12em;
-      line-height: 1;
-    }
-    .seller {
-      font-size: 16pt;
-      font-weight: 800;
-      text-align: center;
-      line-height: 1.1;
-      word-break: break-word;
-    }
-    .zone-middle {
-      flex: 0 0 60%;
+    .label--number {
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
+      padding: 3mm;
     }
     .cell-number {
       font-weight: 900;
@@ -103,49 +83,84 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
       text-align: center;
       letter-spacing: -0.02em;
     }
-    .zone-bottom {
-      flex: 0 0 20%;
+    .label--meta {
+      display: flex;
+      flex-direction: column;
+      height: 120mm;
+    }
+    .zone-mp {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 2mm 2mm 0;
+      min-height: 58mm;
+    }
+    .mp-name {
+      font-weight: 900;
+      line-height: 0.8;
+      text-align: center;
+      letter-spacing: -0.04em;
+    }
+    .zone-info {
+      flex: 0 0 auto;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 0 3mm;
-      gap: 1mm;
+      justify-content: flex-end;
+      padding: 1mm 3mm 3mm;
+      gap: 1.5mm;
     }
-    .barcode-svg svg { width: 100%; max-width: 65mm; height: 10mm; }
+    .seller {
+      font-size: 16pt;
+      font-weight: 800;
+      text-align: center;
+      line-height: 1.05;
+      word-break: break-word;
+      max-height: 22mm;
+      overflow: hidden;
+    }
+    .barcode-svg svg { width: 100%; max-width: 68mm; height: 11mm; }
     .barcode-text {
-      font-size: 5.5mm;
+      font-size: 5mm;
       font-weight: 700;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
       line-height: 1;
+      text-align: center;
+      word-break: break-all;
     }
   </style>
 </head>
 <body>
-  <article class="label">
-    <header className="zone-top">
-      <div class="mp-badge">${mpLabel}</div>
+  <article class="label label--number">
+    <div class="cell-number" id="cellNum">${cellNumber}</div>
+  </article>
+  <article class="label label--meta">
+    <div class="zone-mp">
+      <div class="mp-name" id="mpName">${mpLabel}</div>
+    </div>
+    <footer class="zone-info">
       <div class="seller">${seller}</div>
-    </header>
-    <main class="zone-middle"><div class="cell-number" id="cellNum">${cellNumber}</div></main>
-    <footer class="zone-bottom">
       <div class="barcode-svg">${barcodeSvg}</div>
       <div class="barcode-text">${barcodeText}</div>
     </footer>
   </article>
   <script>
     (function () {
-      var zone = document.querySelector('.zone-middle');
-      var el = document.getElementById('cellNum');
-      if (!zone || !el) return;
-      var maxW = zone.clientWidth * 0.92;
-      var maxH = zone.clientHeight * 0.92;
-      var size = maxH;
-      el.style.fontSize = size + 'px';
-      while ((el.scrollWidth > maxW || el.scrollHeight > maxH) && size > 8) {
-        size -= 2;
+      function fit(el, zone, fill) {
+        if (!el || !zone) return;
+        var maxW = zone.clientWidth * 0.94;
+        var maxH = zone.clientHeight * fill;
+        var size = maxH;
         el.style.fontSize = size + 'px';
+        while ((el.scrollWidth > maxW || el.scrollHeight > maxH) && size > 8) {
+          size -= 2;
+          el.style.fontSize = size + 'px';
+        }
       }
+      fit(document.getElementById('cellNum'), document.querySelector('.label--number'), 0.92);
+      fit(document.getElementById('mpName'), document.querySelector('.zone-mp'), 0.95);
       ${autoPrint ? 'window.onload = function () { window.print(); window.close(); };' : ''}
     })();
   </script>

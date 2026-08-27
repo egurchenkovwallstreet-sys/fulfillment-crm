@@ -20,11 +20,14 @@ export function CellLabelPrompt({ label, onClose }: Props) {
         aria-labelledby="cell-label-prompt-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 id="cell-label-prompt-title">Распечатать номер ячейки?</h3>
+        <h3 id="cell-label-prompt-title">Распечатать этикетку ячейки?</h3>
         <p>
+          Две наклейки 75×120: номер ячейки и маркетплейс + ИП + баркод.
+          <br />
           Селлер: <strong>{label.seller_name}</strong>
           <br />
           Ячейка: <strong>№{label.cell_number}</strong>
+          · {label.marketplace_label || (label.marketplace === 'ozon' ? 'OZON' : 'ВБ')}
           <br />
           Баркод: <strong>{label.barcode}</strong>
         </p>

@@ -461,7 +461,7 @@ export function InventoryPage() {
                     className="btn btn--secondary inventory-btn inventory-btn--print"
                     onClick={handlePrintCellLabel}
                   >
-                    Распечатать номер ячейки
+                    Распечатать этикетку ячейки
                   </button>
                 )}
 
