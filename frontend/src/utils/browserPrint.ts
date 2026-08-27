@@ -10,11 +10,21 @@ export const PRINT_SIZES = {
   fbsSticker: '58mm 40mm',
 } as const
 
+export function normalizeImageBase64(value: string): string {
+  let raw = (value || '').trim()
+  const comma = raw.indexOf(',')
+  if (raw.slice(0, 12).toLowerCase().includes('data:') && comma >= 0) {
+    raw = raw.slice(comma + 1)
+  }
+  return raw.replace(/\s/g, '')
+}
+
 function autoPrintScript(): string {
   return 'window.onload = function () { window.print(); window.close(); };'
 }
 
 function fbsStickerHtml(base64: string, autoPrint: boolean): string {
+  const payload = normalizeImageBase64(base64)
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -40,19 +50,107 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   </style>
 </head>
 <body>
-  <img src="data:image/png;base64,${base64}" alt="" />
+  <img src="data:image/png;base64,${payload}" alt="" />
   ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`
 }
 
-/** Стикер FBS 58×40 мм (PNG base64 от WB API). Как в инвентаризации: окно → print → close. */
-export function printFbsSticker(base64: string, autoPrint = true): boolean {
+export function openPrintHolder(): Window | null {
   const win = window.open('', '_blank', 'width=420,height=640')
-  if (!win) return false
-  win.document.write(fbsStickerHtml(base64, autoPrint))
+  if (!win) return null
+  win.document.write(
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title></title></head><body style="font-family:Arial,sans-serif;padding:16px">Печать стикера…</body></html>',
+  )
   win.document.close()
+  return win
+}
+
+export function closePrintHolder(win?: Window | null) {
+  if (!win || win.closed) return
+  try {
+    win.close()
+  } catch {
+    // ignore
+  }
+}
+
+function printViaIframe(html: string): boolean {
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument
+  if (!doc) {
+    iframe.remove()
+    return false
+  }
+  doc.open()
+  doc.write(html)
+  doc.close()
+  const cleanup = () => {
+    window.setTimeout(() => iframe.remove(), 1500)
+  }
+  const frameWin = iframe.contentWindow
+  if (!frameWin) {
+    cleanup()
+    return false
+  }
+  const doPrint = () => {
+    try {
+      frameWin.print()
+    } catch {
+      // ignore
+    }
+    cleanup()
+  }
+  const img = doc.querySelector('img')
+  if (img) {
+    if (img.complete && img.naturalWidth > 0) {
+      doPrint()
+    } else {
+      img.addEventListener('load', doPrint)
+      img.addEventListener('error', cleanup)
+    }
+  } else {
+    doPrint()
+  }
   return true
+}
+
+/** Стикер FBS 58×40 мм (PNG base64 от WB API). */
+export function printFbsSticker(
+  base64: string,
+  autoPrint = true,
+  preopened?: Window | null,
+): boolean {
+  const html = fbsStickerHtml(base64, autoPrint)
+  if (preopened && !preopened.closed) {
+    try {
+      preopened.document.open()
+      preopened.document.write(html)
+      preopened.document.close()
+      return true
+    } catch {
+      try {
+        preopened.close()
+      } catch {
+        // ignore
+      }
+    }
+  }
+  const win = window.open('', '_blank', 'width=420,height=640')
+  if (win) {
+    win.document.write(html)
+    win.document.close()
+    return true
+  }
+  return printViaIframe(fbsStickerHtml(base64, false))
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */

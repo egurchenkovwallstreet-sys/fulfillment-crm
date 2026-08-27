@@ -167,6 +167,10 @@
   align-items: start;
 }
 
+.assembly-grid--scan {
+  grid-template-columns: 1fr;
+}
+
 .assembly-picklist-head {
   display: flex;
   flex-wrap: wrap;
@@ -209,6 +213,25 @@
   border: 2px solid #2563eb;
   border-radius: 8px;
   box-sizing: border-box;
+}
+
+.assembly-scan-live {
+  margin-bottom: 1rem;
+  padding: 1.35rem 1.5rem;
+  border: 3px solid #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.18);
+}
+
+.assembly-scan-live .section-title {
+  font-size: 1.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.assembly-scan-live .assembly-scan-input {
+  font-size: 1.65rem;
+  padding: 1.15rem 1.2rem;
+  letter-spacing: 0.03em;
 }
 
 .assembly-scan-input:focus {
@@ -721,6 +744,7 @@
   .topbar,
   .assembly-pipeline,
   .assembly-scan-panel,
+  .assembly-scan-live,
   .assembly-table-panel {
     display: none !important;
   }

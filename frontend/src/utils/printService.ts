@@ -7,9 +7,13 @@ import {
 import {
   printFbsSticker as browserPrintFbsSticker,
   printSupplySticker as browserPrintSupplySticker,
+  normalizeImageBase64,
+  openPrintHolder,
+  closePrintHolder,
 } from './browserPrint'
 
 export type PrintChannel = 'bridge' | 'browser'
+export { openPrintHolder, closePrintHolder }
 
 let cachedHealth: PrintBridgeHealth | null = null
 
@@ -23,8 +27,10 @@ export function getCachedPrintBridgeHealth(): PrintBridgeHealth | null {
 }
 
 async function printViaBridge(jobType: PrintJobType, base64: string): Promise<boolean> {
+  const payload = normalizeImageBase64(base64)
+  if (!payload) return false
   try {
-    await bridgePrintImage(jobType, base64)
+    await bridgePrintImage(jobType, payload)
     cachedHealth = { ok: true, ...(cachedHealth || {}) }
     return true
   } catch {
@@ -33,11 +39,16 @@ async function printViaBridge(jobType: PrintJobType, base64: string): Promise<bo
   }
 }
 
-export async function printFbsSticker(base64: string, autoPrint = true): Promise<PrintChannel> {
+export async function printFbsSticker(
+  base64: string,
+  autoPrint = true,
+  preopened?: Window | null,
+): Promise<PrintChannel> {
   if (await printViaBridge('fbs_sticker', base64)) {
+    closePrintHolder(preopened)
     return 'bridge'
   }
-  browserPrintFbsSticker(base64, autoPrint)
+  browserPrintFbsSticker(base64, autoPrint, preopened)
   return 'browser'
 }
 

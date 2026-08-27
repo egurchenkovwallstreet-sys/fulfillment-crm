@@ -14,7 +14,7 @@ export const WORKFLOW_STEPS = [
   {
     id: 2 as WorkflowStepId,
     title: 'Скан баркода',
-    hint: 'Сверка с листом подбора; для ЧЗ — затем шаг 3',
+    hint: 'Активное окно скана; лист подбора на этой вкладке скрыт',
   },
   {
     id: 3 as WorkflowStepId,

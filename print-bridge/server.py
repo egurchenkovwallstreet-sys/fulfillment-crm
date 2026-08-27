@@ -114,6 +114,17 @@ def _fit_image_to_box(img: Image.Image, width_px: int, height_px: int) -> Image.
   return img.resize((target_w, target_h), Image.LANCZOS)
 
 
+def _decode_image_b64(image_b64: str) -> bytes:
+  raw = (image_b64 or "").strip()
+  if raw.lower().startswith("data:") and "," in raw:
+    raw = raw.split(",", 1)[1]
+  raw = "".join(raw.split())
+  pad = (-len(raw)) % 4
+  if pad:
+    raw += "=" * pad
+  return base64.b64decode(raw)
+
+
 def print_png(
   image_b64: str,
   *,
@@ -123,7 +134,7 @@ def print_png(
   if not HAS_WIN32:
     raise RuntimeError("Установите pywin32: pip install pywin32")
 
-  raw = base64.b64decode(image_b64, validate=True)
+  raw = _decode_image_b64(image_b64)
   img = Image.open(io.BytesIO(raw))
   if img.mode != "RGB":
     img = img.convert("RGB")
