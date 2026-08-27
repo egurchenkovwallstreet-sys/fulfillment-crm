@@ -1265,7 +1265,7 @@ function WbAssemblySellerPage() {
               <div className="assembly-picklist-head">
                 <h2 className="section-title">
                   {pickListPreviewStage === stage
-                    ? `Лист подбора (${stage === 'confirm' ? 'на сборке' : 'новые'})`
+                    ? 'Лист подбора (новые)'
                     : `Лист подбора #${displayPickList.id}`}
                 </h2>
                 <div className="assembly-picklist-actions">
