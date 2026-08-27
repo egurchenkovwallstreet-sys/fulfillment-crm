@@ -223,11 +223,9 @@ class OrderSyncView(APIView):
     sync_mode = serializer.validated_data.get("mode", "full")
 
     if marketplace == OZON:
-      from apps.orders.services.ozon_counts import (
-        OzonCountsError,
-        _stage_totals_ozon,
-        refresh_ozon_counts,
-      )
+      from apps.orders.services.ozon_counts import OzonCountsError, _stage_totals_ozon
+      from apps.orders.services.ozon_postings import OzonPostingSyncError, sync_ozon_postings
+      from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 
       if user.role == "seller":
         sellers = Seller.objects.filter(pk=user.seller_id, ozon_enabled=True)
@@ -238,13 +236,19 @@ class OrderSyncView(APIView):
 
       errors = []
       refreshed = 0
+      fetched = 0
       for seller in sellers:
         if not seller.ozon_client_id or not seller.ozon_api_key_encrypted:
           continue
         try:
-          refresh_ozon_counts(seller)
+          try:
+            sync_seller_ozon_warehouses(seller, user=user)
+          except OzonWarehouseSyncError:
+            pass
+          stats = sync_ozon_postings(seller, user=user)
+          fetched += int(stats.get("created", 0)) + int(stats.get("updated", 0))
           refreshed += 1
-        except OzonCountsError as exc:
+        except (OzonPostingSyncError, OzonCountsError) as exc:
           errors.append({"seller_id": seller.id, "error": str(exc)})
 
       counts, _latest = _stage_totals_ozon(sellers)
@@ -252,6 +256,8 @@ class OrderSyncView(APIView):
         "success": True,
         "marketplace": OZON,
         "refreshed": refreshed,
+        "fetched": fetched,
+        "statuses_updated": fetched,
         "errors": errors,
         "dashboard_stats": {
           "new_orders": counts["new"],
@@ -259,7 +265,7 @@ class OrderSyncView(APIView):
           "in_delivery": counts["in_delivery"],
         },
         "message": (
-          "Счётчики Ozon обновлены. Сборка отправлений — следующий шаг."
+          "Склады и отправления Ozon обновлены."
           if refreshed
           else "Нет селлеров с ключами Ozon. Добавьте Client-Id и Api-Key в «Селлеры»."
         ),
@@ -408,27 +414,10 @@ class AssemblySellerDetailView(APIView):
 
     marketplace = parse_marketplace(request)
     if marketplace == OZON:
-      from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
+      from apps.orders.views_ozon import OzonAssemblySellerDetailView
 
-      tab_counts = get_seller_ozon_tab_counts(seller)
-      return Response({
-        "seller": {"id": seller.id, "company_name": seller.company_name},
-        "marketplace": OZON,
-        "ozon_assembly_ready": False,
-        "message": (
-          "Сборка FBS Ozon (скан, этикетка, ЧЗ, акт) — шаг 4 плана. "
-          "Сейчас обновляются счётчики новых / в доставке."
-        ),
-        "counts": {
-          "new": tab_counts["new"],
-          "in_picking": tab_counts["in_picking"],
-          "in_delivery": tab_counts["in_delivery"],
-        },
-        "orders": [],
-        "pick_list": None,
-        "supplies_forming": 0,
-        "warehouses": [],
-      })
+      stage = request.query_params.get("stage", "new")
+      return Response(OzonAssemblySellerDetailView.payload(seller, stage))
 
     stage_counts = get_seller_stage_counts(seller)
     tab_counts = get_seller_wb_tab_counts(seller)

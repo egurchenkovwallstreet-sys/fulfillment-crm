@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from django.core.exceptions import ObjectDoesNotExist
 
-from apps.sellers.models import Seller, SellerWarehouse
+from apps.sellers.models import Seller, SellerOzonWarehouse, SellerWarehouse
 from apps.sellers.utils import seller_has_user_account, seller_username
 
 
@@ -30,6 +30,26 @@ class SellerWarehouseSerializer(serializers.ModelSerializer):
 
 class SellerWarehouseToggleSerializer(serializers.Serializer):
   is_enabled = serializers.BooleanField()
+
+
+class SellerOzonWarehouseSerializer(serializers.ModelSerializer):
+  class Meta:
+    model = SellerOzonWarehouse
+    fields = (
+      "id",
+      "ozon_warehouse_id",
+      "name",
+      "is_rfbs",
+      "is_enabled",
+      "synced_at",
+    )
+    read_only_fields = (
+      "id",
+      "ozon_warehouse_id",
+      "name",
+      "is_rfbs",
+      "synced_at",
+    )
 
 
 class SellerManageSerializer(serializers.ModelSerializer):

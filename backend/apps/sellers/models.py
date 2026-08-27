@@ -68,6 +68,37 @@ class SellerWarehouse(models.Model):
     return f"{self.seller} · {label}"
 
 
+class SellerOzonWarehouse(models.Model):
+  """Склад продавца в ЛК Ozon (точка отгрузки FBS)."""
+
+  seller = models.ForeignKey(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="ozon_warehouses",
+  )
+  ozon_warehouse_id = models.BigIntegerField("ID склада Ozon", db_index=True)
+  name = models.CharField("Название", max_length=255, blank=True)
+  is_rfbs = models.BooleanField("rFBS", default=False)
+  is_enabled = models.BooleanField(
+    "Обслуживаем в CRM",
+    default=True,
+    help_text="Выключенный склад скрыт: отправления не синкаются и не показываются",
+  )
+  synced_at = models.DateTimeField(null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "Склад Ozon селлера"
+    verbose_name_plural = "Склады Ozon селлеров"
+    unique_together = [("seller", "ozon_warehouse_id")]
+    ordering = ["name", "ozon_warehouse_id"]
+
+  def __str__(self):
+    label = self.name or f"Склад #{self.ozon_warehouse_id}"
+    return f"{self.seller} · {label}"
+
+
 class SellerInvite(models.Model):
   """Одноразовая ссылка для регистрации селлера в CRM."""
 

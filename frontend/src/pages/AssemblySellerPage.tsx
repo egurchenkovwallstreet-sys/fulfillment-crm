@@ -49,6 +49,8 @@ import {
 import { downloadPickListPdf } from '../utils/pickListPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
+import { useMarketplace } from '../context/MarketplaceContext'
+import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
 const MARKING_STATUS_POLL_MS = 4000
@@ -87,6 +89,17 @@ function assemblyErrorMessage(
 }
 
 export function AssemblySellerPage() {
+  const { sellerId } = useParams<{ sellerId: string }>()
+  const { marketplace } = useMarketplace()
+  const id = Number(sellerId)
+  if (!id) return null
+  if (marketplace === 'ozon') {
+    return <OzonAssemblySellerPage sellerId={id} />
+  }
+  return <WbAssemblySellerPage />
+}
+
+function WbAssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
   const id = Number(sellerId)
   const scanRef = useRef<HTMLInputElement>(null)
@@ -751,31 +764,6 @@ export function AssemblySellerPage() {
   }
 
   if (!data) return null
-
-  if (data.marketplace === 'ozon') {
-    return (
-      <>
-        <header className="topbar">
-          <div>
-            <p>
-              <Link to="/assembly">← Селлеры Ozon</Link>
-            </p>
-            <h1>{data.seller.company_name}</h1>
-            <p>Сборка FBS Ozon</p>
-          </div>
-        </header>
-        <section className="panel">
-          <p>{data.message || 'Сборка отправлений Ozon — шаг 4 плана.'}</p>
-          <p>
-            Новые: <strong>{data.counts.new ?? 0}</strong>
-            {' · '}
-            В доставке: <strong>{data.counts.in_delivery ?? 0}</strong>
-          </p>
-          <p>Ключи API и счётчики уже работают. Скан, этикетка, ЧЗ и акт появятся следующим этапом.</p>
-        </section>
-      </>
-    )
-  }
 
   const counts = data.counts
   const assemblyEligible = data.assembly_eligible

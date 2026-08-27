@@ -5,7 +5,13 @@ from .views import (
   SellerWarehouseSyncView,
   SellerWarehouseToggleView,
 )
-from .views_ozon import SellerMarketplaceFlagsView, SellerOzonKeysView
+from .views_ozon import (
+  SellerMarketplaceFlagsView,
+  SellerOzonKeysView,
+  SellerOzonWarehouseListView,
+  SellerOzonWarehouseSyncView,
+  SellerOzonWarehouseToggleView,
+)
 from .views_cabinet import (
   AdminBillingDashboardView,
   SellerCabinetBarcodeView,
@@ -56,5 +62,20 @@ urlpatterns = [
     "<int:seller_id>/warehouses/<int:warehouse_id>/",
     SellerWarehouseToggleView.as_view(),
     name="seller-warehouse-toggle",
+  ),
+  path(
+    "<int:seller_id>/ozon-warehouses/",
+    SellerOzonWarehouseListView.as_view(),
+    name="seller-ozon-warehouse-list",
+  ),
+  path(
+    "<int:seller_id>/ozon-warehouses/sync/",
+    SellerOzonWarehouseSyncView.as_view(),
+    name="seller-ozon-warehouse-sync",
+  ),
+  path(
+    "<int:seller_id>/ozon-warehouses/<int:warehouse_id>/",
+    SellerOzonWarehouseToggleView.as_view(),
+    name="seller-ozon-warehouse-toggle",
   ),
 ]

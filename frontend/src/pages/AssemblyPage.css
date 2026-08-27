@@ -725,3 +725,11 @@
     display: none !important;
   }
 }
+
+.assembly-warehouse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.35rem 1.25rem 0.35rem 0;
+  font-size: 0.95rem;
+}

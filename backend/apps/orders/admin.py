@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Order, PickList, PickListItem, Supply
+from .models import Order, OzonPosting, PickList, PickListItem, Supply
 
 
 class PickListItemInline(admin.TabularInline):
@@ -25,3 +25,23 @@ class PickListAdmin(admin.ModelAdmin):
 class SupplyAdmin(admin.ModelAdmin):
   list_display = ("id", "seller", "status", "supply_barcode_printed", "stock_deducted")
   list_filter = ("status", "seller")
+
+
+@admin.register(OzonPosting)
+class OzonPostingAdmin(admin.ModelAdmin):
+  list_display = (
+    "posting_number",
+    "seller",
+    "ozon_status",
+    "crm_stage",
+    "barcode",
+    "cell_number",
+  )
+  list_filter = ("crm_stage", "ozon_status", "seller")
+  search_fields = ("posting_number", "barcode", "offer_id")
+
+  @admin.display(description="Ячейка")
+  def cell_number(self, obj):
+    if obj.product_id and obj.product.cell_id:
+      return obj.product.cell.number
+    return "—"

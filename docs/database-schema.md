@@ -49,6 +49,12 @@ erDiagram
 | ozon_api_key_encrypted | text | Зашифрованный Api-Key Ozon |
 | is_active | bool | Активен |
 
+### sellers_sellerwarehouse
+Склады WB селлера (`wb_warehouse_id`, `is_enabled`).
+
+### sellers_sellerozonwarehouse
+Склады Ozon FBS (`ozon_warehouse_id`, `is_rfbs`, `is_enabled`). Unique `(seller, ozon_warehouse_id)`.
+
 ### warehouse_cell
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -66,7 +72,8 @@ erDiagram
 | Поле | Тип | Описание |
 |------|-----|----------|
 | seller_id | FK | Селлер |
-| barcode | varchar | Баркод (unique per seller) |
+| barcode | varchar | Баркод (unique seller + marketplace) |
+| marketplace | wb / ozon | Маркетплейс карточки |
 | cell_id | FK | Ячейка (1 баркод = 1 ячейка) |
 | price_group_id | FK | Ценовая группа |
 | individual_price | decimal, nullable | Индивидуальная цена (приоритет) |
@@ -91,6 +98,9 @@ erDiagram
 ### orders_supply
 Поставка WB. Списание остатков после подтверждения.
 
+### orders_ozonposting
+Отправление Ozon FBS. Unique `(seller, posting_number)`. Стадии CRM: `new` / `in_picking` / `in_delivery`. Статусы Ozon: `awaiting_packaging` / `awaiting_deliver`.
+
 ### warehouse_xlintakesession / warehouse_xlintakeline
 Приёмка в XL: поштучный скан до подключения API WB. Строка — уникальный баркод, `sort_order` (1, 2, 3…), `quantity`.
 
@@ -101,7 +111,7 @@ erDiagram
 
 - `orders_order(wb_order_id)` — уникальный
 - `orders_order(seller_id, status)` — фильтрация заказов
-- `warehouse_product(seller_id, barcode)` — сканирование при приёмке/сборке
+- `warehouse_product(seller_id, marketplace, barcode)` — сканирование при приёмке/сборке
 - `integrations_auditlog(action_type, created_at)` — отчёты
 
 ## Правила из ТЗ

@@ -156,3 +156,56 @@ class Supply(models.Model):
     verbose_name = "Поставка"
     verbose_name_plural = "Поставки"
     ordering = ["-created_at"]
+
+
+class OzonPosting(models.Model):
+  class CrmStage(models.TextChoices):
+    NEW = "new", "Новые"
+    IN_PICKING = "in_picking", "На сборке"
+    IN_DELIVERY = "in_delivery", "В доставке"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="ozon_postings",
+  )
+  posting_number = models.CharField("Номер отправления", max_length=64, db_index=True)
+  ozon_order_id = models.BigIntegerField("ID заказа Ozon", null=True, blank=True)
+  ozon_status = models.CharField("Статус Ozon", max_length=40, db_index=True)
+  crm_stage = models.CharField(
+    "Стадия CRM",
+    max_length=20,
+    choices=CrmStage.choices,
+    default=CrmStage.NEW,
+    db_index=True,
+  )
+  ozon_warehouse_id = models.BigIntegerField("ID склада Ozon", null=True, blank=True, db_index=True)
+  barcode = models.CharField("Баркод", max_length=100, blank=True, db_index=True)
+  offer_id = models.CharField("Артикул продавца", max_length=200, blank=True)
+  sku = models.BigIntegerField("SKU Ozon", null=True, blank=True)
+  product_name = models.CharField("Название", max_length=500, blank=True)
+  quantity = models.PositiveIntegerField("Количество", default=1)
+  requires_marking = models.BooleanField("Требует ЧЗ", default=False)
+  product = models.ForeignKey(
+    "warehouse.Product",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="ozon_postings",
+  )
+  marking_code = models.CharField("Код Честного знака", max_length=500, blank=True)
+  marking_bound = models.BooleanField("Маркировка привязана", default=False)
+  stock_deducted = models.BooleanField("Остаток списан", default=False)
+  shipment_date = models.DateTimeField(null=True, blank=True)
+  in_process_at = models.DateTimeField(null=True, blank=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "Отправление Ozon"
+    verbose_name_plural = "Отправления Ozon"
+    unique_together = [("seller", "posting_number")]
+    ordering = ["-in_process_at", "-created_at"]
+
+  def __str__(self):
+    return self.posting_number

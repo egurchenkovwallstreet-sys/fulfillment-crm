@@ -24,10 +24,13 @@ export interface SellerAssemblyCounters {
 export interface AssemblyOrder {
   id: number
   wb_order_id: number
+  posting_number?: string
   barcode: string
   photo_url: string
   tech_size: string
   cell_number: string
+  product_name?: string
+  quantity?: number
   status: string
   status_display: string
   wb_supplier_status: string
@@ -308,4 +311,36 @@ export function sendOrderToDelivery(sellerId: number, orderId: number) {
 /** @deprecated use scanOrderBarcode */
 export function scanPrintSticker(sellerId: number, barcode: string) {
   return scanOrderBarcode(sellerId, barcode)
+}
+
+export function scanOzonBarcode(sellerId: number, barcode: string) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    posting: AssemblyOrder
+    counts: Record<string, number>
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-scan/`, {
+    method: 'POST',
+    body: JSON.stringify({ barcode }),
+  })
+}
+
+export function shipOzonPosting(sellerId: number, postingId: number) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    posting: AssemblyOrder
+    counts: Record<string, number>
+    stock?: SendToDeliveryResult['stock']
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-ship/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_id: postingId }),
+  })
+}
+
+export function syncOzonAssembly(sellerId: number, stage?: string) {
+  return apiFetch<AssemblySellerDetail>(`/api/orders/assembly/sellers/${sellerId}/ozon-sync/`, {
+    method: 'POST',
+    body: JSON.stringify({ stage: stage || 'new' }),
+  })
 }

@@ -158,7 +158,7 @@ export function DashboardPage() {
             <StatCard
               label="На сборке"
               value={String(stats.in_assembly ?? stats.in_picking)}
-              hint={marketplace === 'ozon' ? 'Сборка в CRM (шаг 4)' : 'Статус «На сборке» в WB'}
+              hint={marketplace === 'ozon' ? 'Скан в CRM, затем ship в Ozon' : 'Статус «На сборке» в WB'}
               tone="orange"
             />
             <StatCard
@@ -212,8 +212,8 @@ export function DashboardPage() {
             <li className="checklist__item checklist__item--done">Модуль заказов и листа подбора</li>
             <li className="checklist__item checklist__item--done">Интеграция Wildberries FBS (токены)</li>
             <li className="checklist__item checklist__item--done">Печать этикеток Xprinter</li>
-            <li className={marketplace === 'ozon' ? 'checklist__item' : 'checklist__item checklist__item--done'}>
-              Ozon FBS: каркас вкладок и ключей
+            <li className="checklist__item checklist__item--done">
+              Ozon FBS: вкладки, склады, сборка (скан и ship)
             </li>
           </ul>
         </div>
