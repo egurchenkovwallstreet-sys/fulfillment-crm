@@ -11,7 +11,12 @@ echo "=== print agent download ==="
 bash scripts/fetch-print-agent.sh || echo "WARN: print agent exe not updated — deploy continues"
 
 echo "=== build ==="
-docker compose build --no-cache frontend web worker
+# Без --no-cache: базовые образы (node/python) берутся из кэша и не упираются в лимит Docker Hub (429).
+if [[ "${FULL_REBUILD:-0}" == "1" ]]; then
+  docker compose build --no-cache frontend web worker
+else
+  docker compose build frontend web worker
+fi
 
 echo "=== up db/redis ==="
 docker compose up -d db redis
