@@ -3,7 +3,8 @@ import type { Seller } from './warehouse'
 
 export type OnboardingWarehouse = {
   id: number
-  wb_warehouse_id: number
+  wb_warehouse_id?: number
+  ozon_warehouse_id?: number
   name: string
   is_enabled: boolean
 }
@@ -37,7 +38,9 @@ export type OnboardingArticle = {
 export type OnboardingPreview = {
   success: boolean
   seller_id: number
+  marketplace?: string
   catalog_mode?: 'all' | 'with_stock'
+  next_cell_number?: number
   cards_count: number
   barcodes_count: number
   new_barcodes_count: number

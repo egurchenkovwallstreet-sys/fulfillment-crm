@@ -213,7 +213,7 @@ export function DashboardPage() {
             <li className="checklist__item checklist__item--done">Интеграция Wildberries FBS (токены)</li>
             <li className="checklist__item checklist__item--done">Печать этикеток Xprinter</li>
             <li className="checklist__item checklist__item--done">
-              Ozon FBS: вкладки, склады, сборка (скан и ship)
+              Ozon FBS: вкладки, склады, каталог, сборка (скан и ship)
             </li>
           </ul>
         </div>

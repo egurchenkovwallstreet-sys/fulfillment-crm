@@ -147,17 +147,25 @@ class OnboardingPreviewSerializer(serializers.Serializer):
 
   def validate(self, attrs):
     seller_id = self.context.get("seller_id")
+    marketplace = self.context.get("marketplace") or "wb"
     warehouse_ids = attrs.get("warehouse_ids") or []
     if not warehouse_ids:
       raise serializers.ValidationError({
         "warehouse_ids": "Выберите хотя бы один FBS-склад",
       })
-    from apps.sellers.models import SellerWarehouse
+    from apps.integrations.marketplace import OZON
+    from apps.sellers.models import SellerOzonWarehouse, SellerWarehouse
 
-    found = SellerWarehouse.objects.filter(
-      seller_id=seller_id,
-      pk__in=warehouse_ids,
-    ).count()
+    if marketplace == OZON:
+      found = SellerOzonWarehouse.objects.filter(
+        seller_id=seller_id,
+        pk__in=warehouse_ids,
+      ).count()
+    else:
+      found = SellerWarehouse.objects.filter(
+        seller_id=seller_id,
+        pk__in=warehouse_ids,
+      ).count()
     if found != len(set(warehouse_ids)):
       raise serializers.ValidationError({
         "warehouse_ids": "Один или несколько складов не найдены у селлера",

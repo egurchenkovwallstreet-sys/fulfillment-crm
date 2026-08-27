@@ -69,22 +69,121 @@ class OzonClient:
 
   def ping(self) -> dict:
     """Проверка ключей: список складов."""
-    data = self._post("/v1/warehouse/list", {})
-    result = data.get("result") if isinstance(data, dict) else data
-    warehouses = []
-    if isinstance(result, list):
-      warehouses = result
-    elif isinstance(result, dict):
-      warehouses = result.get("warehouses") or result.get("items") or []
+    warehouses = self.warehouse_list()
     return {"ok": True, "warehouses": len(warehouses)}
 
   def warehouse_list(self) -> list[dict]:
-    data = self._post("/v1/warehouse/list", {})
-    result = data.get("result") if isinstance(data, dict) else data
-    if isinstance(result, list):
-      return result
-    if isinstance(result, dict):
-      return result.get("warehouses") or result.get("items") or []
+    last_error: OzonApiError | None = None
+    for path in ("/v2/warehouse/list", "/v1/warehouse/list"):
+      try:
+        data = self._post(path, {})
+      except OzonApiError as exc:
+        last_error = exc
+        if path.endswith("/v2/warehouse/list"):
+          logger.warning("Ozon warehouse v2 failed, fallback v1: %s", exc)
+          continue
+        raise
+      result = data.get("result") if isinstance(data, dict) else data
+      if isinstance(result, list):
+        return result
+      if isinstance(result, dict):
+        return result.get("warehouses") or result.get("items") or []
+    if last_error:
+      raise last_error
+    return []
+
+  def product_list_ids(self) -> list[dict]:
+    """Краткие карточки: product_id + offer_id. POST /v3/product/list."""
+    last_id = ""
+    collected: list[dict] = []
+    for _ in range(80):
+      data = self._post("/v3/product/list", {
+        "filter": {"visibility": "ALL"},
+        "last_id": last_id,
+        "limit": PAGE_LIMIT,
+      })
+      if not isinstance(data, dict):
+        break
+      result = data.get("result") if isinstance(data.get("result"), dict) else data
+      items = result.get("items") or []
+      collected.extend(item for item in items if isinstance(item, dict))
+      last_id = str(result.get("last_id") or "")
+      if not items or not last_id:
+        break
+    return collected
+
+  def product_info_list(self, product_ids: list[int]) -> list[dict]:
+    """Детали карточек. POST /v3/product/info/list, пачки до 100."""
+    collected: list[dict] = []
+    chunk_size = 100
+    for start in range(0, len(product_ids), chunk_size):
+      chunk = product_ids[start:start + chunk_size]
+      if not chunk:
+        continue
+      data = self._post("/v3/product/info/list", {
+        "product_id": chunk,
+        "offer_id": [],
+        "sku": [],
+      })
+      if not isinstance(data, dict):
+        continue
+      items = data.get("items")
+      if items is None and isinstance(data.get("result"), dict):
+        items = data["result"].get("items")
+      if items is None and isinstance(data.get("result"), list):
+        items = data["result"]
+      collected.extend(item for item in (items or []) if isinstance(item, dict))
+    return collected
+
+  def fbs_stocks_by_offer_ids(self, offer_ids: list[str]) -> list[dict]:
+    """Остатки FBS по складам. v2, fallback v1."""
+    unique = [item for item in dict.fromkeys(offer_ids) if item]
+    collected: list[dict] = []
+    chunk_size = 100
+    for start in range(0, len(unique), chunk_size):
+      collected.extend(self._fbs_stocks_request({
+        "limit": 1000,
+        "cursor": "",
+        "offer_id": unique[start:start + chunk_size],
+      }))
+    return collected
+
+  def fbs_stocks_by_skus(self, skus: list[str]) -> list[dict]:
+    unique = [item for item in dict.fromkeys(str(sku) for sku in skus) if item]
+    collected: list[dict] = []
+    chunk_size = 100
+    for start in range(0, len(unique), chunk_size):
+      collected.extend(self._fbs_stocks_request({
+        "limit": 1000,
+        "cursor": "",
+        "sku": unique[start:start + chunk_size],
+      }))
+    return collected
+
+  def _fbs_stocks_request(self, payload: dict) -> list[dict]:
+    last_error: OzonApiError | None = None
+    for path in (
+      "/v2/product/info/stocks-by-warehouse/fbs",
+      "/v1/product/info/stocks-by-warehouse/fbs",
+    ):
+      try:
+        data = self._post(path, payload)
+      except OzonApiError as exc:
+        last_error = exc
+        if "v2" in path:
+          logger.warning("Ozon stocks v2 failed, fallback v1: %s", exc)
+          continue
+        raise
+      if not isinstance(data, dict):
+        return []
+      products = data.get("products")
+      if products is None and isinstance(data.get("result"), dict):
+        products = data["result"].get("products") or data["result"].get("items")
+      if products is None and isinstance(data.get("result"), list):
+        products = data["result"]
+      return [item for item in (products or []) if isinstance(item, dict)]
+    if last_error:
+      raise last_error
     return []
 
   def _cutoff_window(self) -> tuple[str, str]:

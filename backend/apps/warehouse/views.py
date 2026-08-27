@@ -28,6 +28,7 @@ from .services.cell_label import build_cell_label_data
 from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
 from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
+from .services.catalog_fetch_ozon import build_ozon_onboarding_preview
 from .services.intake import IntakeError, perform_intake
 from .services.inventory import perform_inventory
 from .services.onboarding import OnboardingError, confirm_onboarding
@@ -417,23 +418,31 @@ class InventoryView(APIView):
 
 
 class OnboardingPreviewView(APIView):
-  """Сценарий 1: каталог WB + остатки + план ячеек."""
+  """Сценарий 1: каталог WB/Ozon + остатки + план ячеек."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
     seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    marketplace = parse_marketplace(request)
     serializer = OnboardingPreviewSerializer(
       data=request.data or {},
-      context={"seller_id": seller_id},
+      context={"seller_id": seller_id, "marketplace": marketplace},
     )
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     try:
-      payload = build_onboarding_preview(
-        seller,
-        catalog_mode=data.get("catalog_mode", "all"),
-        warehouse_ids=data.get("warehouse_ids"),
-      )
+      if marketplace == OZON:
+        payload = build_ozon_onboarding_preview(
+          seller,
+          catalog_mode=data.get("catalog_mode", "all"),
+          warehouse_ids=data.get("warehouse_ids"),
+        )
+      else:
+        payload = build_onboarding_preview(
+          seller,
+          catalog_mode=data.get("catalog_mode", "all"),
+          warehouse_ids=data.get("warehouse_ids"),
+        )
     except CatalogError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({"success": True, **payload})
@@ -467,6 +476,7 @@ class OnboardingConfirmView(APIView):
         seller,
         serializer.validated_data["items"],
         user=request.user,
+        marketplace=parse_marketplace(request),
       )
     except OnboardingError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

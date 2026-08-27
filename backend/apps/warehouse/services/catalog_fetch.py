@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from apps.integrations.marketplace import WB
 from apps.integrations.wb_client import WBApiError
 from apps.integrations.wb_content import _pick_photo_url, fetch_all_seller_cards
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
+from apps.warehouse.services.cells import _next_cell_number
 from apps.warehouse.services.size_sort import size_sort_key
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
@@ -200,17 +202,20 @@ def build_onboarding_preview(
     flat_items = [item for item in flat_items if item.barcode in kept_barcodes]
 
   existing_barcodes = set(
-    Product.objects.filter(seller=seller).values_list("barcode", flat=True)
+    Product.objects.filter(seller=seller, marketplace=WB).values_list("barcode", flat=True)
   )
   for item in flat_items:
     item.already_in_crm = item.barcode in existing_barcodes
 
   new_items = [item for item in flat_items if not item.already_in_crm]
-  _assign_cell_numbers(new_items)
+  start_from = int(_next_cell_number(seller, WB))
+  _assign_cell_numbers(new_items, start_from=start_from)
 
   return {
     "seller_id": seller.id,
+    "marketplace": WB,
     "catalog_mode": catalog_mode,
+    "next_cell_number": start_from,
     "cards_count": len(cards),
     "barcodes_count": len(flat_items),
     "new_barcodes_count": len(new_items),

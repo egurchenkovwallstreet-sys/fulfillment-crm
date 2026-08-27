@@ -16,14 +16,48 @@ import {
   type StockOverview,
   type StockOverviewProduct,
 } from '../api/warehouseHub'
-import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
+import {
+  fetchSellerOzonWarehouses,
+  fetchSellerWarehouses,
+  syncSellerOzonWarehouses,
+  syncSellerWarehouses,
+  type SellerOzonWarehouse,
+  type SellerWarehouse,
+} from '../api/sellers'
 import { useMarketplace } from '../context/MarketplaceContext'
 import './WarehouseHubPage.css'
 
 type TabId = 'onboarding' | 'import' | 'intake' | 'transfer'
 
+type HubWarehouse = {
+  id: number
+  name: string
+  code: number
+  is_enabled: boolean
+}
+
+function mapWbWarehouses(rows: SellerWarehouse[]): HubWarehouse[] {
+  return rows.map((wh) => ({
+    id: wh.id,
+    name: wh.name,
+    code: wh.wb_warehouse_id,
+    is_enabled: wh.is_enabled,
+  }))
+}
+
+function mapOzonWarehouses(rows: SellerOzonWarehouse[]): HubWarehouse[] {
+  return rows.map((wh) => ({
+    id: wh.id,
+    name: wh.name,
+    code: wh.ozon_warehouse_id,
+    is_enabled: wh.is_enabled,
+  }))
+}
+
 export function WarehouseHubPage() {
   const { marketplace } = useMarketplace()
+  const isOzon = marketplace === 'ozon'
+  const mpName = isOzon ? 'Ozon' : 'WB'
   const [tab, setTab] = useState<TabId>('onboarding')
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
@@ -32,7 +66,7 @@ export function WarehouseHubPage() {
   const [success, setSuccess] = useState('')
 
   const [preview, setPreview] = useState<OnboardingPreview | null>(null)
-  const [sellerWarehouses, setSellerWarehouses] = useState<SellerWarehouse[]>([])
+  const [sellerWarehouses, setSellerWarehouses] = useState<HubWarehouse[]>([])
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>([])
   const [catalogMode, setCatalogMode] = useState<'all' | 'with_stock'>('all')
   const [excludeBarcodes, setExcludeBarcodes] = useState<Set<string>>(new Set())
@@ -77,14 +111,18 @@ export function WarehouseHubPage() {
       setSelectedWarehouseIds([])
       return
     }
-    fetchSellerWarehouses(Number(sellerId))
+    const load = isOzon ? fetchSellerOzonWarehouses : fetchSellerWarehouses
+    load(Number(sellerId))
       .then((whs) => {
-        setSellerWarehouses(whs)
-        setSelectedWarehouseIds(whs.filter((w) => w.is_enabled).map((w) => w.id))
-        if (whs.length === 1) setImportWarehouseId(whs[0].id)
+        const mapped = isOzon
+          ? mapOzonWarehouses(whs as SellerOzonWarehouse[])
+          : mapWbWarehouses(whs as SellerWarehouse[])
+        setSellerWarehouses(mapped)
+        setSelectedWarehouseIds(mapped.filter((w) => w.is_enabled).map((w) => w.id))
+        if (mapped.length === 1) setImportWarehouseId(mapped[0].id)
       })
       .catch(() => setSellerWarehouses([]))
-  }, [sellerId])
+  }, [sellerId, isOzon])
 
   const activeItems = useMemo(() => {
     if (!preview) return []
@@ -113,7 +151,7 @@ export function WarehouseHubPage() {
   }, [preview, excludeBarcodes, excludeNmIds])
 
   const renumberedItems = useMemo(() => {
-    let num = 1
+    let num = preview?.next_cell_number ?? 1
     return activeItems.map((item) => {
       if (item.excluded || item.already_in_crm) {
         return { ...item, cell_number: item.already_in_crm ? item.cell_number : '' }
@@ -122,7 +160,7 @@ export function WarehouseHubPage() {
       num += 1
       return next
     })
-  }, [activeItems])
+  }, [activeItems, preview?.next_cell_number])
 
   const newToCreate = renumberedItems.filter((i) => !i.excluded && !i.already_in_crm)
 
@@ -138,9 +176,15 @@ export function WarehouseHubPage() {
     setExcludeBarcodes(new Set())
     setExcludeNmIds(new Set())
     try {
-      await syncSellerWarehouses(Number(sellerId))
-      const whs = await fetchSellerWarehouses(Number(sellerId))
-      setSellerWarehouses(whs)
+      if (isOzon) {
+        await syncSellerOzonWarehouses(Number(sellerId))
+        const whs = mapOzonWarehouses(await fetchSellerOzonWarehouses(Number(sellerId)))
+        setSellerWarehouses(whs)
+      } else {
+        await syncSellerWarehouses(Number(sellerId))
+        const whs = mapWbWarehouses(await fetchSellerWarehouses(Number(sellerId)))
+        setSellerWarehouses(whs)
+      }
       const data = await fetchOnboardingPreview(Number(sellerId), {
         catalog_mode: catalogMode,
         warehouse_ids: selectedWarehouseIds,
@@ -155,7 +199,7 @@ export function WarehouseHubPage() {
     } finally {
       setLoading(false)
     }
-  }, [sellerId, catalogMode, selectedWarehouseIds])
+  }, [sellerId, catalogMode, selectedWarehouseIds, isOzon])
 
   function toggleWarehouseSelection(warehouseId: number, checked: boolean) {
     setSelectedWarehouseIds((prev) => {
@@ -248,7 +292,7 @@ export function WarehouseHubPage() {
   const handleConfirmOnboarding = async () => {
     if (!sellerId || newToCreate.length === 0) return
     if (!window.confirm(
-      `Создать ${newToCreate.length} товаров с ячейками и остатками из WB?\n\nУже в CRM: ${preview?.existing_barcodes_count ?? 0} баркодов будут пропущены.`,
+      `Создать ${newToCreate.length} товаров с ячейками ${mpName}?\n\nУже в CRM: ${preview?.existing_barcodes_count ?? 0} баркодов будут пропущены.`,
     )) return
     setLoading(true)
     setError('')
@@ -379,19 +423,12 @@ export function WarehouseHubPage() {
       <header className="topbar whub-header">
         <div>
           <h1>Склад</h1>
-          <p>Подключение селлера, приёмка и перераспределение остатков FBS</p>
+          <p>Подключение каталога {mpName}, приёмка и ячейки FBS</p>
         </div>
         <Link to="/inventory" className="btn btn--danger">
           Инвентаризация
         </Link>
       </header>
-
-      {marketplace === 'ozon' && (
-        <div className="dashboard-sync-msg">
-          Каталог и склады Ozon — шаг 3 плана. Сейчас на вкладке Ozon работают приёмка, XL и ячейки.
-          Онбординг карточек ниже пока только для WB.
-        </div>
-      )}
 
       <div className="whub-tabs">
         <button
@@ -399,15 +436,17 @@ export function WarehouseHubPage() {
           className={`whub-tab${tab === 'onboarding' ? ' whub-tab--active' : ''}`}
           onClick={() => setTab('onboarding')}
         >
-          Подключение (WB → CRM)
+          Подключение ({mpName} → CRM)
         </button>
-        <button
-          type="button"
-          className={`whub-tab${tab === 'import' ? ' whub-tab--active' : ''}`}
-          onClick={() => setTab('import')}
-        >
-          Импорт Excel
-        </button>
+        {!isOzon && (
+          <button
+            type="button"
+            className={`whub-tab${tab === 'import' ? ' whub-tab--active' : ''}`}
+            onClick={() => setTab('import')}
+          >
+            Импорт Excel
+          </button>
+        )}
         <button
           type="button"
           className={`whub-tab${tab === 'intake' ? ' whub-tab--active' : ''}`}
@@ -415,13 +454,15 @@ export function WarehouseHubPage() {
         >
           Приёмка (новый клиент)
         </button>
-        <button
-          type="button"
-          className={`whub-tab${tab === 'transfer' ? ' whub-tab--active' : ''}`}
-          onClick={() => setTab('transfer')}
-        >
-          Перераспределение
-        </button>
+        {!isOzon && (
+          <button
+            type="button"
+            className={`whub-tab${tab === 'transfer' ? ' whub-tab--active' : ''}`}
+            onClick={() => setTab('transfer')}
+          >
+            Перераспределение
+          </button>
+        )}
       </div>
 
       <section className="panel whub-seller-bar">
@@ -450,8 +491,9 @@ export function WarehouseHubPage() {
       {tab === 'onboarding' && (
         <section className="panel">
           <p className="whub-hint">
-            Подключение каталога WB: выберите склады FBS и режим загрузки. Ячейки назначаются на все
+            Подключение каталога {mpName}: выберите склады FBS и режим загрузки. Ячейки назначаются на все
             размеры артикула (даже с нулевым остатком), если артикул попал в выборку.
+            {isOzon ? ' Остатки пишутся в CRM; отдельная отправка на склад Ozon — следующей кнопкой.' : ''}
           </p>
 
           <div className="whub-options">
@@ -480,7 +522,7 @@ export function WarehouseHubPage() {
             <fieldset className="whub-fieldset">
               <legend>FBS-склады для остатков</legend>
               {sellerWarehouses.length === 0 ? (
-                <p className="whub-hint">Загрузите склады WB (кнопка ниже)</p>
+                <p className="whub-hint">Загрузите склады {mpName} (кнопка ниже)</p>
               ) : (
                 <ul className="whub-warehouse-picks">
                   {sellerWarehouses.map((wh) => (
@@ -491,7 +533,7 @@ export function WarehouseHubPage() {
                           checked={selectedWarehouseIds.includes(wh.id)}
                           onChange={(e) => toggleWarehouseSelection(wh.id, e.target.checked)}
                         />
-                        {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                        {wh.name || `Склад #${wh.code}`}
                       </label>
                     </li>
                   ))}
@@ -504,9 +546,23 @@ export function WarehouseHubPage() {
             type="button"
             className="btn btn--secondary btn--small"
             disabled={!sellerId || loading}
-            onClick={() => void syncSellerWarehouses(Number(sellerId)).then(() => fetchSellerWarehouses(Number(sellerId)).then(setSellerWarehouses))}
+            onClick={() => {
+              if (!sellerId) return
+              const run = isOzon
+                ? syncSellerOzonWarehouses(Number(sellerId)).then(() =>
+                    fetchSellerOzonWarehouses(Number(sellerId)).then((rows) =>
+                      setSellerWarehouses(mapOzonWarehouses(rows)),
+                    ),
+                  )
+                : syncSellerWarehouses(Number(sellerId)).then(() =>
+                    fetchSellerWarehouses(Number(sellerId)).then((rows) =>
+                      setSellerWarehouses(mapWbWarehouses(rows)),
+                    ),
+                  )
+              void run
+            }}
           >
-            Обновить склады из WB
+            Обновить склады из {mpName}
           </button>
           <button
             type="button"
@@ -514,7 +570,7 @@ export function WarehouseHubPage() {
             disabled={!sellerId || loading || selectedWarehouseIds.length === 0}
             onClick={() => void handleLoadPreview()}
           >
-            {loading ? 'Загрузка каталога WB…' : 'Подключение — загрузить каталог'}
+            {loading ? `Загрузка каталога ${mpName}…` : 'Подключение — загрузить каталог'}
           </button>
 
           {preview && (
@@ -535,7 +591,7 @@ export function WarehouseHubPage() {
                       <div>
                         <h3>{article.title || `Артикул ${article.wb_nm_id}`}</h3>
                         <p>
-                          WB #{article.wb_nm_id}
+                          {mpName} #{article.wb_nm_id}
                           {article.vendor_code ? ` · ${article.vendor_code}` : ''}
                           {article.requires_marking ? ' · ЧЗ' : ''}
                         </p>
@@ -554,7 +610,7 @@ export function WarehouseHubPage() {
                           <th>Ячейка</th>
                           <th>Размер</th>
                           <th>Баркод</th>
-                          <th>Остаток WB</th>
+                          <th>Остаток {mpName}</th>
                           <th />
                         </tr>
                       </thead>
@@ -602,7 +658,7 @@ export function WarehouseHubPage() {
         </section>
       )}
 
-      {tab === 'import' && (
+      {tab === 'import' && !isOzon && (
         <section className="panel">
           <p className="whub-hint">
             Excel в формате WB (баркод + количество). Остатки <strong>прибавляются</strong> к CRM и
@@ -618,7 +674,7 @@ export function WarehouseHubPage() {
                 <option value="">— выберите —</option>
                 {sellerWarehouses.map((wh) => (
                   <option key={wh.id} value={wh.id}>
-                    {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                    {wh.name || `Склад #${wh.code}`}
                   </option>
                 ))}
               </select>
@@ -770,7 +826,7 @@ export function WarehouseHubPage() {
         </section>
       )}
 
-      {tab === 'transfer' && (
+      {tab === 'transfer' && !isOzon && (
         <section className="panel">
           <p className="whub-hint">
             Перенос остатков между FBS-складами WB. Суммарный остаток баркода в CRM не меняется.
