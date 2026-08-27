@@ -23,8 +23,8 @@ function renderBarcodeSvg(barcode: string): string {
   try {
     JsBarcode(svg, barcode, {
       format: 'CODE128',
-      width: 1.6,
-      height: 36,
+      width: 1.4,
+      height: 28,
       displayValue: false,
       margin: 0,
     })
@@ -35,7 +35,7 @@ function renderBarcodeSvg(barcode: string): string {
 }
 
 export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
-  const win = window.open('', '_blank', 'width=420,height=900')
+  const win = window.open('', '_blank', 'width=420,height=640')
   if (!win) return false
 
   const seller = escapeHtml(data.seller_name || '—')
@@ -54,28 +54,27 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: 75mm 120mm; margin: 0; }
-    html, body { width: 75mm; background: #fff; }
+    html, body { width: 75mm; height: 120mm; }
     body {
       font-family: Arial, Helvetica, sans-serif;
+      background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .label {
       width: 75mm;
       height: 120mm;
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
-      page-break-after: always;
-      break-after: page;
     }
-    .label:last-child {
-      page-break-after: auto;
-      break-after: auto;
-    }
-    .label--number {
+    .zone-number {
+      flex: 0 0 60%;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 3mm;
+      overflow: hidden;
+      padding: 1mm 2mm 0;
     }
     .cell-number {
       font-weight: 900;
@@ -83,49 +82,51 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
       text-align: center;
       letter-spacing: -0.02em;
     }
-    .label--meta {
+    .zone-meta {
+      flex: 0 0 40%;
       display: flex;
-      flex-direction: column;
-      height: 120mm;
+      min-height: 0;
+      border-top: 0.4mm solid #000;
     }
     .zone-mp {
-      flex: 1 1 auto;
+      flex: 1 1 55%;
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      padding: 2mm 2mm 0;
-      min-height: 58mm;
+      padding: 1mm;
     }
     .mp-name {
       font-weight: 900;
-      line-height: 0.8;
+      line-height: 0.78;
       text-align: center;
       letter-spacing: -0.04em;
     }
     .zone-info {
-      flex: 0 0 auto;
+      flex: 1 1 45%;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: flex-end;
-      padding: 1mm 3mm 3mm;
-      gap: 1.5mm;
+      justify-content: center;
+      padding: 1.5mm 2mm;
+      gap: 1mm;
+      min-width: 0;
     }
     .seller {
-      font-size: 16pt;
+      font-size: 11pt;
       font-weight: 800;
       text-align: center;
       line-height: 1.05;
       word-break: break-word;
-      max-height: 22mm;
+      max-height: 16mm;
       overflow: hidden;
     }
-    .barcode-svg svg { width: 100%; max-width: 68mm; height: 11mm; }
+    .barcode-svg { width: 100%; }
+    .barcode-svg svg { width: 100%; max-width: 32mm; height: 8mm; }
     .barcode-text {
-      font-size: 5mm;
+      font-size: 3.2mm;
       font-weight: 700;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.02em;
       line-height: 1;
       text-align: center;
       word-break: break-all;
@@ -133,18 +134,20 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   </style>
 </head>
 <body>
-  <article class="label label--number">
-    <div class="cell-number" id="cellNum">${cellNumber}</div>
-  </article>
-  <article class="label label--meta">
-    <div class="zone-mp">
-      <div class="mp-name" id="mpName">${mpLabel}</div>
-    </div>
-    <footer class="zone-info">
-      <div class="seller">${seller}</div>
-      <div class="barcode-svg">${barcodeSvg}</div>
-      <div class="barcode-text">${barcodeText}</div>
-    </footer>
+  <article class="label">
+    <section class="zone-number">
+      <div class="cell-number" id="cellNum">${cellNumber}</div>
+    </section>
+    <section class="zone-meta">
+      <div class="zone-mp">
+        <div class="mp-name" id="mpName">${mpLabel}</div>
+      </div>
+      <div class="zone-info">
+        <div class="seller">${seller}</div>
+        <div class="barcode-svg">${barcodeSvg}</div>
+        <div class="barcode-text">${barcodeText}</div>
+      </div>
+    </section>
   </article>
   <script>
     (function () {
@@ -159,7 +162,7 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
           el.style.fontSize = size + 'px';
         }
       }
-      fit(document.getElementById('cellNum'), document.querySelector('.label--number'), 0.92);
+      fit(document.getElementById('cellNum'), document.querySelector('.zone-number'), 0.92);
       fit(document.getElementById('mpName'), document.querySelector('.zone-mp'), 0.95);
       ${autoPrint ? 'window.onload = function () { window.print(); window.close(); };' : ''}
     })();
