@@ -18,7 +18,7 @@ class Order(models.Model):
     on_delete=models.CASCADE,
     related_name="orders",
   )
-  wb_order_id = models.BigIntegerField("ID заказа WB", unique=True)
+  wb_order_id = models.BigIntegerField("ID заказа WB")
   barcode = models.CharField("Баркод заказа", max_length=100)
   wb_warehouse_id = models.BigIntegerField("ID склада WB", null=True, blank=True, db_index=True)
   product = models.ForeignKey(
@@ -83,6 +83,9 @@ class Order(models.Model):
       models.Index(fields=["seller", "status"]),
       models.Index(fields=["seller", "wb_supplier_status"]),
       models.Index(fields=["barcode"]),
+    ]
+    constraints = [
+      models.UniqueConstraint(fields=["seller", "wb_order_id"], name="uniq_order_seller_wb_id"),
     ]
 
   def __str__(self):

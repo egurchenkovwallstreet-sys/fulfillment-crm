@@ -1,18 +1,16 @@
 from decimal import Decimal
 
-from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin
-from apps.sellers.models import Seller
+from apps.accounts.tenant import fulfillment_for_staff_user, get_seller_for_user, price_groups_for_user
 from apps.warehouse.models import PriceGroup
 from apps.warehouse.services.seller_pricing import (
   SellerPricingError,
   apply_seller_tariff,
-  get_price_groups,
   get_seller_pricing_summary,
 )
 
@@ -58,12 +56,15 @@ class PriceGroupListView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def get(self, request):
-    return Response(PriceGroupSerializer(get_price_groups(), many=True).data)
+    return Response(PriceGroupSerializer(price_groups_for_user(request.user), many=True).data)
 
   def post(self, request):
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response({"detail": "Фулфилмент не определён"}, status=status.HTTP_400_BAD_REQUEST)
     serializer = PriceGroupSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    group = serializer.save()
+    group = serializer.save(fulfillment=fulfillment)
     return Response(PriceGroupSerializer(group).data, status=status.HTTP_201_CREATED)
 
 
@@ -71,14 +72,18 @@ class PriceGroupDetailView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def patch(self, request, group_id):
-    group = get_object_or_404(PriceGroup, pk=group_id)
+    group = price_groups_for_user(request.user).filter(pk=group_id).first()
+    if not group:
+      return Response(status=status.HTTP_404_NOT_FOUND)
     serializer = PriceGroupSerializer(group, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     group = serializer.save()
     return Response(PriceGroupSerializer(group).data)
 
   def delete(self, request, group_id):
-    group = get_object_or_404(PriceGroup, pk=group_id)
+    group = price_groups_for_user(request.user).filter(pk=group_id).first()
+    if not group:
+      return Response(status=status.HTTP_404_NOT_FOUND)
     group.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -87,12 +92,16 @@ class SellerPricingView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def get(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id)
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
     summary = get_seller_pricing_summary(seller)
     return Response(SellerPricingSummarySerializer(summary).data)
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id)
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
     serializer = SellerTariffApplySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data

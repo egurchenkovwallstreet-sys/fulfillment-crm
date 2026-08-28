@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_seller_for_user
 from apps.orders.models import OzonPosting
 from apps.orders.services.ozon_assembly import OzonAssemblyError, scan_ozon_barcode, ship_ozon_posting
 from apps.orders.services.ozon_postings import serialize_ozon_posting, sync_ozon_postings
@@ -58,7 +59,7 @@ class OzonAssemblyScanView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     barcode = str(request.data.get("barcode") or "")
@@ -73,7 +74,7 @@ class OzonAssemblyShipView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     posting_id = request.data.get("posting_id") or request.data.get("order_id")
@@ -88,7 +89,7 @@ class OzonAssemblySyncView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     warning = ""

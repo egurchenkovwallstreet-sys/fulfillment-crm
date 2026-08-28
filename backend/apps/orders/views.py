@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_seller_for_user, sellers_for_user
 from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
@@ -110,8 +111,9 @@ def _orders_queryset_for_user(user):
     if not user.seller_id:
       return qs.none()
     qs = qs.filter(seller_id=user.seller_id)
-    return filter_orders_queryset(qs, seller=Seller.objects.filter(pk=user.seller_id).first())
-  return filter_orders_queryset(qs)
+    return filter_orders_queryset(qs, seller=get_seller_for_user(user, user.seller_id))
+  fulfillment = sellers_for_user(user)
+  return filter_orders_queryset(qs.filter(seller__in=fulfillment))
 
 
 def _pick_lists_queryset_for_user(user):
@@ -120,7 +122,7 @@ def _pick_lists_queryset_for_user(user):
     if not user.seller_id:
       return qs.none()
     return qs.filter(seller_id=user.seller_id)
-  return qs
+  return qs.filter(seller__in=sellers_for_user(user))
 
 
 class OrderListView(APIView):
@@ -162,7 +164,7 @@ class OrderStatsView(APIView):
     stats_source = "ozon_api_cache" if marketplace == OZON else "wb_api_cache"
 
     if user.role == "seller" and user.seller_id:
-      seller = Seller.objects.filter(pk=user.seller_id).first()
+      seller = get_seller_for_user(user, user.seller_id)
       if seller:
         if marketplace == OZON:
           counts, latest_sync = _stage_totals_ozon([seller] if seller.ozon_enabled else [])
@@ -175,7 +177,7 @@ class OrderStatsView(APIView):
       else:
         new_orders = in_assembly = in_delivery = 0
     else:
-      sellers_qs = filter_sellers_qs(Seller.objects.filter(is_active=True), marketplace)
+      sellers_qs = filter_sellers_qs(sellers_for_user(user).filter(is_active=True), marketplace)
       if marketplace == OZON:
         counts, latest_sync = _stage_totals_ozon(sellers_qs)
       else:
@@ -199,7 +201,7 @@ class OrderStatsView(APIView):
 
     if user.role in ("admin", "manager"):
       data["sellers_count"] = filter_sellers_qs(
-        Seller.objects.filter(is_active=True),
+        sellers_for_user(user).filter(is_active=True),
         marketplace,
       ).count()
 
@@ -228,11 +230,11 @@ class OrderSyncView(APIView):
       from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 
       if user.role == "seller":
-        sellers = Seller.objects.filter(pk=user.seller_id, ozon_enabled=True)
+        sellers = sellers_for_user(user).filter(ozon_enabled=True)
       elif seller_id:
-        sellers = Seller.objects.filter(pk=seller_id, is_active=True, ozon_enabled=True)
+        sellers = sellers_for_user(user).filter(pk=seller_id, is_active=True, ozon_enabled=True)
       else:
-        sellers = Seller.objects.filter(is_active=True, ozon_enabled=True)
+        sellers = sellers_for_user(user).filter(is_active=True, ozon_enabled=True)
 
       errors = []
       refreshed = 0
@@ -290,7 +292,9 @@ class OrderSyncView(APIView):
       return Response(status=status.HTTP_403_FORBIDDEN)
 
     if seller_id:
-      seller = Seller.objects.get(pk=seller_id, is_active=True)
+      seller = get_seller_for_user(user, seller_id, active_only=True)
+      if not seller:
+        return Response(status=status.HTTP_404_NOT_FOUND)
       try:
         result = sync_orders_for_seller(seller, user=user, mode=sync_mode)
       except SyncError as exc:
@@ -300,7 +304,13 @@ class OrderSyncView(APIView):
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
 
-    payload = sync_all_active_sellers(user=user, mode=sync_mode)
+    from apps.accounts.tenant import get_user_fulfillment
+
+    payload = sync_all_active_sellers(
+      user=user,
+      mode=sync_mode,
+      fulfillment=get_user_fulfillment(user),
+    )
     results = payload.get("results") or []
     if results:
       payload["dashboard_stats"] = _aggregate_sync_dashboard_stats(results)
@@ -347,7 +357,9 @@ class PickListGenerateView(APIView):
   def post(self, request):
     serializer = PickListGenerateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    seller = Seller.objects.get(pk=serializer.validated_data["seller_id"], is_active=True)
+    seller = get_seller_for_user(request.user, serializer.validated_data["seller_id"], active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
 
     try:
       pick_list = generate_pick_list(seller, user=request.user)
@@ -368,7 +380,7 @@ class AssemblySellerListView(APIView):
   def get(self, request):
     marketplace = parse_marketplace(request)
     sellers = filter_sellers_qs(
-      Seller.objects.filter(is_active=True),
+      sellers_for_user(request.user).filter(is_active=True),
       marketplace,
     ).order_by("company_name")
     payload = []
@@ -408,7 +420,7 @@ class AssemblySellerDetailView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -485,7 +497,7 @@ class AssemblyStartView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -506,7 +518,7 @@ class AssemblyPickListPreviewView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -529,7 +541,7 @@ class AssemblyDeletePickListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -551,7 +563,7 @@ class AssemblyDeleteOrderView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -581,7 +593,7 @@ class AssemblyScanPrintView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -614,7 +626,7 @@ class AssemblyBindMarkingView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -647,7 +659,7 @@ class AssemblyMarkingStatusView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -666,7 +678,7 @@ class AssemblyVerifyMarkingView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -697,7 +709,7 @@ class AssemblyReplaceOrderView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -725,7 +737,7 @@ class AssemblyReprintStickerView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -767,7 +779,7 @@ class AssemblySendToAssemblyView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -799,7 +811,7 @@ class AssemblySendToDeliveryView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -834,7 +846,7 @@ class AssemblySendAllToAssemblyView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -869,7 +881,7 @@ class SupplyListView(APIView):
         status=status.HTTP_400_BAD_REQUEST,
       )
 
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -970,7 +982,9 @@ class SupplyBulkDeliverView(APIView):
     serializer = SupplyBulkDeliverSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    seller = Seller.objects.get(pk=data["seller_id"])
+    seller = get_seller_for_user(request.user, data["seller_id"])
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
 
     supply_ids = data.get("supply_ids") or None
     try:

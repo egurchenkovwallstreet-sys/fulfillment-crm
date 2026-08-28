@@ -14,6 +14,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { InventoryPage } from './pages/InventoryPage'
 import { IntakePage } from './pages/IntakePage'
 import { CellInventoryPage } from './pages/CellInventoryPage'
+import { FulfillmentRegisterPage } from './pages/FulfillmentRegisterPage'
 import { LoginPage } from './pages/LoginPage'
 import { PrintAgentPage } from './pages/PrintAgentPage'
 import { SellerBarcodeDetailPage } from './pages/SellerBarcodeDetailPage'
@@ -44,6 +45,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={isSeller ? '/cabinet' : '/'} replace /> : <LoginPage />} />
+      <Route path="/signup" element={<FulfillmentRegisterPage />} />
       <Route path="/register/:token" element={<SellerRegisterPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>

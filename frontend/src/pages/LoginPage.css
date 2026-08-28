@@ -90,6 +90,23 @@
   margin-top: 0.25rem;
 }
 
+.login-card__footer {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.login-card__footer a {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.login-card__footer a:hover {
+  text-decoration: underline;
+}
+
 .login-roles {
   margin-top: 1.5rem;
   padding-top: 1.25rem;

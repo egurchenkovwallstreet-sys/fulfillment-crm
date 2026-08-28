@@ -4,6 +4,12 @@ from django.db import models
 
 
 class Seller(models.Model):
+  fulfillment = models.ForeignKey(
+    "accounts.Fulfillment",
+    on_delete=models.CASCADE,
+    related_name="sellers",
+    verbose_name="Фулфилмент",
+  )
   company_name = models.CharField("ИП / название компании", max_length=255)
   wb_api_token_encrypted = models.TextField("WB API токен (зашифрован)", blank=True)
   is_active = models.BooleanField("Активен", default=True)

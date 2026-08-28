@@ -7,8 +7,9 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from apps.integrations.models import AuditLog
+from apps.accounts.tenant import fulfillment_for_staff_user
 from apps.integrations.marketplace import WB, normalize_marketplace
+from apps.integrations.models import AuditLog
 from apps.integrations.wb_crypto import encrypt_token
 from apps.sellers.models import Seller
 from apps.sellers.services.invite import ensure_seller_invite
@@ -81,8 +82,12 @@ def create_session(*, company_name: str, user=None, marketplace: str = WB) -> Xl
   if not name:
     raise XlIntakeError("Укажите название ИП / компании")
   mp = normalize_marketplace(marketplace)
+  fulfillment = fulfillment_for_staff_user(user) if user else None
+  if not fulfillment:
+    raise XlIntakeError("Фулфилмент не определён")
   seller = Seller.objects.create(
     company_name=name,
+    fulfillment=fulfillment,
     wb_enabled=mp == WB,
     ozon_enabled=mp != WB,
   )

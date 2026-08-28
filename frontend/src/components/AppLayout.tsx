@@ -112,6 +112,7 @@ export function AppLayout() {
           <div className="sidebar__user">
             <strong>{user.username}</strong>
             <span>{roleLabel}</span>
+            {user.fulfillment_name && <small>{user.fulfillment_name}</small>}
           </div>
           <button type="button" className="btn btn--ghost" onClick={logout}>
             Выйти

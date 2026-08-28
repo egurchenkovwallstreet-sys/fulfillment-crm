@@ -403,9 +403,12 @@ def merge_weekly_shipments_payloads(
   }
 
 
-def load_admin_billing_dashboard() -> dict:
+def load_admin_billing_dashboard(*, fulfillment=None) -> dict:
   """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
-  sellers = Seller.objects.filter(is_active=True).order_by("company_name")
+  sellers = Seller.objects.filter(is_active=True)
+  if fulfillment:
+    sellers = sellers.filter(fulfillment=fulfillment)
+  sellers = sellers.order_by("company_name")
   seller_rows: list[dict] = []
   successful_payloads: list[dict] = []
 

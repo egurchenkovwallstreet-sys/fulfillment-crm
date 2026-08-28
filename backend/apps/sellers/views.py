@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_seller_for_user
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer, SellerWarehouseToggleSerializer
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
@@ -13,7 +14,7 @@ class SellerWarehouseListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
@@ -24,7 +25,7 @@ class SellerWarehouseSyncView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     try:
@@ -43,7 +44,7 @@ class SellerWarehouseToggleView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def patch(self, request, seller_id, warehouse_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     warehouse = SellerWarehouse.objects.filter(pk=warehouse_id, seller=seller).first()

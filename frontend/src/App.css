@@ -269,6 +269,11 @@
   color: #94a3b8;
 }
 
+.sidebar__user small {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
 .loading-screen {
   min-height: 100vh;
   display: grid;

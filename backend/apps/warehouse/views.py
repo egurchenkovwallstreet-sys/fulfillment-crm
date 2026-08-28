@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_seller_for_user, sellers_for_user
 from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller
 
@@ -56,12 +57,23 @@ from .services.marking_lookup import lookup_marking_for_barcode, refresh_product
 from .services.wb_product_sync import refresh_seller_products_from_wb
 
 
+def _require_seller(request, seller_id):
+  seller = get_seller_for_user(request.user, seller_id, active_only=True)
+  if not seller:
+    from django.http import Http404
+    raise Http404
+  return seller
+
+
 class SellerListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
     marketplace = parse_marketplace(request)
-    sellers = filter_sellers_qs(Seller.objects.filter(is_active=True), marketplace).order_by("company_name")
+    sellers = filter_sellers_qs(
+      sellers_for_user(request.user).filter(is_active=True),
+      marketplace,
+    ).order_by("company_name")
     return Response(SellerBriefSerializer(sellers, many=True).data)
 
 
@@ -78,6 +90,8 @@ class CellListView(APIView):
 
     free_only = request.query_params.get("free") == "1"
     marketplace = parse_marketplace(request)
+    if not get_seller_for_user(request.user, seller_id, active_only=True):
+      return Response(status=status.HTTP_404_NOT_FOUND)
     cells = cells_queryset_ordered(
       Cell.objects.filter(seller_id=seller_id, marketplace=marketplace)
     )
@@ -91,7 +105,7 @@ class SellerProductsView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     marketplace = parse_marketplace(request)
     products = (
       Product.objects.filter(seller=seller, marketplace=marketplace)
@@ -107,7 +121,7 @@ class SellerProductsRefreshView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     result = refresh_seller_products_from_wb(seller)
 
     if result.error:
@@ -199,7 +213,7 @@ class IntakeLookupView(APIView):
         status=status.HTTP_400_BAD_REQUEST,
       )
 
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
 
     wb_stock = None
     warehouse_name = ""
@@ -236,8 +250,12 @@ class IntakeLookupView(APIView):
         },
       })
 
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      from django.http import Http404
+      raise Http404
     marking = lookup_marking_for_barcode(
-      Seller.objects.get(pk=seller_id),
+      seller,
       barcode,
     )
     return Response({
@@ -263,7 +281,7 @@ class IntakeView(APIView):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
 
-    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    seller = _require_seller(request, data["seller_id"])
 
     try:
       result = perform_intake(
@@ -317,7 +335,7 @@ class WbSyncIntakePreviewView(APIView):
     serializer = WbSyncPreviewSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    seller = _require_seller(request, data["seller_id"])
     try:
       preview = preview_wb_sync_intake(seller, data["wb_warehouse_id"])
     except WbSyncIntakeError as exc:
@@ -333,7 +351,7 @@ class WbSyncIntakeAutoView(APIView):
     serializer = WbSyncAutoSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    seller = _require_seller(request, data["seller_id"])
     try:
       result = apply_wb_sync_auto(
         seller,
@@ -391,7 +409,7 @@ class InventoryLookupView(APIView):
         status=status.HTTP_400_BAD_REQUEST,
       )
 
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     marketplace = parse_marketplace(request)
     product = (
       Product.objects.filter(seller_id=seller_id, barcode=barcode, marketplace=marketplace)
@@ -434,7 +452,7 @@ class InventoryView(APIView):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
 
-    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    seller = _require_seller(request, data["seller_id"])
 
     try:
       result = perform_inventory(
@@ -483,7 +501,7 @@ class OnboardingPreviewView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     marketplace = parse_marketplace(request)
     serializer = OnboardingPreviewSerializer(
       data=request.data or {},
@@ -514,7 +532,7 @@ class OnboardingExcludeView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    get_object_or_404(Seller, pk=seller_id, is_active=True)
+    _require_seller(request, seller_id)
     serializer = OnboardingExcludeSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     items = apply_exclusions_and_renumber(
@@ -529,7 +547,7 @@ class OnboardingConfirmView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     serializer = OnboardingConfirmSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:
@@ -548,7 +566,7 @@ class StockOverviewView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     try:
       data = build_stock_overview(seller)
     except StockTransferError as exc:
@@ -560,7 +578,7 @@ class StockTransferView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     serializer = StockTransferSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:
@@ -581,7 +599,7 @@ class StockDistributeView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     serializer = StockDistributeSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     product_ids = serializer.validated_data.get("product_ids")
@@ -603,7 +621,7 @@ class StockFilePreviewView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     upload = request.FILES.get("file")
     warehouse_id = request.data.get("warehouse_id")
     if not upload:
@@ -631,7 +649,7 @@ class StockFileApplyView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+    seller = _require_seller(request, seller_id)
     serializer = StockFileApplySerializer(
       data=request.data,
       context={"seller_id": seller_id},

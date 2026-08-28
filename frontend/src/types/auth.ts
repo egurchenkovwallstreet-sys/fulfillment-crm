@@ -14,6 +14,8 @@ export type User = {
   ozon_enabled?: boolean
   has_wb_token?: boolean
   has_ozon_api?: boolean
+  fulfillment_id?: number | null
+  fulfillment_name?: string | null
 }
 
 export type LoginResponse = {

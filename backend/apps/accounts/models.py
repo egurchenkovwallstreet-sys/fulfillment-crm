@@ -4,6 +4,24 @@ from django.db import models
 from .managers import UserManager
 
 
+class Fulfillment(models.Model):
+  """Оператор фулфилмента (tenant). Каждый экземпляр изолирован."""
+
+  name = models.CharField("Название", max_length=255)
+  slug = models.SlugField("Код", max_length=100, unique=True)
+  is_active = models.BooleanField("Активен", default=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "Фулфилмент"
+    verbose_name_plural = "Фулфилменты"
+    ordering = ["name"]
+
+  def __str__(self):
+    return self.name
+
+
 class User(AbstractUser):
   class Role(models.TextChoices):
     ADMIN = "admin", "Администратор"
@@ -16,6 +34,14 @@ class User(AbstractUser):
     max_length=20,
     choices=Role.choices,
     default=Role.MANAGER,
+  )
+  fulfillment = models.ForeignKey(
+    Fulfillment,
+    on_delete=models.CASCADE,
+    null=True,
+    blank=True,
+    related_name="users",
+    verbose_name="Фулфилмент",
   )
   seller = models.OneToOneField(
     "sellers.Seller",

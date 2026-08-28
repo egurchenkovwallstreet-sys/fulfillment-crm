@@ -267,10 +267,13 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   }
 
 
-def sync_all_active_sellers(*, user=None, mode: str = "full") -> list[dict]:
+def sync_all_active_sellers(*, user=None, mode: str = "full", fulfillment=None) -> list[dict]:
   results = []
   errors = []
-  for seller in Seller.objects.filter(is_active=True):
+  sellers = Seller.objects.filter(is_active=True)
+  if fulfillment:
+    sellers = sellers.filter(fulfillment=fulfillment)
+  for seller in sellers:
     try:
       results.append(sync_orders_for_seller(seller, user=user, mode=mode))
     except SyncError as exc:

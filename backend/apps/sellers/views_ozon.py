@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsManager
+from apps.accounts.tenant import get_seller_for_user
 from apps.integrations.wb_crypto import encrypt_token
 from apps.orders.services.ozon_counts import OzonCountsError, ping_seller_ozon, refresh_ozon_counts
 from apps.sellers.models import Seller, SellerOzonWarehouse
@@ -15,7 +16,7 @@ class SellerMarketplaceFlagsView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def patch(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -38,7 +39,7 @@ class SellerOzonKeysView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -90,7 +91,7 @@ class SellerOzonWarehouseListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     warehouses = SellerOzonWarehouse.objects.filter(seller=seller).order_by("name", "ozon_warehouse_id")
@@ -101,7 +102,7 @@ class SellerOzonWarehouseSyncView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     try:
@@ -120,7 +121,7 @@ class SellerOzonWarehouseToggleView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def patch(self, request, seller_id, warehouse_id):
-    seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     warehouse = SellerOzonWarehouse.objects.filter(pk=warehouse_id, seller=seller).first()

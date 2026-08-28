@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import './LoginPage.css'
 
@@ -69,6 +69,10 @@ export function LoginPage() {
             {submitting ? 'Вход…' : 'Войти'}
           </button>
         </form>
+
+        <p className="login-card__footer">
+          Новый фулфилмент? <Link to="/signup">Зарегистрироваться</Link>
+        </p>
 
         <div className="login-roles">
           <p>Роли в системе:</p>

@@ -2,12 +2,16 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from apps.accounts.tenant import get_user_fulfillment
+
 User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
   role_display = serializers.CharField(source="get_role_display", read_only=True)
   seller_name = serializers.SerializerMethodField()
+  fulfillment_id = serializers.SerializerMethodField()
+  fulfillment_name = serializers.SerializerMethodField()
   wb_enabled = serializers.SerializerMethodField()
   ozon_enabled = serializers.SerializerMethodField()
   has_wb_token = serializers.SerializerMethodField()
@@ -23,6 +27,8 @@ class UserSerializer(serializers.ModelSerializer):
       "last_name",
       "role",
       "role_display",
+      "fulfillment_id",
+      "fulfillment_name",
       "seller",
       "seller_name",
       "wb_enabled",
@@ -36,6 +42,14 @@ class UserSerializer(serializers.ModelSerializer):
     if obj.seller_id:
       return obj.seller.company_name
     return None
+
+  def get_fulfillment_id(self, obj):
+    fulfillment = get_user_fulfillment(obj)
+    return fulfillment.id if fulfillment else None
+
+  def get_fulfillment_name(self, obj):
+    fulfillment = get_user_fulfillment(obj)
+    return fulfillment.name if fulfillment else None
 
   def _seller(self, obj):
     return obj.seller if obj.seller_id else None
@@ -68,6 +82,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     token["role"] = user.role
     if user.seller_id:
       token["seller_id"] = user.seller_id
+    fulfillment = get_user_fulfillment(user)
+    if fulfillment:
+      token["fulfillment_id"] = fulfillment.id
     return token
 
   def validate(self, attrs):

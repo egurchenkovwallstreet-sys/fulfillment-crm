@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsSeller
 from apps.accounts.serializers import UserSerializer
+from apps.accounts.tenant import fulfillment_for_staff_user, get_seller_for_user, sellers_for_user
 from apps.sellers.models import Seller
 from apps.sellers.serializers import (
   AdminBillingDashboardSerializer,
@@ -44,24 +45,27 @@ def _invite_path(request, token: str) -> str:
   return f"{request.scheme}://{request.get_host()}/register/{token}"
 
 
-def _seller_queryset():
-  return Seller.objects.select_related("user_account").select_related("invite")
+def _seller_queryset(user):
+  return sellers_for_user(user).select_related("user_account").select_related("invite")
 
 
 class SellerManageListCreateView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def get(self, request):
-    sellers = _seller_queryset().order_by("company_name")
+    sellers = _seller_queryset(request.user).order_by("company_name")
     for seller in sellers:
       ensure_seller_invite(seller)
-    sellers = _seller_queryset().order_by("company_name")
+    sellers = _seller_queryset(request.user).order_by("company_name")
     return Response(SellerManageSerializer(sellers, many=True).data)
 
   def post(self, request):
     serializer = SellerCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    seller = serializer.save()
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response({"detail": "Фулфилмент не определён"}, status=status.HTTP_400_BAD_REQUEST)
+    seller = serializer.save(fulfillment=fulfillment)
     invite = ensure_seller_invite(seller)
     payload = SellerManageSerializer(seller).data
     payload["invite_url"] = _invite_path(request, invite.token)
@@ -72,7 +76,7 @@ class SellerManageDetailView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def patch(self, request, seller_id):
-    seller = Seller.objects.select_related("user_account").filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     serializer = SellerUpdateSerializer(seller, data=request.data, partial=True)
@@ -85,7 +89,7 @@ class SellerWbTokenView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -121,7 +125,7 @@ class SellerWbTokenView(APIView):
     })
 
   def delete(self, request, seller_id):
-    seller = Seller.objects.filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     seller.wb_api_token_encrypted = ""
@@ -133,7 +137,7 @@ class SellerInviteView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def post(self, request, seller_id):
-    seller = Seller.objects.select_related("user_account").filter(pk=seller_id).first()
+    seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     has_account = seller_has_user_account(seller)
@@ -256,7 +260,7 @@ class AdminBillingDashboardView(APIView):
 
   def get(self, request):
     try:
-      payload = load_admin_billing_dashboard()
+      payload = load_admin_billing_dashboard(fulfillment=fulfillment_for_staff_user(request.user))
       return Response(AdminBillingDashboardSerializer(payload).data)
     except Exception as exc:
       logger.exception("admin billing dashboard failed")

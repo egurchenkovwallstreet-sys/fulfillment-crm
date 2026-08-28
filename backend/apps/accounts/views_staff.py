@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin
 from apps.accounts.serializers import UserSerializer
+from apps.accounts.tenant import fulfillment_for_staff_user
 
 User = get_user_model()
 
@@ -55,13 +56,19 @@ class StaffUserListCreateView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
   def get(self, request):
-    users = User.objects.filter(role=User.Role.MANAGER).order_by("username")
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response([], status=status.HTTP_200_OK)
+    users = User.objects.filter(role=User.Role.MANAGER, fulfillment=fulfillment).order_by("username")
     return Response(StaffUserSerializer(users, many=True).data)
 
   def post(self, request):
     serializer = StaffUserCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response({"detail": "Фулфилмент не определён"}, status=status.HTTP_400_BAD_REQUEST)
     user = User.objects.create_user(
       username=data["username"],
       password=data["password"],
@@ -69,6 +76,7 @@ class StaffUserListCreateView(APIView):
       first_name=data.get("first_name") or "",
       last_name=data.get("last_name") or "",
       role=User.Role.MANAGER,
+      fulfillment=fulfillment,
     )
     return Response(StaffUserSerializer(user).data, status=status.HTTP_201_CREATED)
 
@@ -76,11 +84,14 @@ class StaffUserListCreateView(APIView):
 class StaffUserDetailView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]
 
-  def _get_manager(self, user_id: int):
-    return User.objects.filter(pk=user_id, role=User.Role.MANAGER).first()
+  def _get_manager(self, user_id: int, fulfillment):
+    return User.objects.filter(pk=user_id, role=User.Role.MANAGER, fulfillment=fulfillment).first()
 
   def patch(self, request, user_id):
-    user = self._get_manager(user_id)
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    user = self._get_manager(user_id, fulfillment)
     if not user:
       return Response(status=status.HTTP_404_NOT_FOUND)
 

@@ -7,6 +7,12 @@ from apps.integrations.marketplace import WB as MARKETPLACE_WB
 
 
 class PriceGroup(models.Model):
+  fulfillment = models.ForeignKey(
+    "accounts.Fulfillment",
+    on_delete=models.CASCADE,
+    related_name="price_groups",
+    verbose_name="Фулфилмент",
+  )
   name = models.CharField("Название группы", max_length=100)
   processing_price = models.DecimalField(
     "Стоимость обработки за единицу",

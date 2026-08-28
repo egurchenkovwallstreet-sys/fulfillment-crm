@@ -13,8 +13,8 @@ class SellerPricingError(Exception):
   pass
 
 
-def get_price_groups() -> list[PriceGroup]:
-  return list(PriceGroup.objects.order_by("sort_order", "name"))
+def get_price_groups(*, fulfillment) -> list[PriceGroup]:
+  return list(PriceGroup.objects.filter(fulfillment=fulfillment).order_by("sort_order", "name"))
 
 
 def get_seller_pricing_summary(seller: Seller) -> dict:
@@ -22,7 +22,7 @@ def get_seller_pricing_summary(seller: Seller) -> dict:
   total_count = products.count()
 
   groups_payload: list[dict] = []
-  for group in get_price_groups():
+  for group in get_price_groups(fulfillment=seller.fulfillment):
     group_products = products.filter(price_group=group)
     count = group_products.count()
     if count == 0:
@@ -92,7 +92,7 @@ def apply_seller_tariff(
   if price_group_id is None:
     raise SellerPricingError("Укажите ценовую группу")
 
-  group = PriceGroup.objects.filter(pk=price_group_id).first()
+  group = PriceGroup.objects.filter(pk=price_group_id, fulfillment=seller.fulfillment).first()
   if group is None:
     raise SellerPricingError("Ценовая группа не найдена")
 
