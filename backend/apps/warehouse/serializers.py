@@ -58,6 +58,11 @@ class ProductSerializer(serializers.ModelSerializer):
     )
 
 
+class CellDetailSerializer(serializers.Serializer):
+  cell = CellSerializer()
+  product = ProductSerializer(allow_null=True)
+
+
 class StockOperationSerializer(serializers.ModelSerializer):
   barcode = serializers.CharField(source="product.barcode", read_only=True)
   cell_number = serializers.CharField(source="product.cell.number", read_only=True)

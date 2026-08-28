@@ -24,6 +24,13 @@ export type Product = {
   photo_url?: string
   tech_size?: string
   wb_size?: string
+  vendor_code?: string
+  wb_nm_id?: number | null
+}
+
+export type CellDetail = {
+  cell: Cell
+  product: Product | null
 }
 
 export type StockMode = 'intake' | 'sync_from_wb'
@@ -151,6 +158,11 @@ export function fetchFreeCells(sellerId: number) {
 
 export function fetchAllCells(sellerId: number) {
   return apiFetch<Cell[]>(`/api/warehouse/cells/?seller_id=${sellerId}`)
+}
+
+export function fetchCellDetail(sellerId: number, cellNumber: string) {
+  const encoded = encodeURIComponent(cellNumber.trim())
+  return apiFetch<CellDetail>(`/api/warehouse/sellers/${sellerId}/cells/${encoded}/`)
 }
 
 export function fetchSellerProducts(sellerId: number) {

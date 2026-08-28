@@ -4,9 +4,10 @@ import './ProductPhotoThumb.css'
 type Props = {
   url: string
   alt: string
+  size?: 'table' | 'detail'
 }
 
-export function ProductPhotoThumb({ url, alt }: Props) {
+export function ProductPhotoThumb({ url, alt, size = 'table' }: Props) {
   const [zoomed, setZoomed] = useState(false)
 
   if (!url) {
@@ -21,12 +22,12 @@ export function ProductPhotoThumb({ url, alt }: Props) {
     <>
       <button
         type="button"
-        className="product-photo-btn"
+        className={`product-photo-btn${size === 'detail' ? ' product-photo-btn--detail' : ''}`}
         onClick={toggleZoom}
         aria-label={zoomed ? 'Уменьшить фото' : 'Увеличить фото'}
         aria-pressed={zoomed}
       >
-        <img src={url} alt={alt} className="product-photo" />
+        <img src={url} alt={alt} className={`product-photo${size === 'detail' ? ' product-photo--detail' : ''}`} />
       </button>
       {zoomed && (
         <div

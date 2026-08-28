@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   fetchAllCells,
+  fetchCellDetail,
   fetchProductCellLabel,
   fetchSellerProducts,
   fetchSellers,
   moveProductToCell,
   refreshSellerProductsFromWb,
   type Cell,
+  type CellDetail,
   type CellLabelData,
   type Product,
   type Seller,
@@ -22,6 +24,9 @@ export function CellInventoryPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [cells, setCells] = useState<Cell[]>([])
   const [barcodeQuery, setBarcodeQuery] = useState('')
+  const [cellQuery, setCellQuery] = useState('')
+  const [cellDetail, setCellDetail] = useState<CellDetail | null>(null)
+  const [cellSearchLoading, setCellSearchLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -85,6 +90,21 @@ export function CellInventoryPage() {
     }
   }
 
+  async function handleCellSearch(e?: React.FormEvent) {
+    e?.preventDefault()
+    if (!sellerId || !cellQuery.trim()) return
+    setCellSearchLoading(true)
+    setError('')
+    setCellDetail(null)
+    try {
+      setCellDetail(await fetchCellDetail(Number(sellerId), cellQuery.trim()))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ячейка не найдена')
+    } finally {
+      setCellSearchLoading(false)
+    }
+  }
+
   async function handlePrint(productId: number) {
     setError('')
     try {
@@ -134,7 +154,7 @@ export function CellInventoryPage() {
       <header className="topbar">
         <div>
           <h1>Ячейки склада</h1>
-          <p>Список товаров по селлеру · печать этикеток · перенос в другую ячейку</p>
+          <p>Список товаров по селлеру · поиск по ячейке · печать этикеток · перенос</p>
         </div>
       </header>
 
@@ -149,6 +169,8 @@ export function CellInventoryPage() {
             onChange={(e) => {
               setSellerId(e.target.value ? Number(e.target.value) : '')
               setBarcodeQuery('')
+              setCellQuery('')
+              setCellDetail(null)
             }}
           >
             <option value="">— выберите —</option>
@@ -157,6 +179,24 @@ export function CellInventoryPage() {
             ))}
           </select>
         </label>
+        {sellerId && (
+          <form className="cell-inventory-field cell-inventory-field--search" onSubmit={handleCellSearch}>
+            <label htmlFor="cell-search">Поиск по ячейке</label>
+            <div className="cell-inventory-search-row">
+              <input
+                id="cell-search"
+                type="search"
+                value={cellQuery}
+                onChange={(e) => setCellQuery(e.target.value)}
+                placeholder="Номер ячейки, например 42"
+                autoComplete="off"
+              />
+              <button type="submit" className="btn btn--primary" disabled={cellSearchLoading || !cellQuery.trim()}>
+                {cellSearchLoading ? '…' : 'Найти'}
+              </button>
+            </div>
+          </form>
+        )}
         {sellerId && (
           <label className="cell-inventory-field cell-inventory-field--search">
             Поиск по баркоду
@@ -170,6 +210,63 @@ export function CellInventoryPage() {
           </label>
         )}
       </section>
+
+      {cellDetail && (
+        <section className="panel cell-detail-panel">
+          <div className="cell-detail-panel__head">
+            <h2 className="section-title">Ячейка №{cellDetail.cell.number}</h2>
+            <button type="button" className="btn btn--ghost btn--small" onClick={() => setCellDetail(null)}>
+              Закрыть
+            </button>
+          </div>
+          {!cellDetail.product ? (
+            <p className="cell-inventory-empty">Ячейка свободна — товар не привязан</p>
+          ) : (
+            <div className="cell-detail-grid">
+              <div className="cell-detail-photo">
+                <ProductPhotoThumb
+                  url={cellDetail.product.photo_url ?? ''}
+                  alt={cellDetail.product.name || cellDetail.product.barcode}
+                  size="detail"
+                />
+                <p className="cell-detail-photo-hint">Нажмите на фото для увеличения</p>
+              </div>
+              <dl className="cell-detail-facts">
+                <div>
+                  <dt>Баркод</dt>
+                  <dd>{cellDetail.product.barcode}</dd>
+                </div>
+                <div>
+                  <dt>Артикул</dt>
+                  <dd>{cellDetail.product.vendor_code || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Размер (EU / тех.)</dt>
+                  <dd>{cellDetail.product.tech_size || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Размер (RU)</dt>
+                  <dd>{cellDetail.product.wb_size || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Название</dt>
+                  <dd>{cellDetail.product.name || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Остаток</dt>
+                  <dd>{cellDetail.product.quantity} шт.</dd>
+                </div>
+                {cellDetail.product.wb_nm_id && (
+                  <div>
+                    <dt>nmID WB</dt>
+                    <dd>{cellDetail.product.wb_nm_id}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel">
         <div className="cell-inventory-section-head">
@@ -202,6 +299,7 @@ export function CellInventoryPage() {
                 <th>Фото</th>
                 <th>Ячейка</th>
                 <th>Баркод</th>
+                <th>Артикул</th>
                 <th>Размер</th>
                 <th>Название</th>
                 <th>Остаток</th>
@@ -216,6 +314,7 @@ export function CellInventoryPage() {
                   </td>
                   <td><strong>№{product.cell_number}</strong></td>
                   <td>{product.barcode}</td>
+                  <td>{product.vendor_code || '—'}</td>
                   <td>
                     <strong className="cell-inventory-size">
                       {product.tech_size || product.wb_size || '—'}

@@ -19,6 +19,7 @@ from .serializers import (
   OnboardingExcludeSerializer,
   OnboardingPreviewSerializer,
   ProductSerializer,
+  CellDetailSerializer,
   SellerBriefSerializer,
   StockFileApplySerializer,
   StockOperationSerializer,
@@ -98,6 +99,29 @@ class CellListView(APIView):
     if free_only:
       cells = cells.filter(is_occupied=False)
     return Response(CellSerializer(cells, many=True).data)
+
+
+class CellDetailView(APIView):
+  """Поиск ячейки по номеру — товар, баркод, артикул, размер, фото."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id, cell_number):
+    seller = _require_seller(request, seller_id)
+    marketplace = parse_marketplace(request)
+    number = str(cell_number).strip()
+    if not number:
+      return Response({"detail": "Укажите номер ячейки"}, status=status.HTTP_400_BAD_REQUEST)
+
+    cell = Cell.objects.filter(seller=seller, marketplace=marketplace, number=number).first()
+    if not cell:
+      return Response({"detail": f"Ячейка №{number} не найдена"}, status=status.HTTP_404_NOT_FOUND)
+
+    product = (
+      Product.objects.filter(cell=cell, seller=seller, marketplace=marketplace)
+      .select_related("cell", "seller")
+      .first()
+    )
+    return Response(CellDetailSerializer({"cell": cell, "product": product}).data)
 
 
 class SellerProductsView(APIView):

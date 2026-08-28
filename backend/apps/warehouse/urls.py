@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
   CellListView,
+  CellDetailView,
   IntakeHistoryView,
   IntakeLookupView,
   IntakeView,
@@ -42,6 +43,11 @@ urlpatterns = [
     name="warehouse_seller_products_refresh",
   ),
   path("cells/", CellListView.as_view(), name="warehouse_cells"),
+  path(
+    "sellers/<int:seller_id>/cells/<str:cell_number>/",
+    CellDetailView.as_view(),
+    name="warehouse_cell_detail",
+  ),
   path("products/<int:product_id>/cell-label/", ProductCellLabelView.as_view(), name="product_cell_label"),
   path("products/<int:product_id>/move-cell/", ProductMoveCellView.as_view(), name="product_move_cell"),
   path("intake/lookup/", IntakeLookupView.as_view(), name="intake_lookup"),
