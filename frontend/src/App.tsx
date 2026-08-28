@@ -4,6 +4,10 @@ import { AdminRoute, ManagerRoute, ProtectedRoute, SellerRoute } from './compone
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { MarketplaceProvider } from './context/MarketplaceContext'
 import { AdminBillingPage } from './pages/AdminBillingPage'
+import { OwnerHomePage } from './pages/owner/OwnerHomePage'
+import { OwnerLayout } from './pages/owner/OwnerLayout'
+import { OwnerPricingPage } from './pages/owner/OwnerPricingPage'
+import { OwnerStaffPage } from './pages/owner/OwnerStaffPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -61,8 +65,15 @@ function AppRoutes() {
             <Route path="/orders" element={<AssemblySellersPage />} />
           </Route>
           <Route element={<AdminRoute />}>
-            <Route path="/sellers" element={<SellersManagePage />} />
-            <Route path="/billing" element={<AdminBillingPage />} />
+            <Route path="/owner" element={<OwnerLayout />}>
+              <Route index element={<OwnerHomePage />} />
+              <Route path="sellers" element={<SellersManagePage />} />
+              <Route path="staff" element={<OwnerStaffPage />} />
+              <Route path="pricing" element={<OwnerPricingPage />} />
+              <Route path="billing" element={<AdminBillingPage />} />
+            </Route>
+            <Route path="/sellers" element={<Navigate to="/owner/sellers" replace />} />
+            <Route path="/billing" element={<Navigate to="/owner/billing" replace />} />
           </Route>
         </Route>
       </Route>

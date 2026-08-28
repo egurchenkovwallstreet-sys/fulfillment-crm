@@ -141,6 +141,12 @@ class SellerCreateSerializer(serializers.ModelSerializer):
     return seller
 
 
+class SellerUpdateSerializer(serializers.ModelSerializer):
+  class Meta:
+    model = Seller
+    fields = ("company_name", "is_active")
+
+
 class SellerInviteSerializer(serializers.Serializer):
   token = serializers.UUIDField()
   invite_path = serializers.CharField()

@@ -17,11 +17,23 @@ from .views_cabinet import (
   SellerCabinetBarcodeView,
   SellerCabinetView,
   SellerInviteView,
+  SellerManageDetailView,
   SellerManageListCreateView,
+  SellerWbTokenView,
 )
 
 urlpatterns = [
   path("manage/", SellerManageListCreateView.as_view(), name="seller-manage-list"),
+  path(
+    "manage/<int:seller_id>/",
+    SellerManageDetailView.as_view(),
+    name="seller-manage-detail",
+  ),
+  path(
+    "manage/<int:seller_id>/wb-token/",
+    SellerWbTokenView.as_view(),
+    name="seller-wb-token",
+  ),
   path(
     "admin/billing/",
     AdminBillingDashboardView.as_view(),

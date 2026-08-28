@@ -60,6 +60,28 @@ class PriceGroupListView(APIView):
   def get(self, request):
     return Response(PriceGroupSerializer(get_price_groups(), many=True).data)
 
+  def post(self, request):
+    serializer = PriceGroupSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    group = serializer.save()
+    return Response(PriceGroupSerializer(group).data, status=status.HTTP_201_CREATED)
+
+
+class PriceGroupDetailView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def patch(self, request, group_id):
+    group = get_object_or_404(PriceGroup, pk=group_id)
+    serializer = PriceGroupSerializer(group, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    group = serializer.save()
+    return Response(PriceGroupSerializer(group).data)
+
+  def delete(self, request, group_id):
+    group = get_object_or_404(PriceGroup, pk=group_id)
+    group.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class SellerPricingView(APIView):
   permission_classes = [IsAuthenticated, IsAdmin]

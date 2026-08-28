@@ -19,9 +19,12 @@ from apps.sellers.serializers import (
   SellerInviteSerializer,
   SellerManageSerializer,
   SellerRegisterSerializer,
+  SellerUpdateSerializer,
   SellerWeeklyShipmentsSerializer,
   SellerWbStageCountsSerializer,
 )
+from apps.integrations.wb_crypto import encrypt_token
+from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.sellers.services.invite import (
   deactivate_invite,
   ensure_seller_invite,
@@ -63,6 +66,67 @@ class SellerManageListCreateView(APIView):
     payload = SellerManageSerializer(seller).data
     payload["invite_url"] = _invite_path(request, invite.token)
     return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class SellerManageDetailView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def patch(self, request, seller_id):
+    seller = Seller.objects.select_related("user_account").filter(pk=seller_id).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    serializer = SellerUpdateSerializer(seller, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(SellerManageSerializer(seller).data)
+
+
+class SellerWbTokenView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def post(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    token = str(request.data.get("token") or "").strip()
+    if not token:
+      return Response(
+        {"detail": "Вставьте персональный токен WB"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    seller.wb_api_token_encrypted = encrypt_token(token)
+    seller.wb_enabled = True
+    seller.save(update_fields=["wb_api_token_encrypted", "wb_enabled", "updated_at"])
+
+    ping_ok = False
+    ping_detail = ""
+    try:
+      sync_seller_warehouses(seller, user=request.user)
+      ping_ok = True
+    except WarehouseSyncError as exc:
+      ping_detail = str(exc)
+
+    payload = SellerManageSerializer(seller).data
+    return Response({
+      "success": True,
+      "ping_ok": ping_ok,
+      "detail": (
+        "Токен WB сохранён. API отвечает, склады синхронизированы."
+        if ping_ok
+        else f"Токен сохранён, но проверка API не прошла: {ping_detail}"
+      ),
+      "seller": payload,
+    })
+
+  def delete(self, request, seller_id):
+    seller = Seller.objects.filter(pk=seller_id).first()
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    seller.wb_api_token_encrypted = ""
+    seller.save(update_fields=["wb_api_token_encrypted", "updated_at"])
+    return Response(SellerManageSerializer(seller).data)
 
 
 class SellerInviteView(APIView):

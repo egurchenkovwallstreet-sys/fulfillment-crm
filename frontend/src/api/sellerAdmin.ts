@@ -76,6 +76,59 @@ export async function saveSellerOzonKeys(sellerId: number, payload: { client_id:
   })
 }
 
+export async function updateSeller(
+  sellerId: number,
+  payload: { company_name?: string; is_active?: boolean },
+): Promise<SellerManageItem> {
+  return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function saveSellerWbToken(sellerId: number, token: string) {
+  return apiFetch<{
+    success: boolean
+    ping_ok: boolean
+    detail: string
+    seller: SellerManageItem
+  }>(`/api/sellers/manage/${sellerId}/wb-token/`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
+export async function clearSellerWbToken(sellerId: number): Promise<SellerManageItem> {
+  return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/wb-token/`, {
+    method: 'DELETE',
+  })
+}
+
+export async function createPriceGroup(payload: {
+  name: string
+  processing_price: string
+  sort_order?: number
+}): Promise<PriceGroupItem> {
+  return apiFetch<PriceGroupItem>('/api/warehouse/price-groups/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updatePriceGroup(
+  groupId: number,
+  payload: Partial<{ name: string; processing_price: string; sort_order: number }>,
+): Promise<PriceGroupItem> {
+  return apiFetch<PriceGroupItem>(`/api/warehouse/price-groups/${groupId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deletePriceGroup(groupId: number): Promise<void> {
+  await apiFetch(`/api/warehouse/price-groups/${groupId}/`, { method: 'DELETE' })
+}
+
 export type InvitePreview = {
   company_name: string
   has_account: boolean

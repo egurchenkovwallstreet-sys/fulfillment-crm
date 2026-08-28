@@ -1,0 +1,130 @@
+.owner-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 100%;
+}
+
+.owner-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0 0.25rem;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.owner-subnav__link {
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.owner-subnav__link:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text, #0f172a);
+}
+
+.owner-subnav__link--active {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+}
+
+.owner-content {
+  flex: 1;
+}
+
+.owner-home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.owner-home-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--panel-bg, #fff);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.owner-home-card:hover {
+  border-color: #a5b4fc;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+
+.owner-home-card strong {
+  font-size: 1rem;
+}
+
+.owner-home-card span {
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
+.owner-staff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.owner-staff-table th,
+.owner-staff-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.owner-staff-table th {
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.owner-pricing-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.owner-pricing-form input {
+  min-width: 140px;
+}
+
+.owner-pricing-table input[type='text'],
+.owner-pricing-table input[type='number'] {
+  width: 100%;
+  max-width: 160px;
+}
+
+.owner-tag--inactive {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.owner-tag--ok {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: #ecfdf5;
+  color: #047857;
+}

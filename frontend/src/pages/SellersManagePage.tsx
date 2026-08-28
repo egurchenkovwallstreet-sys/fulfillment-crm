@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
+  clearSellerWbToken,
   createSeller,
   fetchSellerInvite,
   fetchSellersManage,
   saveSellerOzonKeys,
+  saveSellerWbToken,
+  updateSeller,
   updateSellerMarketplaces,
   type SellerManageItem,
 } from '../api/sellerAdmin'
@@ -31,6 +34,12 @@ export function SellersManagePage() {
   const [ozonClientId, setOzonClientId] = useState('')
   const [ozonApiKey, setOzonApiKey] = useState('')
   const [savingOzon, setSavingOzon] = useState(false)
+  const [wbSellerId, setWbSellerId] = useState<number | null>(null)
+  const [wbToken, setWbToken] = useState('')
+  const [savingWb, setSavingWb] = useState(false)
+  const [editSeller, setEditSeller] = useState<SellerManageItem | null>(null)
+  const [editName, setEditName] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -156,8 +165,30 @@ export function SellersManagePage() {
                     <td>
                       <strong>{seller.company_name}</strong>
                       {!seller.is_active && <span className="sellers-tag sellers-tag--muted">неактивен</span>}
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => {
+                          setEditSeller(seller)
+                          setEditName(seller.company_name)
+                        }}
+                      >
+                        ✎
+                      </button>
                     </td>
                     <td>
+                      {seller.wb_enabled && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => {
+                            setWbSellerId(seller.id)
+                            setWbToken('')
+                          }}
+                        >
+                          {seller.has_wb_token ? 'Токен WB ✓' : 'Токен WB'}
+                        </button>
+                      )}
                       {seller.wb_enabled && <span className="sellers-tag sellers-tag--wb">WB</span>}
                       {seller.ozon_enabled && <span className="sellers-tag sellers-tag--ozon">Ozon</span>}
                       {!seller.wb_enabled && (
@@ -244,6 +275,120 @@ export function SellersManagePage() {
           </div>
         )}
       </section>
+
+      {wbSellerId !== null && (
+        <section className="panel sellers-create-panel">
+          <h2 className="section-title">Токен WB Seller API</h2>
+          <p className="sellers-ozon-hint">
+            ЛК seller.wildberries.ru → Настройки → Доступ к API → создайте токен с правами «Контент» и «Маркетплейс».
+          </p>
+          <form
+            className="sellers-create-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setSavingWb(true)
+              setError('')
+              setMessage('')
+              try {
+                const result = await saveSellerWbToken(wbSellerId, wbToken.trim())
+                setMessage(result.detail)
+                setWbSellerId(null)
+                setWbToken('')
+                await load()
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Не удалось сохранить токен WB')
+              } finally {
+                setSavingWb(false)
+              }
+            }}
+          >
+            <input
+              type="password"
+              value={wbToken}
+              onChange={(e) => setWbToken(e.target.value)}
+              placeholder="Вставьте токен WB"
+              required
+            />
+            <button type="submit" className="btn btn--primary" disabled={savingWb}>
+              {savingWb ? 'Проверка…' : 'Сохранить и проверить'}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={async () => {
+                if (!window.confirm('Удалить токен WB у этого селлера?')) return
+                setSavingWb(true)
+                setError('')
+                try {
+                  await clearSellerWbToken(wbSellerId)
+                  setMessage('Токен WB удалён')
+                  setWbSellerId(null)
+                  await load()
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Ошибка')
+                } finally {
+                  setSavingWb(false)
+                }
+              }}
+            >
+              Удалить токен
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => setWbSellerId(null)}>
+              Отмена
+            </button>
+          </form>
+        </section>
+      )}
+
+      {editSeller && (
+        <section className="panel sellers-create-panel">
+          <h2 className="section-title">Редактирование селлера</h2>
+          <form
+            className="sellers-create-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setSavingEdit(true)
+              setError('')
+              setMessage('')
+              try {
+                await updateSeller(editSeller.id, {
+                  company_name: editName.trim(),
+                  is_active: editSeller.is_active,
+                })
+                setMessage('Селлер сохранён')
+                setEditSeller(null)
+                await load()
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Ошибка сохранения')
+              } finally {
+                setSavingEdit(false)
+              }
+            }}
+          >
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="Название компании"
+              required
+            />
+            <label className="sellers-mp-check">
+              <input
+                type="checkbox"
+                checked={editSeller.is_active}
+                onChange={(e) => setEditSeller({ ...editSeller, is_active: e.target.checked })}
+              />
+              Активен
+            </label>
+            <button type="submit" className="btn btn--primary" disabled={savingEdit}>
+              {savingEdit ? 'Сохранение…' : 'Сохранить'}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)}>
+              Отмена
+            </button>
+          </form>
+        </section>
+      )}
 
       {ozonSellerId !== null && (
         <section className="panel sellers-create-panel">

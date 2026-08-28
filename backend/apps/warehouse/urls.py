@@ -23,7 +23,7 @@ from .views import (
   StockTransferView,
   StockDistributeView,
 )
-from .views_pricing import PriceGroupListView, SellerPricingView
+from .views_pricing import PriceGroupDetailView, PriceGroupListView, SellerPricingView
 from .views_xl_intake import (
   XlIntakeConnectWbView,
   XlIntakeExcelView,
@@ -118,6 +118,11 @@ urlpatterns = [
     name="xl_intake_connect_wb",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
+  path(
+    "price-groups/<int:group_id>/",
+    PriceGroupDetailView.as_view(),
+    name="price_group_detail",
+  ),
   path(
     "sellers/<int:seller_id>/pricing/",
     SellerPricingView.as_view(),
