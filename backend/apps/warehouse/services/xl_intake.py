@@ -35,10 +35,15 @@ def _normalize_barcode(value: str) -> str:
   return barcode
 
 
+def _can_scan(session: XlIntakeSession) -> bool:
+  return session.status != XlIntakeSession.Status.COMPLETED
+
+
 def serialize_line(line: XlIntakeLine) -> dict:
   return {
     "barcode": line.barcode,
     "quantity": line.quantity,
+    "applied_quantity": line.applied_quantity,
     "sort_order": line.sort_order,
   }
 
@@ -73,6 +78,8 @@ def serialize_session(
     "created_at": session.created_at.isoformat() if session.created_at else None,
     "saved_at": session.saved_at.isoformat() if session.saved_at else None,
     "applied_at": session.applied_at.isoformat() if session.applied_at else None,
+    "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+    "can_scan": _can_scan(session),
   }
 
 
@@ -120,8 +127,8 @@ def create_session_for_seller(*, seller: Seller, user=None, marketplace: str = W
 @transaction.atomic
 def scan_unit(session: XlIntakeSession, barcode: str) -> XlIntakeSession:
   session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
-  if session.status != XlIntakeSession.Status.SCANNING:
-    raise XlIntakeError("Приёмка уже сохранена — сканирование закрыто")
+  if not _can_scan(session):
+    raise XlIntakeError("Приёмка завершена — сканирование закрыто")
 
   barcode = _normalize_barcode(barcode)
   if len(barcode) < 4:
@@ -160,18 +167,20 @@ def last_scanned_line(session: XlIntakeSession) -> XlIntakeLine | None:
 
 @transaction.atomic
 def save_session(session: XlIntakeSession, *, user=None) -> XlIntakeSession:
-  if session.status == XlIntakeSession.Status.APPLIED:
-    raise XlIntakeError("Приёмка уже применена — ячейки созданы")
+  session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  if session.status == XlIntakeSession.Status.COMPLETED:
+    raise XlIntakeError("Приёмка завершена")
   if not session.lines.exists():
     raise XlIntakeError("Нет отсканированных баркодов")
-  session.status = XlIntakeSession.Status.SAVED
   session.saved_at = timezone.now()
+  if session.status == XlIntakeSession.Status.SCANNING:
+    session.status = XlIntakeSession.Status.SAVED
   session.save(update_fields=["status", "saved_at"])
   AuditLog.objects.create(
     user=user,
     seller=session.seller,
     action_type=AuditLog.ActionType.INTAKE,
-    message=f"XL-приёмка #{session.id} сохранена",
+    message=f"XL-приёмка #{session.id} сохранена (контрольная точка)",
     details=serialize_session(session),
   )
   return session
@@ -180,8 +189,8 @@ def save_session(session: XlIntakeSession, *, user=None) -> XlIntakeSession:
 def build_excel_bytes(session: XlIntakeSession) -> bytes:
   if Workbook is None:
     raise XlIntakeError("На сервере не установлен openpyxl для Excel")
-  if session.status == XlIntakeSession.Status.SCANNING:
-    raise XlIntakeError("Сначала нажмите «Сохранить»")
+  if not session.lines.exists():
+    raise XlIntakeError("Нет отсканированных баркодов")
 
   wb = Workbook()
   ws = wb.active
@@ -207,16 +216,16 @@ def _apply_card_fields(product: Product, item) -> None:
   product.photo_url = item.photo_url or product.photo_url
 
 
+@transaction.atomic
 def apply_after_wb(
   session: XlIntakeSession,
   *,
   token: str = "",
   user=None,
 ) -> dict:
-  if session.status == XlIntakeSession.Status.SCANNING:
-    raise XlIntakeError("Сначала сохраните приёмку")
-  if session.status == XlIntakeSession.Status.APPLIED:
-    raise XlIntakeError("Ячейки по этой приёмке уже созданы")
+  session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  if session.status == XlIntakeSession.Status.COMPLETED:
+    raise XlIntakeError("Приёмка завершена")
   if not session.lines.exists():
     raise XlIntakeError("Нет отсканированных баркодов")
 
@@ -245,6 +254,11 @@ def apply_after_wb(
     line.barcode: line.quantity
     for line in session.lines.order_by("sort_order")
   }
+  delta_by_barcode = {
+    line.barcode: line.quantity - line.applied_quantity
+    for line in session.lines.order_by("sort_order")
+    if line.quantity > line.applied_quantity
+  }
   scanned = set(qty_by_barcode)
   matched_items = [item for item in catalog_items if item.barcode in scanned]
   matched_barcodes = {item.barcode for item in matched_items}
@@ -253,6 +267,19 @@ def apply_after_wb(
     for barcode in qty_by_barcode
     if barcode not in matched_barcodes
   ]
+
+  if not delta_by_barcode:
+    session.unmatched = unmatched
+    session.warehouse_sync_warning = warehouse_warning[:500]
+    session.save(update_fields=["unmatched", "warehouse_sync_warning"])
+    return {
+      **serialize_session(session),
+      "created_products": 0,
+      "updated_products": 0,
+      "created_cells": [],
+      "unmatched_count": len(unmatched),
+      "matched_count": len(matched_items),
+    }
 
   if not matched_items:
     session.unmatched = unmatched
@@ -272,15 +299,22 @@ def apply_after_wb(
   created_cells: list[str] = []
 
   with transaction.atomic():
+    lines_by_barcode = {
+      line.barcode: line
+      for line in session.lines.select_for_update().order_by("sort_order")
+    }
     for item in matched_items:
-      qty = qty_by_barcode[item.barcode]
+      delta = delta_by_barcode.get(item.barcode, 0)
+      if delta <= 0:
+        continue
+      line = lines_by_barcode[item.barcode]
       product = (
         Product.objects.select_related("cell")
         .filter(seller=seller, barcode=item.barcode, marketplace=session.marketplace)
         .first()
       )
       if product:
-        product.quantity += qty
+        product.quantity += delta
         _apply_card_fields(product, item)
         product.save()
         updated_products += 1
@@ -290,7 +324,7 @@ def apply_after_wb(
           seller=seller,
           barcode=item.barcode,
           cell=cell,
-          quantity=qty,
+          quantity=delta,
           marketplace=session.marketplace,
         )
         _apply_card_fields(product, item)
@@ -302,10 +336,12 @@ def apply_after_wb(
       StockOperation.objects.create(
         product=product,
         operation_type=StockOperation.OperationType.INTAKE,
-        quantity=qty,
+        quantity=delta,
         performed_by=user,
         comment=f"XL-приёмка #{session.id}",
       )
+      line.applied_quantity = line.quantity
+      line.save(update_fields=["applied_quantity"])
 
     session.status = XlIntakeSession.Status.APPLIED
     session.applied_at = timezone.now()
@@ -339,3 +375,23 @@ def apply_after_wb(
     "unmatched_count": len(unmatched),
     "matched_count": len(matched_items),
   }
+
+
+@transaction.atomic
+def complete_session(session: XlIntakeSession, *, user=None) -> XlIntakeSession:
+  session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  if session.status == XlIntakeSession.Status.COMPLETED:
+    raise XlIntakeError("Приёмка уже завершена")
+  if not session.lines.exists():
+    raise XlIntakeError("Нет отсканированных баркодов")
+  session.status = XlIntakeSession.Status.COMPLETED
+  session.completed_at = timezone.now()
+  session.save(update_fields=["status", "completed_at"])
+  AuditLog.objects.create(
+    user=user,
+    seller=session.seller,
+    action_type=AuditLog.ActionType.INTAKE,
+    message=f"XL-приёмка #{session.id} завершена",
+    details=serialize_session(session),
+  )
+  return session

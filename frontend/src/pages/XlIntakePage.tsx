@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { fetchSellers, type Seller } from '../api/warehouse'
 import {
+  completeXlSession,
   connectXlWb,
   createXlSession,
   downloadXlExcel,
@@ -18,6 +19,7 @@ const STATUS_LABEL: Record<XlIntakeSession['status'], string> = {
   scanning: 'Сканирование',
   saved: 'Сохранена',
   applied: 'Ячейки созданы',
+  completed: 'Завершена',
 }
 
 export function XlIntakePage() {
@@ -40,7 +42,7 @@ export function XlIntakePage() {
   const [showUnmatched, setShowUnmatched] = useState(false)
 
   const activeId = sessionId ? Number(sessionId) : null
-  const scanning = session?.status === 'scanning'
+  const canScan = session?.status !== 'completed'
 
   const focusBarcode = useCallback(() => {
     window.setTimeout(() => barcodeRef.current?.focus(), 20)
@@ -75,13 +77,13 @@ export function XlIntakePage() {
   }, [activeId, loadHome])
 
   useEffect(() => {
-    if (!scanning) return
+    if (!canScan) return
     focusBarcode()
-  }, [scanning, focusBarcode, session?.id])
+  }, [canScan, focusBarcode, session?.id])
 
   const submitScan = useCallback(
     async (raw: string) => {
-      if (!activeId || !scanning || scanBusy.current) return
+      if (!activeId || !canScan || scanBusy.current) return
       const value = raw.trim()
       if (value.length < 4) return
       scanBusy.current = true
@@ -97,7 +99,7 @@ export function XlIntakePage() {
         focusBarcode()
       }
     },
-    [activeId, scanning, focusBarcode],
+    [activeId, canScan, focusBarcode],
   )
 
   function scheduleScan(value: string) {
@@ -116,7 +118,7 @@ export function XlIntakePage() {
   }
 
   function onBarcodeBlur() {
-    if (!scanning) return
+    if (!canScan) return
     window.setTimeout(() => {
       const active = document.activeElement
       if (active instanceof HTMLElement && active.closest('[data-allow-blur]')) return
@@ -148,10 +150,11 @@ export function XlIntakePage() {
     if (!activeId) return
     setLoading(true)
     setError('')
+    setSuccess('')
     try {
       const next = await saveXlSession(activeId)
       setSession(next)
-      setSuccess('Приёмка сохранена. Можно скачать Excel или подключить API WB.')
+      setSuccess('Контрольная точка сохранена. Можно продолжать сканирование.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить')
     } finally {
@@ -182,17 +185,41 @@ export function XlIntakePage() {
       const next = await connectXlWb(activeId, token.trim())
       setSession(next)
       setToken('')
-      if ((next.matched_count ?? 0) === 0) {
+      const created = next.created_products ?? 0
+      const updated = next.updated_products ?? 0
+      if (created === 0 && updated === 0) {
+        setSuccess('Новых позиций для применения нет — всё уже в CRM.')
+      } else if ((next.matched_count ?? 0) === 0) {
         setSuccess('')
         setError('Ни один баркод не найден в ЛК WB. Ячейки не созданы.')
       } else {
         setSuccess(
-          `Клиент готов: ячеек ${next.created_products ?? 0}, обновлено ${next.updated_products ?? 0}. Остатки на WB не отправлялись.`,
+          `Ячеек создано: ${created}, обновлено: ${updated}. Можно продолжать сканирование.`,
         )
       }
       if ((next.unmatched || []).length > 0) setShowUnmatched(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось подключить WB')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleComplete() {
+    if (!activeId || !session) return
+    const ok = window.confirm(
+      'Завершить приёмку? Сканирование и изменения будут закрыты навсегда.',
+    )
+    if (!ok) return
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const next = await completeXlSession(activeId)
+      setSession(next)
+      setSuccess('Приёмка завершена.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось завершить')
     } finally {
       setLoading(false)
     }
@@ -281,7 +308,9 @@ export function XlIntakePage() {
                       <td>{item.unique_count}</td>
                       <td>{item.total_quantity}</td>
                       <td>
-                        <Link to={`/intake-xl/${item.id}`}>Открыть</Link>
+                        <Link to={`/intake-xl/${item.id}`}>
+                          {item.status === 'completed' ? 'Открыть' : 'Продолжить'}
+                        </Link>
                       </td>
                     </tr>
                   ))}
@@ -292,8 +321,15 @@ export function XlIntakePage() {
         </section>
       )}
 
-      {session && scanning && (
+      {session && canScan && (
         <section className="xl-scan">
+          <div className="xl-session-header">
+            <h2>
+              {session.seller_name} · {STATUS_LABEL[session.status]}
+            </h2>
+            <p className="xl-muted">Каждый скан сохраняется автоматически</p>
+          </div>
+
           <div className="xl-total" aria-live="polite">
             Всего единиц: <strong>{session.total_quantity}</strong>
             <span className="xl-total__sep">·</span>
@@ -311,9 +347,7 @@ export function XlIntakePage() {
             </div>
           </div>
 
-          {session.last_barcode && (
-            <p className="xl-last-code">{session.last_barcode}</p>
-          )}
+          {session.last_barcode && <p className="xl-last-code">{session.last_barcode}</p>}
 
           <input
             ref={barcodeRef}
@@ -332,8 +366,66 @@ export function XlIntakePage() {
           />
 
           <div className="xl-scan-actions" data-allow-blur>
-            <button className="btn btn--primary" type="button" onClick={() => void handleSave()} disabled={loading || session.total_quantity < 1}>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={loading || session.total_quantity < 1}
+            >
               Сохранить
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => void handleExcel()}
+              disabled={session.total_quantity < 1}
+            >
+              Скачать Excel
+            </button>
+            <button
+              className="btn btn--danger"
+              type="button"
+              onClick={() => void handleComplete()}
+              disabled={loading || session.total_quantity < 1}
+            >
+              Завершить приёмку
+            </button>
+          </div>
+
+          <div className="xl-connect" data-allow-blur>
+            <h3>{session.status === 'applied' ? 'Обновить ячейки из WB' : 'Подключить API WB'}</h3>
+            <p>
+              CRM подтянет карточки, фото и расставит ячейки. После создания ячеек можно продолжать
+              сканирование и снова применить WB для новых баркодов.
+            </p>
+            {!session.has_wb_token && (
+              <label className="xl-field">
+                Персональный токен WB
+                <input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  autoComplete="off"
+                  data-keep-focus="token"
+                />
+              </label>
+            )}
+            {session.has_wb_token && <p className="xl-muted">Токен уже есть у клиента.</p>}
+            {session.warehouse_sync_warning && (
+              <p className="xl-warn">Склады WB: {session.warehouse_sync_warning}</p>
+            )}
+            {(session.unmatched || []).length > 0 && (
+              <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)}>
+                Баркоды не найдены в ЛК WB ({session.unmatched.length})
+              </button>
+            )}
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => void handleConnectWb()}
+              disabled={loading || session.total_quantity < 1}
+            >
+              {session.status === 'applied' ? 'Применить новые баркоды' : 'Создать ячейки из каталога WB'}
             </button>
           </div>
 
@@ -362,7 +454,7 @@ export function XlIntakePage() {
         </section>
       )}
 
-      {session && !scanning && (
+      {session && !canScan && (
         <section className="xl-saved">
           <div className="xl-card">
             <h2>
@@ -376,51 +468,10 @@ export function XlIntakePage() {
                 Скачать Excel
               </button>
             </div>
-
-            {session.status === 'saved' && (session.unmatched || []).length > 0 && (
+            {(session.unmatched || []).length > 0 && (
               <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)}>
                 Баркоды не найдены в ЛК WB ({session.unmatched.length})
               </button>
-            )}
-
-            {session.status === 'saved' && (
-              <div className="xl-connect" data-allow-blur>
-                <h3>Подключить API WB</h3>
-                <p>
-                  После токена CRM подтянет карточки, фото и расставит ячейки по размерам. Остатки
-                  в ЛК WB не меняются.
-                </p>
-                {!session.has_wb_token && (
-                  <label className="xl-field">
-                    Персональный токен WB
-                    <input
-                      type="password"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      autoComplete="off"
-                      data-keep-focus="token"
-                    />
-                  </label>
-                )}
-                {session.has_wb_token && <p className="xl-muted">Токен уже есть у клиента.</p>}
-                <button className="btn btn--primary" type="button" onClick={() => void handleConnectWb()} disabled={loading}>
-                  Создать ячейки из каталога WB
-                </button>
-              </div>
-            )}
-
-            {session.status === 'applied' && (
-              <div className="xl-applied">
-                <p>Клиент создан: ячейки, названия, фото и размеры из ЛК WB.</p>
-                {session.warehouse_sync_warning && (
-                  <p className="xl-warn">Склады WB: {session.warehouse_sync_warning}</p>
-                )}
-                {(session.unmatched || []).length > 0 && (
-                  <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)}>
-                    Баркоды не найдены в ЛК WB ({session.unmatched.length})
-                  </button>
-                )}
-              </div>
             )}
           </div>
 

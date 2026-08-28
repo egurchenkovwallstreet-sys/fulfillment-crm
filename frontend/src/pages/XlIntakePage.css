@@ -151,7 +151,19 @@
 }
 
 .xl-scan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
   margin: 1rem 0 1.5rem;
+}
+
+.xl-session-header {
+  margin-bottom: 1rem;
+}
+
+.xl-session-header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.2rem;
 }
 
 .xl-list-title {
@@ -187,6 +199,14 @@
 .xl-saved-actions,
 .xl-connect {
   margin-top: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.xl-connect h3 {
+  margin: 0 0 0.5rem;
 }
 
 .xl-warn {

@@ -185,6 +185,7 @@ class XlIntakeSession(models.Model):
     SCANNING = "scanning", "Сканирование"
     SAVED = "saved", "Сохранена"
     APPLIED = "applied", "Ячейки созданы"
+    COMPLETED = "completed", "Завершена"
 
   seller = models.ForeignKey(
     "sellers.Seller",
@@ -215,6 +216,7 @@ class XlIntakeSession(models.Model):
   created_at = models.DateTimeField(auto_now_add=True)
   saved_at = models.DateTimeField(null=True, blank=True)
   applied_at = models.DateTimeField(null=True, blank=True)
+  completed_at = models.DateTimeField(null=True, blank=True)
 
   class Meta:
     verbose_name = "XL-приёмка"
@@ -233,6 +235,7 @@ class XlIntakeLine(models.Model):
   )
   barcode = models.CharField("Баркод", max_length=100)
   quantity = models.PositiveIntegerField("Количество", default=0)
+  applied_quantity = models.PositiveIntegerField("Уже применено в CRM", default=0)
   sort_order = models.PositiveIntegerField("Порядковый номер баркода")
 
   class Meta:

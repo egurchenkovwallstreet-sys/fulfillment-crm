@@ -2,11 +2,12 @@ import { apiFetch } from './client'
 import { getAccessToken } from './tokens'
 import { getStoredMarketplace } from '../utils/marketplace'
 
-export type XlIntakeStatus = 'scanning' | 'saved' | 'applied'
+export type XlIntakeStatus = 'scanning' | 'saved' | 'applied' | 'completed'
 
 export type XlIntakeLine = {
   barcode: string
   quantity: number
+  applied_quantity?: number
   sort_order: number
 }
 
@@ -32,6 +33,8 @@ export type XlIntakeSession = {
   created_at: string
   saved_at: string | null
   applied_at: string | null
+  completed_at: string | null
+  can_scan?: boolean
   created_products?: number
   updated_products?: number
   created_cells?: string[]
@@ -63,6 +66,13 @@ export function scanXlBarcode(sessionId: number, barcode: string) {
 
 export function saveXlSession(sessionId: number) {
   return apiFetch<XlIntakeSession>(`/api/warehouse/xl-intake/sessions/${sessionId}/save/`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+export function completeXlSession(sessionId: number) {
+  return apiFetch<XlIntakeSession>(`/api/warehouse/xl-intake/sessions/${sessionId}/complete/`, {
     method: 'POST',
     body: JSON.stringify({}),
   })

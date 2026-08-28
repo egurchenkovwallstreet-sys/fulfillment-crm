@@ -13,6 +13,7 @@ from apps.warehouse.services.xl_intake import (
   XlIntakeError,
   apply_after_wb,
   build_excel_bytes,
+  complete_session,
   create_session,
   create_session_for_seller,
   last_scanned_line,
@@ -127,3 +128,15 @@ class XlIntakeConnectWbView(APIView):
     except XlIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
+
+
+class XlIntakeCompleteView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    try:
+      session = complete_session(session, user=request.user)
+    except XlIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serialize_session(session))

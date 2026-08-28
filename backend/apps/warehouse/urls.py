@@ -26,6 +26,7 @@ from .views import (
 )
 from .views_pricing import PriceGroupDetailView, PriceGroupListView, SellerPricingView
 from .views_xl_intake import (
+  XlIntakeCompleteView,
   XlIntakeConnectWbView,
   XlIntakeExcelView,
   XlIntakeSaveView,
@@ -122,6 +123,11 @@ urlpatterns = [
     "xl-intake/sessions/<int:session_id>/connect-wb/",
     XlIntakeConnectWbView.as_view(),
     name="xl_intake_connect_wb",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/complete/",
+    XlIntakeCompleteView.as_view(),
+    name="xl_intake_complete",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
   path(
