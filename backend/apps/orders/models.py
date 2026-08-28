@@ -113,8 +113,8 @@ class PickListItem(models.Model):
     on_delete=models.CASCADE,
     related_name="items",
   )
-  cell = models.ForeignKey("warehouse.Cell", on_delete=models.PROTECT)
-  product = models.ForeignKey("warehouse.Product", on_delete=models.PROTECT)
+  cell = models.ForeignKey("warehouse.Cell", on_delete=models.PROTECT, null=True, blank=True)
+  product = models.ForeignKey("warehouse.Product", on_delete=models.PROTECT, null=True, blank=True)
   barcode = models.CharField(max_length=100)
   quantity = models.PositiveIntegerField("Количество собрать")
   picked_quantity = models.PositiveIntegerField("Собрано", default=0)

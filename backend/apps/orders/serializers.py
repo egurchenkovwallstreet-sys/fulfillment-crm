@@ -139,8 +139,8 @@ class OrderPrintSerializer(serializers.ModelSerializer):
 
 
 class PickListItemSerializer(serializers.ModelSerializer):
-  cell_number = serializers.CharField(source="cell.number", read_only=True)
-  product_name = serializers.CharField(source="product.name", read_only=True)
+  cell_number = serializers.SerializerMethodField()
+  product_name = serializers.SerializerMethodField()
   wb_nm_id = serializers.SerializerMethodField()
   wb_article = serializers.SerializerMethodField()
   tech_size = serializers.SerializerMethodField()
@@ -159,18 +159,34 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "picked_quantity",
     )
 
+  def get_cell_number(self, obj):
+    if obj.cell_id:
+      return obj.cell.number
+    return "—"
+
+  def get_product_name(self, obj):
+    if obj.product_id:
+      return obj.product.name
+    return "—"
+
   def get_wb_nm_id(self, obj):
+    if not obj.product_id:
+      return None
     return obj.product.wb_nm_id
 
   def get_wb_article(self, obj):
+    if not obj.product_id:
+      return "—"
     product = obj.product
     if product.wb_nm_id:
       return str(product.wb_nm_id)
-    return (product.vendor_code or "").strip()
+    return (product.vendor_code or "").strip() or "—"
 
   def get_tech_size(self, obj):
+    if not obj.product_id:
+      return "—"
     product = obj.product
-    return (product.tech_size or product.wb_size or "").strip()
+    return (product.tech_size or product.wb_size or "").strip() or "—"
 
 
 class PickListSerializer(serializers.ModelSerializer):

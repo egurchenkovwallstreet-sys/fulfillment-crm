@@ -422,7 +422,7 @@ function WbAssemblySellerPage() {
       if (result.pick_list.warehouse_label) {
         msg += ` (${result.pick_list.warehouse_label})`
       }
-      if (skipped) msg += `. Без товара на складе: ${skipped}`
+      if (skipped) msg += `. Без ячейки в CRM (только баркод): ${skipped}`
       msg += '. Нажмите «Скачать PDF (A4)».'
       setSuccess(msg)
     } catch (err) {
