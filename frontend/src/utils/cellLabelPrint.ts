@@ -172,3 +172,133 @@ export function printCellLabel(data: CellLabelData, autoPrint = true): boolean {
   win.document.close()
   return true
 }
+
+function buildCellLabelPage(data: CellLabelData): string {
+  const seller = escapeHtml(data.seller_name || '—')
+  const cellNumber = escapeHtml(data.cell_number || '—')
+  const barcodeText = escapeHtml(data.barcode || '—')
+  const barcodeSvg = renderBarcodeSvg(data.barcode)
+  const mpLabel = escapeHtml(
+    data.marketplace_label || (data.marketplace === 'ozon' ? 'OZON' : 'ВБ'),
+  )
+  return `<article class="label">
+    <section class="zone-number">
+      <div class="cell-number">${cellNumber}</div>
+    </section>
+    <section class="zone-meta">
+      <div class="zone-mp">
+        <div class="mp-name">${mpLabel}</div>
+      </div>
+      <div class="zone-info">
+        <div class="seller">${seller}</div>
+        <div class="barcode-svg">${barcodeSvg}</div>
+        <div class="barcode-text">${barcodeText}</div>
+      </div>
+    </section>
+  </article>`
+}
+
+export function printCellLabels(labels: CellLabelData[], autoPrint = true): boolean {
+  if (!labels.length) return false
+  const win = window.open('', '_blank', 'width=420,height=640')
+  if (!win) return false
+
+  const pages = labels.map((label) => buildCellLabelPage(label)).join('\n<div class="page-break"></div>\n')
+
+  win.document.write(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: 75mm 120mm; margin: 0; }
+    html, body { background: #fff; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page-break { break-after: page; page-break-after: always; height: 0; }
+    .label {
+      width: 75mm;
+      height: 120mm;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .zone-number {
+      flex: 0 0 60%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 1mm 2mm 0;
+    }
+    .cell-number {
+      font-weight: 900;
+      line-height: 0.85;
+      text-align: center;
+      letter-spacing: -0.02em;
+      font-size: 42mm;
+    }
+    .zone-meta {
+      flex: 0 0 40%;
+      display: flex;
+      min-height: 0;
+      border-top: 0.4mm solid #000;
+    }
+    .zone-mp {
+      flex: 1 1 55%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 1mm;
+    }
+    .mp-name {
+      font-weight: 900;
+      line-height: 0.78;
+      text-align: center;
+      letter-spacing: -0.04em;
+      font-size: 18mm;
+    }
+    .zone-info {
+      flex: 1 1 45%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5mm 2mm;
+      gap: 1mm;
+      min-width: 0;
+    }
+    .seller {
+      font-size: 11pt;
+      font-weight: 800;
+      text-align: center;
+      line-height: 1.05;
+      word-break: break-word;
+      max-height: 16mm;
+      overflow: hidden;
+    }
+    .barcode-svg { width: 100%; }
+    .barcode-svg svg { width: 100%; max-width: 32mm; height: 8mm; }
+    .barcode-text {
+      font-size: 3.2mm;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      text-align: center;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  ${pages}
+  ${autoPrint ? '<script>window.onload = function () { window.print(); window.close(); };<\/script>' : ''}
+</body>
+</html>`)
+  win.document.close()
+  return true
+}

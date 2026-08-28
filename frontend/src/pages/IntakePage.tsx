@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import {
+  applyWbSyncAuto,
   fetchFreeCells,
   fetchIntakeHistory,
   fetchSellers,
   lookupBarcode,
+  previewWbSyncIntake,
   submitIntake,
   type Cell,
   type CellLabelData,
@@ -11,9 +13,13 @@ import {
   type IntakeLookup,
   type Seller,
   type StockMode,
+  type SyncVariant,
+  type WbSyncPreviewItem,
+  type WbSyncPreviewResult,
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { printCellLabels } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
 import './IntakePage.css'
 
@@ -28,7 +34,11 @@ export function IntakePage() {
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [warehouseId, setWarehouseId] = useState<number | ''>('')
   const [stockMode, setStockMode] = useState<StockMode>('intake')
+  const [syncVariant, setSyncVariant] = useState<SyncVariant>('auto')
   const [verifiedStockMatch, setVerifiedStockMatch] = useState(false)
+  const [wbSyncPreview, setWbSyncPreview] = useState<WbSyncPreviewResult | null>(null)
+  const [selectedBarcodes, setSelectedBarcodes] = useState<Set<string>>(new Set())
+  const [wbSyncLabels, setWbSyncLabels] = useState<CellLabelData[]>([])
   const [barcode, setBarcode] = useState('')
   const [quantityInput, setQuantityInput] = useState('1')
   const [productName, setProductName] = useState('')
@@ -154,7 +164,7 @@ export function IntakePage() {
       setError('Сначала отсканируйте баркод (Enter)')
       return
     }
-    if (stockMode === 'sync_from_wb' && !verifiedStockMatch) {
+    if (stockMode === 'sync_from_wb' && syncVariant !== 'scan' && !verifiedStockMatch) {
       setError('Подтвердите сверку остатков на фулфилменте')
       return
     }
@@ -176,8 +186,11 @@ export function IntakePage() {
         barcode: barcode.trim(),
         quantity,
         stock_mode: isOzon ? 'intake' : stockMode,
-        verified_stock_match: stockMode === 'sync_from_wb' ? verifiedStockMatch : false,
-        cell_mode: lookup.exists ? 'auto' : cellMode,
+        sync_variant: isOzon ? undefined : (stockMode === 'sync_from_wb' ? syncVariant : undefined),
+        verified_stock_match: stockMode === 'sync_from_wb' && syncVariant !== 'scan'
+          ? verifiedStockMatch
+          : false,
+        cell_mode: lookup.exists || isSyncScan ? 'auto' : cellMode,
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
         name: productName,
       })
@@ -209,6 +222,12 @@ export function IntakePage() {
     }
   }
 
+  function resetWbSyncState() {
+    setWbSyncPreview(null)
+    setSelectedBarcodes(new Set())
+    setWbSyncLabels([])
+  }
+
   function resetForm() {
     setBarcode('')
     setLookup(null)
@@ -218,8 +237,132 @@ export function IntakePage() {
     barcodeRef.current?.focus()
   }
 
+  function handleStockModeChange(mode: StockMode) {
+    setStockMode(mode)
+    setVerifiedStockMatch(false)
+    setLookup(null)
+    resetWbSyncState()
+    if (mode === 'sync_from_wb') {
+      setSyncVariant('auto')
+    }
+  }
+
+  function handleSyncVariantChange(variant: SyncVariant) {
+    setSyncVariant(variant)
+    setLookup(null)
+    resetWbSyncState()
+  }
+
+  function toggleBarcodeSelection(barcode: string, checked: boolean) {
+    setSelectedBarcodes((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(barcode)
+      else next.delete(barcode)
+      return next
+    })
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    if (!wbSyncPreview) return
+    if (checked) {
+      setSelectedBarcodes(new Set(wbSyncPreview.items.map((item) => item.barcode)))
+    } else {
+      setSelectedBarcodes(new Set())
+    }
+  }
+
+  async function handleLoadWbSyncPreview() {
+    if (!sellerId || !warehouseId) {
+      setError('Выберите селлера и склад FBS')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await previewWbSyncIntake(Number(sellerId), Number(warehouseId))
+      setWbSyncPreview(result)
+      setSelectedBarcodes(new Set(result.items.map((item) => item.barcode)))
+      setWbSyncLabels([])
+      setSuccess(`Загружено ${result.items.length} позиций с остатком WB (${result.warehouse_name})`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить остатки WB')
+      setWbSyncPreview(null)
+      setSelectedBarcodes(new Set())
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleApplyWbSyncAuto() {
+    if (!sellerId || !warehouseId || !wbSyncPreview) return
+    const barcodes = Array.from(selectedBarcodes)
+    if (barcodes.length < 1) {
+      setError('Отметьте хотя бы один баркод')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await applyWbSyncAuto(Number(sellerId), Number(warehouseId), barcodes)
+      setWbSyncLabels(result.cell_labels)
+      setSuccess(result.message)
+      const [cellsData, historyData] = await Promise.all([
+        fetchFreeCells(Number(sellerId)),
+        fetchIntakeHistory(),
+      ])
+      setCells(cellsData)
+      setHistory(historyData)
+      await handleLoadWbSyncPreview()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка автоматической сверки')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handlePrintWbSyncLabels(all: boolean) {
+    const labels = all
+      ? wbSyncLabels
+      : wbSyncLabels.filter((label) => selectedBarcodes.has(label.barcode))
+    if (labels.length < 1) {
+      setError(all ? 'Нет новых этикеток для печати' : 'Выберите позиции с новыми ячейками')
+      return
+    }
+    printCellLabels(labels, true)
+    setSuccess(`Отправлено на печать: ${labels.length} этикеток`)
+  }
+
+  function renderWbSyncRow(item: WbSyncPreviewItem) {
+    const checked = selectedBarcodes.has(item.barcode)
+    return (
+      <tr key={item.barcode}>
+        <td>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => toggleBarcodeSelection(item.barcode, e.target.checked)}
+          />
+        </td>
+        <td><code>{item.barcode}</code></td>
+        <td>{item.tech_size || '—'}</td>
+        <td><strong>{item.wb_stock}</strong></td>
+        <td>{item.already_in_crm ? (item.crm_quantity ?? '—') : '—'}</td>
+        <td><strong>{item.cell_number || '—'}</strong></td>
+        <td>{item.already_in_crm ? 'В CRM' : 'Новый'}</td>
+      </tr>
+    )
+  }
+
   const isSyncMode = stockMode === 'sync_from_wb'
+  const isSyncAuto = isSyncMode && syncVariant === 'auto'
+  const isSyncScan = isSyncMode && syncVariant === 'scan'
   const enabledWarehouses = warehouses.filter((w) => w.is_enabled)
+  const allSelected =
+    wbSyncPreview != null &&
+    wbSyncPreview.items.length > 0 &&
+    wbSyncPreview.items.every((item) => selectedBarcodes.has(item.barcode))
 
   return (
     <>
@@ -272,6 +415,7 @@ export function IntakePage() {
                 onChange={(e) => {
                   setWarehouseId(e.target.value ? Number(e.target.value) : '')
                   setLookup(null)
+                  resetWbSyncState()
                 }}
                 required
                 disabled={!sellerId}
@@ -294,11 +438,7 @@ export function IntakePage() {
                   type="radio"
                   name="stockMode"
                   checked={stockMode === 'intake'}
-                  onChange={() => {
-                    setStockMode('intake')
-                    setVerifiedStockMatch(false)
-                    setLookup(null)
-                  }}
+                  onChange={() => handleStockModeChange('intake')}
                 />
                 <strong>Приёмка</strong> — принять на склад CRM и добавить в ЛК WB
               </label>
@@ -307,15 +447,121 @@ export function IntakePage() {
                   type="radio"
                   name="stockMode"
                   checked={stockMode === 'sync_from_wb'}
-                  onChange={() => {
-                    setStockMode('sync_from_wb')
-                    setVerifiedStockMatch(false)
-                    setLookup(null)
-                  }}
+                  onChange={() => handleStockModeChange('sync_from_wb')}
                 />
                 <strong>Сверка с WB</strong> — установить остаток CRM по ЛК WB
               </label>
             </fieldset>
+            )}
+
+            {isSyncMode && (
+            <fieldset className="intake-sync-variant">
+              <legend>Режим сверки</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="syncVariant"
+                  checked={syncVariant === 'auto'}
+                  onChange={() => handleSyncVariantChange('auto')}
+                />
+                <strong>Автоматически</strong> — все остатки WB, ячейки и CRM
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="syncVariant"
+                  checked={syncVariant === 'scan'}
+                  onChange={() => handleSyncVariantChange('scan')}
+                />
+                <strong>По сканированию</strong> — баркод → ячейка → печать
+              </label>
+            </fieldset>
+            )}
+
+            {isSyncAuto && (
+            <div className="intake-wb-sync-auto">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void handleLoadWbSyncPreview()}
+                disabled={loading || !sellerId || !warehouseId}
+              >
+                {loading ? 'Загрузка…' : 'Загрузить остатки из WB'}
+              </button>
+              {wbSyncPreview && (
+                <>
+                  <p className="intake-hint">
+                    Склад «{wbSyncPreview.warehouse_name}»: {wbSyncPreview.items.length} позиций с остатком WB
+                  </p>
+                  <div className="intake-wb-sync-table-wrap">
+                    <table className="intake-wb-sync-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={(e) => toggleSelectAll(e.target.checked)}
+                              aria-label="Выбрать все"
+                            />
+                          </th>
+                          <th>Баркод</th>
+                          <th>Размер</th>
+                          <th>WB</th>
+                          <th>CRM</th>
+                          <th>Ячейка</th>
+                          <th>Статус</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wbSyncPreview.items.map(renderWbSyncRow)}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="intake-actions">
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => void handleApplyWbSyncAuto()}
+                      disabled={loading || selectedBarcodes.size < 1}
+                    >
+                      Применить сверку ({selectedBarcodes.size})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={() => handlePrintWbSyncLabels(false)}
+                      disabled={wbSyncLabels.length < 1}
+                    >
+                      Печать выбранных этикеток
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={() => handlePrintWbSyncLabels(true)}
+                      disabled={wbSyncLabels.length < 1}
+                    >
+                      Печать всех этикеток
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            )}
+
+            {!isSyncAuto && (
+            <>
+            {isSyncScan && (
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void handleLoadWbSyncPreview()}
+                disabled={loading || !sellerId || !warehouseId}
+              >
+                {wbSyncPreview
+                  ? `Остатки WB загружены (${wbSyncPreview.items.length})`
+                  : 'Загрузить остатки из WB'}
+              </button>
             )}
 
             <label className="intake-field">
@@ -358,7 +604,17 @@ export function IntakePage() {
               </div>
             )}
 
-            {lookup && !lookup.exists && (
+            {lookup && !lookup.exists && isSyncScan && (
+              <div className="intake-info intake-info--new">
+                <h3>Новый баркод</h3>
+                <p>Будет создан товар, ячейка назначится автоматически по возрастанию, этикетка — после сохранения.</p>
+                {lookup.wb_stock != null && (
+                  <p><strong>Остаток WB ({lookup.warehouse_name}):</strong> {lookup.wb_stock} шт.</p>
+                )}
+              </div>
+            )}
+
+            {lookup && !lookup.exists && !isSyncScan && (
               <div className="intake-info intake-info--new">
                 <h3>Новый баркод</h3>
                 <p>Товар не найден — будет создан и привязан к ячейке</p>
@@ -420,7 +676,7 @@ export function IntakePage() {
               </div>
             )}
 
-            {lookup && isSyncMode && (
+            {lookup && isSyncMode && !isSyncScan && (
               <div className="intake-warning intake-warning--danger">
                 <p>
                   <strong>Внимание!</strong> Остаток в CRM будет установлен равным остатку в ЛК WB
@@ -465,19 +721,24 @@ export function IntakePage() {
                   <button
                     type="submit"
                     className="btn btn--primary"
-                    disabled={loading || (isSyncMode && !verifiedStockMatch)}
+                    disabled={loading || (isSyncMode && !isSyncScan && !verifiedStockMatch)}
                   >
                     {loading
                       ? 'Сохранение…'
-                      : isSyncMode
-                        ? 'Установить остаток из WB'
-                        : 'Принять на склад'}
+                      : isSyncScan
+                        ? 'Сверить, назначить ячейку и печать'
+                        : isSyncMode
+                          ? 'Установить остаток из WB'
+                          : 'Принять на склад'}
                   </button>
                   <button type="button" className="btn btn--secondary" onClick={resetForm}>
                     Сбросить
                   </button>
                 </div>
               </>
+            )}
+
+            </>
             )}
 
             {error && <p className="intake-message intake-message--error">{error}</p>}

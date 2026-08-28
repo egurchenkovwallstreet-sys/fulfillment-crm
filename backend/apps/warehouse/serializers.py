@@ -87,6 +87,11 @@ class IntakeSerializer(serializers.Serializer):
     default="intake",
   )
   verified_stock_match = serializers.BooleanField(default=False)
+  sync_variant = serializers.ChoiceField(
+    choices=["auto", "scan"],
+    required=False,
+    allow_null=True,
+  )
   cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
   cell_id = serializers.IntegerField(required=False, allow_null=True)
   name = serializers.CharField(required=False, allow_blank=True, max_length=500)
@@ -112,8 +117,9 @@ class IntakeSerializer(serializers.Serializer):
       raise serializers.ValidationError({"wb_warehouse_id": "Склад WB не найден у этого селлера"})
 
     stock_mode = attrs.get("stock_mode", "intake")
+    sync_variant = attrs.get("sync_variant")
     if stock_mode == "sync_from_wb":
-      if not attrs.get("verified_stock_match"):
+      if sync_variant != "scan" and not attrs.get("verified_stock_match"):
         raise serializers.ValidationError({
           "verified_stock_match": (
             "Подтвердите, что на фулфилменте пересчитали остатки и они совпадают с ЛК WB"
@@ -123,6 +129,20 @@ class IntakeSerializer(serializers.Serializer):
       raise serializers.ValidationError({"quantity": "Укажите количество от 1"})
 
     return attrs
+
+
+class WbSyncPreviewSerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  wb_warehouse_id = serializers.IntegerField()
+
+
+class WbSyncAutoSerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  wb_warehouse_id = serializers.IntegerField()
+  barcodes = serializers.ListField(
+    child=serializers.CharField(max_length=100),
+    required=False,
+  )
 
 
 class MoveCellSerializer(serializers.Serializer):

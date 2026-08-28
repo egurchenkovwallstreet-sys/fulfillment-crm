@@ -34,7 +34,7 @@ import {
   type ScanPhase,
   type StageKey,
 } from '../utils/assemblyWorkflow'
-import { AssemblyModal, type AssemblyModalState } from '../components/AssemblyModal'
+import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } from '../components/AssemblyModal'
 import {
   AssemblyMarkingListModal,
   AssemblyMarkingPanels,
@@ -707,8 +707,20 @@ function WbAssemblySellerPage() {
     } catch (err) {
       closePrintHolder(printWin)
       setScanValue('')
-      setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
-      scanRef.current?.focus()
+      if (err instanceof ApiError && err.code === 'not_in_pick_list') {
+        playAssemblyScanErrorBeep()
+        setModal({
+          kind: 'scan-error',
+          title: 'Ошибка',
+          message: 'Товара нет в поставке',
+          onDismiss: () => {
+            resetScanFlow()
+          },
+        })
+      } else {
+        setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
+        scanRef.current?.focus()
+      }
     } finally {
       setScanBusy(false)
     }

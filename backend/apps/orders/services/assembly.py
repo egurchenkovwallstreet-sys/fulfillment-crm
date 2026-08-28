@@ -113,6 +113,45 @@ def _reset_marking_for_retry(order: Order, seller: Seller, *, user=None) -> None
   )
 
 
+def _get_active_pick_list(seller: Seller) -> PickList | None:
+  return (
+    PickList.objects.filter(seller=seller, is_completed=False)
+    .order_by("-created_at")
+    .first()
+  )
+
+
+def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
+  scan = scan_value.strip()
+  if not scan:
+    return False
+
+  item_barcodes = set(
+    PickListItem.objects.filter(pick_list=pick_list).values_list("barcode", flat=True)
+  )
+  if scan in item_barcodes:
+    return True
+
+  if scan.isdigit():
+    order = Order.objects.filter(
+      seller_id=pick_list.seller_id,
+      pick_list=pick_list,
+      wb_order_id=int(scan),
+    ).first()
+    if order and order.barcode in item_barcodes:
+      return True
+
+  return False
+
+
+def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
+  pick_list = _get_active_pick_list(seller)
+  if not pick_list or not pick_list.items.exists():
+    return
+  if not _scan_allowed_in_pick_list(pick_list, scan_value):
+    raise AssemblyError("Товара нет в поставке", code="not_in_pick_list")
+
+
 def _find_active_order(seller: Seller, scan_value: str) -> Order:
   scan_value = scan_value.strip()
   if not scan_value:
@@ -233,6 +272,11 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   — без ЧЗ: сразу LABEL_PRINTED + печать;
   — с ЧЗ: ждём скан DataMatrix (стикер не печатаем).
   """
+  scan_value = scan_value.strip()
+  if not scan_value:
+    raise AssemblyError("Пустой штрихкод")
+
+  _assert_scan_in_pick_list(seller, scan_value)
   order = _find_active_order(seller, scan_value)
 
   if _is_marking_retry_order(order):

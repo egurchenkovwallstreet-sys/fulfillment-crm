@@ -27,6 +27,36 @@ export type Product = {
 }
 
 export type StockMode = 'intake' | 'sync_from_wb'
+export type SyncVariant = 'auto' | 'scan'
+
+export type WbSyncPreviewItem = {
+  barcode: string
+  title: string
+  tech_size: string
+  wb_stock: number
+  cell_number: string
+  already_in_crm: boolean
+  requires_marking: boolean
+  product_id?: number | null
+  crm_quantity?: number | null
+}
+
+export type WbSyncPreviewResult = {
+  success: boolean
+  warehouse_id: number
+  warehouse_name: string
+  items: WbSyncPreviewItem[]
+}
+
+export type WbSyncAutoResult = {
+  success: boolean
+  message: string
+  created: number
+  updated: number
+  skipped: number
+  products: Product[]
+  cell_labels: CellLabelData[]
+}
 
 export type IntakeLookup = {
   exists: boolean
@@ -60,6 +90,7 @@ export type IntakePayload = {
   quantity: number
   stock_mode: StockMode
   verified_stock_match?: boolean
+  sync_variant?: SyncVariant | null
   cell_mode: 'auto' | 'manual'
   cell_id?: number | null
   name?: string
@@ -167,6 +198,27 @@ export function submitIntake(payload: IntakePayload) {
 
 export function fetchIntakeHistory() {
   return apiFetch<IntakeHistoryItem[]>('/api/warehouse/intake/history/')
+}
+
+export function previewWbSyncIntake(sellerId: number, wbWarehouseId: number) {
+  return apiFetch<WbSyncPreviewResult>('/api/warehouse/intake/wb-sync/preview/', {
+    method: 'POST',
+    body: JSON.stringify({
+      seller_id: sellerId,
+      wb_warehouse_id: wbWarehouseId,
+    }),
+  })
+}
+
+export function applyWbSyncAuto(sellerId: number, wbWarehouseId: number, barcodes?: string[]) {
+  return apiFetch<WbSyncAutoResult>('/api/warehouse/intake/wb-sync/auto/', {
+    method: 'POST',
+    body: JSON.stringify({
+      seller_id: sellerId,
+      wb_warehouse_id: wbWarehouseId,
+      barcodes,
+    }),
+  })
 }
 
 export type InventoryLookup = {

@@ -23,6 +23,37 @@
   border-color: #f59e0b;
 }
 
+.assembly-modal--scan-error {
+  max-width: 640px;
+  border-color: #dc2626;
+  background: #fef2f2;
+  box-shadow: 0 24px 48px rgba(220, 38, 38, 0.25);
+}
+
+.assembly-modal--scan-error h2 {
+  color: #991b1b;
+  font-size: 1.65rem;
+}
+
+.assembly-modal--scan-error .assembly-modal__message {
+  color: #991b1b;
+  font-size: 1.35rem;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.assembly-modal--scan-error .assembly-modal__ok {
+  min-width: 180px;
+  font-size: 1.05rem;
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.assembly-modal--scan-error .assembly-modal__actions {
+  justify-content: center;
+}
+
 .assembly-modal h2 {
   margin: 0 0 0.75rem;
   font-size: 1.15rem;

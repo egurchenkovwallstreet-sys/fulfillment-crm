@@ -23,6 +23,8 @@ from .serializers import (
   StockOperationSerializer,
   StockTransferSerializer,
   StockDistributeSerializer,
+  WbSyncAutoSerializer,
+  WbSyncPreviewSerializer,
 )
 from .services.cell_label import build_cell_label_data
 from .services.cell_move import CellMoveError, move_product_to_cell
@@ -44,6 +46,12 @@ from .services.stock_transfer import (
   perform_stock_transfer,
 )
 from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
+from .services.wb_sync_intake import (
+  WbSyncIntakeError,
+  apply_wb_sync_auto,
+  preview_wb_sync_intake,
+  serialize_preview,
+)
 from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
 from .services.wb_product_sync import refresh_seller_products_from_wb
 
@@ -270,6 +278,7 @@ class IntakeView(APIView):
         cell_id=data.get("cell_id"),
         name=data.get("name", ""),
         marketplace=marketplace,
+        sync_variant=data.get("sync_variant"),
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -295,6 +304,58 @@ class IntakeView(APIView):
         "cell_label": result.cell_label,
         "stock_mode": result.stock_mode,
         "wb_sync": result.wb_sync,
+      },
+      status=status.HTTP_201_CREATED,
+    )
+
+
+class WbSyncIntakePreviewView(APIView):
+  """Остатки ЛК WB для сверки: список баркодов с планом ячеек."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    serializer = WbSyncPreviewSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    try:
+      preview = preview_wb_sync_intake(seller, data["wb_warehouse_id"])
+    except WbSyncIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **serialize_preview(preview)})
+
+
+class WbSyncIntakeAutoView(APIView):
+  """Автоматическая сверка: CRM = остатки WB, ячейки по плану."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    serializer = WbSyncAutoSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = get_object_or_404(Seller, pk=data["seller_id"], is_active=True)
+    try:
+      result = apply_wb_sync_auto(
+        seller,
+        data["wb_warehouse_id"],
+        barcodes=data.get("barcodes"),
+        user=request.user,
+      )
+    except WbSyncIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+      {
+        "success": True,
+        "message": (
+          f"Сверка с WB: создано {result.created}, обновлено {result.updated}, "
+          f"пропущено {result.skipped}"
+        ),
+        "created": result.created,
+        "updated": result.updated,
+        "skipped": result.skipped,
+        "products": ProductSerializer(result.products, many=True).data,
+        "cell_labels": result.cell_labels,
       },
       status=status.HTTP_201_CREATED,
     )

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import './AssemblyModal.css'
 
 export type AssemblyModalState =
@@ -5,6 +6,12 @@ export type AssemblyModalState =
       kind: 'block'
       title: string
       message: string
+    }
+  | {
+      kind: 'scan-error'
+      title: string
+      message: string
+      onDismiss?: () => void
     }
   | {
       kind: 'confirm'
@@ -21,11 +28,46 @@ type Props = {
 }
 
 export function AssemblyModal({ modal, onClose, loading = false }: Props) {
+  const primaryRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    primaryRef.current?.focus()
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
+      if (modal.kind === 'confirm' || loading) return
+      if (modal.kind === 'scan-error') {
+        modal.onDismiss?.()
+        onClose()
+        return
+      }
+      onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [modal, onClose, loading])
+
+  const isScanError = modal.kind === 'scan-error'
+  const isBlock = modal.kind === 'block'
+
+  function handlePrimaryClose() {
+    if (modal.kind === 'scan-error') {
+      modal.onDismiss?.()
+    }
+    onClose()
+  }
+
   return (
-    <div className="assembly-modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="assembly-modal-backdrop" role="presentation" onClick={handlePrimaryClose}>
       <div
-        className={`assembly-modal${modal.kind === 'block' ? ' assembly-modal--block' : ''}`}
-        role={modal.kind === 'block' ? 'alertdialog' : 'dialog'}
+        className={`assembly-modal${
+          isScanError
+            ? ' assembly-modal--scan-error'
+            : isBlock
+              ? ' assembly-modal--block'
+              : ''
+        }`}
+        role={isScanError || isBlock ? 'alertdialog' : 'dialog'}
         aria-labelledby="assembly-modal-title"
         onClick={(e) => e.stopPropagation()}
       >
@@ -50,7 +92,12 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
               </button>
             </>
           ) : (
-            <button type="button" className="btn btn--primary" onClick={onClose}>
+            <button
+              ref={primaryRef}
+              type="button"
+              className={`btn btn--primary${isScanError ? ' assembly-modal__ok' : ''}`}
+              onClick={handlePrimaryClose}
+            >
               Понятно
             </button>
           )}
@@ -58,4 +105,24 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
       </div>
     </div>
   )
+}
+
+export function playAssemblyScanErrorBeep() {
+  try {
+    const ctx = new AudioContext()
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.value = 440
+    gain.gain.value = 0.08
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start()
+    window.setTimeout(() => {
+      oscillator.stop()
+      void ctx.close()
+    }, 180)
+  } catch {
+    // ignore
+  }
 }

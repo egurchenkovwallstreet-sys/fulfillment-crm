@@ -8,7 +8,7 @@ from apps.sellers.models import Seller
 
 from apps.warehouse.models import Cell, Product, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
-from apps.warehouse.services.cells import first_free_cell, refresh_cell_occupied
+from apps.warehouse.services.cells import create_cell_with_next_number, first_free_cell, refresh_cell_occupied
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 from apps.warehouse.services.wb_stocks import (
   STOCK_MODE_INTAKE,
@@ -33,7 +33,14 @@ class IntakeResult:
   wb_sync: dict | None = None
 
 
-def _assign_cell(seller: Seller, cell_mode: str, cell_id: int | None, marketplace: str = WB) -> Cell:
+def _assign_cell(
+  seller: Seller,
+  cell_mode: str,
+  cell_id: int | None,
+  marketplace: str = WB,
+  *,
+  sequential: bool = False,
+) -> Cell:
   mp = normalize_marketplace(marketplace)
   if cell_mode == "manual":
     if not cell_id:
@@ -43,6 +50,9 @@ def _assign_cell(seller: Seller, cell_mode: str, cell_id: int | None, marketplac
     except Cell.DoesNotExist as exc:
       raise IntakeError("Ячейка не найдена у этого селлера") from exc
     return cell
+
+  if sequential:
+    return create_cell_with_next_number(seller, mp)
 
   return first_free_cell(seller, mp)
 
@@ -61,6 +71,7 @@ def perform_intake(
   cell_id: int | None = None,
   name: str = "",
   marketplace: str = WB,
+  sync_variant: str | None = None,
 ) -> IntakeResult:
   mp = normalize_marketplace(marketplace)
   barcode = barcode.strip()
@@ -83,7 +94,8 @@ def perform_intake(
       raise IntakeError(str(exc)) from exc
 
     if stock_mode == STOCK_MODE_SYNC_FROM_WB:
-      if not verified_stock_match:
+      sync_scan = sync_variant == "scan"
+      if not sync_scan and not verified_stock_match:
         raise IntakeError(
           "Подтвердите, что на фулфилменте пересчитали остатки и они совпадают с ЛК WB"
         )
@@ -91,6 +103,11 @@ def perform_intake(
         wb_amount = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
       except WBStockError as exc:
         raise IntakeError(str(exc)) from exc
+      if sync_scan and wb_amount < 1:
+        raise IntakeError(
+          f"Баркод {barcode} не найден в остатках ЛК WB на складе "
+          f"«{warehouse.name or warehouse.wb_warehouse_id}»"
+        )
       intake_quantity = wb_amount
       wb_sync = {
         "mode": stock_mode,
@@ -115,7 +132,13 @@ def perform_intake(
       product.save(update_fields=["quantity", "updated_at"])
       is_new = False
     else:
-      cell = _assign_cell(seller, cell_mode, cell_id, mp)
+      cell = _assign_cell(
+        seller,
+        cell_mode,
+        cell_id,
+        mp,
+        sequential=sync_variant == "scan",
+      )
       marking = lookup_marking_for_barcode(seller, barcode)
       product = Product.objects.create(
         seller=seller,
