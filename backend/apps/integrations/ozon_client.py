@@ -280,6 +280,38 @@ class OzonClient:
       logger.warning("Ozon v4 list failed (%s), fallback unfulfilled: %s", status, exc)
       return self._unfulfilled_list(status)
 
+  def list_recent_postings(self, *, days: int = 30) -> list[dict]:
+    """Все отправления FBS за период (без фильтра по статусу)."""
+    now = datetime.now(dt_timezone.utc)
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    until = (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    collected: list[dict] = []
+    cursor = ""
+    for _ in range(40):
+      payload: dict = {
+        "dir": "ASC",
+        "filter": {"since": since, "to": until},
+        "limit": PAGE_LIMIT,
+        "with": {
+          "analytics_data": False,
+          "financial_data": False,
+          "barcodes": True,
+        },
+      }
+      if cursor:
+        payload["cursor"] = cursor
+      data = self._post("/v4/posting/fbs/list", payload)
+      if not isinstance(data, dict):
+        break
+      postings, has_next, next_cursor = self._extract_postings(data)
+      collected.extend(postings)
+      if not has_next or not postings:
+        break
+      cursor = next_cursor
+      if not cursor:
+        break
+    return collected
+
   def posting_status_count(self, status: str, *, max_offset: int = 2000) -> int:
     return len(self.list_postings(status))
 

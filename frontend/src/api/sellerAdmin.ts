@@ -217,10 +217,12 @@ export type AdminBillingSellerRow = {
 
 export type AdminBillingResponse = {
   today: string
+  marketplace?: string
   combined: SellerWeeklyShipments
   sellers: AdminBillingSellerRow[]
 }
 
-export async function fetchAdminBilling(): Promise<AdminBillingResponse> {
-  return apiFetch<AdminBillingResponse>('/api/sellers/admin/billing/')
+export async function fetchAdminBilling(marketplace: 'wb' | 'ozon' = 'wb'): Promise<AdminBillingResponse> {
+  const query = marketplace === 'ozon' ? '?marketplace=ozon' : ''
+  return apiFetch<AdminBillingResponse>(`/api/sellers/admin/billing/${query}`)
 }

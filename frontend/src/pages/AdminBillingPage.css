@@ -1,3 +1,34 @@
+.admin-billing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.admin-billing-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.admin-billing-tab {
+  border: 0;
+  background: transparent;
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  color: #475569;
+}
+
+.admin-billing-tab--active {
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .admin-billing-sellers {
   margin-top: 1rem;
 }

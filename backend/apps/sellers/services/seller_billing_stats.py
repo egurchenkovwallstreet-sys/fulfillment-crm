@@ -67,22 +67,24 @@ def _order_ids_from_wb_supply_name(name: str) -> list[int]:
   return [int(match.group(1))]
 
 
-def _barcode_price_map(seller: Seller) -> dict[str, Decimal]:
+def _barcode_price_map(seller: Seller, *, marketplace: str | None = None) -> dict[str, Decimal]:
   prices: dict[str, Decimal] = {}
-  for product in Product.objects.filter(seller=seller).select_related("price_group"):
+  qs = Product.objects.filter(seller=seller).select_related("price_group")
+  if marketplace:
+    qs = qs.filter(marketplace=marketplace)
+  for product in qs:
     price = product.processing_price
     if price is not None:
       prices[product.barcode] = price
   return prices
 
 
-def _seller_fallback_tariff(seller: Seller) -> Decimal | None:
+def _seller_fallback_tariff(seller: Seller, *, marketplace: str | None = None) -> Decimal | None:
   """Общий тариф селлера, если у всех товаров одна individual_price."""
-  distinct = list(
-    Product.objects.filter(seller=seller, individual_price__isnull=False)
-    .values_list("individual_price", flat=True)
-    .distinct()
-  )
+  qs = Product.objects.filter(seller=seller, individual_price__isnull=False)
+  if marketplace:
+    qs = qs.filter(marketplace=marketplace)
+  distinct = list(qs.values_list("individual_price", flat=True).distinct())
   if len(distinct) == 1:
     return distinct[0]
   return None
@@ -403,16 +405,53 @@ def merge_weekly_shipments_payloads(
   }
 
 
-def load_admin_billing_dashboard(*, fulfillment=None) -> dict:
+def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -> dict:
   """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
+  from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+  from apps.sellers.services.ozon_billing_stats import load_weekly_ozon_shipped_orders
+
+  mp = normalize_marketplace(marketplace)
+  is_ozon = mp == OZON
+
   sellers = Seller.objects.filter(is_active=True)
   if fulfillment:
     sellers = sellers.filter(fulfillment=fulfillment)
+  if is_ozon:
+    sellers = sellers.filter(ozon_enabled=True)
+  else:
+    sellers = sellers.filter(wb_enabled=True)
   sellers = sellers.order_by("company_name")
   seller_rows: list[dict] = []
   successful_payloads: list[dict] = []
 
   for seller in sellers:
+    if is_ozon:
+      if not (seller.ozon_client_id and seller.ozon_api_key_encrypted):
+        seller_rows.append({
+          "seller_id": seller.id,
+          "company_name": seller.company_name,
+          "weekly_shipments": None,
+          "error": "Ключи Ozon не настроены",
+        })
+        continue
+      try:
+        shipments = load_weekly_ozon_shipped_orders(seller)
+        successful_payloads.append(shipments)
+        seller_rows.append({
+          "seller_id": seller.id,
+          "company_name": seller.company_name,
+          "weekly_shipments": shipments,
+          "error": None,
+        })
+      except SellerAnalyticsError as exc:
+        seller_rows.append({
+          "seller_id": seller.id,
+          "company_name": seller.company_name,
+          "weekly_shipments": None,
+          "error": str(exc),
+        })
+      continue
+
     if not seller.wb_api_token_encrypted:
       seller_rows.append({
         "seller_id": seller.id,
@@ -441,6 +480,7 @@ def load_admin_billing_dashboard(*, fulfillment=None) -> dict:
   combined = merge_weekly_shipments_payloads(successful_payloads)
   return {
     "today": combined["today"],
+    "marketplace": mp,
     "combined": combined,
     "sellers": seller_rows,
   }

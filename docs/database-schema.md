@@ -99,7 +99,7 @@ erDiagram
 Поставка WB. Списание остатков после подтверждения.
 
 ### orders_ozonposting
-Отправление Ozon FBS. Unique `(seller, posting_number)`. Стадии CRM: `new` / `in_picking` / `in_delivery`. Статусы Ozon: `awaiting_packaging` / `awaiting_deliver`. Дополнительно: `delivery_method_id`, `carriage_id`, `products_json`, `marking_codes`.
+Отправление Ozon FBS. Unique `(seller, posting_number)`. Стадии CRM: `new` / `in_picking` / `in_delivery`. Статусы Ozon: `awaiting_packaging` / `awaiting_deliver`. Дополнительно: `delivery_method_id`, `carriage_id`, `products_json`, `marking_codes`, `shipped_at` (для billing).
 
 ### warehouse_xlintakesession / warehouse_xlintakeline
 Приёмка в XL: поштучный скан до подключения API WB. Строка — уникальный баркод, `sort_order` (1, 2, 3…), `quantity`.

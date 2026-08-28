@@ -6,13 +6,18 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+from apps.orders.models import OzonPosting
 from apps.orders.services.assembly import get_seller_wb_tab_counts
 from apps.sellers.models import Seller
 from apps.sellers.services.calendar_periods import calendar_week_bounds_offset, iter_week_days, today_local
+from apps.sellers.services.ozon_billing_stats import load_weekly_ozon_shipped_orders
+from apps.sellers.services.ozon_order_stats import get_enabled_ozon_warehouses_meta, load_ozon_fbs_stats
 from apps.sellers.services.seller_billing_stats import load_weekly_shipped_orders
 from apps.sellers.services.wb_order_stats import (
   SALES_LOOKBACK_DAYS,
   SellerAnalyticsError,
+  get_enabled_warehouses_meta,
   load_wb_fbs_stats,
 )
 from apps.warehouse.models import Product
@@ -65,14 +70,23 @@ def _days_remaining(quantity: int, avg_daily: float) -> float | None:
   return round(quantity / avg_daily, 1)
 
 
+def _product_queryset(seller: Seller, marketplace: str):
+  qs = Product.objects.filter(seller=seller)
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    return qs.filter(marketplace=OZON)
+  return qs.filter(marketplace=WB)
+
+
 def _build_items(
   seller: Seller,
   order_counts: dict[str, dict[str, int]],
   daily_by_barcode: dict,
   *,
+  marketplace: str = WB,
   barcode: str | None = None,
 ) -> list[dict]:
-  products = Product.objects.filter(seller=seller)
+  products = _product_queryset(seller, marketplace)
   if barcode:
     products = products.filter(barcode=barcode)
 
@@ -102,43 +116,85 @@ def _build_items(
   return items
 
 
-def build_seller_cabinet_payload(seller: Seller) -> tuple[dict, list[dict], dict, dict]:
-  order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
+def _ozon_stage_counts(seller: Seller) -> dict[str, int]:
+  return {
+    "new": OzonPosting.objects.filter(
+      seller=seller,
+      crm_stage=OzonPosting.CrmStage.NEW,
+      ozon_status="awaiting_packaging",
+    ).count(),
+    "in_picking": OzonPosting.objects.filter(
+      seller=seller,
+      crm_stage=OzonPosting.CrmStage.IN_PICKING,
+    ).count(),
+    "in_delivery": OzonPosting.objects.filter(
+      seller=seller,
+      crm_stage=OzonPosting.CrmStage.IN_DELIVERY,
+    ).count(),
+  }
+
+
+def build_seller_cabinet_payload(seller: Seller, *, marketplace: str = WB) -> tuple[dict, list[dict], dict, dict, dict]:
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    order_summary, order_counts, daily_by_barcode = load_ozon_fbs_stats(seller)
+    products_qs = _product_queryset(seller, OZON)
+    stages = _ozon_stage_counts(seller)
+    weekly_loader = load_weekly_ozon_shipped_orders
+    meta = {
+      "enabled_warehouses": get_enabled_ozon_warehouses_meta(seller),
+      "source": "ozon_fbs_api",
+      "timezone": "Europe/Moscow",
+      "marketplace": OZON,
+    }
+  else:
+    order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
+    products_qs = _product_queryset(seller, WB)
+    stages = get_seller_wb_tab_counts(seller)
+    weekly_loader = load_weekly_shipped_orders
+    meta = {
+      "enabled_warehouses": get_enabled_warehouses_meta(seller),
+      "source": "wb_statistics_api",
+      "timezone": "Europe/Moscow",
+      "marketplace": WB,
+    }
+
   summary = {
     **order_summary,
-    "sku_count": Product.objects.filter(seller=seller, quantity__gt=0).count(),
-    "total_stock": sum(
-      Product.objects.filter(seller=seller).values_list("quantity", flat=True)
-    ),
+    "sku_count": products_qs.filter(quantity__gt=0).count(),
+    "total_stock": sum(products_qs.values_list("quantity", flat=True)),
   }
-  items = _build_items(seller, order_counts, daily_by_barcode)
-  wb_stages = get_seller_wb_tab_counts(seller)
+  items = _build_items(seller, order_counts, daily_by_barcode, marketplace=mp)
   try:
-    weekly_shipments = load_weekly_shipped_orders(seller)
+    weekly_shipments = weekly_loader(seller)
   except SellerAnalyticsError as exc:
-    logger.warning("weekly shipments unavailable for seller %s: %s", seller.id, exc)
+    logger.warning("weekly shipments unavailable for seller %s (%s): %s", seller.id, mp, exc)
     weekly_shipments = _empty_weekly_shipments()
-  return summary, items, wb_stages, weekly_shipments
+  return summary, items, stages, weekly_shipments, meta
 
 
-def build_seller_summary(seller: Seller) -> dict:
-  summary, _, _, _ = build_seller_cabinet_payload(seller)
+def build_seller_summary(seller: Seller, *, marketplace: str = WB) -> dict:
+  summary, _, _, _, _ = build_seller_cabinet_payload(seller, marketplace=marketplace)
   return summary
 
 
-def build_barcode_analytics(seller: Seller, barcode: str | None = None) -> list[dict]:
-  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller)
-  return _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
+def build_barcode_analytics(seller: Seller, barcode: str | None = None, *, marketplace: str = WB) -> list[dict]:
+  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller, marketplace=marketplace)
+  return _build_items(seller, order_counts, daily_by_barcode, marketplace=marketplace, barcode=barcode)
 
 
-def _load_cabinet_order_stats(seller: Seller) -> tuple[dict, dict, dict, dict]:
-  order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
+def _load_cabinet_order_stats(seller: Seller, *, marketplace: str = WB) -> tuple[dict, dict, dict, dict]:
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    order_summary, order_counts, daily_by_barcode = load_ozon_fbs_stats(seller)
+  else:
+    order_summary, order_counts, daily_by_barcode = load_wb_fbs_stats(seller)
   return order_summary, order_counts, daily_by_barcode, {}
 
 
-def build_barcode_detail(seller: Seller, barcode: str) -> dict | None:
-  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller)
-  items = _build_items(seller, order_counts, daily_by_barcode, barcode=barcode)
+def build_barcode_detail(seller: Seller, barcode: str, *, marketplace: str = WB) -> dict | None:
+  _, order_counts, daily_by_barcode, _ = _load_cabinet_order_stats(seller, marketplace=marketplace)
+  items = _build_items(seller, order_counts, daily_by_barcode, marketplace=marketplace, barcode=barcode)
   if not items:
     return None
   item = items[0]

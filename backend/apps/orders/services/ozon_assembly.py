@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.integrations.ozon_client import OzonApiError
 from apps.orders.models import OzonPosting
@@ -256,7 +257,8 @@ def ship_ozon_posting(seller, posting_id: int, *, user=None) -> dict:
 
   posting.ozon_status = "awaiting_deliver"
   posting.crm_stage = OzonPosting.CrmStage.IN_DELIVERY
-  update_fields = ["ozon_status", "crm_stage", "updated_at"]
+  posting.shipped_at = timezone.now()
+  update_fields = ["ozon_status", "crm_stage", "shipped_at", "updated_at"]
 
   stock = None
   if not posting.stock_deducted:

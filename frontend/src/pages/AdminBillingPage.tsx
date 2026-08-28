@@ -4,7 +4,10 @@ import { formatMoney, WeeklyShipmentsPanel } from '../components/WeeklyShipments
 import '../pages/SellerCabinetPage.css'
 import './AdminBillingPage.css'
 
+type BillingMarketplace = 'wb' | 'ozon'
+
 export function AdminBillingPage() {
+  const [marketplace, setMarketplace] = useState<BillingMarketplace>('wb')
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchAdminBilling>> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -14,17 +17,21 @@ export function AdminBillingPage() {
     setLoading(true)
     setError('')
     try {
-      setData(await fetchAdminBilling())
+      setData(await fetchAdminBilling(marketplace))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [marketplace])
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    setWeekIndex(0)
+  }, [marketplace, data?.combined])
 
   const sellerRows = useMemo(() => {
     if (!data) return []
@@ -50,25 +57,58 @@ export function AdminBillingPage() {
     }
   }, [sellerRows])
 
+  const isOzon = marketplace === 'ozon'
+
   return (
     <>
       <header className="topbar">
         <div>
           <h1>Статистика отгрузок</h1>
-          <p>Все селлеры · отгрузки на склад WB · суммы по тарифам</p>
+          <p>
+            Все селлеры · {isOzon ? 'отгрузки Ozon FBS' : 'отгрузки на склад WB'} · суммы по тарифам
+          </p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
-          {loading ? 'Обновление…' : 'Обновить'}
-        </button>
+        <div className="admin-billing-toolbar">
+          <div className="admin-billing-tabs" role="tablist" aria-label="Маркетплейс">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={marketplace === 'wb'}
+              className={`admin-billing-tab${marketplace === 'wb' ? ' admin-billing-tab--active' : ''}`}
+              onClick={() => setMarketplace('wb')}
+            >
+              Wildberries
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={marketplace === 'ozon'}
+              className={`admin-billing-tab${marketplace === 'ozon' ? ' admin-billing-tab--active' : ''}`}
+              onClick={() => setMarketplace('ozon')}
+            >
+              Ozon
+            </button>
+          </div>
+          <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+            {loading ? 'Обновление…' : 'Обновить'}
+          </button>
+        </div>
       </header>
 
       {error && <div className="dashboard-sync-msg dashboard-sync-msg--error">{error}</div>}
-      {loading && !data && <p>Загрузка… (запросы к WB могут занять 1–2 минуты)</p>}
+      {loading && !data && (
+        <p>{isOzon ? 'Загрузка…' : 'Загрузка… (запросы к WB могут занять 1–2 минуты)'}</p>
+      )}
 
       {data?.combined && (
         <WeeklyShipmentsPanel
           data={data.combined}
-          title="Все селлеры — итого"
+          title={isOzon ? 'Все селлеры Ozon — итого' : 'Все селлеры — итого'}
+          hint={
+            isOzon
+              ? 'Отправления, переданные к отгрузке через CRM (ship). Сумма — по тарифу обработки за единицу.'
+              : 'Считаются все заказы из поставок WB (done), в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.'
+          }
           weekIndex={weekIndex}
           onWeekIndexChange={setWeekIndex}
         />
@@ -79,7 +119,8 @@ export function AdminBillingPage() {
           <div className="admin-billing-sellers__head">
             <h2 className="section-title">По селлерам</h2>
             <p className="admin-billing-sellers__meta">
-              {weekTotals.sellers} селлеров · {weekTotals.orders} заказов · {formatMoney(weekTotals.amount)}
+              {weekTotals.sellers} селлеров · {weekTotals.orders} {isOzon ? 'единиц' : 'заказов'} ·{' '}
+              {formatMoney(weekTotals.amount)}
             </p>
           </div>
 
@@ -88,9 +129,9 @@ export function AdminBillingPage() {
               <thead>
                 <tr>
                   <th>Селлер</th>
-                  <th>Заказов</th>
+                  <th>{isOzon ? 'Единиц' : 'Заказов'}</th>
                   <th>Сумма</th>
-                  <th>Поставок</th>
+                  <th>{isOzon ? 'Отгрузок' : 'Поставок'}</th>
                   <th>Статус</th>
                 </tr>
               </thead>

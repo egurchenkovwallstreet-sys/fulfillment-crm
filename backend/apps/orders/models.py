@@ -200,6 +200,7 @@ class OzonPosting(models.Model):
   marking_codes = models.JSONField("Коды Честного знака", default=list, blank=True)
   marking_bound = models.BooleanField("Маркировка привязана", default=False)
   stock_deducted = models.BooleanField("Остаток списан", default=False)
+  shipped_at = models.DateTimeField("Передано к отгрузке", null=True, blank=True, db_index=True)
   delivery_method_id = models.BigIntegerField("ID метода доставки Ozon", null=True, blank=True, db_index=True)
   carriage_id = models.BigIntegerField("ID отгрузки Ozon", null=True, blank=True, db_index=True)
   products_json = models.JSONField("Товары отправления", default=list, blank=True)

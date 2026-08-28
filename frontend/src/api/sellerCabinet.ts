@@ -61,14 +61,17 @@ export type SellerBarcodeItem = {
 
 export type SellerCabinetResponse = {
   seller: { id: number; company_name: string }
+  marketplace?: string
   summary: SellerCabinetSummary
+  stages?: SellerWbStageCounts
   wb_stages: SellerWbStageCounts
   weekly_shipments: SellerWeeklyShipments
   items: SellerBarcodeItem[]
   meta?: {
-    enabled_warehouses: { wb_warehouse_id: number; name: string }[]
+    enabled_warehouses: Array<Record<string, string | number>>
     source: string
     timezone?: string
+    marketplace?: string
   }
 }
 

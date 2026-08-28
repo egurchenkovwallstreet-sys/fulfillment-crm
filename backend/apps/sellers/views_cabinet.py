@@ -24,6 +24,7 @@ from apps.sellers.serializers import (
   SellerWeeklyShipmentsSerializer,
   SellerWbStageCountsSerializer,
 )
+from apps.integrations.marketplace import parse_marketplace, seller_allows_marketplace
 from apps.integrations.wb_crypto import encrypt_token
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.sellers.services.invite import (
@@ -34,7 +35,7 @@ from apps.sellers.services.invite import (
 )
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
 from apps.sellers.services.seller_billing_stats import load_admin_billing_dashboard
-from apps.sellers.services.wb_order_stats import SellerAnalyticsError, get_enabled_warehouses_meta, load_wb_fbs_stats
+from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.utils import seller_has_user_account, seller_username
 
 User = get_user_model()
@@ -212,22 +213,26 @@ class SellerCabinetView(APIView):
     seller = request.user.seller
     if not seller:
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
+    marketplace = parse_marketplace(request)
+    if not seller_allows_marketplace(seller, marketplace):
+      return Response({"detail": "Маркетплейс недоступен для этого селлера"}, status=status.HTTP_400_BAD_REQUEST)
     try:
-      summary, items, wb_stages, weekly_shipments = build_seller_cabinet_payload(seller)
+      summary, items, stages, weekly_shipments, meta = build_seller_cabinet_payload(
+        seller,
+        marketplace=marketplace,
+      )
       summary_data = SellerCabinetSummarySerializer(summary).data
-      wb_stages_data = SellerWbStageCountsSerializer(wb_stages).data
+      stages_data = SellerWbStageCountsSerializer(stages).data
       weekly_data = SellerWeeklyShipmentsSerializer(weekly_shipments).data
       return Response({
         "seller": {"id": seller.id, "company_name": seller.company_name},
+        "marketplace": marketplace,
         "summary": summary_data,
-        "wb_stages": wb_stages_data,
+        "stages": stages_data,
+        "wb_stages": stages_data,
         "weekly_shipments": weekly_data,
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
-        "meta": {
-          "enabled_warehouses": get_enabled_warehouses_meta(seller),
-          "source": "wb_statistics_api",
-          "timezone": "Europe/Moscow",
-        },
+        "meta": meta,
       })
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -246,8 +251,11 @@ class SellerCabinetBarcodeView(APIView):
     seller = request.user.seller
     if not seller:
       return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
+    marketplace = parse_marketplace(request)
+    if not seller_allows_marketplace(seller, marketplace):
+      return Response({"detail": "Маркетплейс недоступен для этого селлера"}, status=status.HTTP_400_BAD_REQUEST)
     try:
-      detail = build_barcode_detail(seller, barcode)
+      detail = build_barcode_detail(seller, barcode, marketplace=marketplace)
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     if not detail:
@@ -260,7 +268,11 @@ class AdminBillingDashboardView(APIView):
 
   def get(self, request):
     try:
-      payload = load_admin_billing_dashboard(fulfillment=fulfillment_for_staff_user(request.user))
+      marketplace = parse_marketplace(request)
+      payload = load_admin_billing_dashboard(
+        fulfillment=fulfillment_for_staff_user(request.user),
+        marketplace=marketplace,
+      )
       return Response(AdminBillingDashboardSerializer(payload).data)
     except Exception as exc:
       logger.exception("admin billing dashboard failed")

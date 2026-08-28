@@ -6,6 +6,7 @@ import {
   type SellerCabinetResponse,
   type SellerWeeklyShipmentWeek,
 } from '../api/sellerCabinet'
+import { useMarketplace } from '../context/MarketplaceContext'
 import { StatCard } from '../components/StatCard'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import './SellerCabinetPage.css'
@@ -42,6 +43,9 @@ function StockBadge({ level }: { level: SellerBarcodeItem['stock_level'] }) {
 }
 
 export function SellerCabinetPage() {
+  const { marketplace } = useMarketplace()
+  const isOzon = marketplace === 'ozon'
+  const mpName = isOzon ? 'Ozon FBS' : 'WB FBS'
   const [data, setData] = useState<SellerCabinetResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -57,7 +61,7 @@ export function SellerCabinetPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [marketplace])
 
   useEffect(() => {
     load()
@@ -69,10 +73,11 @@ export function SellerCabinetPage() {
     () => Math.max(...(selectedShipmentWeek?.days.map((item) => item.orders) ?? [0]), 1),
     [selectedShipmentWeek],
   )
+  const stages = data?.stages ?? data?.wb_stages
 
   useEffect(() => {
     setShipmentWeekIndex(0)
-  }, [data?.weekly_shipments])
+  }, [data?.weekly_shipments, marketplace])
 
   const summary = data?.summary
 
@@ -81,7 +86,10 @@ export function SellerCabinetPage() {
       <header className="topbar">
         <div>
           <h1>Кабинет селлера</h1>
-          <p>{data?.seller.company_name ?? 'FBS-заказы · Statistics API WB · остатки на фулфилменте'}</p>
+          <p>
+            {data?.seller.company_name ?? `${mpName} · остатки на фулфилменте`}
+            {isOzon ? ' · Seller API Ozon' : ' · Statistics API WB'}
+          </p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
           {loading ? 'Обновление…' : 'Обновить'}
@@ -96,7 +104,7 @@ export function SellerCabinetPage() {
             <StatCard
               label="Заказы сегодня"
               value={summary.orders_day.current}
-              hint="FBS · календарный день (МСК)"
+              hint={`${mpName} · календарный день (МСК)`}
               tone="blue"
               trend={summary.orders_day}
               trendLabel="к вчера"
@@ -104,7 +112,7 @@ export function SellerCabinetPage() {
             <StatCard
               label="За неделю"
               value={summary.orders_week.current}
-              hint="FBS · календарная неделя пн–вс"
+              hint={`${mpName} · календарная неделя пн–вс`}
               tone="purple"
               trend={summary.orders_week}
               trendLabel="к прошлой неделе"
@@ -112,7 +120,7 @@ export function SellerCabinetPage() {
             <StatCard
               label="За месяц"
               value={summary.orders_month.current}
-              hint="FBS · с 1-го числа (МСК)"
+              hint={`${mpName} · с 1-го числа (МСК)`}
               tone="orange"
               trend={summary.orders_month}
               trendLabel="к прошлому месяцу"
@@ -120,11 +128,11 @@ export function SellerCabinetPage() {
             <StatCard label="Остаток (шт.)" value={summary.total_stock} hint={`${summary.sku_count} SKU на складе`} tone="green" />
           </section>
 
-          {data?.wb_stages && (
+          {stages && (
             <section className="stats-grid stats-grid--stages">
-              <StatCard label="Новые" value={data.wb_stages.new} hint="Как в сборке FBS" tone="red" />
-              <StatCard label="На сборке" value={data.wb_stages.in_picking} hint="Как в сборке FBS" tone="orange" />
-              <StatCard label="В доставке" value={data.wb_stages.in_delivery} hint="Как в сборке FBS" tone="blue" />
+              <StatCard label="Новые" value={stages.new} hint="Как в сборке FBS" tone="red" />
+              <StatCard label="На сборке" value={stages.in_picking} hint="Как в сборке FBS" tone="orange" />
+              <StatCard label="В доставке" value={stages.in_delivery} hint="Как в сборке FBS" tone="blue" />
             </section>
           )}
 
@@ -132,13 +140,16 @@ export function SellerCabinetPage() {
             <section className="panel seller-weekly-shipments">
               <div className="seller-weekly-shipments__head">
                 <div>
-                  <h2 className="section-title">Отгрузки на склад WB</h2>
+                  <h2 className="section-title">
+                    {isOzon ? 'Отгрузки Ozon FBS' : 'Отгрузки на склад WB'}
+                  </h2>
                   <p className="seller-weekly-shipments__hint">
                     Календарная неделя {formatWeekRange(selectedShipmentWeek)} (МСК).
-                    Считаются все заказы из поставок WB (done), в т.ч. отгруженные вне CRM.
-                    Сумма — по тарифу обработки за единицу.
+                    {isOzon
+                      ? ' Считаются отправления, переданные к отгрузке через CRM (ship). Сумма — по тарифу обработки за единицу.'
+                      : ' Считаются все заказы из поставок WB (done), в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.'}
                     {selectedShipmentWeek.supplies_count > 0 && (
-                      <> Поставок: {selectedShipmentWeek.supplies_count}.</>
+                      <> {isOzon ? 'Отгрузок' : 'Поставок'}: {selectedShipmentWeek.supplies_count}.</>
                     )}
                   </p>
                 </div>
@@ -148,7 +159,7 @@ export function SellerCabinetPage() {
                     {formatMoney(selectedShipmentWeek.total_amount)}
                   </strong>
                   <span className="seller-weekly-shipments__total-orders">
-                    {selectedShipmentWeek.total} заказов
+                    {selectedShipmentWeek.total} {isOzon ? 'единиц' : 'заказов'}
                   </span>
                 </div>
               </div>
@@ -209,7 +220,7 @@ export function SellerCabinetPage() {
       )}
 
       <section className="panel seller-cabinet-table-wrap">
-        <h2 className="section-title">Товары и остатки</h2>
+        <h2 className="section-title">Товары и остатки ({isOzon ? 'Ozon' : 'WB'})</h2>
         <p className="seller-cabinet-legend">
           <span className="stock-badge stock-badge--urgent">Срочно догрузить</span> — меньше 5 дней
           <span className="stock-badge stock-badge--restock">Догрузить</span> — 5–10 дней
@@ -220,7 +231,7 @@ export function SellerCabinetPage() {
         {loading && !data && <p>Загрузка…</p>}
 
         {data && data.items.length === 0 && (
-          <p className="seller-cabinet-empty">На складе пока нет ваших товаров.</p>
+          <p className="seller-cabinet-empty">На складе пока нет ваших товаров {isOzon ? 'Ozon' : 'WB'}.</p>
         )}
 
         {data && data.items.length > 0 && (
