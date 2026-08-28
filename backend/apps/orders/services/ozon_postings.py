@@ -48,11 +48,43 @@ def _match_product(seller: Seller, barcode: str, offer_id: str) -> Product | Non
   )
 
 
-def _first_product(raw: dict) -> dict:
-  products = raw.get("products") or []
-  if products and isinstance(products[0], dict):
-    return products[0]
-  return {}
+def _products_payload(raw: dict) -> list[dict]:
+  items = []
+  for product_raw in raw.get("products") or []:
+    if not isinstance(product_raw, dict):
+      continue
+    offer_id = str(product_raw.get("offer_id") or "").strip()
+    barcode = str(product_raw.get("barcode") or offer_id).strip()
+    sku = product_raw.get("sku") or product_raw.get("product_id")
+    sku_int = None
+    try:
+      sku_int = int(sku) if sku not in (None, "") else None
+    except (TypeError, ValueError):
+      sku_int = None
+    qty = product_raw.get("quantity") or 1
+    try:
+      qty_int = int(qty)
+    except (TypeError, ValueError):
+      qty_int = 1
+    mandatory = product_raw.get("mandatory_mark") or []
+    items.append({
+      "sku": sku_int,
+      "offer_id": offer_id,
+      "barcode": barcode,
+      "name": str(product_raw.get("name") or "")[:500],
+      "quantity": max(1, qty_int),
+      "requires_marking": bool(mandatory),
+    })
+  return items
+
+
+def _delivery_method_id(raw: dict) -> int | None:
+  method = raw.get("delivery_method") or {}
+  value = method.get("id") or method.get("delivery_method_id") or raw.get("delivery_method_id")
+  try:
+    return int(value) if value not in (None, "") else None
+  except (TypeError, ValueError):
+    return None
 
 
 def _warehouse_id(raw: dict) -> int | None:
@@ -68,22 +100,22 @@ def _upsert_posting(seller: Seller, raw: dict) -> str:
   posting_number = str(raw.get("posting_number") or "").strip()
   if not posting_number:
     return "skipped"
-  product_raw = _first_product(raw)
+  products = _products_payload(raw)
+  product_raw = products[0] if products else {}
   offer_id = str(product_raw.get("offer_id") or "").strip()
   barcode = str(product_raw.get("barcode") or offer_id).strip()
-  sku = product_raw.get("sku") or product_raw.get("product_id")
-  mandatory = product_raw.get("mandatory_mark") or []
+  sku_int = product_raw.get("sku")
   ozon_status = str(raw.get("status") or "").strip()
   warehouse_id = _warehouse_id(raw)
+  delivery_method_id = _delivery_method_id(raw)
   product = _match_product(seller, barcode, offer_id)
   if product and product.barcode:
     barcode = product.barcode
 
-  sku_int = None
-  try:
-    sku_int = int(sku) if sku not in (None, "") else None
-  except (TypeError, ValueError):
-    sku_int = None
+  qty = sum(int(item.get("quantity") or 1) for item in products) if products else 1
+  requires_marking = any(bool(item.get("requires_marking")) for item in products)
+  if product and product.requires_marking:
+    requires_marking = True
 
   crm_stage = OzonPosting.CrmStage.NEW
   if ozon_status == "awaiting_deliver":
@@ -101,12 +133,14 @@ def _upsert_posting(seller: Seller, raw: dict) -> str:
     "ozon_status": ozon_status,
     "crm_stage": crm_stage,
     "ozon_warehouse_id": warehouse_id,
+    "delivery_method_id": delivery_method_id,
     "barcode": barcode,
     "offer_id": offer_id,
     "sku": sku_int,
     "product_name": str(product_raw.get("name") or "")[:500],
-    "quantity": int(product_raw.get("quantity") or 1) if str(product_raw.get("quantity") or "1").isdigit() else 1,
-    "requires_marking": bool(mandatory) or bool(product.requires_marking if product else False),
+    "quantity": qty or 1,
+    "requires_marking": requires_marking,
+    "products_json": products,
     "product": product,
     "shipment_date": _parse_dt(raw.get("shipment_date") or raw.get("delivering_date")),
     "in_process_at": _parse_dt(raw.get("in_process_at")),
@@ -206,6 +240,11 @@ def serialize_ozon_posting(posting: OzonPosting) -> dict:
     OzonPosting.CrmStage.IN_PICKING: "На сборке",
     OzonPosting.CrmStage.IN_DELIVERY: "В доставке",
   }.get(posting.crm_stage, posting.crm_stage)
+  marks = list(posting.marking_codes or [])
+  if posting.marking_code and posting.marking_code not in marks:
+    marks = [posting.marking_code, *marks]
+  needed = posting.quantity or 1
+  bound_count = len(marks) if posting.requires_marking else needed
   return {
     "id": posting.id,
     "wb_order_id": posting.id,
@@ -223,13 +262,18 @@ def serialize_ozon_posting(posting: OzonPosting) -> dict:
     "wb_supplier_status": posting.ozon_status,
     "wb_status": posting.ozon_status,
     "wb_stage_display": posting.ozon_status,
-    "has_sticker": False,
+    "has_sticker": posting.crm_stage == OzonPosting.CrmStage.IN_DELIVERY,
     "sticker_part_a": "",
     "sticker_part_b": "",
     "marking_bound": posting.marking_bound,
+    "marking_bound_count": bound_count if posting.requires_marking else 0,
+    "marking_needed_count": needed if posting.requires_marking else 0,
     "requires_marking": posting.requires_marking,
     "can_send_to_assembly": posting.crm_stage == OzonPosting.CrmStage.NEW,
     "can_send_to_delivery": posting.crm_stage == OzonPosting.CrmStage.IN_PICKING,
+    "can_print_label": posting.crm_stage == OzonPosting.CrmStage.IN_DELIVERY,
+    "delivery_method_id": posting.delivery_method_id,
+    "carriage_id": posting.carriage_id,
     "warehouse_quantity": posting.product.quantity if posting.product_id else None,
     "created_at": posting.created_at.isoformat() if posting.created_at else "",
   }

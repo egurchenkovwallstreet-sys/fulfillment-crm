@@ -336,3 +336,18 @@
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;
 }
+
+.whub-ozon-push {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin: 0.75rem 0 1rem;
+}
+
+.whub-ozon-push label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 220px;
+}

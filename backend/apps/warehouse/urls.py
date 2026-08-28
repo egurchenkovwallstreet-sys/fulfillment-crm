@@ -23,6 +23,7 @@ from .views import (
   StockOverviewView,
   StockTransferView,
   StockDistributeView,
+  OzonStocksPushView,
 )
 from .views_pricing import PriceGroupDetailView, PriceGroupListView, SellerPricingView
 from .views_xl_intake import (
@@ -97,6 +98,11 @@ urlpatterns = [
     "sellers/<int:seller_id>/stock-distribute/",
     StockDistributeView.as_view(),
     name="stock_distribute",
+  ),
+  path(
+    "sellers/<int:seller_id>/ozon-stocks/",
+    OzonStocksPushView.as_view(),
+    name="ozon_stocks_push",
   ),
   path("xl-intake/sessions/", XlIntakeSessionListCreateView.as_view(), name="xl_intake_sessions"),
   path(

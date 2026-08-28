@@ -28,7 +28,14 @@ from .views import (
   SupplyDetailView,
   SupplyListView,
 )
-from .views_ozon import OzonAssemblyScanView, OzonAssemblyShipView, OzonAssemblySyncView
+from .views_ozon import (
+  OzonAssemblyActView,
+  OzonAssemblyBindMarkingView,
+  OzonAssemblyLabelView,
+  OzonAssemblyScanView,
+  OzonAssemblyShipView,
+  OzonAssemblySyncView,
+)
 
 urlpatterns = [
     path("", OrderListView.as_view(), name="order-list"),
@@ -114,9 +121,24 @@ urlpatterns = [
       name="ozon-assembly-scan",
     ),
     path(
+      "assembly/sellers/<int:seller_id>/ozon-bind-marking/",
+      OzonAssemblyBindMarkingView.as_view(),
+      name="ozon-assembly-bind-marking",
+    ),
+    path(
       "assembly/sellers/<int:seller_id>/ozon-ship/",
       OzonAssemblyShipView.as_view(),
       name="ozon-assembly-ship",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/ozon-label/",
+      OzonAssemblyLabelView.as_view(),
+      name="ozon-assembly-label",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/ozon-act/",
+      OzonAssemblyActView.as_view(),
+      name="ozon-assembly-act",
     ),
     path(
       "assembly/sellers/<int:seller_id>/ozon-sync/",

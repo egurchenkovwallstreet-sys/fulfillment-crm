@@ -1,6 +1,7 @@
 """Клиент Ozon Seller API (FBS). Заголовки: Client-Id + Api-Key."""
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 
@@ -14,9 +15,10 @@ REQUEST_TIMEOUT = 30.0
 
 
 class OzonApiError(Exception):
-  def __init__(self, message: str, status_code: int | None = None):
+  def __init__(self, message: str, status_code: int | None = None, code: str = ""):
     super().__init__(message)
     self.status_code = status_code
+    self.code = code
 
 
 class OzonClient:
@@ -298,28 +300,142 @@ class OzonClient:
     })
     return data if isinstance(data, dict) else {}
 
-  def package_label(self, posting_numbers: list[str]) -> bytes:
-    """PDF этикетки отправления. После ship нужно подождать ~1 мин."""
-    url = f"{self._base_url}/v2/posting/fbs/package-label"
+  def _binary_post(self, path: str, payload: dict, *, timeout: float = 60.0) -> bytes:
+    url = f"{self._base_url}{path}"
     try:
-      with httpx.Client(timeout=60.0) as client:
-        response = client.post(
-          url,
-          headers=self._headers(),
-          json={"posting_number": posting_numbers},
-        )
+      with httpx.Client(timeout=timeout) as client:
+        response = client.post(url, headers=self._headers(), json=payload)
     except httpx.RequestError as exc:
       raise OzonApiError(f"Ошибка сети Ozon API: {exc}") from exc
     if response.status_code >= 400:
+      text = response.text[:240]
+      lowered = text.lower()
+      code = ""
+      if "aren't ready" in lowered or "not ready" in lowered or "не готов" in lowered:
+        code = "not_ready"
       raise OzonApiError(
-        f"Ozon API ошибка {response.status_code}: {response.text[:240]}",
+        f"Ozon API ошибка {response.status_code}: {text}",
         status_code=response.status_code,
+        code=code,
       )
-    content_type = response.headers.get("content-type", "")
-    if "pdf" in content_type or response.content[:4] == b"%PDF":
-      return response.content
+    content_type = (response.headers.get("content-type") or "").lower()
+    body = response.content or b""
+    if "pdf" in content_type or body[:4] == b"%PDF":
+      return body
+    if "image/" in content_type or body[:8] in (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff"):
+      return body
     try:
       data = response.json()
     except ValueError as exc:
-      raise OzonApiError("Ozon не вернул PDF этикетки") from exc
-    raise OzonApiError(str((data or {}).get("message") or data)[:240])
+      if body:
+        return body
+      raise OzonApiError("Ozon не вернул файл") from exc
+    if not isinstance(data, dict):
+      raise OzonApiError("Ozon вернул неожиданный ответ")
+    message = str(data.get("message") or data.get("error") or "")
+    lowered = message.lower()
+    if "aren't ready" in lowered or "not ready" in lowered or "не готов" in lowered:
+      raise OzonApiError(
+        "Документ ещё готовится. Подождите около минуты и нажмите ещё раз.",
+        status_code=response.status_code,
+        code="not_ready",
+      )
+    for key in ("file_content", "content", "barcode"):
+      raw = data.get(key)
+      if isinstance(raw, str) and raw.strip():
+        try:
+          return base64.b64decode(raw)
+        except ValueError:
+          continue
+    result = data.get("result")
+    if isinstance(result, dict):
+      for key in ("file_content", "content", "barcode"):
+        raw = result.get(key)
+        if isinstance(raw, str) and raw.strip():
+          try:
+            return base64.b64decode(raw)
+          except ValueError:
+            continue
+    raise OzonApiError(message[:240] or str(data)[:240])
+
+  def package_label(self, posting_numbers: list[str]) -> bytes:
+    """PDF этикетки отправления. После ship нужно подождать ~1 мин."""
+    numbers = [str(item).strip() for item in posting_numbers if str(item).strip()]
+    if not numbers:
+      raise OzonApiError("Не указаны номера отправлений")
+    if len(numbers) > 20:
+      raise OzonApiError("Ozon печатает не больше 20 этикеток за раз")
+    try:
+      return self._binary_post("/v2/posting/fbs/package-label", {"posting_number": numbers})
+    except OzonApiError as exc:
+      text = str(exc).lower()
+      if "aren't ready" in text or "not ready" in text or exc.code == "not_ready":
+        raise OzonApiError(
+          "Этикетка ещё готовится. Подождите около минуты после «В доставку» и нажмите ещё раз.",
+          status_code=exc.status_code,
+          code="not_ready",
+        ) from exc
+      raise
+
+  def carriage_create(self, delivery_method_id: int, *, comment: str = "") -> dict:
+    """Создать отгрузку FBS. Пустое тело {} нельзя — Ozon создаст чужую отгрузку."""
+    if not delivery_method_id:
+      raise OzonApiError("Не указан метод доставки Ozon")
+    payload: dict = {"delivery_method_id": int(delivery_method_id)}
+    if comment:
+      payload["comment"] = comment[:500]
+    data = self._post("/v1/carriage/create", payload)
+    return data if isinstance(data, dict) else {}
+
+  def carriage_approve(self, carriage_id: int) -> dict:
+    data = self._post("/v1/carriage/approve", {"carriage_id": int(carriage_id)})
+    return data if isinstance(data, dict) else {}
+
+  def carriage_delivery_list(self, status: str = "new") -> list[dict]:
+    data = self._post("/v1/carriage/delivery/list", {"status": status, "limit": 50})
+    if not isinstance(data, dict):
+      return []
+    result = data.get("result")
+    if isinstance(result, list):
+      return [item for item in result if isinstance(item, dict)]
+    if isinstance(result, dict):
+      items = result.get("result") or result.get("items") or result.get("deliveries") or []
+      return [item for item in items if isinstance(item, dict)]
+    return []
+
+  def act_get_barcode(self, carriage_id: int) -> bytes:
+    return self._binary_post("/v2/posting/fbs/act/get-barcode", {"id": int(carriage_id)})
+
+  def act_get_pdf(self, carriage_id: int) -> bytes:
+    last_error: OzonApiError | None = None
+    for path, payload in (
+      ("/v2/posting/fbs/digital/act/get-pdf", {"id": int(carriage_id), "doc_type": "act_of_acceptance"}),
+      ("/v2/posting/fbs/act/get-pdf", {"id": int(carriage_id)}),
+    ):
+      try:
+        return self._binary_post(path, payload)
+      except OzonApiError as exc:
+        last_error = exc
+        logger.warning("Ozon act PDF %s failed: %s", path, exc)
+        continue
+    if last_error:
+      raise last_error
+    raise OzonApiError("Ozon не вернул PDF акта")
+
+  def update_stocks(self, stocks: list[dict]) -> list[dict]:
+    """Остатки FBS. POST /v2/products/stocks, пачки до 100."""
+    collected: list[dict] = []
+    chunk_size = 100
+    for start in range(0, len(stocks), chunk_size):
+      chunk = stocks[start:start + chunk_size]
+      data = self._post("/v2/products/stocks", {"stocks": chunk})
+      if not isinstance(data, dict):
+        continue
+      result = data.get("result")
+      items = []
+      if isinstance(result, list):
+        items = result
+      elif isinstance(result, dict):
+        items = result.get("stocks") or result.get("items") or []
+      collected.extend(item for item in items if isinstance(item, dict))
+    return collected

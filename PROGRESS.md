@@ -12,9 +12,9 @@
 ---
 
 ## Текущий статус проекта
-**Дата последнего обновления:** 28.08.2026  
+**Дата последнего обновления:** 29.08.2026  
 **Общий статус:** 📦 Операционный MVP + Ozon FBS + **кабинет владельца** (`/owner`)  
-**Стадия:** **Ozon FBS в работе.** Сделаны шаги 1–3 и часть 4. Дальше: этикетка PDF, ЧЗ, акт, отправка остатков на Ozon. План: `тз и прогрес/2026-08-27-ozon-fbs-план.md`.
+**Стадия:** **Ozon FBS в работе.** Шаги 1–4 и Celery/остатки: этикетка PDF, ЧЗ, акт/ШК, синк каждую минуту, кнопка остатков на Ozon. Дальше: кабинет селлера и `/billing` по Ozon. План: `тз и прогрес/2026-08-27-ozon-fbs-план.md`.
 
 **Выбранный стек:**
 - Backend: Python 3.12 + Django 5 + Django REST Framework
@@ -78,7 +78,7 @@
 | §3 Роли (admin / manager / seller) | 🟡 | JWT + RBAC; кабинет селлера ✅; задолженность селлеру — нет |
 | §4 Управление селлерами | 🟡 | Seller, склады WB, инвайты; **тарифы в UI** ✅; **токен WB в кабинете владельца** ✅ |
 | §5 Модуль приёмки | ✅ | API + UI, needKiz, этикетки, перенос, sync названий; **хаб `/warehouse`**: каталог WB и Ozon, онбординг ячеек, перенос остатков между складами FBS |
-| §5.4 Приёмка в XL | ✅ | `/intake-xl`: скан единиц без API, Excel, ячейки после токена WB (остатки на WB не пушим) |
+| §5.4 Приёмка в XL | ✅ | `/intake-xl`: автосохранение скана, контрольная точка «Сохранить», Excel, ячейки после WB, **возобновление скана после applied**, **«Завершить приёмку»** (`6af6be3`) |
 | §6 Заказы FBS, синхронизация | ✅ | Sync new + архив 30 дн. + статусы, Celery 15 мин |
 | §6.3 Счётчики как в ЛК WB | ✅ | **31/0/147 совпадает**; live API + кэш Seller; delivery-v11 |
 | §6 Лист подбора | ✅ | Группировка по ячейкам, UI, печать |
@@ -140,6 +140,7 @@
 | 25.08.2026 | **Списание остатков при доставке через ЛК WB** | ✅ | `5555e25`, `supply_sync.py`, `deduct_pending_delivery_stock` |
 | 27.08.2026 | **Приёмка в XL** | ✅ | Новый клиент без API: скан единиц, Excel, ячейки после токена WB |
 | 28.08.2026 | **Multi-tenant Fulfillment** | ✅ | Изоляция селлеров/менеджеров/тарифов; регистрация `/signup` |
+| 29.08.2026 | **Приёмка в XL: возобновление скана** | ✅ | Скан после save/applied, дельта WB, статус `completed`, миграция `0007` (`6af6be3`) |
 
 ---
 
@@ -158,7 +159,7 @@
   - `services/onboarding.py` / `catalog_fetch.py` — мастер склада: каталог WB → ячейки
   - `services/wb_stocks.py` / `stock_transfer.py` — остатки FBS и перенос между складами
   - `services/stock_deduction.py` — списание при отгрузке
-  - `services/xl_intake.py` — приёмка в XL (скан, Excel, ячейки после API)
+  - `services/xl_intake.py` — приёмка в XL (скан с автосохранением, Excel, ячейки после API, дельта WB, complete)
 - **integrations** — AuditLog, `wb_client.py`, **`wb_statistics_client.py`**, Celery
 - **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
   - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
@@ -184,15 +185,23 @@
 | POST | `/api/orders/assembly/sellers/<id>/scan-print/` | Скан → печать / ЧЗ |
 | GET | `/api/orders/assembly/sellers/<id>/marking-status/` | Панели «Ошибки ЧЗ» / «Без ЧЗ» |
 | POST | `/api/orders/assembly/sellers/<id>/verify-marking/` | Фоновый опрос статуса ЧЗ в WB |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-scan/` | Скан баркода Ozon → «На сборке» |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-bind-marking/` | Привязка Честного знака Ozon |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-ship/` | `/v4/posting/fbs/ship` + списание CRM |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-label/` | PDF-этикетка (до 20 отправлений) |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-act/` | Акт/ШК сдачи (`carriage` create+approve) |
+| POST | `/api/orders/assembly/sellers/<id>/ozon-sync/` | Синк отправлений Ozon |
 | GET/POST | `/api/warehouse/inventory/*` | Инвентаризация склада |
 | GET/POST | `/api/warehouse/xl-intake/sessions/` | Список / новая XL-приёмка (ИП без токена) |
-| POST | `/api/warehouse/xl-intake/sessions/<id>/scan/` | Скан одной единицы |
-| POST | `/api/warehouse/xl-intake/sessions/<id>/save/` | Сохранить список |
+| POST | `/api/warehouse/xl-intake/sessions/<id>/scan/` | Скан одной единицы (если не `completed`) |
+| POST | `/api/warehouse/xl-intake/sessions/<id>/save/` | Контрольная точка (не блокирует скан) |
 | GET | `/api/warehouse/xl-intake/sessions/<id>/excel/` | Скачать Excel (баркод, количество) |
-| POST | `/api/warehouse/xl-intake/sessions/<id>/connect-wb/` | Токен WB → карточки, ячейки, окно «не найдено» |
+| POST | `/api/warehouse/xl-intake/sessions/<id>/connect-wb/` | Токен WB → карточки, ячейки; повтор — только дельта |
+| POST | `/api/warehouse/xl-intake/sessions/<id>/complete/` | Завершить приёмку (`completed`) |
 | GET/POST | `/api/warehouse/onboarding/<id>/*` | Мастер склада: превью каталога WB, подтверждение |
 | GET | `/api/warehouse/sellers/<id>/stock-overview/` | Остатки по складам FBS |
 | POST | `/api/warehouse/sellers/<id>/stock-transfer/` | Перенос остатка между складами WB |
+| POST | `/api/warehouse/sellers/<id>/ozon-stocks/` | Остатки CRM → выбранный склад Ozon FBS |
 | GET | `/api/warehouse/sellers/<id>/products/` | Товары селлера по ячейкам |
 | POST | `/api/warehouse/sellers/<id>/products/refresh-from-wb/` | Обновить названия/маркировку из WB |
 | POST | `/api/warehouse/products/<id>/move-cell/` | Перенос товара в другую ячейку |
@@ -211,7 +220,7 @@
 
 ### Frontend (React)
 - `/` — дашборд: **Новые / На сборке / В доставке** — совпадает с ЛК WB
-- `/assembly/:sellerId` — вкладки стадий, склады WB, панели ЧЗ, скан баркод→ЧЗ→стикер
+- `/assembly/:sellerId` — вкладки стадий; **Ozon:** скан, ЧЗ, ship, PDF-этикетка, акт/ШК
 - `/inventory` — **инвентаризация:** скан баркодов, сверка CRM/WB, печать этикетки ячейки
 - `/owner` — **кабинет владельца:** обзор, селлеры, сотрудники, ценовые группы, статистика
 - `/owner/sellers` — селлеры, инвайты, токены WB/Ozon, тарифы
@@ -219,9 +228,9 @@
 - `/owner/pricing` — ценовые группы
 - `/owner/billing` — статистика отгрузок
 - `/cabinet` — **кабинет селлера:** заказы д/н/м, стадии WB, отгрузки (4 нед., ₽), остатки
-- `/warehouse` — **хаб склада:** онбординг каталога WB, остатки, перенос между складами
+- `/warehouse` — **хаб склада:** онбординг каталога WB/Ozon, остатки на Ozon, перенос между складами WB
 - `/intake` — приёмка
-- `/intake-xl` — **приёмка в XL** (новый клиент без API, скан единиц, Excel)
+- `/intake-xl` — **приёмка в XL** (скан с автосохранением, Excel, WB, завершение; см. `тз и прогрес/2026-08-27-приемка-xl.md`)
 - `/cells` — ячейки: список товаров, печать этикеток, перенос, «Обновить из WB»
 - `/print-agent` — скачивание и инструкция агента Xprinter
 - `/login` — вход
@@ -245,8 +254,9 @@
 ## Ближайшие задачи (очередь по ТЗ)
 
 ### Приоритет 1 — операционка (осталось)
-1. [x] **Ozon FBS шаг 1–3 + сборка частично** — вкладки, ключи, склады, онбординг каталога Ozon → ячейки, синк отправлений, скан/ship. Дальше: этикетка PDF, ЧЗ, акт, остатки на Ozon. План: `тз и прогрес/2026-08-27-ozon-fbs-план.md`.
-2. [x] **§4 UI токена WB** — в кабинете владельца → Селлеры → «Токен WB»
+1. [x] **Ozon FBS шаг 1–4 + Celery + остатки** — вкладки, ключи, склады, онбординг, синк, скан/ЧЗ/ship, PDF-этикетка, акт/ШК, автосинк 1 мин, кнопка остатков на Ozon. План: `тз и прогрес/2026-08-27-ozon-fbs-план.md`.
+2. [ ] **Ozon FBS шаг 5** — кабинет селлера и `/billing` по отгрузкам Ozon
+3. [x] **§4 UI токена WB** — в кабинете владельца → Селлеры → «Токен WB»
 3. [ ] Отдельная кнопка **отправки остатков XL на склад WB** (после полноценного клиента)
 
 ### Приоритет 2 — финансы и отчёты
@@ -284,8 +294,8 @@
 - [x] **§7 Агент печати Xprinter** (`.exe` + `install-agent.bat` + `/print-agent`)
 - [x] **Лист подбора:** отдельная кнопка, PDF A4, артикул WB + размер, одна поставка/склад
 - [x] **Счётчик «В доставке» = ЛК WB** (delivery-v14, reconcile stale waiting)
-- [x] **Приёмка в XL** (`/intake-xl`): скан без API, Excel, ячейки после токена WB
-- [x] **Ozon FBS шаг 1–3 + сборка частично** — вкладки, ключи, склады, онбординг каталога Ozon → ячейки, синк отправлений, скан в сборку, ship в доставку. Дальше: этикетка PDF, ЧЗ, акт, остатки на Ozon.
+- [x] **Приёмка в XL** (`/intake-xl`): автосохранение скана, контрольная точка, Excel, ячейки после WB, возобновление после applied, «Завершить приёмку» (`6af6be3`)
+- [x] **Ozon FBS шаг 1–4 + Celery + остатки** — сборка: скан, ЧЗ, ship, PDF-этикетка, акт/ШК; кнопка остатков на Ozon; автосинк каждую минуту. Дальше: кабинет и `/billing` Ozon.
 - [x] **Сборка WB «На сборке»:** лист подбора скрыт, активное окно баркода → ЧЗ → печать стикера (окно печати в жесте сканера, iframe-запас)
 
 ---
@@ -330,6 +340,8 @@
 | **27.08.2026** | **Ozon FBS шаг 3: онбординг каталога Ozon → ячейки** | Ассистент |
 | **27.08.2026** | **Этикетка ячейки: одна 75×120, две зоны (номер + маркетплейс/ИП/баркод)** | Ассистент |
 | **28.08.2026** | **Сборка: «нет в поставке» (красное окно) + сверка WB авто/скан + печать этикеток** | Ассистент |
+| **29.08.2026** | **Приёмка в XL: возобновление скана, дельта WB, завершение сессии** | Ассистент |
+| **29.08.2026** | **Ozon FBS: PDF-этикетка, ЧЗ, акт/ШК, Celery-синк, остатки на Ozon** | Ассистент |
 
 ---
 
@@ -366,6 +378,7 @@
 - `2cdaeec` — Bulk assembly: batch WB supply orders in chunks of 100
 - `8451972` — Marking retry after WB error, sticker number on errors, Chrome print
 - `440585b` — Marking queue panels, background verify 3s, fast barcode→ЧЗ
+- `6af6be3` — XL intake: resume scan after save/WB apply, delta stock, complete session (`0007_xl_intake_resume`)
 
 ---
 

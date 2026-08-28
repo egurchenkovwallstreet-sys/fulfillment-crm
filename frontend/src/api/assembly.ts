@@ -40,11 +40,16 @@ export interface AssemblyOrder {
   sticker_part_a: string
   sticker_part_b: string
   marking_bound: boolean
+  marking_bound_count?: number
+  marking_needed_count?: number
   marking_verify_status?: string
   marking_verify_error?: string
   requires_marking: boolean
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
+  can_print_label?: boolean
+  delivery_method_id?: number | null
+  carriage_id?: number | null
   warehouse_quantity: number | null
   created_at: string
 }
@@ -317,11 +322,25 @@ export function scanOzonBarcode(sellerId: number, barcode: string) {
   return apiFetch<{
     success: boolean
     message: string
+    action?: 'scanned' | 'await_marking'
     posting: AssemblyOrder
     counts: Record<string, number>
   }>(`/api/orders/assembly/sellers/${sellerId}/ozon-scan/`, {
     method: 'POST',
     body: JSON.stringify({ barcode }),
+  })
+}
+
+export function bindOzonMarking(sellerId: number, postingId: number, markingCode: string) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    action?: 'await_marking' | 'bound'
+    posting: AssemblyOrder
+    counts: Record<string, number>
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-bind-marking/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_id: postingId, marking_code: markingCode }),
   })
 }
 
@@ -335,6 +354,57 @@ export function shipOzonPosting(sellerId: number, postingId: number) {
   }>(`/api/orders/assembly/sellers/${sellerId}/ozon-ship/`, {
     method: 'POST',
     body: JSON.stringify({ posting_id: postingId }),
+  })
+}
+
+export function fetchOzonLabel(sellerId: number, postingId: number) {
+  return apiFetch<{
+    success: boolean
+    filename: string
+    pdf_base64: string
+    posting?: AssemblyOrder
+    count?: number
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-label/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_id: postingId }),
+  })
+}
+
+export function fetchOzonLabelsBulk(sellerId: number, postingIds: number[]) {
+  return apiFetch<{
+    success: boolean
+    filename: string
+    pdf_base64: string
+    count?: number
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-label/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_ids: postingIds }),
+  })
+}
+
+export type OzonActResult = {
+  success: boolean
+  message?: string
+  carriage_id?: number
+  barcode_file?: string
+  pdf_base64?: string
+  filename?: string
+  warning?: string
+  acts?: Array<{
+    delivery_method_id: number
+    carriage_id: number
+    posting_count: number
+    barcode_file: string
+    pdf_base64: string
+    filename: string
+    warning: string
+  }>
+}
+
+export function formOzonAct(sellerId: number, carriageId?: number) {
+  return apiFetch<OzonActResult>(`/api/orders/assembly/sellers/${sellerId}/ozon-act/`, {
+    method: 'POST',
+    body: JSON.stringify(carriageId ? { carriage_id: carriageId } : {}),
   })
 }
 

@@ -157,3 +157,19 @@ export function printFbsSticker(
 export function printSupplySticker(base64: string, autoPrint = true): boolean {
   return printFbsSticker(base64, autoPrint)
 }
+
+export function openPdfBase64(payload: string, filename: string) {
+  const raw = payload.includes(',') ? payload.slice(payload.indexOf(',') + 1) : payload
+  const binary = atob(raw.replace(/\s/g, ''))
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const win = window.open(url, '_blank')
+  if (!win) {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+  }
+}

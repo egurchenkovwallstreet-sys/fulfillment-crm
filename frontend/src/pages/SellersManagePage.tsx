@@ -394,7 +394,9 @@ export function SellersManagePage() {
         <section className="panel sellers-create-panel">
           <h2 className="section-title">Ключи Ozon Seller API</h2>
           <p className="sellers-ozon-hint">
-            ЛК seller.ozon.ru → Настройки → API-ключи: скопируйте Client-Id и Api-Key.
+            1) Войдите в seller.ozon.ru. 2) Настройки → API-ключи. 3) Создайте ключ с доступом к Seller API
+            (FBS: заказы, склады, товары). 4) Скопируйте <strong>Client-Id</strong> и <strong>Api-Key</strong> —
+            это два разных поля, не один токен как у WB.
           </p>
           <form
             className="sellers-create-form"

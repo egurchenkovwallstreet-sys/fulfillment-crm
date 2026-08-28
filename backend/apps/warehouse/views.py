@@ -690,3 +690,23 @@ class StockFileApplyView(APIView):
     except StockFileImportError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({"success": result.get("ok", False), **result}, status=status.HTTP_201_CREATED)
+
+
+class OzonStocksPushView(APIView):
+  """Отправить остатки CRM на выбранный склад Ozon FBS."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = _require_seller(request, seller_id)
+    warehouse_id = request.data.get("warehouse_id")
+    try:
+      warehouse_id = int(warehouse_id)
+    except (TypeError, ValueError):
+      return Response({"detail": "Выберите склад Ozon"}, status=status.HTTP_400_BAD_REQUEST)
+    from .services.ozon_stocks import OzonStockError, push_ozon_crm_stocks
+
+    try:
+      result = push_ozon_crm_stocks(seller, warehouse_id, user=request.user)
+    except OzonStockError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)

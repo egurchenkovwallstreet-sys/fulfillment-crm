@@ -6,9 +6,17 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsManager
 from apps.accounts.tenant import get_seller_for_user
 from apps.orders.models import OzonPosting
-from apps.orders.services.ozon_assembly import OzonAssemblyError, scan_ozon_barcode, ship_ozon_posting
+from apps.orders.services.ozon_act import OzonActError, fetch_ozon_act_docs, form_ozon_acts
+from apps.orders.services.ozon_assembly import (
+  OzonAssemblyError,
+  bind_ozon_marking,
+  fetch_ozon_label,
+  fetch_ozon_labels_bulk,
+  scan_ozon_barcode,
+  ship_ozon_posting,
+)
 from apps.orders.services.ozon_postings import serialize_ozon_posting, sync_ozon_postings
-from apps.sellers.models import Seller, SellerOzonWarehouse
+from apps.sellers.models import SellerOzonWarehouse
 from apps.sellers.serializers import SellerOzonWarehouseSerializer
 from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 
@@ -22,6 +30,14 @@ def _ozon_stage_qs(seller, stage: str):
   if stage in ("complete", "in_delivery"):
     return qs.filter(crm_stage=OzonPosting.CrmStage.IN_DELIVERY)
   return qs
+
+
+def _error_response(exc: Exception):
+  payload = {"detail": str(exc)}
+  code = getattr(exc, "code", "") or ""
+  if code:
+    payload["code"] = code
+  return Response(payload, status=status.HTTP_400_BAD_REQUEST)
 
 
 class OzonAssemblySellerDetailView:
@@ -66,7 +82,23 @@ class OzonAssemblyScanView(APIView):
     try:
       result = scan_ozon_barcode(seller, barcode)
     except OzonAssemblyError as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+      return _error_response(exc)
+    return Response(result)
+
+
+class OzonAssemblyBindMarkingView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    posting_id = request.data.get("posting_id") or request.data.get("order_id")
+    marking_code = str(request.data.get("marking_code") or request.data.get("barcode") or "")
+    try:
+      result = bind_ozon_marking(seller, int(posting_id), marking_code)
+    except (OzonAssemblyError, TypeError, ValueError) as exc:
+      return _error_response(exc)
     return Response(result)
 
 
@@ -81,7 +113,45 @@ class OzonAssemblyShipView(APIView):
     try:
       result = ship_ozon_posting(seller, int(posting_id), user=request.user)
     except (OzonAssemblyError, TypeError, ValueError) as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+      return _error_response(exc)
+    return Response(result)
+
+
+class OzonAssemblyLabelView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    posting_ids = request.data.get("posting_ids") or []
+    posting_id = request.data.get("posting_id") or request.data.get("order_id")
+    try:
+      if posting_ids:
+        ids = [int(item) for item in posting_ids]
+        result = fetch_ozon_labels_bulk(seller, ids)
+      else:
+        result = fetch_ozon_label(seller, int(posting_id))
+    except (OzonAssemblyError, TypeError, ValueError) as exc:
+      return _error_response(exc)
+    return Response(result)
+
+
+class OzonAssemblyActView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    carriage_id = request.data.get("carriage_id")
+    try:
+      if carriage_id:
+        result = fetch_ozon_act_docs(seller, int(carriage_id))
+      else:
+        result = form_ozon_acts(seller)
+    except (OzonActError, TypeError, ValueError) as exc:
+      return _error_response(exc)
     return Response(result)
 
 

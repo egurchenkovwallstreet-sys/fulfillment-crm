@@ -10,6 +10,7 @@ import {
   previewStockImport,
   transferStock,
   distributeStockEvenly,
+  pushOzonStocks,
   type OnboardingPreview,
   type StockImportPreview,
   type StockImportResult,
@@ -92,6 +93,7 @@ export function WarehouseHubPage() {
   }, [distributableProducts, selectedDistributeIds])
 
   const [importWarehouseId, setImportWarehouseId] = useState<number | ''>('')
+  const [pushWarehouseId, setPushWarehouseId] = useState<number | ''>('')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [stockImportPreview, setStockImportPreview] = useState<StockImportPreview | null>(null)
   const [stockImportResult, setStockImportResult] = useState<StockImportResult | null>(null)
@@ -119,7 +121,10 @@ export function WarehouseHubPage() {
           : mapWbWarehouses(whs as SellerWarehouse[])
         setSellerWarehouses(mapped)
         setSelectedWarehouseIds(mapped.filter((w) => w.is_enabled).map((w) => w.id))
-        if (mapped.length === 1) setImportWarehouseId(mapped[0].id)
+        if (mapped.length === 1) {
+          setImportWarehouseId(mapped[0].id)
+          setPushWarehouseId(mapped[0].id)
+        }
       })
       .catch(() => setSellerWarehouses([]))
   }, [sellerId, isOzon])
@@ -302,6 +307,27 @@ export function WarehouseHubPage() {
       await handleLoadPreview()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка подтверждения')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePushOzonStocks = async () => {
+    if (!sellerId || !pushWarehouseId) {
+      setError('Выберите склад Ozon для отправки остатков')
+      return
+    }
+    if (!window.confirm(
+      'Отправить текущие остатки CRM на выбранный склад Ozon? Количество в ЛК Ozon станет как в CRM.',
+    )) return
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await pushOzonStocks(Number(sellerId), Number(pushWarehouseId))
+      setSuccess(result.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отправить остатки на Ozon')
     } finally {
       setLoading(false)
     }
@@ -493,7 +519,7 @@ export function WarehouseHubPage() {
           <p className="whub-hint">
             Подключение каталога {mpName}: выберите склады FBS и режим загрузки. Ячейки назначаются на все
             размеры артикула (даже с нулевым остатком), если артикул попал в выборку.
-            {isOzon ? ' Остатки пишутся в CRM; отдельная отправка на склад Ozon — следующей кнопкой.' : ''}
+            {isOzon ? ' Остатки пишутся в CRM. Кнопка ниже отправляет их на выбранный склад Ozon.' : ''}
           </p>
 
           <div className="whub-options">
@@ -564,6 +590,32 @@ export function WarehouseHubPage() {
           >
             Обновить склады из {mpName}
           </button>
+          {isOzon && (
+            <div className="whub-ozon-push">
+              <label>
+                Склад Ozon для остатков CRM
+                <select
+                  value={pushWarehouseId}
+                  onChange={(e) => setPushWarehouseId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">— выберите —</option>
+                  {sellerWarehouses.map((wh) => (
+                    <option key={wh.id} value={wh.id}>
+                      {wh.name || `Склад #${wh.code}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={!sellerId || !pushWarehouseId || loading}
+                onClick={() => void handlePushOzonStocks()}
+              >
+                Отправить остатки CRM на склад Ozon
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="btn btn--primary"

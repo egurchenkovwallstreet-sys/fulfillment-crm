@@ -272,4 +272,20 @@ export function applyStockImport(
   })
 }
 
+export function pushOzonStocks(sellerId: number, warehouseId: number) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    sent: number
+    updated: number
+    skipped: number
+    error_count: number
+    errors: Array<{ offer_id: string; error: string }>
+    warehouse_name: string
+  }>(`/api/warehouse/sellers/${sellerId}/ozon-stocks/`, {
+    method: 'POST',
+    body: JSON.stringify({ warehouse_id: warehouseId }),
+  })
+}
+
 export type { Seller }

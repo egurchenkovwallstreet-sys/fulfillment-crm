@@ -35,3 +35,29 @@ def sync_wb_product_cards():
     logger.warning("WB product cards sync errors: %s", result["errors"])
   logger.info("WB product cards sync done: %s", result["results"])
   return result
+
+
+@shared_task
+def sync_ozon_orders():
+  """Синхронизация отправлений Ozon FBS для всех активных селлеров с ключами."""
+  from apps.orders.services.ozon_postings import OzonPostingSyncError, sync_ozon_postings
+  from apps.sellers.models import Seller
+
+  sellers = (
+    Seller.objects.filter(is_active=True, ozon_enabled=True)
+    .exclude(ozon_client_id="")
+    .exclude(ozon_api_key_encrypted="")
+  )
+  results = []
+  errors = []
+  for seller in sellers:
+    try:
+      stats = sync_ozon_postings(seller)
+      results.append({"seller_id": seller.id, **stats})
+    except OzonPostingSyncError as exc:
+      errors.append({"seller_id": seller.id, "error": str(exc)})
+      logger.warning("Ozon posting sync failed for seller %s: %s", seller.id, exc)
+  if errors:
+    logger.warning("Ozon order sync errors: %s", errors)
+  logger.info("Ozon order sync done: %s sellers", len(results))
+  return {"results": results, "errors": errors}
