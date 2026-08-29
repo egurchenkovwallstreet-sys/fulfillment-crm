@@ -5,10 +5,10 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsManager
 from apps.accounts.tenant import get_seller_for_user
-from apps.integrations.wb_crypto import encrypt_token
-from apps.orders.services.ozon_counts import OzonCountsError, ping_seller_ozon, refresh_ozon_counts
+from apps.orders.services.ozon_counts import refresh_ozon_counts
 from apps.sellers.models import Seller, SellerOzonWarehouse
 from apps.sellers.serializers import SellerManageSerializer, SellerOzonWarehouseSerializer, SellerWarehouseToggleSerializer
+from apps.sellers.services.seller_manage import SellerManageError, apply_ozon_keys, clear_ozon_keys
 from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 
 
@@ -45,46 +45,34 @@ class SellerOzonKeysView(APIView):
 
     client_id = str(request.data.get("client_id") or "").strip()
     api_key = str(request.data.get("api_key") or "").strip()
-    if not client_id or not api_key:
-      return Response(
-        {"detail": "Укажите Client-Id и Api-Key из ЛК Ozon"},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
-
-    seller.ozon_client_id = client_id
-    seller.ozon_api_key_encrypted = encrypt_token(api_key)
-    seller.ozon_enabled = True
-    seller.save(
-      update_fields=[
-        "ozon_client_id",
-        "ozon_api_key_encrypted",
-        "ozon_enabled",
-        "updated_at",
-      ]
-    )
-
-    ping_ok = False
-    ping_detail = ""
-    counts = None
     try:
-      ping_seller_ozon(seller)
-      ping_ok = True
-      counts = refresh_ozon_counts(seller)
-    except OzonCountsError as exc:
-      ping_detail = str(exc)
+      ping_ok, detail = apply_ozon_keys(seller, client_id, api_key)
+    except SellerManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    payload = SellerManageSerializer(seller).data
+    counts = None
+    if ping_ok:
+      try:
+        counts = refresh_ozon_counts(seller)
+      except Exception:
+        counts = None
+
+    seller.refresh_from_db()
     return Response({
       "success": True,
       "ping_ok": ping_ok,
-      "detail": (
-        "Ключи сохранены. API Ozon отвечает."
-        if ping_ok
-        else f"Ключи сохранены, но проверка API не прошла: {ping_detail}"
-      ),
+      "detail": detail,
       "counts": counts,
-      "seller": payload,
+      "seller": SellerManageSerializer(seller).data,
     })
+
+  def delete(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    clear_ozon_keys(seller)
+    seller.refresh_from_db()
+    return Response(SellerManageSerializer(seller).data)
 
 
 class SellerOzonWarehouseListView(APIView):

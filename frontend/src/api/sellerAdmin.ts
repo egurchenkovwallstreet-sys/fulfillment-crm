@@ -28,6 +28,16 @@ export type SellerCreatePayload = {
   is_active?: boolean
   wb_enabled?: boolean
   ozon_enabled?: boolean
+  wb_token?: string
+  ozon_client_id?: string
+  ozon_api_key?: string
+}
+
+export type SellerUpdatePayload = {
+  company_name?: string
+  is_active?: boolean
+  wb_enabled?: boolean
+  ozon_enabled?: boolean
 }
 
 export type SellerInviteResponse = {
@@ -78,11 +88,17 @@ export async function saveSellerOzonKeys(sellerId: number, payload: { client_id:
 
 export async function updateSeller(
   sellerId: number,
-  payload: { company_name?: string; is_active?: boolean },
+  payload: SellerUpdatePayload,
 ): Promise<SellerManageItem> {
   return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteSeller(sellerId: number) {
+  return apiFetch<{ success: boolean; detail: string }>(`/api/sellers/manage/${sellerId}/`, {
+    method: 'DELETE',
   })
 }
 
@@ -100,6 +116,12 @@ export async function saveSellerWbToken(sellerId: number, token: string) {
 
 export async function clearSellerWbToken(sellerId: number): Promise<SellerManageItem> {
   return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/wb-token/`, {
+    method: 'DELETE',
+  })
+}
+
+export async function clearSellerOzonKeys(sellerId: number): Promise<SellerManageItem> {
+  return apiFetch<SellerManageItem>(`/api/sellers/manage/${sellerId}/ozon-keys/`, {
     method: 'DELETE',
   })
 }

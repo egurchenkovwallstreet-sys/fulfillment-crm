@@ -123,10 +123,21 @@ class SellerManageSerializer(serializers.ModelSerializer):
 class SellerCreateSerializer(serializers.ModelSerializer):
   wb_enabled = serializers.BooleanField(default=True)
   ozon_enabled = serializers.BooleanField(default=False)
+  wb_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+  ozon_client_id = serializers.CharField(required=False, allow_blank=True, write_only=True)
+  ozon_api_key = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
   class Meta:
     model = Seller
-    fields = ("company_name", "is_active", "wb_enabled", "ozon_enabled")
+    fields = (
+      "company_name",
+      "is_active",
+      "wb_enabled",
+      "ozon_enabled",
+      "wb_token",
+      "ozon_client_id",
+      "ozon_api_key",
+    )
 
   def validate(self, attrs):
     if not attrs.get("wb_enabled", True) and not attrs.get("ozon_enabled", False):
@@ -136,15 +147,28 @@ class SellerCreateSerializer(serializers.ModelSerializer):
   def create(self, validated_data):
     from apps.sellers.services.invite import ensure_seller_invite
 
+    validated_data.pop("wb_token", None)
+    validated_data.pop("ozon_client_id", None)
+    validated_data.pop("ozon_api_key", None)
     seller = super().create(validated_data)
     ensure_seller_invite(seller)
     return seller
 
 
 class SellerUpdateSerializer(serializers.ModelSerializer):
+  wb_enabled = serializers.BooleanField(required=False)
+  ozon_enabled = serializers.BooleanField(required=False)
+
   class Meta:
     model = Seller
-    fields = ("company_name", "is_active")
+    fields = ("company_name", "is_active", "wb_enabled", "ozon_enabled")
+
+  def validate(self, attrs):
+    wb = attrs.get("wb_enabled", self.instance.wb_enabled if self.instance else True)
+    ozon = attrs.get("ozon_enabled", self.instance.ozon_enabled if self.instance else False)
+    if wb is False and ozon is False:
+      raise serializers.ValidationError("Оставьте хотя бы один маркетплейс: WB или Ozon")
+    return attrs
 
 
 class SellerInviteSerializer(serializers.Serializer):

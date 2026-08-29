@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
+  clearSellerOzonKeys,
   clearSellerWbToken,
   createSeller,
+  deleteSeller,
   fetchSellerInvite,
   fetchSellersManage,
   saveSellerOzonKeys,
   saveSellerWbToken,
   updateSeller,
-  updateSellerMarketplaces,
   type SellerManageItem,
 } from '../api/sellerAdmin'
 import { copyToClipboard } from '../utils/copyToClipboard'
@@ -26,19 +27,20 @@ export function SellersManagePage() {
   const [companyName, setCompanyName] = useState('')
   const [createWb, setCreateWb] = useState(true)
   const [createOzon, setCreateOzon] = useState(false)
+  const [createWbToken, setCreateWbToken] = useState('')
+  const [createOzonClientId, setCreateOzonClientId] = useState('')
+  const [createOzonApiKey, setCreateOzonApiKey] = useState('')
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
   const [tariffSeller, setTariffSeller] = useState<SellerManageItem | null>(null)
-  const [ozonSellerId, setOzonSellerId] = useState<number | null>(null)
-  const [ozonClientId, setOzonClientId] = useState('')
-  const [ozonApiKey, setOzonApiKey] = useState('')
-  const [savingOzon, setSavingOzon] = useState(false)
-  const [wbSellerId, setWbSellerId] = useState<number | null>(null)
-  const [wbToken, setWbToken] = useState('')
-  const [savingWb, setSavingWb] = useState(false)
   const [editSeller, setEditSeller] = useState<SellerManageItem | null>(null)
   const [editName, setEditName] = useState('')
+  const [editWbEnabled, setEditWbEnabled] = useState(true)
+  const [editOzonEnabled, setEditOzonEnabled] = useState(false)
+  const [editWbToken, setEditWbToken] = useState('')
+  const [editOzonClientId, setEditOzonClientId] = useState('')
+  const [editOzonApiKey, setEditOzonApiKey] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
   const load = useCallback(async () => {
@@ -57,6 +59,17 @@ export function SellersManagePage() {
     load()
   }, [load])
 
+  function openEdit(seller: SellerManageItem) {
+    setEditSeller(seller)
+    setEditName(seller.company_name)
+    setEditWbEnabled(seller.wb_enabled)
+    setEditOzonEnabled(seller.ozon_enabled)
+    setEditWbToken('')
+    setEditOzonClientId(seller.ozon_client_id || '')
+    setEditOzonApiKey('')
+    setError('')
+  }
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
     if (!companyName.trim()) return
@@ -72,14 +85,88 @@ export function SellersManagePage() {
         company_name: companyName.trim(),
         wb_enabled: createWb,
         ozon_enabled: createOzon,
+        wb_token: createWb ? createWbToken.trim() : undefined,
+        ozon_client_id: createOzon ? createOzonClientId.trim() : undefined,
+        ozon_api_key: createOzon ? createOzonApiKey.trim() : undefined,
       })
       setCompanyName('')
-      setMessage(`Селлер «${created.company_name}» создан. Скопируйте ссылку для регистрации.`)
+      setCreateWbToken('')
+      setCreateOzonClientId('')
+      setCreateOzonApiKey('')
+      const extra = (created as { token_messages?: string[] }).token_messages?.join(' ')
+      setMessage(
+        extra
+          ? `Селлер «${created.company_name}» создан. ${extra}`
+          : `Селлер «${created.company_name}» создан. Скопируйте ссылку для регистрации.`,
+      )
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка создания')
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleSaveEdit(e: FormEvent) {
+    e.preventDefault()
+    if (!editSeller) return
+    if (!editWbEnabled && !editOzonEnabled) {
+      setError('Оставьте хотя бы один маркетплейс')
+      return
+    }
+    setSavingEdit(true)
+    setError('')
+    setMessage('')
+    try {
+      await updateSeller(editSeller.id, {
+        company_name: editName.trim(),
+        is_active: editSeller.is_active,
+        wb_enabled: editWbEnabled,
+        ozon_enabled: editOzonEnabled,
+      })
+      if (editWbEnabled && editWbToken.trim()) {
+        const wb = await saveSellerWbToken(editSeller.id, editWbToken.trim())
+        setMessage(wb.detail)
+      }
+      if (editOzonEnabled && editOzonClientId.trim() && editOzonApiKey.trim()) {
+        const oz = await saveSellerOzonKeys(editSeller.id, {
+          client_id: editOzonClientId.trim(),
+          api_key: editOzonApiKey.trim(),
+        })
+        setMessage(oz.detail)
+      }
+      if (!editWbToken.trim() && !(editOzonApiKey.trim() && editOzonClientId.trim())) {
+        setMessage('Селлер сохранён')
+      }
+      setEditSeller(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка сохранения')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  async function handleDeleteSeller() {
+    if (!editSeller) return
+    if (
+      !window.confirm(
+        `Удалить селлера «${editSeller.company_name}» навсегда?\n\nВсе товары, ячейки и история будут удалены. Это нельзя отменить.`,
+      )
+    ) {
+      return
+    }
+    setSavingEdit(true)
+    setError('')
+    try {
+      const result = await deleteSeller(editSeller.id)
+      setMessage(result.detail)
+      setEditSeller(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -107,7 +194,7 @@ export function SellersManagePage() {
       <header className="topbar">
         <div>
           <h1>Селлеры</h1>
-          <p>Создание селлеров, тарифы и одноразовые ссылки для регистрации</p>
+          <p>Создание, API-токены, редактирование и удаление селлеров</p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
           Обновить
@@ -119,25 +206,65 @@ export function SellersManagePage() {
 
       <section className="panel sellers-create-panel">
         <h2 className="section-title">Новый селлер</h2>
-        <form className="sellers-create-form" onSubmit={handleCreate}>
-          <input
-            type="text"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
-            placeholder="ИП / название компании"
-            required
-          />
-          <label className="sellers-mp-check">
-            <input type="checkbox" checked={createWb} onChange={(e) => setCreateWb(e.target.checked)} />
-            WB
-          </label>
-          <label className="sellers-mp-check">
-            <input type="checkbox" checked={createOzon} onChange={(e) => setCreateOzon(e.target.checked)} />
-            Ozon
-          </label>
-          <button type="submit" className="btn btn--primary" disabled={creating}>
-            {creating ? 'Создание…' : 'Создать'}
-          </button>
+        <form className="sellers-form" onSubmit={handleCreate}>
+          <div className="sellers-form__row">
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="ИП / название компании"
+              required
+            />
+            <label className="sellers-mp-check">
+              <input type="checkbox" checked={createWb} onChange={(e) => setCreateWb(e.target.checked)} />
+              WB
+            </label>
+            <label className="sellers-mp-check">
+              <input type="checkbox" checked={createOzon} onChange={(e) => setCreateOzon(e.target.checked)} />
+              Ozon
+            </label>
+            <button type="submit" className="btn btn--primary" disabled={creating}>
+              {creating ? 'Создание…' : 'Создать'}
+            </button>
+          </div>
+
+          {createWb && (
+            <div className="sellers-form__block">
+              <strong>Токен WB (необязательно сейчас)</strong>
+              <p className="sellers-ozon-hint">
+                ЛК seller.wildberries.ru → Настройки → Доступ к API → права «Контент» и «Маркетплейс».
+              </p>
+              <input
+                type="password"
+                value={createWbToken}
+                onChange={(e) => setCreateWbToken(e.target.value)}
+                placeholder="Вставьте токен WB"
+              />
+            </div>
+          )}
+
+          {createOzon && (
+            <div className="sellers-form__block">
+              <strong>Ключи Ozon (необязательно сейчас)</strong>
+              <p className="sellers-ozon-hint">
+                seller.ozon.ru → Настройки → API-ключи → Client-Id и Api-Key.
+              </p>
+              <div className="sellers-form__row">
+                <input
+                  type="text"
+                  value={createOzonClientId}
+                  onChange={(e) => setCreateOzonClientId(e.target.value)}
+                  placeholder="Client-Id"
+                />
+                <input
+                  type="password"
+                  value={createOzonApiKey}
+                  onChange={(e) => setCreateOzonApiKey(e.target.value)}
+                  placeholder="Api-Key"
+                />
+              </div>
+            </div>
+          )}
         </form>
       </section>
 
@@ -151,12 +278,13 @@ export function SellersManagePage() {
               <thead>
                 <tr>
                   <th>Компания</th>
-                  <th>Маркетплейсы</th>
+                  <th>Маркетплейсы / API</th>
                   <th>Аккаунт</th>
                   <th>WB: новые / сборка / доставка</th>
                   <th>Ozon: новые / сборка / доставка</th>
                   <th>Тариф</th>
                   <th>Ссылка</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -165,68 +293,17 @@ export function SellersManagePage() {
                     <td>
                       <strong>{seller.company_name}</strong>
                       {!seller.is_active && <span className="sellers-tag sellers-tag--muted">неактивен</span>}
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm"
-                        onClick={() => {
-                          setEditSeller(seller)
-                          setEditName(seller.company_name)
-                        }}
-                      >
-                        ✎
-                      </button>
                     </td>
                     <td>
                       {seller.wb_enabled && (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => {
-                            setWbSellerId(seller.id)
-                            setWbToken('')
-                          }}
-                        >
-                          {seller.has_wb_token ? 'Токен WB ✓' : 'Токен WB'}
-                        </button>
-                      )}
-                      {seller.wb_enabled && <span className="sellers-tag sellers-tag--wb">WB</span>}
-                      {seller.ozon_enabled && <span className="sellers-tag sellers-tag--ozon">Ozon</span>}
-                      {!seller.wb_enabled && (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() =>
-                            updateSellerMarketplaces(seller.id, { wb_enabled: true }).then(load)
-                          }
-                        >
-                          + WB
-                        </button>
-                      )}
-                      {!seller.ozon_enabled && (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => {
-                            setOzonSellerId(seller.id)
-                            setOzonClientId(seller.ozon_client_id || '')
-                            setOzonApiKey('')
-                          }}
-                        >
-                          + Ozon
-                        </button>
+                        <span className="sellers-tag sellers-tag--wb">
+                          WB{seller.has_wb_token ? ' ✓' : ''}
+                        </span>
                       )}
                       {seller.ozon_enabled && (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => {
-                            setOzonSellerId(seller.id)
-                            setOzonClientId(seller.ozon_client_id || '')
-                            setOzonApiKey('')
-                          }}
-                        >
-                          {seller.has_ozon_api ? 'Ключи Ozon' : 'Ключи Ozon'}
-                        </button>
+                        <span className="sellers-tag sellers-tag--ozon">
+                          Ozon{seller.has_ozon_api ? ' ✓' : ''}
+                        </span>
                       )}
                     </td>
                     <td>
@@ -268,6 +345,15 @@ export function SellersManagePage() {
                         </button>
                       )}
                     </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => openEdit(seller)}
+                      >
+                        Изменить
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -276,171 +362,157 @@ export function SellersManagePage() {
         )}
       </section>
 
-      {wbSellerId !== null && (
-        <section className="panel sellers-create-panel">
-          <h2 className="section-title">Токен WB Seller API</h2>
-          <p className="sellers-ozon-hint">
-            ЛК seller.wildberries.ru → Настройки → Доступ к API → создайте токен с правами «Контент» и «Маркетплейс».
-          </p>
-          <form
-            className="sellers-create-form"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              setSavingWb(true)
-              setError('')
-              setMessage('')
-              try {
-                const result = await saveSellerWbToken(wbSellerId, wbToken.trim())
-                setMessage(result.detail)
-                setWbSellerId(null)
-                setWbToken('')
-                await load()
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Не удалось сохранить токен WB')
-              } finally {
-                setSavingWb(false)
-              }
-            }}
-          >
-            <input
-              type="password"
-              value={wbToken}
-              onChange={(e) => setWbToken(e.target.value)}
-              placeholder="Вставьте токен WB"
-              required
-            />
-            <button type="submit" className="btn btn--primary" disabled={savingWb}>
-              {savingWb ? 'Проверка…' : 'Сохранить и проверить'}
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={async () => {
-                if (!window.confirm('Удалить токен WB у этого селлера?')) return
-                setSavingWb(true)
-                setError('')
-                try {
-                  await clearSellerWbToken(wbSellerId)
-                  setMessage('Токен WB удалён')
-                  setWbSellerId(null)
-                  await load()
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : 'Ошибка')
-                } finally {
-                  setSavingWb(false)
-                }
-              }}
-            >
-              Удалить токен
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={() => setWbSellerId(null)}>
-              Отмена
-            </button>
-          </form>
-        </section>
-      )}
-
       {editSeller && (
-        <section className="panel sellers-create-panel">
-          <h2 className="section-title">Редактирование селлера</h2>
-          <form
-            className="sellers-create-form"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              setSavingEdit(true)
-              setError('')
-              setMessage('')
-              try {
-                await updateSeller(editSeller.id, {
-                  company_name: editName.trim(),
-                  is_active: editSeller.is_active,
-                })
-                setMessage('Селлер сохранён')
-                setEditSeller(null)
-                await load()
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Ошибка сохранения')
-              } finally {
-                setSavingEdit(false)
-              }
-            }}
-          >
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              placeholder="Название компании"
-              required
-            />
-            <label className="sellers-mp-check">
+        <section className="panel sellers-create-panel sellers-edit-panel">
+          <h2 className="section-title">Редактирование: {editSeller.company_name}</h2>
+          <form className="sellers-form" onSubmit={handleSaveEdit}>
+            <div className="sellers-form__row">
               <input
-                type="checkbox"
-                checked={editSeller.is_active}
-                onChange={(e) => setEditSeller({ ...editSeller, is_active: e.target.checked })}
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Название компании"
+                required
               />
-              Активен
-            </label>
-            <button type="submit" className="btn btn--primary" disabled={savingEdit}>
-              {savingEdit ? 'Сохранение…' : 'Сохранить'}
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)}>
-              Отмена
-            </button>
-          </form>
-        </section>
-      )}
+              <label className="sellers-mp-check">
+                <input
+                  type="checkbox"
+                  checked={editSeller.is_active}
+                  onChange={(e) => setEditSeller({ ...editSeller, is_active: e.target.checked })}
+                />
+                Активен
+              </label>
+              <label className="sellers-mp-check">
+                <input
+                  type="checkbox"
+                  checked={editWbEnabled}
+                  onChange={(e) => setEditWbEnabled(e.target.checked)}
+                />
+                WB
+              </label>
+              <label className="sellers-mp-check">
+                <input
+                  type="checkbox"
+                  checked={editOzonEnabled}
+                  onChange={(e) => setEditOzonEnabled(e.target.checked)}
+                />
+                Ozon
+              </label>
+            </div>
 
-      {ozonSellerId !== null && (
-        <section className="panel sellers-create-panel">
-          <h2 className="section-title">Ключи Ozon Seller API</h2>
-          <p className="sellers-ozon-hint">
-            1) Войдите в seller.ozon.ru. 2) Настройки → API-ключи. 3) Создайте ключ с доступом к Seller API
-            (FBS: заказы, склады, товары). 4) Скопируйте <strong>Client-Id</strong> и <strong>Api-Key</strong> —
-            это два разных поля, не один токен как у WB.
-          </p>
-          <form
-            className="sellers-create-form"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              setSavingOzon(true)
-              setError('')
-              setMessage('')
-              try {
-                const result = await saveSellerOzonKeys(ozonSellerId, {
-                  client_id: ozonClientId.trim(),
-                  api_key: ozonApiKey.trim(),
-                })
-                setMessage(result.detail)
-                setOzonSellerId(null)
-                setOzonApiKey('')
-                await load()
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Не удалось сохранить ключи Ozon')
-              } finally {
-                setSavingOzon(false)
-              }
-            }}
-          >
-            <input
-              type="text"
-              value={ozonClientId}
-              onChange={(e) => setOzonClientId(e.target.value)}
-              placeholder="Client-Id"
-              required
-            />
-            <input
-              type="password"
-              value={ozonApiKey}
-              onChange={(e) => setOzonApiKey(e.target.value)}
-              placeholder="Api-Key"
-              required
-            />
-            <button type="submit" className="btn btn--primary" disabled={savingOzon}>
-              {savingOzon ? 'Проверка…' : 'Сохранить и проверить'}
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={() => setOzonSellerId(null)}>
-              Отмена
-            </button>
+            {editWbEnabled && (
+              <div className="sellers-form__block">
+                <strong>Токен WB</strong>
+                <p className="sellers-ozon-hint">
+                  {editSeller.has_wb_token
+                    ? 'Токен уже подключён. Вставьте новый, чтобы заменить.'
+                    : 'Токен не задан.'}
+                </p>
+                <div className="sellers-form__row">
+                  <input
+                    type="password"
+                    value={editWbToken}
+                    onChange={(e) => setEditWbToken(e.target.value)}
+                    placeholder="Новый токен WB"
+                  />
+                  {editSeller.has_wb_token && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      disabled={savingEdit}
+                      onClick={async () => {
+                        if (!window.confirm('Удалить токен WB?')) return
+                        setSavingEdit(true)
+                        setError('')
+                        try {
+                          await clearSellerWbToken(editSeller.id)
+                          setMessage('Токен WB удалён')
+                          setEditSeller({ ...editSeller, has_wb_token: false })
+                          await load()
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Ошибка')
+                        } finally {
+                          setSavingEdit(false)
+                        }
+                      }}
+                    >
+                      Удалить токен
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {editOzonEnabled && (
+              <div className="sellers-form__block">
+                <strong>Ключи Ozon</strong>
+                <p className="sellers-ozon-hint">
+                  {editSeller.has_ozon_api
+                    ? `Client-Id: ${editSeller.ozon_client_id || '—'}. Введите Api-Key для замены.`
+                    : 'Ключи не заданы.'}
+                </p>
+                <div className="sellers-form__row">
+                  <input
+                    type="text"
+                    value={editOzonClientId}
+                    onChange={(e) => setEditOzonClientId(e.target.value)}
+                    placeholder="Client-Id"
+                  />
+                  <input
+                    type="password"
+                    value={editOzonApiKey}
+                    onChange={(e) => setEditOzonApiKey(e.target.value)}
+                    placeholder="Api-Key"
+                  />
+                  {editSeller.has_ozon_api && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      disabled={savingEdit}
+                      onClick={async () => {
+                        if (!window.confirm('Удалить ключи Ozon?')) return
+                        setSavingEdit(true)
+                        setError('')
+                        try {
+                          await clearSellerOzonKeys(editSeller.id)
+                          setMessage('Ключи Ozon удалены')
+                          setEditSeller({
+                            ...editSeller,
+                            has_ozon_api: false,
+                            ozon_client_id: '',
+                          })
+                          setEditOzonClientId('')
+                          await load()
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Ошибка')
+                        } finally {
+                          setSavingEdit(false)
+                        }
+                      }}
+                    >
+                      Удалить ключи
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="sellers-form__actions">
+              <button type="submit" className="btn btn--primary" disabled={savingEdit}>
+                {savingEdit ? 'Сохранение…' : 'Сохранить'}
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={savingEdit}
+                onClick={() => void handleDeleteSeller()}
+              >
+                Удалить селлера
+              </button>
+            </div>
           </form>
         </section>
       )}

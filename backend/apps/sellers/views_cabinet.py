@@ -25,13 +25,18 @@ from apps.sellers.serializers import (
   SellerWbStageCountsSerializer,
 )
 from apps.integrations.marketplace import parse_marketplace, seller_allows_marketplace
-from apps.integrations.wb_crypto import encrypt_token
-from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.sellers.services.invite import (
   deactivate_invite,
   ensure_seller_invite,
   get_invite_by_token,
   issue_seller_invite,
+)
+from apps.sellers.services.seller_manage import (
+  SellerManageError,
+  apply_ozon_keys,
+  apply_wb_token,
+  clear_wb_token,
+  delete_seller,
 )
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
 from apps.sellers.services.seller_billing_stats import load_admin_billing_dashboard
@@ -66,10 +71,34 @@ class SellerManageListCreateView(APIView):
     fulfillment = fulfillment_for_staff_user(request.user)
     if not fulfillment:
       return Response({"detail": "Фулфилмент не определён"}, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    wb_token = str(data.pop("wb_token", "") or "").strip()
+    ozon_client_id = str(data.pop("ozon_client_id", "") or "").strip()
+    ozon_api_key = str(data.pop("ozon_api_key", "") or "").strip()
+
     seller = serializer.save(fulfillment=fulfillment)
     invite = ensure_seller_invite(seller)
+
+    token_messages: list[str] = []
+    if wb_token and seller.wb_enabled:
+      try:
+        _, msg = apply_wb_token(seller, wb_token, user=request.user)
+        token_messages.append(msg)
+      except SellerManageError as exc:
+        token_messages.append(str(exc))
+    if ozon_client_id and ozon_api_key and seller.ozon_enabled:
+      try:
+        _, msg = apply_ozon_keys(seller, ozon_client_id, ozon_api_key)
+        token_messages.append(msg)
+      except SellerManageError as exc:
+        token_messages.append(str(exc))
+
+    seller.refresh_from_db()
     payload = SellerManageSerializer(seller).data
     payload["invite_url"] = _invite_path(request, invite.token)
+    if token_messages:
+      payload["token_messages"] = token_messages
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
@@ -83,7 +112,19 @@ class SellerManageDetailView(APIView):
     serializer = SellerUpdateSerializer(seller, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
+    seller.refresh_from_db()
     return Response(SellerManageSerializer(seller).data)
+
+  def delete(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    name = seller.company_name
+    try:
+      delete_seller(seller)
+    except SellerManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, "detail": f"Селлер «{name}» удалён"})
 
 
 class SellerWbTokenView(APIView):
@@ -95,42 +136,25 @@ class SellerWbTokenView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     token = str(request.data.get("token") or "").strip()
-    if not token:
-      return Response(
-        {"detail": "Вставьте персональный токен WB"},
-        status=status.HTTP_400_BAD_REQUEST,
-      )
-
-    seller.wb_api_token_encrypted = encrypt_token(token)
-    seller.wb_enabled = True
-    seller.save(update_fields=["wb_api_token_encrypted", "wb_enabled", "updated_at"])
-
-    ping_ok = False
-    ping_detail = ""
     try:
-      sync_seller_warehouses(seller, user=request.user)
-      ping_ok = True
-    except WarehouseSyncError as exc:
-      ping_detail = str(exc)
+      ping_ok, detail = apply_wb_token(seller, token, user=request.user)
+    except SellerManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    payload = SellerManageSerializer(seller).data
+    seller.refresh_from_db()
     return Response({
       "success": True,
       "ping_ok": ping_ok,
-      "detail": (
-        "Токен WB сохранён. API отвечает, склады синхронизированы."
-        if ping_ok
-        else f"Токен сохранён, но проверка API не прошла: {ping_detail}"
-      ),
-      "seller": payload,
+      "detail": detail,
+      "seller": SellerManageSerializer(seller).data,
     })
 
   def delete(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
-    seller.wb_api_token_encrypted = ""
-    seller.save(update_fields=["wb_api_token_encrypted", "updated_at"])
+    clear_wb_token(seller)
+    seller.refresh_from_db()
     return Response(SellerManageSerializer(seller).data)
 
 
