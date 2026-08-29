@@ -190,11 +190,11 @@ def scan_barcode(
     }
 
   try:
-    anchor, group_items = find_group_by_barcode(seller, mp, barcode)
+    anchor, group_items, meta = find_group_by_barcode(seller, mp, barcode)
   except CatalogError as exc:
     raise ArticleIntakeError(str(exc)) from exc
 
-  group_key = group_key_for_item(mp, anchor)
+  group_key = str(meta.get("group_key") or group_key_for_item(mp, anchor))
   if quantity <= 0:
     raise ArticleIntakeError("Для новой группы укажите количество больше 0")
 
@@ -228,6 +228,7 @@ def scan_barcode(
     scanned_quantity=quantity,
     cell_numbers=cell_numbers,
     existing_barcodes=existing_barcodes,
+    article_label=str(meta.get("article_label") or anchor.vendor_code or anchor.wb_nm_id),
   )
   preview["next_cell_number"] = start_cell
   return {
@@ -256,11 +257,11 @@ def confirm_group(
     raise ArticleIntakeError("Количество должно быть больше 0")
 
   try:
-    anchor, group_items = find_group_by_barcode(seller, mp, scanned_barcode)
+    anchor, group_items, meta = find_group_by_barcode(seller, mp, scanned_barcode)
   except CatalogError as exc:
     raise ArticleIntakeError(str(exc)) from exc
 
-  group_key = group_key_for_item(mp, anchor)
+  group_key = str(meta.get("group_key") or group_key_for_item(mp, anchor))
   if group_key in (session.confirmed_group_keys or []):
     raise ArticleIntakeError("Эта группа уже подтверждена")
 

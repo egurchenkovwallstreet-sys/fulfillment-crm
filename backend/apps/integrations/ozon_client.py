@@ -137,6 +137,50 @@ class OzonClient:
       collected.extend(item for item in (items or []) if isinstance(item, dict))
     return collected
 
+  def product_info_attributes(
+    self,
+    *,
+    product_ids: list[int] | None = None,
+    offer_ids: list[str] | None = None,
+  ) -> list[dict]:
+    """Характеристики карточек (цвет, размер). POST /v4/product/info/attributes."""
+    ids = [int(item) for item in (product_ids or []) if int(item or 0)]
+    offers = [str(item).strip() for item in (offer_ids or []) if str(item).strip()]
+    if not ids and not offers:
+      return []
+
+    collected: list[dict] = []
+    last_id = ""
+    for _ in range(80):
+      body: dict = {"limit": 1000}
+      filt: dict = {}
+      if ids:
+        filt["product_id"] = ids[:1000]
+      if offers:
+        filt["offer_id"] = offers[:1000]
+      body["filter"] = filt
+      if last_id:
+        body["last_id"] = last_id
+
+      data = self._post("/v4/product/info/attributes", body)
+      if not isinstance(data, dict):
+        break
+      result = data.get("result")
+      if isinstance(result, dict):
+        items = result.get("items") or result.get("products") or []
+        last_id = str(result.get("last_id") or "")
+      elif isinstance(result, list):
+        items = result
+        last_id = str(data.get("last_id") or "")
+      else:
+        items = data.get("items") or []
+        last_id = str(data.get("last_id") or "")
+
+      collected.extend(item for item in items if isinstance(item, dict))
+      if not items or not last_id:
+        break
+    return collected
+
   def fbs_stocks_by_offer_ids(self, offer_ids: list[str]) -> list[dict]:
     """Остатки FBS по складам. v2, fallback v1."""
     unique = [item for item in dict.fromkeys(offer_ids) if item]

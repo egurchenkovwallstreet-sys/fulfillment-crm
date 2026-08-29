@@ -1,6 +1,8 @@
 """Загрузка каталога Ozon FBS и план ячеек (как онбординг WB)."""
 from __future__ import annotations
 
+import re
+
 from apps.integrations.marketplace import OZON
 from apps.integrations.ozon_client import OzonApiError
 from apps.orders.services.ozon_counts import OzonCountsError, ozon_client_for_seller
@@ -18,6 +20,170 @@ from apps.warehouse.services.catalog_fetch import (
 )
 from apps.warehouse.services.cells import _next_cell_number
 from apps.warehouse.services.size_sort import size_sort_key
+
+OZON_COLOR_ATTR_IDS = {10096, 10097, 8229}
+OZON_SIZE_ATTR_IDS = {9535, 9508, 9456, 9455}
+
+
+def _product_pk(raw: dict) -> int:
+  try:
+    return int(raw.get("id") or raw.get("product_id") or 0)
+  except (TypeError, ValueError):
+    return 0
+
+
+def _attribute_values(attr: dict) -> list[str]:
+  values: list[str] = []
+  for item in attr.get("values") or []:
+    if isinstance(item, dict):
+      text = str(item.get("value") or item.get("dictionary_value") or "").strip()
+    else:
+      text = str(item).strip()
+    if text:
+      values.append(text)
+  single = str(attr.get("value") or "").strip()
+  if single:
+    values.append(single)
+  return values
+
+
+def _iter_attributes(raw: dict):
+  for attr in raw.get("attributes") or []:
+    if isinstance(attr, dict):
+      yield attr
+  for block in raw.get("complex_attributes") or []:
+    if isinstance(block, dict):
+      for attr in block.get("attributes") or []:
+        if isinstance(attr, dict):
+          yield attr
+    elif isinstance(block, list):
+      for attr in block:
+        if isinstance(attr, dict):
+          yield attr
+
+
+def _match_attribute(attr: dict, *, kind: str) -> str:
+  try:
+    attr_id = int(attr.get("id") or attr.get("attribute_id") or 0)
+  except (TypeError, ValueError):
+    attr_id = 0
+  name = str(attr.get("name") or attr.get("attribute_name") or "").lower()
+
+  if kind == "color":
+    is_match = attr_id in OZON_COLOR_ATTR_IDS or "цвет" in name or name == "color"
+  else:
+    is_match = (
+      attr_id in OZON_SIZE_ATTR_IDS
+      or "размер" in name
+      or name in {"size", "sizes", "размер производителя", "российский размер"}
+    )
+  if not is_match:
+    return ""
+  values = _attribute_values(attr)
+  return values[0] if values else ""
+
+
+def _color_from_name(raw: dict) -> str:
+  name = str(raw.get("name") or "").strip()
+  if not name:
+    return ""
+  parts = [part.strip() for part in name.split(",") if part.strip()]
+  if len(parts) >= 2:
+    candidate = parts[-2]
+    if not re.search(r"\d", candidate) and len(candidate) <= 40:
+      return candidate
+  return ""
+
+
+def _size_from_name(raw: dict) -> str:
+  name = str(raw.get("name") or "").strip()
+  if not name:
+    return ""
+  parts = [part.strip() for part in name.split(",") if part.strip()]
+  if parts:
+    tail = parts[-1]
+    if re.search(r"\d", tail) or re.fullmatch(
+      r"(?i)(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl|onesize|one size)",
+      tail.replace(" ", ""),
+    ):
+      return tail
+  return ""
+
+
+def _color_from_attributes(raw: dict) -> str:
+  for attr in _iter_attributes(raw):
+    value = _match_attribute(attr, kind="color")
+    if value:
+      return value
+  return _color_from_name(raw)
+
+
+def _size_from_attributes(raw: dict) -> str:
+  for attr in _iter_attributes(raw):
+    value = _match_attribute(attr, kind="size")
+    if value:
+      return value
+  return _size_from_name(raw)
+
+
+def _merge_attribute_cards(info_cards: list[dict], attr_cards: list[dict]) -> list[dict]:
+  by_id: dict[int, dict] = {}
+  for card in attr_cards:
+    pk = _product_pk(card)
+    if pk:
+      by_id[pk] = card
+
+  merged: list[dict] = []
+  for card in info_cards:
+    pk = _product_pk(card)
+    attr_card = by_id.get(pk) or {}
+    combined = dict(card)
+    if attr_card.get("attributes"):
+      combined["attributes"] = attr_card["attributes"]
+    if attr_card.get("complex_attributes"):
+      combined["complex_attributes"] = attr_card["complex_attributes"]
+    if attr_card.get("name") and not combined.get("name"):
+      combined["name"] = attr_card["name"]
+    merged.append(combined)
+  return merged
+
+
+def _article_label(raw: dict, vendor_code: str) -> str:
+  model = (raw.get("model_info") or {}) if isinstance(raw.get("model_info"), dict) else {}
+  model_name = str(model.get("name") or "").strip()
+  if model_name:
+    return model_name
+  if vendor_code:
+    return re.sub(r"[-_/]\d{1,3}([A-Za-z]{1,3})?$", "", vendor_code).strip() or vendor_code
+  try:
+    return str(int(model.get("model_id") or raw.get("id") or 0))
+  except (TypeError, ValueError):
+    return vendor_code or "—"
+
+
+def _name_group_key(raw: dict) -> str:
+  name = str(raw.get("name") or "").strip().lower()
+  if not name:
+    return ""
+  text = re.sub(r",\s*(?:размер\s*)?\d{2,3}([/\-\d]*)?\s*$", "", name, flags=re.I)
+  text = re.sub(
+    r",\s*(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl)\s*$",
+    "",
+    text,
+    flags=re.I,
+  )
+  return text.strip(" ,")
+
+
+def ozon_group_key(item: CatalogBarcodeItem, raw: dict | None = None) -> str:
+  color = (item.color_label or "").strip().lower()
+  if not color and raw:
+    color = _color_from_name(raw).lower()
+  if not color and raw:
+    color = _name_group_key(raw)
+  if color:
+    return f"ozon:{item.wb_nm_id}:{color}"
+  return f"ozon:{item.wb_nm_id}:offer:{item.vendor_code or item.barcode}"
 
 
 def resolve_seller_ozon_warehouses(
@@ -74,36 +240,6 @@ def _barcodes(raw: dict) -> list[str]:
   return codes
 
 
-def _color_from_attributes(raw: dict) -> str:
-  for attr in raw.get("attributes") or []:
-    if not isinstance(attr, dict):
-      continue
-    name = str(attr.get("name") or "").lower()
-    if "цвет" not in name and "color" not in name:
-      continue
-    values = attr.get("values") or []
-    if values and isinstance(values[0], dict):
-      return str(values[0].get("value") or values[0].get("value_id") or "").strip()
-    if values:
-      return str(values[0]).strip()
-  return ""
-
-
-def _size_from_attributes(raw: dict) -> str:
-  for attr in raw.get("attributes") or []:
-    if not isinstance(attr, dict):
-      continue
-    name = str(attr.get("name") or "").lower()
-    if "размер" not in name and name not in {"size", "sizes"}:
-      continue
-    values = attr.get("values") or []
-    if values and isinstance(values[0], dict):
-      return str(values[0].get("value") or values[0].get("value_id") or "").strip()
-    if values:
-      return str(values[0]).strip()
-  return ""
-
-
 def _article_id(raw: dict) -> int:
   model = (raw.get("model_info") or {}) if isinstance(raw.get("model_info"), dict) else {}
   try:
@@ -121,7 +257,7 @@ def _article_id(raw: dict) -> int:
 def _requires_marking(raw: dict) -> bool:
   if raw.get("is_mandatory_mark") or raw.get("is_kiz"):
     return True
-  for attr in raw.get("attributes") or []:
+  for attr in _iter_attributes(raw):
     if not isinstance(attr, dict):
       continue
     name = str(attr.get("name") or "").lower()
@@ -133,8 +269,31 @@ def _requires_marking(raw: dict) -> bool:
   return False
 
 
-def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
+def _load_ozon_cards(seller: Seller) -> list[dict]:
+  client = ozon_client_for_seller(seller)
+  short = client.product_list_ids()
+  product_ids = []
+  for row in short:
+    try:
+      product_ids.append(int(row.get("product_id") or row.get("id") or 0))
+    except (TypeError, ValueError):
+      continue
+  product_ids = [item for item in product_ids if item]
+  cards = client.product_info_list(product_ids) if product_ids else []
+  if not cards and short:
+    cards = short
+  if cards and product_ids:
+    try:
+      attr_cards = client.product_info_attributes(product_ids=product_ids)
+      cards = _merge_attribute_cards(cards, attr_cards)
+    except OzonApiError:
+      pass
+  return cards
+
+
+def _parse_cards_to_items(cards: list[dict]) -> tuple[list[CatalogBarcodeItem], dict[str, dict]]:
   items: list[CatalogBarcodeItem] = []
+  card_by_barcode: dict[str, dict] = {}
   seen: set[str] = set()
   for card in cards:
     article_id = _article_id(card)
@@ -153,6 +312,7 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
       if barcode in seen:
         continue
       seen.add(barcode)
+      card_by_barcode[barcode] = card
       items.append(
         CatalogBarcodeItem(
           barcode=barcode,
@@ -166,28 +326,58 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
           color_label=color_label,
         )
       )
-  items.sort(key=lambda item: (item.wb_nm_id, item.color_label.lower(), size_sort_key(item.tech_size, item.wb_size), item.barcode))
-  return items
+  items.sort(
+    key=lambda item: (
+      item.wb_nm_id,
+      item.color_label.lower(),
+      size_sort_key(item.tech_size, item.wb_size),
+      item.barcode,
+    )
+  )
+  return items, card_by_barcode
 
 
 def fetch_ozon_catalog_items(seller: Seller) -> list[CatalogBarcodeItem]:
   """Каталог Ozon селлера для поиска групп артикул+цвет."""
   try:
-    client = ozon_client_for_seller(seller)
-    short = client.product_list_ids()
-    product_ids = []
-    for row in short:
-      try:
-        product_ids.append(int(row.get("product_id") or row.get("id") or 0))
-      except (TypeError, ValueError):
-        continue
-    product_ids = [item for item in product_ids if item]
-    cards = client.product_info_list(product_ids) if product_ids else []
+    cards = _load_ozon_cards(seller)
   except (OzonCountsError, OzonApiError) as exc:
     raise CatalogError(str(exc)) from exc
-  if not cards and short:
-    cards = short
-  return _parse_cards_to_items(cards)
+  items, _ = _parse_cards_to_items(cards)
+  return items
+
+
+def fetch_ozon_group_by_barcode(
+  seller: Seller,
+  barcode: str,
+) -> tuple[CatalogBarcodeItem, list[CatalogBarcodeItem], dict]:
+  barcode = normalize_barcode(barcode)
+  if not barcode:
+    raise CatalogError("Пустой баркод")
+  try:
+    cards = _load_ozon_cards(seller)
+  except (OzonCountsError, OzonApiError) as exc:
+    raise CatalogError(str(exc)) from exc
+  items, card_by_barcode = _parse_cards_to_items(cards)
+  anchor = next((item for item in items if item.barcode == barcode), None)
+  if not anchor:
+    raise CatalogError("Баркод не найден в каталоге Ozon")
+
+  anchor_card = card_by_barcode.get(anchor.barcode)
+  anchor_key = ozon_group_key(anchor, anchor_card)
+  grouped = []
+  for item in items:
+    item_card = card_by_barcode.get(item.barcode)
+    if ozon_group_key(item, item_card) == anchor_key:
+      grouped.append(item)
+  grouped.sort(key=lambda item: (size_sort_key(item.tech_size, item.wb_size), item.barcode))
+
+  article_label = _article_label(anchor_card or {}, anchor.vendor_code)
+  return anchor, grouped, {
+    "article_label": article_label,
+    "group_size": len(grouped),
+    "group_key": anchor_key,
+  }
 
 
 def _stock_map(
@@ -234,21 +424,11 @@ def build_ozon_onboarding_preview(
   warehouses = resolve_seller_ozon_warehouses(seller, warehouse_ids)
   try:
     client = ozon_client_for_seller(seller)
-    short = client.product_list_ids()
-    product_ids = []
-    for row in short:
-      try:
-        product_ids.append(int(row.get("product_id") or row.get("id") or 0))
-      except (TypeError, ValueError):
-        continue
-    product_ids = [item for item in product_ids if item]
-    cards = client.product_info_list(product_ids) if product_ids else []
+    cards = _load_ozon_cards(seller)
   except (OzonCountsError, OzonApiError) as exc:
     raise CatalogError(str(exc)) from exc
 
-  if not cards and short:
-    cards = short
-  flat_items = _parse_cards_to_items(cards)
+  flat_items, _ = _parse_cards_to_items(cards)
   if not flat_items:
     raise CatalogError("В Ozon не найдено карточек с баркодом или артикулом")
 

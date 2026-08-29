@@ -26,6 +26,7 @@ export type ArticleGroupPreviewItem = {
   wb_size: string
   size_label: string
   color_label: string
+  article_label: string
   photo_url: string
   requires_marking: boolean
   cell_number: string
@@ -37,9 +38,11 @@ export type ArticleGroupPreviewItem = {
 export type ArticleGroupPreview = {
   group_key: string
   article_id: number
+  article_label: string
   vendor_code: string
   title: string
   color_label: string
+  group_size?: number
   photo_url: string
   scanned_barcode: string
   scanned_quantity: number

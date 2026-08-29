@@ -11,15 +11,18 @@ from apps.warehouse.services.catalog_fetch import (
   normalize_barcode,
   parse_wb_card_to_items,
 )
-from apps.warehouse.services.catalog_fetch_ozon import fetch_ozon_catalog_items
+from apps.warehouse.services.catalog_fetch_ozon import fetch_ozon_group_by_barcode, ozon_group_key
 from apps.warehouse.services.size_sort import size_sort_key
 
 
-def group_key_for_item(marketplace: str, item: CatalogBarcodeItem) -> str:
+def group_key_for_item(
+  marketplace: str,
+  item: CatalogBarcodeItem,
+  raw_card: dict | None = None,
+) -> str:
   mp = normalize_marketplace(marketplace)
-  color = (item.color_label or "").strip().lower()
   if mp == OZON:
-    return f"ozon:{item.wb_nm_id}:{color}"
+    return ozon_group_key(item, raw_card)
   return f"wb:{item.wb_nm_id}"
 
 
@@ -61,26 +64,25 @@ def find_wb_group_by_barcode(seller: Seller, barcode: str) -> tuple[CatalogBarco
 def find_ozon_group_by_barcode(
   seller: Seller,
   barcode: str,
-) -> tuple[CatalogBarcodeItem, list[CatalogBarcodeItem]]:
-  barcode = normalize_barcode(barcode)
-  if not barcode:
-    raise CatalogError("Пустой баркод")
-  items = fetch_ozon_catalog_items(seller)
-  anchor = next((item for item in items if item.barcode == barcode), None)
-  if not anchor:
-    raise CatalogError("Баркод не найден в каталоге Ozon")
-  return anchor, items_in_same_group(OZON, items, anchor)
+) -> tuple[CatalogBarcodeItem, list[CatalogBarcodeItem], dict]:
+  return fetch_ozon_group_by_barcode(seller, barcode)
 
 
 def find_group_by_barcode(
   seller: Seller,
   marketplace: str,
   barcode: str,
-) -> tuple[CatalogBarcodeItem, list[CatalogBarcodeItem]]:
+) -> tuple[CatalogBarcodeItem, list[CatalogBarcodeItem], dict]:
   mp = normalize_marketplace(marketplace)
   if mp == OZON:
     return find_ozon_group_by_barcode(seller, barcode)
-  return find_wb_group_by_barcode(seller, barcode)
+  anchor, items = find_wb_group_by_barcode(seller, barcode)
+  group_key = f"wb:{anchor.wb_nm_id}"
+  return anchor, items, {
+    "article_label": anchor.vendor_code or str(anchor.wb_nm_id),
+    "group_size": len(items),
+    "group_key": group_key,
+  }
 
 
 def serialize_group_item(
@@ -95,6 +97,7 @@ def serialize_group_item(
     "barcode": item.barcode,
     "wb_nm_id": item.wb_nm_id,
     "vendor_code": item.vendor_code,
+    "article_label": item.vendor_code or str(item.wb_nm_id),
     "title": item.title,
     "tech_size": item.tech_size,
     "wb_size": item.wb_size,
@@ -118,13 +121,17 @@ def serialize_group_preview(
   scanned_quantity: int,
   cell_numbers: dict[str, str],
   existing_barcodes: set[str],
+  article_label: str = "",
 ) -> dict:
+  label = article_label or anchor.vendor_code or str(anchor.wb_nm_id)
   return {
     "group_key": group_key_for_item(marketplace, anchor),
     "article_id": anchor.wb_nm_id,
+    "article_label": label,
     "vendor_code": anchor.vendor_code,
     "title": anchor.title,
     "color_label": anchor.color_label or "—",
+    "group_size": len(items),
     "photo_url": anchor.photo_url,
     "scanned_barcode": scanned_barcode,
     "scanned_quantity": scanned_quantity,

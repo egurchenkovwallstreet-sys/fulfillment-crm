@@ -442,14 +442,17 @@ export function ArticleIntakePage() {
           <div className="art-modal" role="dialog" aria-modal="true">
             <h2>Новая группа: артикул + цвет</h2>
             <p className="art-modal__meta">
-              Артикул <strong>{preview.vendor_code || preview.article_id}</strong>
+              Артикул <strong>{preview.article_label || preview.vendor_code || preview.article_id}</strong>
               {' · '}цвет <strong>{preview.color_label}</strong>
-              {' · '}{preview.title}
+              {' · '}размеров: <strong>{preview.group_size ?? previewItems.filter((i) => !i.excluded).length}</strong>
             </p>
+            <p className="art-modal__meta">{preview.title}</p>
             <table className="art-modal__table">
               <thead>
                 <tr>
-                  <th>EU</th>
+                  <th>Артикул</th>
+                  <th>Цвет</th>
+                  <th>Размер</th>
                   <th>Баркод</th>
                   <th>Ячейка</th>
                   <th>Кол-во</th>
@@ -462,6 +465,8 @@ export function ArticleIntakePage() {
                     key={item.barcode}
                     className={item.excluded ? 'art-row--excluded' : ''}
                   >
+                    <td>{item.vendor_code || item.article_label || '—'}</td>
+                    <td>{item.color_label || preview.color_label || '—'}</td>
                     <td>{item.size_label}</td>
                     <td><code>{item.barcode}</code></td>
                     <td>{item.excluded ? '—' : `№ ${item.cell_number}`}</td>
