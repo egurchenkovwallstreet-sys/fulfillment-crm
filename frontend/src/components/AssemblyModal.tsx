@@ -31,16 +31,15 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
   const primaryRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    primaryRef.current?.focus()
+    if (modal.kind !== 'scan-error') {
+      primaryRef.current?.focus()
+    }
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Enter') return
+      // Сканер шлёт Enter после баркода — не закрываем окно ошибки сразу.
+      if (modal.kind === 'scan-error') return
       e.preventDefault()
       if (modal.kind === 'confirm' || loading) return
-      if (modal.kind === 'scan-error') {
-        modal.onDismiss?.()
-        onClose()
-        return
-      }
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
@@ -58,7 +57,11 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
   }
 
   return (
-    <div className="assembly-modal-backdrop" role="presentation" onClick={handlePrimaryClose}>
+    <div
+      className={`assembly-modal-backdrop${isScanError ? ' assembly-modal-backdrop--scan-error' : ''}`}
+      role="presentation"
+      onClick={isScanError ? undefined : handlePrimaryClose}
+    >
       <div
         className={`assembly-modal${
           isScanError

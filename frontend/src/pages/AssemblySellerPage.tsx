@@ -686,11 +686,9 @@ function WbAssemblySellerPage() {
     setSuccess('')
     setScanBusy(true)
     scanRef.current?.blur()
-    const printWin = orderExpectsMarking(barcode) ? null : openPrintHolder()
     try {
       const result = await scanOrderBarcode(id, barcode)
       if (result.action === 'await_marking') {
-        closePrintHolder(printWin)
         flushSync(() => {
           scanPhaseRef.current = 'marking'
           setScanPhase('marking')
@@ -700,19 +698,24 @@ function WbAssemblySellerPage() {
         markingRef.current?.focus()
         void refreshMarkingStatus()
       } else {
-        await finishPrint(result.order, printWin)
+        const printWin = openPrintHolder()
+        try {
+          await finishPrint(result.order, printWin)
+        } catch (printErr) {
+          closePrintHolder(printWin)
+          throw printErr
+        }
         void refreshMarkingStatus()
         void load({ silent: true })
       }
     } catch (err) {
-      closePrintHolder(printWin)
       setScanValue('')
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
         playAssemblyScanErrorBeep()
         setModal({
           kind: 'scan-error',
           title: 'Ошибка',
-          message: 'Товара нет в поставке',
+          message: 'Баркода нет в листе подбора!',
           onDismiss: () => {
             resetScanFlow()
           },

@@ -9,6 +9,11 @@
   padding: 1rem;
 }
 
+.assembly-modal-backdrop--scan-error {
+  background: rgba(127, 29, 29, 0.88);
+  padding: 1.5rem;
+}
+
 .assembly-modal {
   background: #fff;
   border-radius: 12px;
@@ -24,28 +29,47 @@
 }
 
 .assembly-modal--scan-error {
-  max-width: 640px;
-  border-color: #dc2626;
-  background: #fef2f2;
-  box-shadow: 0 24px 48px rgba(220, 38, 38, 0.25);
+  max-width: min(760px, 96vw);
+  padding: 2.75rem 2rem 2rem;
+  border: 4px solid #dc2626;
+  border-radius: 20px;
+  background: #fff1f2;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.35);
+  animation: assembly-scan-error-pop 0.2s ease-out;
+}
+
+@keyframes assembly-scan-error-pop {
+  from {
+    transform: scale(0.94);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .assembly-modal--scan-error h2 {
   color: #991b1b;
-  font-size: 1.65rem;
+  font-size: 1.5rem;
+  text-align: center;
+  margin-bottom: 1rem;
 }
 
 .assembly-modal--scan-error .assembly-modal__message {
-  color: #991b1b;
-  font-size: 1.35rem;
-  font-weight: 800;
+  color: #7f1d1d;
+  font-size: clamp(1.75rem, 5vw, 2.35rem);
+  font-weight: 900;
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 
 .assembly-modal--scan-error .assembly-modal__ok {
-  min-width: 180px;
-  font-size: 1.05rem;
+  min-width: 220px;
+  min-height: 52px;
+  font-size: 1.15rem;
   background: #dc2626;
   border-color: #dc2626;
 }

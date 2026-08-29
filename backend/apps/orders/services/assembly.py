@@ -149,7 +149,7 @@ def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
   if not pick_list or not pick_list.items.exists():
     return
   if not _scan_allowed_in_pick_list(pick_list, scan_value):
-    raise AssemblyError("Товара нет в поставке", code="not_in_pick_list")
+    raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
 
 def _find_active_order(seller: Seller, scan_value: str) -> Order:
