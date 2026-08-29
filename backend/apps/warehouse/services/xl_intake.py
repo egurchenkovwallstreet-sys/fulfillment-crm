@@ -166,6 +166,35 @@ def last_scanned_line(session: XlIntakeSession) -> XlIntakeLine | None:
 
 
 @transaction.atomic
+def update_line_quantity(session: XlIntakeSession, *, barcode: str, quantity: int) -> XlIntakeSession:
+  session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  if not _can_scan(session):
+    raise XlIntakeError("Приёмка завершена — редактирование закрыто")
+  barcode = _normalize_barcode(barcode)
+  if quantity < 0:
+    raise XlIntakeError("Количество не может быть отрицательным")
+  line = XlIntakeLine.objects.select_for_update().filter(session=session, barcode=barcode).first()
+  if not line:
+    raise XlIntakeError("Строка не найдена")
+  line.quantity = quantity
+  line.save(update_fields=["quantity"])
+  session._last_line = line  # noqa: SLF001
+  return session
+
+
+@transaction.atomic
+def delete_line(session: XlIntakeSession, *, barcode: str) -> XlIntakeSession:
+  session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  if not _can_scan(session):
+    raise XlIntakeError("Приёмка завершена — редактирование закрыто")
+  barcode = _normalize_barcode(barcode)
+  deleted, _ = XlIntakeLine.objects.filter(session=session, barcode=barcode).delete()
+  if not deleted:
+    raise XlIntakeError("Строка не найдена")
+  return session
+
+
+@transaction.atomic
 def save_session(session: XlIntakeSession, *, user=None) -> XlIntakeSession:
   session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   if session.status == XlIntakeSession.Status.COMPLETED:

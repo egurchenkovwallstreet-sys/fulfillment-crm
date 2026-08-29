@@ -64,6 +64,20 @@ export function scanXlBarcode(sessionId: number, barcode: string) {
   })
 }
 
+export function updateXlLine(sessionId: number, barcode: string, quantity: number) {
+  return apiFetch<XlIntakeSession>(`/api/warehouse/xl-intake/sessions/${sessionId}/update-line/`, {
+    method: 'POST',
+    body: JSON.stringify({ barcode, quantity }),
+  })
+}
+
+export function deleteXlLine(sessionId: number, barcode: string) {
+  return apiFetch<XlIntakeSession>(`/api/warehouse/xl-intake/sessions/${sessionId}/delete-line/`, {
+    method: 'POST',
+    body: JSON.stringify({ barcode }),
+  })
+}
+
 export function saveXlSession(sessionId: number) {
   return apiFetch<XlIntakeSession>(`/api/warehouse/xl-intake/sessions/${sessionId}/save/`, {
     method: 'POST',

@@ -30,6 +30,8 @@ from .views_xl_intake import (
   XlIntakeCompleteView,
   XlIntakeConnectWbView,
   XlIntakeExcelView,
+  XlIntakeLineDeleteView,
+  XlIntakeLineUpdateView,
   XlIntakeSaveView,
   XlIntakeScanView,
   XlIntakeSessionDetailView,
@@ -38,7 +40,10 @@ from .views_xl_intake import (
 from .views_article_intake import (
   ArticleIntakeCompleteView,
   ArticleIntakeConfirmGroupView,
+  ArticleIntakeDeleteProductView,
+  ArticleIntakeIncrementView,
   ArticleIntakePushView,
+  ArticleIntakeSaveQuantitiesView,
   ArticleIntakeScanView,
   ArticleIntakeSessionDetailView,
   ArticleIntakeSessionListCreateView,
@@ -124,6 +129,16 @@ urlpatterns = [
     name="xl_intake_scan",
   ),
   path(
+    "xl-intake/sessions/<int:session_id>/update-line/",
+    XlIntakeLineUpdateView.as_view(),
+    name="xl_intake_update_line",
+  ),
+  path(
+    "xl-intake/sessions/<int:session_id>/delete-line/",
+    XlIntakeLineDeleteView.as_view(),
+    name="xl_intake_delete_line",
+  ),
+  path(
     "xl-intake/sessions/<int:session_id>/save/",
     XlIntakeSaveView.as_view(),
     name="xl_intake_save",
@@ -162,6 +177,21 @@ urlpatterns = [
     "article-intake/sessions/<int:session_id>/confirm-group/",
     ArticleIntakeConfirmGroupView.as_view(),
     name="article_intake_confirm_group",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/increment/",
+    ArticleIntakeIncrementView.as_view(),
+    name="article_intake_increment",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/save-quantities/",
+    ArticleIntakeSaveQuantitiesView.as_view(),
+    name="article_intake_save_quantities",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/delete-product/",
+    ArticleIntakeDeleteProductView.as_view(),
+    name="article_intake_delete_product",
   ),
   path(
     "article-intake/sessions/<int:session_id>/push-marketplace/",

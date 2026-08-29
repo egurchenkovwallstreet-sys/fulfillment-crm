@@ -13,7 +13,10 @@ from apps.warehouse.services.article_intake import (
   complete_session,
   confirm_group,
   create_session,
+  delete_intake_product,
+  increment_product,
   push_to_marketplace,
+  save_group_quantities,
   scan_barcode,
   serialize_session,
 )
@@ -68,12 +71,32 @@ class ArticleIntakeScanView(APIView):
   def post(self, request, session_id):
     session = _session_or_404(session_id)
     barcode = str(request.data.get("barcode") or "")
+    scan_mode = str(request.data.get("scan_mode") or "lookup")
     try:
       quantity = int(request.data.get("quantity") or 0)
     except (TypeError, ValueError):
       quantity = 0
     try:
-      result = scan_barcode(session, barcode=barcode, quantity=quantity, user=request.user)
+      result = scan_barcode(
+        session,
+        barcode=barcode,
+        quantity=quantity,
+        scan_mode=scan_mode,
+        user=request.user,
+      )
+    except ArticleIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+class ArticleIntakeIncrementView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    barcode = str(request.data.get("barcode") or "")
+    try:
+      result = increment_product(session, barcode=barcode, user=request.user)
     except ArticleIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
@@ -85,10 +108,6 @@ class ArticleIntakeConfirmGroupView(APIView):
   def post(self, request, session_id):
     session = _session_or_404(session_id)
     scanned_barcode = str(request.data.get("scanned_barcode") or "")
-    try:
-      scanned_quantity = int(request.data.get("scanned_quantity") or 0)
-    except (TypeError, ValueError):
-      scanned_quantity = 0
     items = request.data.get("items") or []
     if not isinstance(items, list):
       items = []
@@ -96,10 +115,47 @@ class ArticleIntakeConfirmGroupView(APIView):
       result = confirm_group(
         session,
         scanned_barcode=scanned_barcode,
-        scanned_quantity=scanned_quantity,
+        scanned_quantity=0,
         items=items,
         user=request.user,
       )
+    except ArticleIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+class ArticleIntakeSaveQuantitiesView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    group_key = str(request.data.get("group_key") or "")
+    items = request.data.get("items") or []
+    if not isinstance(items, list):
+      items = []
+    try:
+      result = save_group_quantities(
+        session,
+        group_key=group_key,
+        items=items,
+        user=request.user,
+      )
+    except ArticleIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+class ArticleIntakeDeleteProductView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    try:
+      product_id = int(request.data.get("product_id") or 0)
+    except (TypeError, ValueError):
+      product_id = 0
+    try:
+      result = delete_intake_product(session, product_id=product_id, user=request.user)
     except ArticleIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)

@@ -16,10 +16,12 @@ from apps.warehouse.services.xl_intake import (
   complete_session,
   create_session,
   create_session_for_seller,
+  delete_line,
   last_scanned_line,
   save_session,
   scan_unit,
   serialize_session,
+  update_line_quantity,
 )
 
 
@@ -85,6 +87,36 @@ class XlIntakeScanView(APIView):
     except XlIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(serialize_session(session, last_line=last_scanned_line(session)))
+
+
+class XlIntakeLineUpdateView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    barcode = str(request.data.get("barcode") or "")
+    try:
+      quantity = int(request.data.get("quantity") or 0)
+    except (TypeError, ValueError):
+      quantity = 0
+    try:
+      session = update_line_quantity(session, barcode=barcode, quantity=quantity)
+    except XlIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serialize_session(session))
+
+
+class XlIntakeLineDeleteView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(session_id)
+    barcode = str(request.data.get("barcode") or "")
+    try:
+      session = delete_line(session, barcode=barcode)
+    except XlIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(serialize_session(session))
 
 
 class XlIntakeSaveView(APIView):

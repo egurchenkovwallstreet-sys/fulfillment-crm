@@ -279,8 +279,10 @@ class ArticleIntakeSession(models.Model):
     db_index=True,
   )
   confirmed_group_keys = models.JSONField("Подтверждённые группы", default=list, blank=True)
+  active_group_key = models.CharField("Текущая группа", max_length=255, blank=True, default="")
   scan_count = models.PositiveIntegerField("Сканов", default=0)
   total_units = models.PositiveIntegerField("Принято шт.", default=0)
+  marketplace_pushed_at = models.DateTimeField("Выгрузка на MP", null=True, blank=True)
   created_by = models.ForeignKey(
     "accounts.User",
     on_delete=models.SET_NULL,

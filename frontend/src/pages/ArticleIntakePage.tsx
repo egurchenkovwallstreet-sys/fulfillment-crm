@@ -1,25 +1,36 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   completeArticleIntakeSession,
   confirmArticleGroup,
   createArticleIntakeSession,
+  deleteArticleIntakeProduct,
   fetchArticleIntakeSession,
   fetchArticleIntakeSessions,
+  incrementArticleIntake,
   pushArticleIntakeToMarketplace,
+  saveArticleGroupQuantities,
   scanArticleIntake,
   type ArticleGroupPreview,
   type ArticleGroupPreviewItem,
+  type ArticleIntakeProduct,
   type ArticleIntakeSession,
 } from '../api/articleIntake'
-import { fetchSellers, type Seller } from '../api/warehouse'
+import { fetchProductCellLabel, fetchSellers, type Seller } from '../api/warehouse'
 import { fetchSellerOzonWarehouses, fetchSellerWarehouses, type SellerOzonWarehouse, type SellerWarehouse } from '../api/sellers'
+import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
+import { printCellLabel } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
 import './ArticleIntakePage.css'
 
 const STATUS_LABEL: Record<ArticleIntakeSession['status'], string> = {
   active: 'Приёмка',
   completed: 'Завершена',
+}
+
+function groupKeys(session: ArticleIntakeSession | null): string[] {
+  if (!session?.products?.length) return []
+  return [...new Set(session.products.map((p) => p.article_group_key).filter(Boolean))]
 }
 
 export function ArticleIntakePage() {
@@ -36,7 +47,6 @@ export function ArticleIntakePage() {
   const [companyName, setCompanyName] = useState('')
   const [existingSellerId, setExistingSellerId] = useState<number | ''>('')
   const [barcode, setBarcode] = useState('')
-  const [quantityInput, setQuantityInput] = useState('1')
   const [wbWarehouses, setWbWarehouses] = useState<SellerWarehouse[]>([])
   const [ozonWarehouses, setOzonWarehouses] = useState<SellerOzonWarehouse[]>([])
   const [pushWarehouseId, setPushWarehouseId] = useState<number | ''>('')
@@ -44,16 +54,48 @@ export function ArticleIntakePage() {
   const [preview, setPreview] = useState<ArticleGroupPreview | null>(null)
   const [previewItems, setPreviewItems] = useState<ArticleGroupPreviewItem[]>([])
   const [zoomPhotoUrl, setZoomPhotoUrl] = useState<string | null>(null)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [activeGroupKey, setActiveGroupKey] = useState('')
+  const [entryMode, setEntryMode] = useState<'piece' | 'manual'>('piece')
+  const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({})
+  const [cellHit, setCellHit] = useState<ArticleIntakeProduct | null>(null)
+  const [resultModal, setResultModal] = useState<CrmResultModalState | null>(null)
   const [loading, setLoading] = useState(false)
 
   const activeId = sessionId ? Number(sessionId) : null
-  const canScan = session?.status === 'active'
+  const canEdit = session?.can_edit ?? false
+  const locked = Boolean(session?.marketplace_pushed_at)
+  const groups = useMemo(() => groupKeys(session), [session])
+
+  const activeProducts = useMemo(
+    () => (session?.products || []).filter((p) => p.article_group_key === activeGroupKey),
+    [session?.products, activeGroupKey],
+  )
 
   const focusBarcode = useCallback(() => {
     window.setTimeout(() => barcodeRef.current?.focus(), 20)
   }, [])
+
+  const syncQtyDraft = useCallback((products: ArticleIntakeProduct[], groupKey: string) => {
+    const next: Record<string, string> = {}
+    for (const p of products) {
+      if (p.article_group_key === groupKey) {
+        next[p.barcode] = String(p.quantity ?? 0)
+      }
+    }
+    setQtyDraft(next)
+  }, [])
+
+  const applySession = useCallback(
+    (next: ArticleIntakeSession) => {
+      setSession(next)
+      const key = next.active_group_key || groupKeys(next)[0] || ''
+      setActiveGroupKey(key)
+      if (key && next.products) {
+        syncQtyDraft(next.products, key)
+      }
+    },
+    [syncQtyDraft],
+  )
 
   const loadHome = useCallback(async () => {
     try {
@@ -61,7 +103,11 @@ export function ArticleIntakePage() {
       setSessions(list)
       setSellers(sellerList)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось загрузить список',
+      })
     }
   }, [])
 
@@ -73,10 +119,16 @@ export function ArticleIntakePage() {
     }
     setLoading(true)
     fetchArticleIntakeSession(activeId)
-      .then(setSession)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Сессия не найдена'))
+      .then(applySession)
+      .catch((err) =>
+        setResultModal({
+          kind: 'error',
+          title: 'Ошибка',
+          message: err instanceof Error ? err.message : 'Сессия не найдена',
+        }),
+      )
       .finally(() => setLoading(false))
-  }, [activeId, loadHome])
+  }, [activeId, applySession, loadHome])
 
   useEffect(() => {
     if (!session?.seller_id) return
@@ -92,24 +144,33 @@ export function ArticleIntakePage() {
   }, [session?.seller_id, isOzon])
 
   useEffect(() => {
-    if (canScan) focusBarcode()
-  }, [canScan, focusBarcode, session?.id])
+    if (canEdit) focusBarcode()
+  }, [canEdit, focusBarcode, session?.id, activeGroupKey, entryMode])
+
+  useEffect(() => {
+    if (activeGroupKey && session?.products) {
+      syncQtyDraft(session.products, activeGroupKey)
+    }
+  }, [activeGroupKey, session?.products, syncQtyDraft])
 
   async function startNew() {
     const name = companyName.trim()
     if (!name && !existingSellerId) {
-      setError('Укажите название ИП или выберите клиента')
+      setResultModal({ kind: 'error', title: 'Ошибка', message: 'Укажите название ИП или выберите клиента' })
       return
     }
     setLoading(true)
-    setError('')
     try {
       const created = existingSellerId
         ? await createArticleIntakeSession({ seller_id: Number(existingSellerId) })
         : await createArticleIntakeSession({ company_name: name })
       navigate(`/intake-article/${created.id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось начать приёмку')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось начать приёмку',
+      })
     } finally {
       setLoading(false)
     }
@@ -117,37 +178,46 @@ export function ArticleIntakePage() {
 
   async function handleScan(e?: FormEvent) {
     e?.preventDefault()
-    if (!activeId || !canScan) return
+    if (!activeId || !canEdit) return
     const value = barcode.trim()
-    const quantity = parseInt(quantityInput, 10)
     if (value.length < 4) {
-      setError('Отсканируйте баркод')
-      return
-    }
-    if (!Number.isFinite(quantity) || quantity < 0) {
-      setError('Укажите количество')
+      setResultModal({ kind: 'error', title: 'Ошибка', message: 'Отсканируйте баркод' })
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
-      const result = await scanArticleIntake(activeId, value, quantity)
-      setSession(result.session)
-      if (result.action === 'added') {
-        setSuccess(
-          `+${result.quantity_added} шт. · яч. ${result.product.cell_number} · остаток ${result.product.quantity}`,
-        )
+      const inSession = session?.products?.some((p) => p.barcode === value)
+      if (entryMode === 'piece' && inSession) {
+        const result = await incrementArticleIntake(activeId, value)
+        applySession(result.session)
+        setCellHit(result.product)
         setBarcode('')
-        setQuantityInput('1')
-        focusBarcode()
-      } else {
+        return
+      }
+
+      const result = await scanArticleIntake(activeId, value, { scan_mode: 'lookup' })
+      applySession(result.session)
+      setBarcode('')
+
+      if (result.action === 'preview') {
         setPreview(result.preview)
         setPreviewItems(result.preview.items.map((item) => ({ ...item })))
-        setBarcode('')
+        return
+      }
+      if (result.action === 'incremented' || result.action === 'added') {
+        setCellHit(result.product)
+        return
+      }
+      if (result.action === 'known') {
+        setCellHit(result.product)
+        setActiveGroupKey(result.product.article_group_key)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка скана')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка скана',
+        message: err instanceof Error ? err.message : 'Скан не принят',
+      })
     } finally {
       setLoading(false)
     }
@@ -166,11 +236,7 @@ export function ArticleIntakePage() {
     if (!item) return
     if (!item.excluded) {
       const label = item.size_label || barcodeValue
-      if (
-        !window.confirm(
-          `Удалить ячейку для размера ${label}?\n\nРазмер не будет создан в CRM.`,
-        )
-      ) {
+      if (!window.confirm(`Удалить ячейку для размера ${label}?\n\nРазмер не будет создан в CRM.`)) {
         return
       }
     }
@@ -185,60 +251,138 @@ export function ArticleIntakePage() {
     if (!activeId || !preview) return
     const activeCount = previewItems.filter((item) => !item.excluded).length
     if (activeCount === 0) {
-      setError('Оставьте хотя бы один размер')
-      return
-    }
-    if (
-      !window.confirm(
-        `Создать ${activeCount} ячеек для артикула ${preview.vendor_code || preview.article_id}, цвет «${preview.color_label}»?`,
-      )
-    ) {
+      setResultModal({ kind: 'error', title: 'Ошибка', message: 'Оставьте хотя бы один размер' })
       return
     }
     setLoading(true)
-    setError('')
     try {
       const result = await confirmArticleGroup(activeId, {
         scanned_barcode: preview.scanned_barcode,
-        scanned_quantity: preview.scanned_quantity,
         items: previewItems.map((item) => ({
           barcode: item.barcode,
           cell_number: item.cell_number,
           excluded: item.excluded,
         })),
       })
-      setSession(result.session)
+      applySession(result.session)
       setPreview(null)
       setPreviewItems([])
-      setSuccess(
-        `Создано ${result.created_products} ячеек (${result.created_cells.join(', ')}), +${result.added_units} шт.`,
-      )
+      setActiveGroupKey(result.group_key)
+      setResultModal({
+        kind: 'success',
+        title: 'Ячейки созданы',
+        message: `Создано ${result.created_products} ячеек.\nТеперь внесите остатки по размерам.`,
+      })
       focusBarcode()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка подтверждения')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось создать ячейки',
+      })
     } finally {
       setLoading(false)
     }
   }
 
-  async function handlePush() {
-    if (!activeId || !pushWarehouseId) {
-      setError('Выберите склад для выгрузки')
+  async function handleSaveQuantities() {
+    if (!activeId || !activeGroupKey || !canEdit) return
+    const items = activeProducts.map((p) => ({
+      barcode: p.barcode,
+      quantity: Math.max(0, parseInt(qtyDraft[p.barcode] || '0', 10) || 0),
+    }))
+    setLoading(true)
+    try {
+      const result = await saveArticleGroupQuantities(activeId, activeGroupKey, items)
+      applySession(result.session)
+      setResultModal({
+        kind: 'success',
+        title: 'Остатки сохранены',
+        message: `Группа сохранена.\nОбновлено позиций: ${result.updated}`,
+      })
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось сохранить остатки',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDeleteProduct(product: ArticleIntakeProduct) {
+    if (!activeId || !canEdit) return
+    if (
+      !window.confirm(
+        `Удалить баркод ${product.barcode}?\n\nЯчейка №${product.cell_number} и количество будут удалены.`,
+      )
+    ) {
       return
     }
-    const modeLabel = pushMode === 'replace' ? 'заменить остатки' : 'прибавить к маркетплейсу'
+    setLoading(true)
+    try {
+      const result = await deleteArticleIntakeProduct(activeId, product.id)
+      applySession(result.session)
+      setResultModal({
+        kind: 'success',
+        title: 'Удалено',
+        message: `Баркод ${product.barcode} и ячейка №${product.cell_number} удалены.`,
+      })
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось удалить',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handlePrintLabel(product: ArticleIntakeProduct) {
+    try {
+      const label = await fetchProductCellLabel(product.id)
+      printCellLabel(label, true)
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Печать',
+        message: err instanceof Error ? err.message : 'Не удалось получить этикетку',
+      })
+    }
+  }
+
+  async function handlePush() {
+    if (!activeId || !pushWarehouseId) {
+      setResultModal({ kind: 'error', title: 'Ошибка', message: 'Выберите склад для выгрузки' })
+      return
+    }
+    const modeLabel = pushMode === 'replace' ? 'заменить остатки в ЛК' : 'прибавить к остаткам в ЛК'
     if (!window.confirm(`Выгрузить остатки из CRM на ${mpName} (${modeLabel})?`)) return
     setLoading(true)
-    setError('')
     try {
-      const result = await pushArticleIntakeToMarketplace(
-        activeId,
-        Number(pushWarehouseId),
-        pushMode,
-      )
-      setSuccess(result.message)
+      const result = await pushArticleIntakeToMarketplace(activeId, Number(pushWarehouseId), pushMode)
+      applySession(result.session)
+      if (result.error_count > 0) {
+        setResultModal({
+          kind: 'error',
+          title: 'Выгрузка с ошибками',
+          message: `${result.message}\n\nПроверьте ошибки в журнале.`,
+        })
+      } else {
+        setResultModal({
+          kind: 'success',
+          title: 'Выгрузка выполнена',
+          message: result.message + (result.locked ? '\n\nПриёмка заблокирована для редактирования.' : ''),
+        })
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка выгрузки')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка выгрузки',
+        message: err instanceof Error ? err.message : 'Не удалось выгрузить',
+      })
     } finally {
       setLoading(false)
     }
@@ -246,15 +390,18 @@ export function ArticleIntakePage() {
 
   async function handleComplete() {
     if (!activeId) return
-    if (!window.confirm('Завершить приёмку? Сканирование будет закрыто.')) return
+    if (!window.confirm('Завершить приёмку?')) return
     setLoading(true)
-    setError('')
     try {
       const next = await completeArticleIntakeSession(activeId)
-      setSession(next)
-      setSuccess('Приёмка завершена')
+      applySession(next)
+      setResultModal({ kind: 'success', title: 'Готово', message: 'Приёмка завершена.' })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка')
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось завершить',
+      })
     } finally {
       setLoading(false)
     }
@@ -268,39 +415,39 @@ export function ArticleIntakePage() {
         <header className="page__header">
           <div>
             <h1>Приёмка с ячейками по артикулам</h1>
-            <p>
-              Скан баркода → все размеры артикула и цвета из {mpName} → ячейки по EU · остатки сначала в CRM
-            </p>
+            <p>Скан → проверка артикула и цвета → ячейки → остатки на фулфилменте → выгрузка на {mpName}</p>
           </div>
           <Link to="/warehouse" className="btn btn--secondary">← Склад</Link>
         </header>
 
-        {error && <div className="alert alert--error">{error}</div>}
-
         <div className="art-home">
           <section className="art-card">
             <h2>Новая приёмка</h2>
-            <label className="art-field">
-              Клиент (если уже есть)
-              <select
-                value={existingSellerId}
-                onChange={(e) => setExistingSellerId(e.target.value ? Number(e.target.value) : '')}
-              >
-                <option value="">— новый селлер —</option>
-                {sellers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.company_name}</option>
-                ))}
-              </select>
-            </label>
-            {!existingSellerId && (
+            <div className="crm-selector-stack">
               <label className="art-field">
-                Название ИП / компании
-                <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+                Клиент (если уже есть)
+                <select
+                  value={existingSellerId}
+                  onChange={(e) => setExistingSellerId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">— новый селлер —</option>
+                  {sellers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.company_name}</option>
+                  ))}
+                </select>
               </label>
-            )}
-            <button type="button" className="btn btn--primary" disabled={loading} onClick={() => void startNew()}>
-              Начать
-            </button>
+              {!existingSellerId && (
+                <label className="art-field">
+                  Название ИП / компании
+                  <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+                </label>
+              )}
+            </div>
+            <div className="art-card__actions">
+              <button type="button" className="btn btn--primary" disabled={loading} onClick={() => void startNew()}>
+                Начать
+              </button>
+            </div>
           </section>
 
           <section className="art-card">
@@ -308,11 +455,13 @@ export function ArticleIntakePage() {
             {sessions.length === 0 ? (
               <p className="art-muted">Пока нет сессий</p>
             ) : (
-              <ul>
+              <ul className="art-session-list">
                 {sessions.slice(0, 12).map((item) => (
                   <li key={item.id}>
                     <Link to={`/intake-article/${item.id}`}>
-                      #{item.id} · {item.seller_name} · {STATUS_LABEL[item.status]} · {item.total_units} шт.
+                      #{item.id} · {item.seller_name} · {STATUS_LABEL[item.status]}
+                      {item.marketplace_pushed_at ? ' · выгружено' : ' · продолжить'}
+                      {' · '}{item.total_units} шт.
                     </Link>
                   </li>
                 ))}
@@ -320,6 +469,8 @@ export function ArticleIntakePage() {
             )}
           </section>
         </div>
+
+        {resultModal && <CrmResultModal modal={resultModal} onClose={() => setResultModal(null)} />}
       </div>
     )
   }
@@ -329,13 +480,13 @@ export function ArticleIntakePage() {
       <header className="page__header">
         <div>
           <h1>Приёмка #{activeId}</h1>
-          <p>{session?.seller_name} · {session ? STATUS_LABEL[session.status] : '…'}</p>
+          <p>
+            {session?.seller_name} · {session ? STATUS_LABEL[session.status] : '…'}
+            {locked ? ' · заблокировано после выгрузки' : ''}
+          </p>
         </div>
         <Link to="/intake-article" className="btn btn--secondary">← Список</Link>
       </header>
-
-      {error && <div className="alert alert--error">{error}</div>}
-      {success && <div className="alert alert--success">{success}</div>}
 
       {session && (
         <>
@@ -343,49 +494,140 @@ export function ArticleIntakePage() {
             <div className="art-stats">
               <span>Групп: <strong>{session.confirmed_groups_count}</strong></span>
               <span>Товаров: <strong>{session.products_count}</strong></span>
-              <span>Принято: <strong>{session.total_units} шт.</strong></span>
-              <span>Сканов: <strong>{session.scan_count}</strong></span>
+              <span>На складе: <strong>{session.total_units} шт.</strong></span>
             </div>
 
-            {canScan ? (
-              <form onSubmit={(e) => void handleScan(e)}>
-                <div className="art-scan-row">
-                  <label className="art-field">
-                    Баркод
-                    <input
-                      ref={barcodeRef}
-                      value={barcode}
-                      onChange={(e) => setBarcode(e.target.value)}
-                      onKeyDown={onBarcodeKeyDown}
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label className="art-field">
-                    Кол-во
-                    <input
-                      type="number"
-                      min={0}
-                      value={quantityInput}
-                      onChange={(e) => setQuantityInput(e.target.value)}
-                    />
-                  </label>
-                  <button type="submit" className="btn btn--primary" disabled={loading}>
-                    Скан
-                  </button>
-                </div>
-                <p className="art-muted">
-                  Новый артикул+цвет — покажем все размеры для подтверждения ячеек. Тот же артикул — только +остаток.
-                </p>
-              </form>
+            {canEdit ? (
+              <>
+                <form onSubmit={(e) => void handleScan(e)}>
+                  <div className="art-scan-row">
+                    <label className="art-field">
+                      Баркод
+                      <input
+                        ref={barcodeRef}
+                        value={barcode}
+                        onChange={(e) => setBarcode(e.target.value)}
+                        onKeyDown={onBarcodeKeyDown}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <div className="art-field art-field--mode">
+                      <span className="art-field__label">Ввод остатков</span>
+                      <div className="art-mode-toggle">
+                        <button
+                          type="button"
+                          className={`btn btn--small${entryMode === 'piece' ? ' btn--primary' : ' btn--secondary'}`}
+                          onClick={() => setEntryMode('piece')}
+                        >
+                          По 1 (скан)
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn--small${entryMode === 'manual' ? ' btn--primary' : ' btn--secondary'}`}
+                          onClick={() => setEntryMode('manual')}
+                        >
+                          Числом
+                        </button>
+                      </div>
+                    </div>
+                    <button type="submit" className="btn btn--primary art-scan-row__submit" disabled={loading}>
+                      {entryMode === 'piece' && activeProducts.length > 0 ? '+1 скан' : 'Проверить'}
+                    </button>
+                  </div>
+                  <p className="art-muted">
+                    Новый цвет — проверка группы и создание ячеек. После ячеек — скан +1 или ручной ввод, затем «Сохранить количество».
+                  </p>
+                </form>
+
+                {groups.length > 0 && (
+                  <div className="art-qty-panel">
+                    <div className="art-qty-panel__head">
+                      <label className="art-field art-field--inline">
+                        Цвет / группа
+                        <select
+                          value={activeGroupKey}
+                          onChange={(e) => setActiveGroupKey(e.target.value)}
+                        >
+                          {groups.map((key) => (
+                            <option key={key} value={key}>{key.replace(/^ozon:\d+:/, '')}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={loading || !activeGroupKey}
+                        onClick={() => void handleSaveQuantities()}
+                      >
+                        Сохранить количество
+                      </button>
+                    </div>
+                    <table className="art-modal__table">
+                      <thead>
+                        <tr>
+                          <th>Размер</th>
+                          <th>Баркод</th>
+                          <th>Ячейка</th>
+                          <th>Кол-во</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeProducts.map((product) => (
+                          <tr key={product.id}>
+                            <td>{product.tech_size || '—'}</td>
+                            <td><code>{product.barcode}</code></td>
+                            <td>№ {product.cell_number}</td>
+                            <td>
+                              {entryMode === 'manual' ? (
+                                <input
+                                  className="art-qty-input"
+                                  type="number"
+                                  min={0}
+                                  value={qtyDraft[product.barcode] ?? '0'}
+                                  onChange={(e) =>
+                                    setQtyDraft((prev) => ({ ...prev, [product.barcode]: e.target.value }))
+                                  }
+                                />
+                              ) : (
+                                product.quantity
+                              )}
+                            </td>
+                            <td className="art-row-actions">
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--small"
+                                onClick={() => void handlePrintLabel(product)}
+                              >
+                                Этикетка
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--danger-outline btn--small"
+                                onClick={() => void handleDeleteProduct(product)}
+                              >
+                                Удалить
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             ) : (
-              <p className="art-muted">Сканирование закрыто</p>
+              <p className="art-muted">
+                {locked
+                  ? 'Редактирование закрыто после выгрузки на маркетплейс.'
+                  : 'Сканирование закрыто.'}
+              </p>
             )}
 
-            {session.confirmed_groups_count > 0 && (
+            {session.can_push && session.confirmed_groups_count > 0 && (
               <div className="art-push">
                 <h3>Выгрузка на {mpName}</h3>
-                <p className="art-muted">Остатки из CRM → маркетплейс (можно до или после завершения)</p>
-                <div className="art-push-grid">
+                <div className="crm-selector-row art-push-grid">
                   <label className="art-field">
                     FBS-склад
                     <select
@@ -406,13 +648,13 @@ export function ArticleIntakePage() {
                       value={pushMode}
                       onChange={(e) => setPushMode(e.target.value as 'replace' | 'add')}
                     >
-                      <option value="replace">Заменить на наши остатки</option>
-                      <option value="add">Прибавить к маркетплейсу</option>
+                      <option value="replace">Заменить на остатки CRM</option>
+                      <option value="add">Прибавить к ЛК</option>
                     </select>
                   </label>
                   <button
                     type="button"
-                    className="btn btn--secondary"
+                    className="btn btn--secondary art-push-grid__btn"
                     disabled={loading || !pushWarehouseId}
                     onClick={() => void handlePush()}
                   >
@@ -422,8 +664,8 @@ export function ArticleIntakePage() {
               </div>
             )}
 
-            {canScan && session.confirmed_groups_count > 0 && (
-              <div style={{ marginTop: '1rem' }}>
+            {canEdit && session.confirmed_groups_count > 0 && (
+              <div className="art-card__actions">
                 <button
                   type="button"
                   className="btn btn--secondary"
@@ -443,12 +685,12 @@ export function ArticleIntakePage() {
           <div className="art-modal" role="dialog" aria-modal="true">
             <div className="art-modal__head">
               <div className="art-modal__head-text">
-                <h2>Новая группа: артикул + цвет</h2>
+                <h2>Проверка: артикул + цвет</h2>
                 <p className="art-modal__meta">
-                  Артикул <strong>{preview.article_label || preview.vendor_code || preview.article_id}</strong>
+                  Артикул <strong>{preview.article_label || preview.vendor_code}</strong>
                   {' · '}цвет <strong>{preview.color_label}</strong>
                   {' · '}размеров:{' '}
-                  <strong>{preview.group_size ?? previewItems.filter((i) => !i.excluded).length}</strong>
+                  <strong>{previewItems.filter((i) => !i.excluded).length}</strong>
                 </p>
                 <p className="art-modal__meta">{preview.title}</p>
               </div>
@@ -484,7 +726,6 @@ export function ArticleIntakePage() {
                   <th>Размер</th>
                   <th>Баркод</th>
                   <th>Ячейка</th>
-                  <th>Кол-во</th>
                   <th />
                 </tr>
               </thead>
@@ -498,25 +739,24 @@ export function ArticleIntakePage() {
                     .filter(Boolean)
                     .join(' ')
                   return (
-                  <tr key={item.barcode} className={rowClass || undefined}>
-                    <td>{item.vendor_code || item.article_label || '—'}</td>
-                    <td>{item.color_label || preview.color_label || '—'}</td>
-                    <td>{item.size_label}</td>
-                    <td><code>{item.barcode}</code></td>
-                    <td>{item.excluded ? '—' : `№ ${item.cell_number}`}</td>
-                    <td>{item.quantity > 0 ? item.quantity : 0}</td>
-                    <td>
-                      {item.barcode !== preview.scanned_barcode && !item.already_in_crm && (
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--small"
-                          onClick={() => toggleExcludeItem(item.barcode)}
-                        >
-                          {item.excluded ? 'Вернуть' : 'Удалить ячейку'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                    <tr key={item.barcode} className={rowClass || undefined}>
+                      <td>{item.vendor_code || item.article_label || '—'}</td>
+                      <td>{item.color_label || preview.color_label || '—'}</td>
+                      <td>{item.size_label}</td>
+                      <td><code>{item.barcode}</code></td>
+                      <td>{item.excluded ? '—' : `№ ${item.cell_number}`}</td>
+                      <td>
+                        {item.barcode !== preview.scanned_barcode && !item.already_in_crm && (
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--small"
+                            onClick={() => toggleExcludeItem(item.barcode)}
+                          >
+                            {item.excluded ? 'Вернуть' : 'Удалить ячейку'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
                   )
                 })}
               </tbody>
@@ -529,7 +769,6 @@ export function ArticleIntakePage() {
                 onClick={() => {
                   setPreview(null)
                   setPreviewItems([])
-                  setZoomPhotoUrl(null)
                   focusBarcode()
                 }}
               >
@@ -541,9 +780,25 @@ export function ArticleIntakePage() {
                 disabled={loading}
                 onClick={() => void handleConfirmGroup()}
               >
-                Создать ячейки
+                Сохранить ячейки
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {cellHit && (
+        <div className="art-cell-hit-backdrop" onClick={() => setCellHit(null)} role="presentation">
+          <div className="art-cell-hit" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <p className="art-cell-hit__label">Ячейка</p>
+            <p className="art-cell-hit__number">№ {cellHit.cell_number}</p>
+            <p className="art-cell-hit__meta">
+              {cellHit.tech_size || '—'} · <code>{cellHit.barcode}</code>
+            </p>
+            <p className="art-cell-hit__qty">Количество: <strong>{cellHit.quantity}</strong></p>
+            <button type="button" className="btn btn--primary" onClick={() => setCellHit(null)}>
+              Понятно
+            </button>
           </div>
         </div>
       )}
@@ -556,13 +811,7 @@ export function ArticleIntakePage() {
           aria-label="Фото товара"
           onClick={() => setZoomPhotoUrl(null)}
         >
-          <button
-            type="button"
-            className="art-photo-zoom__close"
-            onClick={() => setZoomPhotoUrl(null)}
-          >
-            ✕
-          </button>
+          <button type="button" className="art-photo-zoom__close" onClick={() => setZoomPhotoUrl(null)}>✕</button>
           <img
             src={zoomPhotoUrl}
             alt="Фото товара"
@@ -571,6 +820,8 @@ export function ArticleIntakePage() {
           />
         </div>
       )}
+
+      {resultModal && <CrmResultModal modal={resultModal} onClose={() => setResultModal(null)} />}
 
       {loading && !session && <p>Загрузка…</p>}
     </div>

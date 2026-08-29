@@ -2,6 +2,17 @@ import { apiFetch } from './client'
 
 export type ArticleIntakeStatus = 'active' | 'completed'
 
+export type ArticleIntakeProduct = {
+  id: number
+  barcode: string
+  name: string
+  quantity: number
+  cell_number: string
+  tech_size: string
+  color_label: string
+  article_group_key: string
+}
+
 export type ArticleIntakeSession = {
   id: number
   status: ArticleIntakeStatus
@@ -12,9 +23,14 @@ export type ArticleIntakeSession = {
   total_units: number
   confirmed_groups_count: number
   products_count: number
+  active_group_key: string
+  marketplace_pushed_at: string | null
   created_at: string
   completed_at: string | null
   can_scan?: boolean
+  can_edit?: boolean
+  can_push?: boolean
+  products?: ArticleIntakeProduct[]
 }
 
 export type ArticleGroupPreviewItem = {
@@ -52,16 +68,7 @@ export type ArticleGroupPreview = {
 
 export type ArticleScanAdded = {
   action: 'added'
-  product: {
-    id: number
-    barcode: string
-    name: string
-    quantity: number
-    cell_number: string
-    tech_size: string
-    color_label: string
-    article_group_key: string
-  }
+  product: ArticleIntakeProduct
   quantity_added: number
   session: ArticleIntakeSession
 }
@@ -72,7 +79,24 @@ export type ArticleScanPreview = {
   session: ArticleIntakeSession
 }
 
-export type ArticleScanResult = ArticleScanAdded | ArticleScanPreview
+export type ArticleScanKnown = {
+  action: 'known'
+  product: ArticleIntakeProduct
+  session: ArticleIntakeSession
+}
+
+export type ArticleScanIncremented = {
+  action: 'incremented'
+  product: ArticleIntakeProduct
+  quantity_added: number
+  session: ArticleIntakeSession
+}
+
+export type ArticleScanResult =
+  | ArticleScanAdded
+  | ArticleScanPreview
+  | ArticleScanKnown
+  | ArticleScanIncremented
 
 export function fetchArticleIntakeSessions() {
   return apiFetch<ArticleIntakeSession[]>('/api/warehouse/article-intake/sessions/')
@@ -89,18 +113,35 @@ export function fetchArticleIntakeSession(sessionId: number) {
   return apiFetch<ArticleIntakeSession>(`/api/warehouse/article-intake/sessions/${sessionId}/`)
 }
 
-export function scanArticleIntake(sessionId: number, barcode: string, quantity: number) {
+export function scanArticleIntake(
+  sessionId: number,
+  barcode: string,
+  options?: { quantity?: number; scan_mode?: 'lookup' | 'increment' },
+) {
   return apiFetch<ArticleScanResult>(`/api/warehouse/article-intake/sessions/${sessionId}/scan/`, {
     method: 'POST',
-    body: JSON.stringify({ barcode, quantity }),
+    body: JSON.stringify({
+      barcode,
+      quantity: options?.quantity ?? 0,
+      scan_mode: options?.scan_mode ?? 'lookup',
+    }),
   })
+}
+
+export function incrementArticleIntake(sessionId: number, barcode: string) {
+  return apiFetch<ArticleScanIncremented>(
+    `/api/warehouse/article-intake/sessions/${sessionId}/increment/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ barcode }),
+    },
+  )
 }
 
 export function confirmArticleGroup(
   sessionId: number,
   payload: {
     scanned_barcode: string
-    scanned_quantity: number
     items: Array<{ barcode: string; cell_number: string; excluded?: boolean }>
   },
 ) {
@@ -108,12 +149,36 @@ export function confirmArticleGroup(
     group_key: string
     created_products: number
     created_cells: string[]
-    added_units: number
+    products: ArticleIntakeProduct[]
     session: ArticleIntakeSession
   }>(`/api/warehouse/article-intake/sessions/${sessionId}/confirm-group/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function saveArticleGroupQuantities(
+  sessionId: number,
+  groupKey: string,
+  items: Array<{ barcode: string; quantity: number }>,
+) {
+  return apiFetch<{ updated: number; group_key: string; session: ArticleIntakeSession }>(
+    `/api/warehouse/article-intake/sessions/${sessionId}/save-quantities/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ group_key: groupKey, items }),
+    },
+  )
+}
+
+export function deleteArticleIntakeProduct(sessionId: number, productId: number) {
+  return apiFetch<{ deleted: boolean; session: ArticleIntakeSession }>(
+    `/api/warehouse/article-intake/sessions/${sessionId}/delete-product/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ product_id: productId }),
+    },
+  )
 }
 
 export function pushArticleIntakeToMarketplace(
@@ -126,7 +191,9 @@ export function pushArticleIntakeToMarketplace(
     errors: Array<{ barcode?: string; offer_id?: string; error: string }>
     error_count: number
     mode: string
+    locked: boolean
     message: string
+    session: ArticleIntakeSession
   }>(`/api/warehouse/article-intake/sessions/${sessionId}/push-marketplace/`, {
     method: 'POST',
     body: JSON.stringify({ warehouse_id: warehouseId, mode }),

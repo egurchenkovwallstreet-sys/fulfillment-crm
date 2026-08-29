@@ -43,6 +43,45 @@ def _require_active(session: ArticleIntakeSession) -> ArticleIntakeSession:
   return session
 
 
+def _require_editable(session: ArticleIntakeSession) -> ArticleIntakeSession:
+  session = _require_active(session)
+  if session.marketplace_pushed_at:
+    raise ArticleIntakeError(
+      "Приёмка заблокирована после выгрузки на маркетплейс — редактирование невозможно",
+    )
+  return session
+
+
+def _session_product_qs(session: ArticleIntakeSession):
+  keys = session.confirmed_group_keys or []
+  if not keys:
+    return Product.objects.none()
+  return Product.objects.filter(
+    seller=session.seller,
+    marketplace=session.marketplace,
+    article_group_key__in=keys,
+  ).select_related("cell")
+
+
+def _recalc_session_totals(session: ArticleIntakeSession) -> None:
+  total = 0
+  for product in _session_product_qs(session).only("quantity"):
+    total += int(product.quantity or 0)
+  session.total_units = total
+  session.save(update_fields=["total_units"])
+
+
+def _delete_product_and_cell(product: Product) -> None:
+  cell = product.cell
+  product.delete()
+  if cell_id := getattr(cell, "id", None):
+    cell_obj = Cell.objects.filter(pk=cell_id).first()
+    if cell_obj and not cell_obj.products.exists():
+      cell_obj.delete()
+    elif cell_obj:
+      refresh_cell_occupied(cell_obj)
+
+
 def _seller_has_marketplace_api(seller: Seller, marketplace: str) -> None:
   mp = normalize_marketplace(marketplace)
   if mp == OZON:
@@ -56,11 +95,11 @@ def _seller_has_marketplace_api(seller: Seller, marketplace: str) -> None:
 def serialize_session(session: ArticleIntakeSession) -> dict:
   seller = session.seller
   mp = session.marketplace
-  products_count = Product.objects.filter(
-    seller=seller,
-    marketplace=mp,
-    article_group_key__in=session.confirmed_group_keys or [],
-  ).count()
+  products_qs = _session_product_qs(session)
+  products_count = products_qs.count()
+  products = [_serialize_product(item) for item in products_qs.order_by("article_group_key", "tech_size", "barcode")]
+  pushed = bool(session.marketplace_pushed_at)
+  can_edit = session.status == ArticleIntakeSession.Status.ACTIVE and not pushed
   return {
     "id": session.id,
     "status": session.status,
@@ -71,9 +110,14 @@ def serialize_session(session: ArticleIntakeSession) -> dict:
     "total_units": session.total_units,
     "confirmed_groups_count": len(session.confirmed_group_keys or []),
     "products_count": products_count,
+    "active_group_key": session.active_group_key or "",
+    "marketplace_pushed_at": session.marketplace_pushed_at.isoformat() if session.marketplace_pushed_at else None,
+    "can_scan": can_edit,
+    "can_edit": can_edit,
+    "can_push": products_count > 0 and not pushed,
+    "products": products,
     "created_at": session.created_at.isoformat() if session.created_at else None,
     "completed_at": session.completed_at.isoformat() if session.completed_at else None,
-    "can_scan": session.status == ArticleIntakeSession.Status.ACTIVE,
   }
 
 
@@ -155,10 +199,11 @@ def scan_barcode(
   session: ArticleIntakeSession,
   *,
   barcode: str,
-  quantity: int,
+  quantity: int = 0,
+  scan_mode: str = "lookup",
   user=None,
 ) -> dict:
-  session = _require_active(
+  session = _require_editable(
     ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   )
   seller = session.seller
@@ -166,11 +211,22 @@ def scan_barcode(
   barcode = normalize_barcode(barcode)
   if len(barcode) < 4:
     raise ArticleIntakeError("Баркод слишком короткий")
-  if quantity < 0:
-    raise ArticleIntakeError("Количество не может быть отрицательным")
 
-  product = Product.objects.filter(seller=seller, marketplace=mp, barcode=barcode).first()
+  mode = (scan_mode or "lookup").strip().lower()
+  product = Product.objects.filter(seller=seller, marketplace=mp, barcode=barcode).select_related("cell").first()
+
+  if product and (session.confirmed_group_keys or []) and product.article_group_key in (session.confirmed_group_keys or []):
+    if mode == "increment":
+      return increment_product(session, barcode=barcode, user=user)
+    return {
+      "action": "known",
+      "product": _serialize_product(product),
+      "session": serialize_session(session),
+    }
+
   if product:
+    if mode == "increment":
+      raise ArticleIntakeError("Баркод уже в CRM, но не из этой приёмки — укажите количество вручную")
     if quantity <= 0:
       raise ArticleIntakeError("Укажите количество больше 0")
     product = _add_product_stock(
@@ -195,18 +251,12 @@ def scan_barcode(
     raise ArticleIntakeError(str(exc)) from exc
 
   group_key = str(meta.get("group_key") or group_key_for_item(mp, anchor))
-  if quantity <= 0:
-    raise ArticleIntakeError("Для новой группы укажите количество больше 0")
 
   if group_key in (session.confirmed_group_keys or []):
-    raise ArticleIntakeError(
-      "Группа уже создана, но баркод отсутствует в CRM — обратитесь к администратору",
-    )
+    raise ArticleIntakeError("Группа уже создана — отсканируйте баркод для +1 или введите количество")
 
   if Product.objects.filter(seller=seller, marketplace=mp, article_group_key=group_key).exists():
-    raise ArticleIntakeError(
-      "Группа артикул+цвет уже есть в CRM, но этот баркод не найден",
-    )
+    raise ArticleIntakeError("Группа артикул+цвет уже есть в CRM, но этот баркод не найден")
 
   existing_barcodes = set(
     Product.objects.filter(seller=seller, marketplace=mp).values_list("barcode", flat=True)
@@ -225,7 +275,7 @@ def scan_barcode(
     anchor,
     group_items,
     scanned_barcode=barcode,
-    scanned_quantity=quantity,
+    scanned_quantity=0,
     cell_numbers=cell_numbers,
     existing_barcodes=existing_barcodes,
     article_label=str(meta.get("article_label") or anchor.vendor_code or anchor.wb_nm_id),
@@ -247,14 +297,12 @@ def confirm_group(
   items: list[dict],
   user=None,
 ) -> dict:
-  session = _require_active(
+  session = _require_editable(
     ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   )
   seller = session.seller
   mp = session.marketplace
   scanned_barcode = normalize_barcode(scanned_barcode)
-  if scanned_quantity <= 0:
-    raise ArticleIntakeError("Количество должно быть больше 0")
 
   try:
     anchor, group_items, meta = find_group_by_barcode(seller, mp, scanned_barcode)
@@ -292,7 +340,7 @@ def confirm_group(
 
   created_cells: list[str] = []
   created_products = 0
-  added_units = 0
+  created_items: list[dict] = []
 
   for item in active_items:
     if Product.objects.filter(seller=seller, marketplace=mp, barcode=item.barcode).exists():
@@ -302,8 +350,6 @@ def confirm_group(
     cell_number = str(row.get("cell_number") or "").strip()
     if not cell_number:
       cell_number = _next_cell_number(seller, mp)
-
-    qty = scanned_quantity if item.barcode == scanned_barcode else 0
 
     cell, _ = Cell.objects.get_or_create(
       seller=seller,
@@ -317,7 +363,7 @@ def confirm_group(
       barcode=item.barcode,
       name=item.title,
       cell=cell,
-      quantity=qty,
+      quantity=0,
       requires_marking=item.requires_marking,
       wb_nm_id=item.wb_nm_id,
       vendor_code=item.vendor_code,
@@ -330,25 +376,14 @@ def confirm_group(
     refresh_cell_occupied(cell)
     created_cells.append(cell_number)
     created_products += 1
-    added_units += qty
-    if qty > 0:
-      StockOperation.objects.create(
-        product=product,
-        operation_type=StockOperation.OperationType.INTAKE,
-        quantity=qty,
-        performed_by=user,
-        comment=(
-          f"Приёмка по артикулам: артикул {item.vendor_code or item.wb_nm_id}, "
-          f"цвет {item.color_label or '—'}, яч. {cell_number}"
-        ),
-      )
+    created_items.append(_serialize_product(product))
 
   keys = list(session.confirmed_group_keys or [])
   keys.append(group_key)
   session.confirmed_group_keys = keys
+  session.active_group_key = group_key
   session.scan_count += 1
-  session.total_units += added_units
-  session.save(update_fields=["confirmed_group_keys", "scan_count", "total_units"])
+  session.save(update_fields=["confirmed_group_keys", "active_group_key", "scan_count"])
 
   AuditLog.objects.create(
     user=user,
@@ -356,7 +391,7 @@ def confirm_group(
     action_type=AuditLog.ActionType.INTAKE,
     message=(
       f"Приёмка по артикулам #{session.id}: группа {anchor.vendor_code or anchor.wb_nm_id} "
-      f"({anchor.color_label or '—'}), {created_products} ячеек, +{added_units} шт."
+      f"({anchor.color_label or '—'}), {created_products} ячеек"
     ),
     details={
       "session_id": session.id,
@@ -370,9 +405,141 @@ def confirm_group(
     "group_key": group_key,
     "created_products": created_products,
     "created_cells": created_cells,
-    "added_units": added_units,
+    "products": created_items,
     "session": serialize_session(session),
   }
+
+
+@transaction.atomic
+def increment_product(
+  session: ArticleIntakeSession,
+  *,
+  barcode: str,
+  user=None,
+) -> dict:
+  session = _require_editable(
+    ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  )
+  barcode = normalize_barcode(barcode)
+  product = (
+    _session_product_qs(session)
+    .select_for_update()
+    .filter(barcode=barcode)
+    .select_related("cell")
+    .first()
+  )
+  if not product:
+    raise ArticleIntakeError("Баркод не найден в этой приёмке")
+  product = _add_product_stock(product, 1, user, "Приёмка по артикулам: +1 шт. (скан)")
+  session.scan_count += 1
+  session.total_units += 1
+  session.active_group_key = product.article_group_key or session.active_group_key
+  session.save(update_fields=["scan_count", "total_units", "active_group_key"])
+  return {
+    "action": "incremented",
+    "product": _serialize_product(product),
+    "quantity_added": 1,
+    "session": serialize_session(session),
+  }
+
+
+@transaction.atomic
+def save_group_quantities(
+  session: ArticleIntakeSession,
+  *,
+  group_key: str,
+  items: list[dict],
+  user=None,
+) -> dict:
+  session = _require_editable(
+    ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  )
+  group_key = (group_key or session.active_group_key or "").strip()
+  if not group_key:
+    raise ArticleIntakeError("Не выбрана группа артикул+цвет")
+  if group_key not in (session.confirmed_group_keys or []):
+    raise ArticleIntakeError("Группа не найдена в этой приёмке")
+
+  payload = {
+    normalize_barcode(str(row.get("barcode") or "")): int(row.get("quantity") or 0)
+    for row in items
+    if normalize_barcode(str(row.get("barcode") or ""))
+  }
+  updated = 0
+  for product in _session_product_qs(session).select_for_update().filter(article_group_key=group_key):
+    if product.barcode not in payload:
+      continue
+    new_qty = max(0, payload[product.barcode])
+    old_qty = int(product.quantity or 0)
+    if new_qty == old_qty:
+      continue
+    delta = new_qty - old_qty
+    product.quantity = new_qty
+    product.save(update_fields=["quantity", "updated_at"])
+    if delta != 0:
+      StockOperation.objects.create(
+        product=product,
+        operation_type=StockOperation.OperationType.INTAKE if delta > 0 else StockOperation.OperationType.ADJUSTMENT,
+        quantity=abs(delta),
+        performed_by=user,
+        comment=f"Приёмка по артикулам: остаток {old_qty} → {new_qty}",
+      )
+    updated += 1
+
+  _recalc_session_totals(session)
+  session.active_group_key = group_key
+  session.save(update_fields=["active_group_key"])
+  return {
+    "updated": updated,
+    "group_key": group_key,
+    "session": serialize_session(session),
+  }
+
+
+@transaction.atomic
+def delete_intake_product(
+  session: ArticleIntakeSession,
+  *,
+  product_id: int,
+  user=None,
+) -> dict:
+  session = _require_editable(
+    ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
+  )
+  product = (
+    _session_product_qs(session)
+    .select_for_update()
+    .filter(pk=product_id)
+    .select_related("cell")
+    .first()
+  )
+  if not product:
+    raise ArticleIntakeError("Товар не найден в этой приёмке")
+
+  group_key = product.article_group_key
+  barcode = product.barcode
+  cell_number = product.cell.number if product.cell_id else ""
+  _delete_product_and_cell(product)
+
+  remaining = _session_product_qs(session).filter(article_group_key=group_key).count()
+  keys = list(session.confirmed_group_keys or [])
+  if remaining == 0 and group_key in keys:
+    keys = [key for key in keys if key != group_key]
+    session.confirmed_group_keys = keys
+    if session.active_group_key == group_key:
+      session.active_group_key = keys[-1] if keys else ""
+
+  _recalc_session_totals(session)
+  session.save(update_fields=["confirmed_group_keys", "active_group_key", "total_units"])
+
+  AuditLog.objects.create(
+    user=user,
+    seller=session.seller,
+    action_type=AuditLog.ActionType.INTAKE,
+    message=f"Приёмка по артикулам #{session.id}: удалён баркод {barcode}, яч. {cell_number}",
+    details={"product_id": product_id, "group_key": group_key},
+  )
+  return {"deleted": True, "session": serialize_session(session)}
 
 
 def _ozon_stock_amount(client, offer_id: str, warehouse_id: int) -> int:
@@ -405,6 +572,9 @@ def push_to_marketplace(
   mode = (mode or PUSH_MODE_REPLACE).strip().lower()
   if mode not in {PUSH_MODE_REPLACE, PUSH_MODE_ADD}:
     raise ArticleIntakeError("Режим: replace или add")
+
+  if session.marketplace_pushed_at:
+    raise ArticleIntakeError("Остатки уже выгружались на маркетплейс")
 
   group_keys = session.confirmed_group_keys or []
   products = list(
@@ -480,6 +650,10 @@ def push_to_marketplace(
     if not raw:
       updated = len(stocks)
 
+  if updated > 0 and not errors:
+    session.marketplace_pushed_at = timezone.now()
+    session.save(update_fields=["marketplace_pushed_at"])
+
   AuditLog.objects.create(
     user=user,
     seller=seller,
@@ -496,6 +670,8 @@ def push_to_marketplace(
     "errors": errors[:20],
     "error_count": len(errors),
     "mode": mode,
+    "locked": bool(session.marketplace_pushed_at),
+    "session": serialize_session(session),
     "message": (
       f"Обновлено {updated} позиций"
       + (f", ошибок: {len(errors)}" if errors else "")

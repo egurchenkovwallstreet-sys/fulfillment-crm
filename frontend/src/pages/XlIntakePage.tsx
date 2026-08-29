@@ -5,13 +5,16 @@ import {
   completeXlSession,
   connectXlWb,
   createXlSession,
+  deleteXlLine,
   downloadXlExcel,
   fetchXlSession,
   fetchXlSessions,
   saveXlSession,
   scanXlBarcode,
+  updateXlLine,
   type XlIntakeSession,
 } from '../api/xlIntake'
+import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
 import './XlIntakePage.css'
 
 const SCAN_IDLE_MS = 120
@@ -40,6 +43,7 @@ export function XlIntakePage() {
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const [showUnmatched, setShowUnmatched] = useState(false)
+  const [resultModal, setResultModal] = useState<CrmResultModalState | null>(null)
 
   const activeId = sessionId ? Number(sessionId) : null
   const canScan = session?.status !== 'completed'
@@ -157,6 +161,43 @@ export function XlIntakePage() {
       setSuccess('Контрольная точка сохранена. Можно продолжать сканирование.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUpdateLine(lineBarcode: string, quantity: number) {
+    if (!activeId || !canScan) return
+    setLoading(true)
+    try {
+      const next = await updateXlLine(activeId, lineBarcode, quantity)
+      setSession(next)
+      setResultModal({ kind: 'success', title: 'Сохранено', message: `Количество для ${lineBarcode} обновлено.` })
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось изменить',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDeleteLine(lineBarcode: string) {
+    if (!activeId || !canScan) return
+    if (!window.confirm(`Удалить баркод ${lineBarcode} из приёмки?`)) return
+    setLoading(true)
+    try {
+      const next = await deleteXlLine(activeId, lineBarcode)
+      setSession(next)
+      setResultModal({ kind: 'success', title: 'Удалено', message: `Баркод ${lineBarcode} удалён.` })
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось удалить',
+      })
     } finally {
       setLoading(false)
     }
@@ -436,6 +477,7 @@ export function XlIntakePage() {
                 <th>№</th>
                 <th>Баркод</th>
                 <th>Количество</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -446,7 +488,29 @@ export function XlIntakePage() {
                 >
                   <td>{line.sort_order}</td>
                   <td>{line.barcode}</td>
-                  <td>{line.quantity}</td>
+                  <td>
+                    <input
+                      className="xl-qty-input"
+                      type="number"
+                      min={0}
+                      defaultValue={line.quantity}
+                      onBlur={(e) => {
+                        const qty = parseInt(e.target.value, 10)
+                        if (Number.isFinite(qty) && qty !== line.quantity) {
+                          void handleUpdateLine(line.barcode, qty)
+                        }
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn--danger-outline btn--small"
+                      onClick={() => void handleDeleteLine(line.barcode)}
+                    >
+                      Удалить
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -526,6 +590,8 @@ export function XlIntakePage() {
           </div>
         </div>
       )}
+
+      {resultModal && <CrmResultModal modal={resultModal} onClose={() => setResultModal(null)} />}
     </div>
   )
 }

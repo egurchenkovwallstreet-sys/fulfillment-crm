@@ -245,6 +245,20 @@ textarea {
   resize: vertical;
 }
 
+/* Единые блоки выбора селлера / склада */
+.crm-selector-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.crm-selector-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+  align-items: end;
+}
+
 /* Checkbox / radio rows */
 .intake-cell-mode label,
 .sellers-mp-check,
