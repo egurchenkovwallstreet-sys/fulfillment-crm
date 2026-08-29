@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchAdminBilling, type AdminBillingSellerRow } from '../api/sellerAdmin'
 import { formatMoney, WeeklyShipmentsPanel } from '../components/WeeklyShipmentsPanel'
+import { uiHint } from '../utils/uiHint'
 import '../pages/SellerCabinetPage.css'
 import './AdminBillingPage.css'
 
@@ -76,6 +77,7 @@ export function AdminBillingPage() {
               aria-selected={marketplace === 'wb'}
               className={`admin-billing-tab${marketplace === 'wb' ? ' admin-billing-tab--active' : ''}`}
               onClick={() => setMarketplace('wb')}
+              {...uiHint('Показать статистику отгрузок Wildberries по всем селлерам.')}
             >
               Wildberries
             </button>
@@ -85,11 +87,12 @@ export function AdminBillingPage() {
               aria-selected={marketplace === 'ozon'}
               className={`admin-billing-tab${marketplace === 'ozon' ? ' admin-billing-tab--active' : ''}`}
               onClick={() => setMarketplace('ozon')}
+              {...uiHint('Показать статистику отгрузок Ozon FBS по всем селлерам.')}
             >
               Ozon
             </button>
           </div>
-          <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+          <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить данные отгрузок и суммы по тарифам.')}>
             {loading ? 'Обновление…' : 'Обновить'}
           </button>
         </div>

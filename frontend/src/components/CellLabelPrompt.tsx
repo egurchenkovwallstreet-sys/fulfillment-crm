@@ -1,4 +1,5 @@
 import { printCellLabel, type CellLabelData } from '../utils/cellLabelPrint'
+import { uiHint } from '../utils/uiHint'
 import './CellLabelPrompt.css'
 
 type Props = {
@@ -32,10 +33,10 @@ export function CellLabelPrompt({ label, onClose }: Props) {
           Баркод: <strong>{label.barcode}</strong>
         </p>
         <div className="cell-label-prompt__actions">
-          <button type="button" className="btn btn--primary" onClick={handleYes}>
+          <button type="button" className="btn btn--primary" onClick={handleYes} {...uiHint('Напечатать этикетку ячейки 75×120 на Xprinter')}>
             Да
           </button>
-          <button type="button" className="btn btn--secondary" onClick={onClose}>
+          <button type="button" className="btn btn--secondary" onClick={onClose} {...uiHint('Пропустить печать этикетки ячейки')}>
             Нет
           </button>
         </div>

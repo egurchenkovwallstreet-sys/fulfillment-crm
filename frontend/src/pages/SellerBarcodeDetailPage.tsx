@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fetchSellerBarcodeDetail, type SellerBarcodeDetail } from '../api/sellerCabinet'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
+import { uiHint } from '../utils/uiHint'
 import './SellerCabinetPage.css'
 
 const STOCK_LABELS: Record<string, string> = {
@@ -42,7 +43,7 @@ export function SellerBarcodeDetailPage() {
       <header className="topbar">
         <div>
           <p className="seller-detail-back">
-            <Link to="/cabinet">← Кабинет</Link>
+            <Link to="/cabinet" {...uiHint('Вернуться к списку товаров в кабинете селлера.')}>← Кабинет</Link>
           </p>
           <h1>{item?.name ?? 'Товар'}</h1>
           <p className="seller-cabinet-barcode-cell">

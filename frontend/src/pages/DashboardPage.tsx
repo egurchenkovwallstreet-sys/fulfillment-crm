@@ -10,6 +10,7 @@ import {
 } from '../api/orders'
 import { useAuth } from '../context/AuthContext'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { uiHint } from '../utils/uiHint'
 
 const STATS_POLL_MS = 60_000
 
@@ -124,6 +125,11 @@ export function DashboardPage() {
           className="btn btn--primary"
           onClick={handleSync}
           disabled={syncing}
+          {...uiHint(
+            marketplace === 'ozon'
+              ? 'Запросить актуальные счётчики отправлений Ozon и обновить табло'
+              : 'Запросить актуальные счётчики заказов WB и обновить табло',
+          )}
         >
           {syncing
             ? marketplace === 'ozon'

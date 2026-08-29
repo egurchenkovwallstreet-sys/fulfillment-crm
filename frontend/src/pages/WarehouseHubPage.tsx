@@ -26,6 +26,7 @@ import {
   type SellerWarehouse,
 } from '../api/sellers'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './WarehouseHubPage.css'
 
 type TabId = 'onboarding' | 'import' | 'intake' | 'transfer'
@@ -451,7 +452,7 @@ export function WarehouseHubPage() {
           <h1>Склад</h1>
           <p>Подключение каталога {mpName}, приёмка и ячейки FBS</p>
         </div>
-        <Link to="/inventory" className="btn btn--danger">
+        <Link to="/inventory" className="btn btn--danger" {...uiHint('Перейти к инвентаризации — пересчёт остатков на фулфилменте.')}>
           Инвентаризация
         </Link>
       </header>
@@ -461,6 +462,7 @@ export function WarehouseHubPage() {
           type="button"
           className={`whub-tab${tab === 'onboarding' ? ' whub-tab--active' : ''}`}
           onClick={() => setTab('onboarding')}
+          {...uiHint(`Подключение каталога ${mpName} к CRM — загрузка карточек и создание ячеек.`)}
         >
           Подключение ({mpName} → CRM)
         </button>
@@ -469,6 +471,7 @@ export function WarehouseHubPage() {
             type="button"
             className={`whub-tab${tab === 'import' ? ' whub-tab--active' : ''}`}
             onClick={() => setTab('import')}
+            {...uiHint('Импорт остатков из Excel-файла WB — прибавление к CRM и складу.')}
           >
             Импорт Excel
           </button>
@@ -477,6 +480,7 @@ export function WarehouseHubPage() {
           type="button"
           className={`whub-tab${tab === 'intake' ? ' whub-tab--active' : ''}`}
           onClick={() => setTab('intake')}
+          {...uiHint('Ссылки на сценарии физической приёмки нового клиента.')}
         >
           Приёмка (новый клиент)
         </button>
@@ -485,6 +489,7 @@ export function WarehouseHubPage() {
             type="button"
             className={`whub-tab${tab === 'transfer' ? ' whub-tab--active' : ''}`}
             onClick={() => setTab('transfer')}
+            {...uiHint('Перенос и равномерное распределение остатков между FBS-складами WB.')}
           >
             Перераспределение
           </button>
@@ -568,28 +573,30 @@ export function WarehouseHubPage() {
             </fieldset>
           </div>
 
-          <button
-            type="button"
-            className="btn btn--secondary btn--small"
-            disabled={!sellerId || loading}
-            onClick={() => {
-              if (!sellerId) return
-              const run = isOzon
-                ? syncSellerOzonWarehouses(Number(sellerId)).then(() =>
-                    fetchSellerOzonWarehouses(Number(sellerId)).then((rows) =>
-                      setSellerWarehouses(mapOzonWarehouses(rows)),
-                    ),
-                  )
-                : syncSellerWarehouses(Number(sellerId)).then(() =>
-                    fetchSellerWarehouses(Number(sellerId)).then((rows) =>
-                      setSellerWarehouses(mapWbWarehouses(rows)),
-                    ),
-                  )
-              void run
-            }}
-          >
-            Обновить склады из {mpName}
-          </button>
+          <span {...hintWrapProps(`Обновить список FBS-складов селлера из ${mpName}.`)}>
+            <button
+              type="button"
+              className="btn btn--secondary btn--small"
+              disabled={!sellerId || loading}
+              onClick={() => {
+                if (!sellerId) return
+                const run = isOzon
+                  ? syncSellerOzonWarehouses(Number(sellerId)).then(() =>
+                      fetchSellerOzonWarehouses(Number(sellerId)).then((rows) =>
+                        setSellerWarehouses(mapOzonWarehouses(rows)),
+                      ),
+                    )
+                  : syncSellerWarehouses(Number(sellerId)).then(() =>
+                      fetchSellerWarehouses(Number(sellerId)).then((rows) =>
+                        setSellerWarehouses(mapWbWarehouses(rows)),
+                      ),
+                    )
+                void run
+              }}
+            >
+              Обновить склады из {mpName}
+            </button>
+          </span>
           {isOzon && (
             <div className="whub-ozon-push">
               <label>
@@ -606,24 +613,28 @@ export function WarehouseHubPage() {
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                disabled={!sellerId || !pushWarehouseId || loading}
-                onClick={() => void handlePushOzonStocks()}
-              >
-                Отправить остатки CRM на склад Ozon
-              </button>
+              <span {...hintWrapProps('Отправить текущие остатки CRM на выбранный склад Ozon.')}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={!sellerId || !pushWarehouseId || loading}
+                  onClick={() => void handlePushOzonStocks()}
+                >
+                  Отправить остатки CRM на склад Ozon
+                </button>
+              </span>
             </div>
           )}
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={!sellerId || loading || selectedWarehouseIds.length === 0}
-            onClick={() => void handleLoadPreview()}
-          >
-            {loading ? `Загрузка каталога ${mpName}…` : 'Подключение — загрузить каталог'}
-          </button>
+          <span {...hintWrapProps('Загрузить каталог маркетплейса для предпросмотра ячеек и остатков. Выберите селлера и склады.')}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!sellerId || loading || selectedWarehouseIds.length === 0}
+              onClick={() => void handleLoadPreview()}
+            >
+              {loading ? `Загрузка каталога ${mpName}…` : 'Подключение — загрузить каталог'}
+            </button>
+          </span>
 
           {preview && (
             <>
@@ -651,6 +662,7 @@ export function WarehouseHubPage() {
                           type="button"
                           className="btn btn--small btn--secondary"
                           onClick={() => handleExcludeArticle(article.wb_nm_id)}
+                          {...uiHint('Исключить весь артикул — ни один его размер не попадёт в CRM.')}
                         >
                           Удалить артикул
                         </button>
@@ -681,6 +693,7 @@ export function WarehouseHubPage() {
                                     type="button"
                                     className="btn btn--small btn--secondary"
                                     onClick={() => handleExcludeBarcode(item.barcode)}
+                                    {...uiHint('Убрать этот баркод из списка создаваемых товаров.')}
                                   >
                                     Убрать
                                   </button>
@@ -696,14 +709,16 @@ export function WarehouseHubPage() {
               </div>
 
               <div className="whub-actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={loading || newToCreate.length === 0}
-                  onClick={() => void handleConfirmOnboarding()}
-                >
-                  Подтвердить ({newToCreate.length} товаров)
-                </button>
+                <span {...hintWrapProps('Создать товары с ячейками в CRM для всех новых баркодов из предпросмотра.')}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={loading || newToCreate.length === 0}
+                    onClick={() => void handleConfirmOnboarding()}
+                  >
+                    Подтвердить ({newToCreate.length} товаров)
+                  </button>
+                </span>
               </div>
             </>
           )}
@@ -743,14 +758,16 @@ export function WarehouseHubPage() {
                 }}
               />
             </label>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={!sellerId || !importFile || !importWarehouseId || loading}
-              onClick={() => void handleStockImportPreview()}
-            >
-              Предпросмотр
-            </button>
+            <span {...hintWrapProps('Проверить Excel-файл перед применением — увидеть изменения CRM и WB.')}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!sellerId || !importFile || !importWarehouseId || loading}
+                onClick={() => void handleStockImportPreview()}
+              >
+                Предпросмотр
+              </button>
+            </span>
           </div>
 
           {stockImportPreview && (
@@ -817,14 +834,16 @@ export function WarehouseHubPage() {
               </table>
 
               <div className="whub-actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={loading || stockImportPreview.rows.length === 0}
-                  onClick={() => void handleStockImportApply()}
-                >
-                  Применить ({stockImportPreview.rows.length})
-                </button>
+                <span {...hintWrapProps('Применить импорт — прибавить остатки к CRM и выбранному FBS-складу WB.')}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={loading || stockImportPreview.rows.length === 0}
+                    onClick={() => void handleStockImportApply()}
+                  >
+                    Применить ({stockImportPreview.rows.length})
+                  </button>
+                </span>
               </div>
             </>
           )}
@@ -873,10 +892,10 @@ export function WarehouseHubPage() {
             → CRM выставляет остатки в WB.
           </p>
           <div className="whub-actions">
-            <Link to="/intake" className="btn btn--primary">
+            <Link to="/intake" className="btn btn--primary" {...uiHint('Обычная приёмка — скан баркода, количество, ячейка и остатки WB.')}>
               Обычная приёмка
             </Link>
-            <Link to="/intake-article" className="btn btn--secondary">
+            <Link to="/intake-article" className="btn btn--secondary" {...uiHint('Приёмка с группировкой по артикулам и цветам — ячейки на все размеры.')}>
               Приёмка с ячейками по артикулам
             </Link>
           </div>
@@ -889,32 +908,48 @@ export function WarehouseHubPage() {
             Перенос остатков между FBS-складами WB. Суммарный остаток баркода в CRM не меняется.
           </p>
           <div className="whub-transfer-toolbar">
-            <button
-              type="button"
-              className="btn btn--secondary"
-              disabled={!sellerId || loading}
-              onClick={() => void handleLoadStockOverview()}
+            <span {...hintWrapProps('Обновить таблицу остатков по FBS-складам WB из личного кабинета.')}>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={!sellerId || loading}
+                onClick={() => void handleLoadStockOverview()}
+              >
+                Обновить остатки из WB
+              </button>
+            </span>
+            <span
+              {...hintWrapProps(
+                !canDistributeEvenly
+                  ? 'Равномерно распределить остатки всех товаров. Нужно минимум 2 включённых FBS-склада.'
+                  : 'Равномерно распределить остатки всех товаров с остатком по всем FBS-складам.',
+              )}
             >
-              Обновить остатки из WB
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={!sellerId || loading || !canDistributeEvenly || distributableProducts.length === 0}
-              onClick={handleDistributeAll}
-              title={!canDistributeEvenly ? 'Нужно минимум 2 включённых FBS-склада' : undefined}
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!sellerId || loading || !canDistributeEvenly || distributableProducts.length === 0}
+                onClick={handleDistributeAll}
+              >
+                Распределить все
+              </button>
+            </span>
+            <span
+              {...hintWrapProps(
+                !canDistributeEvenly
+                  ? 'Распределить остатки отмеченных товаров. Нужно минимум 2 FBS-склада.'
+                  : 'Равномерно распределить остатки отмеченных галочкой товаров.',
+              )}
             >
-              Распределить все
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              disabled={!sellerId || loading || !canDistributeEvenly || selectedDistributeIds.size === 0}
-              onClick={handleDistributeSelected}
-              title={!canDistributeEvenly ? 'Нужно минимум 2 включённых FBS-склада' : undefined}
-            >
-              Распределить выбранные ({selectedDistributeIds.size})
-            </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={!sellerId || loading || !canDistributeEvenly || selectedDistributeIds.size === 0}
+                onClick={handleDistributeSelected}
+              >
+                Распределить выбранные ({selectedDistributeIds.size})
+              </button>
+            </span>
           </div>
           {!canDistributeEvenly && stockOverview && (
             <p className="whub-hint whub-hint--warn">
@@ -971,15 +1006,24 @@ export function WarehouseHubPage() {
                       return <td key={wh.id}>{row?.quantity ?? 0}</td>
                     })}
                     <td className="whub-transfer-actions">
-                      <button
-                        type="button"
-                        className="btn btn--small btn--secondary"
-                        disabled={!canDistributeEvenly || product.wb_total <= 0 || loading}
-                        onClick={() => handleDistributeProduct(product)}
-                        title={!canDistributeEvenly ? 'Нужно минимум 2 склада' : product.wb_total <= 0 ? 'Нулевой остаток' : undefined}
+                      <span
+                        {...hintWrapProps(
+                          !canDistributeEvenly
+                            ? 'Распределить остаток поровну. Нужно минимум 2 FBS-склада.'
+                            : product.wb_total <= 0
+                              ? 'У товара нулевой остаток — распределить нечего.'
+                              : `Равномерно распределить ${product.wb_total} шт. по всем FBS-складам.`,
+                        )}
                       >
-                        Поровну
-                      </button>
+                        <button
+                          type="button"
+                          className="btn btn--small btn--secondary"
+                          disabled={!canDistributeEvenly || product.wb_total <= 0 || loading}
+                          onClick={() => handleDistributeProduct(product)}
+                        >
+                          Поровну
+                        </button>
+                      </span>
                       <button
                         type="button"
                         className="btn btn--small btn--primary"
@@ -989,6 +1033,7 @@ export function WarehouseHubPage() {
                           setToWh('')
                           setTransferQty(1)
                         }}
+                        {...uiHint('Перенести часть остатка с одного FBS-склада на другой.')}
                       >
                         Перенести
                       </button>
@@ -1044,10 +1089,10 @@ export function WarehouseHubPage() {
                   />
                 </label>
                 <div className="whub-actions">
-                  <button type="submit" className="btn btn--primary" disabled={loading}>
+                  <button type="submit" className="btn btn--primary" disabled={loading} {...uiHint('Перенести указанное количество между FBS-складами WB.')}>
                     Перенести
                   </button>
-                  <button type="button" className="btn btn--secondary" onClick={() => setTransferProduct(null)}>
+                  <button type="button" className="btn btn--secondary" onClick={() => setTransferProduct(null)} {...uiHint('Закрыть окно перераспределения без изменений.')}>
                     Отмена
                   </button>
                 </div>

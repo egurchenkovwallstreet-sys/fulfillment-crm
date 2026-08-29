@@ -52,6 +52,7 @@ import { downloadPickListPdf } from '../utils/pickListPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { uiHint, hintWrapProps } from '../utils/uiHint'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
@@ -72,6 +73,12 @@ const STAGES = [
   { key: 'confirm', label: 'На сборке', tone: 'orange' },
   { key: 'complete', label: 'В доставке', tone: 'blue' },
 ] as const
+
+const STAGE_HINTS: Record<(typeof STAGES)[number]['key'], string> = {
+  new: 'Новые заказы WB — лист подбора и передача на сборку',
+  confirm: 'Скан баркода, ЧЗ и печать стикеров FBS',
+  complete: 'Заказы в поставке, ожидают сканирования на складе WB',
+}
 
 function showAssemblyButton(order: AssemblyOrder): boolean {
   return order.can_send_to_assembly ?? false
@@ -874,7 +881,13 @@ function WbAssemblySellerPage() {
           </p>
         </div>
         <div className="topbar__actions">
-          <button type="button" className="btn btn--secondary" onClick={handleSync} disabled={loading || syncing || refreshing}>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={handleSync}
+            disabled={loading || syncing || refreshing}
+            {...uiHint('Подтянуть новые заказы и статусы из Wildberries')}
+          >
             Обновить заказы
           </button>
           {(stage === 'new' || stage === 'confirm') && pickListOrderCount > 0 && (
@@ -884,6 +897,7 @@ function WbAssemblySellerPage() {
                 className="btn btn--secondary"
                 onClick={() => void handleGeneratePickList()}
                 disabled={loading || ordersBusy}
+                {...uiHint('Сформировать PDF-лист подбора по ячейкам для кладовщика')}
               >
                 Сформировать лист подбора
             </button>
@@ -893,6 +907,7 @@ function WbAssemblySellerPage() {
                   className="btn btn--secondary"
                   onClick={handleDownloadPickListPdf}
                   disabled={loading}
+                  {...uiHint('Скачать лист подбора формата A4 для печати')}
                 >
                   Скачать PDF (A4)
             </button>
@@ -900,24 +915,33 @@ function WbAssemblySellerPage() {
             </>
           )}
           {stage === 'new' && bulkAssemblyCount > 0 && (
-            <button type="button" className="btn btn--primary" onClick={handleTransferToAssembly} disabled={loading}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleTransferToAssembly}
+              disabled={loading}
+              {...uiHint('Отправить выбранные новые заказы в статус «На сборке» в WB')}
+            >
               Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={handleSendAllReadyToDelivery}
-              disabled={loading || markingQueueBlocked}
-              title={
+            <span
+              {...hintWrapProps(
                 markingQueueBlocked
                   ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
-                  : undefined
-              }
+                  : 'Передать все собранные заказы в поставку и в доставку WB',
+              )}
             >
-              Все готовые в доставку ({readyToDeliverCount})
-            </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleSendAllReadyToDelivery}
+                disabled={loading || markingQueueBlocked}
+              >
+                Все готовые в доставку ({readyToDeliverCount})
+              </button>
+            </span>
           )}
         </div>
       </header>
@@ -961,7 +985,7 @@ function WbAssemblySellerPage() {
             type="button"
             className={`assembly-stage assembly-stage--${s.tone}${stage === s.key ? ' assembly-stage--active' : ''}${locked ? ' assembly-stage--locked' : ''}`}
             onClick={() => requestStageChange(s.key)}
-            title={locked ? gate.reason : undefined}
+            {...uiHint(locked ? gate.reason : STAGE_HINTS[s.key])}
           >
             <span className="assembly-stage__count">{stageCount(s.key)}</span>
             <span className="assembly-stage__label">{s.label}</span>
@@ -1044,10 +1068,22 @@ function WbAssemblySellerPage() {
                 />
               </form>
               <div className="assembly-scan-actions">
-                <button type="button" className="btn btn--secondary" onClick={handleReplaceOrder} disabled={loading}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={handleReplaceOrder}
+                  disabled={loading}
+                  {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
+                >
                   Заменить товар
                 </button>
-                <button type="button" className="btn btn--secondary" onClick={resetScanFlow} disabled={loading}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={resetScanFlow}
+                  disabled={loading}
+                  {...uiHint('Вернуться к сканированию баркода без привязки ЧЗ')}
+                >
                   Отмена
                 </button>
               </div>
@@ -1059,19 +1095,22 @@ function WbAssemblySellerPage() {
               <p>
                 <strong>Шаг 4:</strong> WB #{lastPrinted.wb_order_id} готов к доставке
               </p>
-              <button
-                type="button"
-                className="btn btn--primary btn--small"
-                onClick={() => handleSendToDelivery(lastPrinted)}
-                disabled={loading || markingQueueBlocked}
-                title={
+              <span
+                {...hintWrapProps(
                   markingQueueBlocked
                     ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
-                    : undefined
-                }
+                    : 'Добавить заказ в поставку WB и перевести в доставку',
+                )}
               >
-                Подтвердить и в доставку
-              </button>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--small"
+                  onClick={() => handleSendToDelivery(lastPrinted)}
+                  disabled={loading || markingQueueBlocked}
+                >
+                  Подтвердить и в доставку
+                </button>
+              </span>
             </div>
           )}
 
@@ -1085,6 +1124,7 @@ function WbAssemblySellerPage() {
                   const win = openPrintHolder()
                   void printSticker(stickerPreview, win).catch(() => closePrintHolder(win))
                 }}
+                {...uiHint('Повторно отправить последний стикер FBS на принтер')}
               >
                 Печать ещё раз
               </button>
@@ -1103,7 +1143,13 @@ function WbAssemblySellerPage() {
       <section className="panel assembly-warehouses">
         <div className="assembly-warehouses__header">
           <h2 className="section-title">Точки отгрузки WB</h2>
-          <button type="button" className="btn btn--secondary btn--small" onClick={handleSyncWarehouses} disabled={refreshing || syncing}>
+          <button
+            type="button"
+            className="btn btn--secondary btn--small"
+            onClick={handleSyncWarehouses}
+            disabled={refreshing || syncing}
+            {...uiHint('Загрузить список FBS-складов селлера из Wildberries')}
+          >
             Загрузить из WB
           </button>
         </div>
@@ -1117,7 +1163,11 @@ function WbAssemblySellerPage() {
           <ul className="assembly-warehouses__list">
             {data.warehouses.map((wh) => (
               <li key={wh.id} className={wh.is_enabled ? '' : 'assembly-warehouses__item--off'}>
-                <label className="assembly-warehouses__toggle">
+                <label className="assembly-warehouses__toggle" {...uiHint(
+                  wh.is_enabled
+                    ? 'Скрыть заказы этого склада из сборки (не влияет на статистику)'
+                    : 'Показывать заказы этого склада в сборке и отдельной поставке',
+                )}>
                   <input
                     type="checkbox"
                     checked={wh.is_enabled}
@@ -1218,6 +1268,7 @@ function WbAssemblySellerPage() {
                           className="btn btn--small btn--secondary"
                           onClick={() => handleReprintSticker(order.id)}
                           disabled={loading || syncing}
+                          {...uiHint('Повторно напечатать стикер FBS для этого заказа')}
                         >
                           Распечатать
                         </button>
@@ -1230,31 +1281,35 @@ function WbAssemblySellerPage() {
                         className="btn btn--small btn--primary"
                         onClick={() => handleSendToAssembly(order.id)}
                         disabled={loading}
+                        {...uiHint('Перевести один заказ в статус «На сборке» в WB')}
                       >
                         На сборку
                       </button>
                     )}
                       {orderCanDeliver(order) && stage === 'confirm' && (
-                      <button
-                        type="button"
-                        className="btn btn--small btn--secondary"
-                          onClick={() => handleSendToDelivery(order)}
-                        disabled={loading || markingQueueBlocked}
-                        title={
+                      <span
+                        {...hintWrapProps(
                           markingQueueBlocked
                             ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
-                            : undefined
-                        }
+                            : 'Добавить заказ в поставку WB',
+                        )}
                       >
-                        В доставку
-                      </button>
+                        <button
+                          type="button"
+                          className="btn btn--small btn--secondary"
+                          onClick={() => handleSendToDelivery(order)}
+                          disabled={loading || markingQueueBlocked}
+                        >
+                          В доставку
+                        </button>
+                      </span>
                     )}
                       <button
                         type="button"
                         className="btn btn--small btn--ghost assembly-order-delete"
                         onClick={() => handleDeleteOrder(order)}
                         disabled={loading}
-                        title="Удалить заказ из сборки"
+                        {...uiHint('Убрать заказ из текущей сборки в CRM (не отмена на WB)')}
                       >
                         Удалить
                       </button>
@@ -1277,7 +1332,13 @@ function WbAssemblySellerPage() {
                     : `Лист подбора #${displayPickList.id}`}
                 </h2>
                 <div className="assembly-picklist-actions">
-                  <button type="button" className="btn btn--secondary btn--small" onClick={handleDownloadPickListPdf} disabled={loading}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--small"
+                    onClick={handleDownloadPickListPdf}
+                    disabled={loading}
+                    {...uiHint('Скачать лист подбора формата A4')}
+                  >
                     Скачать PDF (A4)
                   </button>
                   {data.active_pick_list && !pickListPreview && (
@@ -1286,6 +1347,7 @@ function WbAssemblySellerPage() {
                   className="btn btn--secondary btn--small"
                     onClick={handleDeletePickList}
                   disabled={loading}
+                  {...uiHint('Удалить текущий лист подбора и начать заново')}
                 >
                     Удалить лист подбора
                 </button>

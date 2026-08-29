@@ -7,6 +7,7 @@ import {
   type SellerManageItem,
   type SellerPricingSummary,
 } from '../api/sellerAdmin'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './SellerTariffModal.css'
 
 type Scope = 'all' | 'group'
@@ -121,7 +122,7 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
             <h2 id="seller-tariff-title" className="section-title">Тариф селлера</h2>
             <p className="seller-tariff-modal__subtitle">{seller.company_name}</p>
           </div>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Закрыть">
+          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Закрыть" {...uiHint('Закрыть окно настройки тарифа без сохранения.')}>
             ✕
           </button>
         </div>
@@ -160,17 +161,20 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
                   type="button"
                   className={`seller-tariff-modal__scope${scope === 'all' ? ' seller-tariff-modal__scope--active' : ''}`}
                   onClick={() => setScope('all')}
+                  {...uiHint('Применить один тариф ко всем товарам селлера.')}
                 >
                   На все товары
                 </button>
-                <button
-                  type="button"
-                  className={`seller-tariff-modal__scope${scope === 'group' ? ' seller-tariff-modal__scope--active' : ''}`}
-                  onClick={() => setScope('group')}
-                  disabled={priceGroups.length === 0}
-                >
-                  На ценовую группу
-                </button>
+                <span {...hintWrapProps('Применить тариф только к товарам выбранной ценовой группы. Сначала создайте группы.')}>
+                  <button
+                    type="button"
+                    className={`seller-tariff-modal__scope${scope === 'group' ? ' seller-tariff-modal__scope--active' : ''}`}
+                    onClick={() => setScope('group')}
+                    disabled={priceGroups.length === 0}
+                  >
+                    На ценовую группу
+                  </button>
+                </span>
               </div>
 
               {scope === 'group' && (
@@ -225,12 +229,14 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
               </p>
 
               <div className="seller-tariff-modal__actions">
-                <button type="button" className="btn btn--ghost" onClick={onClose}>
+                <button type="button" className="btn btn--ghost" onClick={onClose} {...uiHint('Закрыть без применения тарифа.')}>
                   Отмена
                 </button>
-                <button type="submit" className="btn btn--primary" disabled={saving || affectedCount === 0}>
-                  {saving ? 'Сохранение…' : 'Применить тариф'}
-                </button>
+                <span {...hintWrapProps(affectedCount === 0 ? 'Нет товаров для применения тарифа.' : 'Сохранить тариф для выбранного набора товаров.')}>
+                  <button type="submit" className="btn btn--primary" disabled={saving || affectedCount === 0}>
+                    {saving ? 'Сохранение…' : 'Применить тариф'}
+                  </button>
+                </span>
               </div>
             </form>
           </>

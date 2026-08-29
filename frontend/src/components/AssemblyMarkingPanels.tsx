@@ -1,6 +1,7 @@
 import type { AssemblyOrder } from '../api/assembly'
 import { ProductPhotoThumb } from './ProductPhotoThumb'
 import { formatStickerNumber } from '../utils/stickerLabel'
+import { uiHint } from '../utils/uiHint'
 
 export type MarkingPanelKind = 'errors' | 'unbound'
 
@@ -21,6 +22,9 @@ export function AssemblyMarkingPanels({
         type="button"
         className={`assembly-marking-panel${errorsCount > 0 ? ' assembly-marking-panel--alert' : ' assembly-marking-panel--ok'}`}
         onClick={() => onOpenList('errors')}
+        {...uiHint(
+          'Заказы, где WB отклонил код Честного знака. Нажмите — список с ячейкой и кнопкой «Заменить товар».',
+        )}
       >
         <span className="assembly-marking-panel__count">{errorsCount}</span>
         <span className="assembly-marking-panel__label">Ошибки ЧЗ</span>
@@ -29,6 +33,9 @@ export function AssemblyMarkingPanels({
         type="button"
         className={`assembly-marking-panel${unboundCount > 0 ? ' assembly-marking-panel--alert' : ' assembly-marking-panel--ok'}`}
         onClick={() => onOpenList('unbound')}
+        {...uiHint(
+          'Товары с обязательной маркировкой без привязанного ЧЗ. Отсканируйте DataMatrix в поле сканирования справа.',
+        )}
       >
         <span className="assembly-marking-panel__count">{unboundCount}</span>
         <span className="assembly-marking-panel__label">Без ЧЗ</span>
@@ -68,7 +75,12 @@ export function AssemblyMarkingListModal({
       >
         <div className="assembly-marking-modal__head">
           <h2 id="marking-list-title">{title}</h2>
-          <button type="button" className="btn btn--ghost btn--small" onClick={onClose}>
+          <button
+            type="button"
+            className="btn btn--ghost btn--small"
+            onClick={onClose}
+            {...uiHint('Закрыть список')}
+          >
             Закрыть
           </button>
         </div>
@@ -78,6 +90,7 @@ export function AssemblyMarkingListModal({
           <ul className="assembly-marking-list">
             {orders.map((order) => {
               const sticker = formatStickerNumber(order)
+              const cell = (order.cell_number || '').trim()
               return (
                 <li key={order.id} className="assembly-marking-list__item">
                   <ProductPhotoThumb
@@ -91,6 +104,9 @@ export function AssemblyMarkingListModal({
                     </div>
                     <div className="assembly-marking-list__row">
                       <code>{order.barcode}</code>
+                    </div>
+                    <div className="assembly-marking-list__cell">
+                      Ячейка: <strong>{cell || '—'}</strong>
                     </div>
                     {sticker && (
                       <div className="assembly-marking-list__sticker">
@@ -107,6 +123,7 @@ export function AssemblyMarkingListModal({
                       className="btn btn--small btn--primary"
                       onClick={() => onReplace(order)}
                       disabled={loading}
+                      {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
                     >
                       Заменить товар
                     </button>

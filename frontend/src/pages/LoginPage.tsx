@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './LoginPage.css'
 
 export function LoginPage() {
@@ -65,13 +66,15 @@ export function LoginPage() {
 
           {error && <p className="login-form__error">{error}</p>}
 
-          <button type="submit" className="btn btn--primary btn--full" disabled={submitting}>
-            {submitting ? 'Вход…' : 'Войти'}
-          </button>
+          <span {...hintWrapProps('Войти в CRM с указанным логином и паролем.')}>
+            <button type="submit" className="btn btn--primary btn--full" disabled={submitting}>
+              {submitting ? 'Вход…' : 'Войти'}
+            </button>
+          </span>
         </form>
 
         <p className="login-card__footer">
-          Новый фулфилмент? <Link to="/signup">Зарегистрироваться</Link>
+          Новый фулфилмент? <Link to="/signup" {...uiHint('Зарегистрировать новый аккаунт оператора фулфилмента.')}>Зарегистрироваться</Link>
         </p>
 
         <div className="login-roles">

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { createStaffUser, fetchStaffUsers, updateStaffUser, type StaffUser } from '../../api/staffAdmin'
+import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
 
 function formatDate(value: string | null): string {
@@ -98,7 +99,7 @@ export function OwnerStaffPage() {
           <h1>Сотрудники</h1>
           <p>Менеджеры склада — доступ к операционным разделам без финансов и настроек</p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить список менеджеров склада.')}>
           Обновить
         </button>
       </header>
@@ -130,7 +131,7 @@ export function OwnerStaffPage() {
               required
             />
           </label>
-          <button type="submit" className="btn btn--primary" disabled={creating}>
+          <button type="submit" className="btn btn--primary" disabled={creating} {...uiHint('Создать учётную запись менеджера склада с указанным логином и паролем.')}>
             {creating ? 'Создание…' : 'Создать'}
           </button>
         </form>
@@ -167,7 +168,7 @@ export function OwnerStaffPage() {
                     </td>
                     <td>{formatDate(user.last_login)}</td>
                     <td>
-                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => toggleActive(user)}>
+                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => toggleActive(user)} {...uiHint(user.is_active ? 'Запретить вход менеджеру в CRM.' : 'Разрешить менеджеру снова входить в CRM.')}>
                         {user.is_active ? 'Отключить' : 'Включить'}
                       </button>
                       <button
@@ -177,6 +178,7 @@ export function OwnerStaffPage() {
                           setResetUserId(user.id)
                           setNewPassword('')
                         }}
+                        {...uiHint('Задать новый пароль для этого менеджера.')}
                       >
                         Сменить пароль
                       </button>
@@ -203,10 +205,10 @@ export function OwnerStaffPage() {
                 required
               />
             </label>
-            <button type="submit" className="btn btn--primary" disabled={savingPassword}>
+            <button type="submit" className="btn btn--primary" disabled={savingPassword} {...uiHint('Сохранить новый пароль для выбранного менеджера.')}>
               {savingPassword ? 'Сохранение…' : 'Сохранить'}
             </button>
-            <button type="button" className="btn btn--ghost" onClick={() => setResetUserId(null)}>
+            <button type="button" className="btn btn--ghost" onClick={() => setResetUserId(null)} {...uiHint('Отменить смену пароля и закрыть форму.')}>
               Отмена
             </button>
           </form>

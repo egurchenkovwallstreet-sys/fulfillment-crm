@@ -16,6 +16,7 @@ import { toggleSellerOzonWarehouse, type SellerOzonWarehouse } from '../api/sell
 import { ApiError } from '../api/client'
 import { openPdfBase64 } from '../utils/browserPrint'
 import { printSupplySticker } from '../utils/printService'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
 const STAGES = [
@@ -265,12 +266,12 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       <header className="topbar">
         <div>
           <p>
-            <Link to="/assembly">← Селлеры Ozon</Link>
+            <Link to="/assembly" {...uiHint('Вернуться к списку селлеров Ozon для сборки FBS.')}>← Селлеры Ozon</Link>
           </p>
           <h1>{data?.seller.company_name || 'Сборка Ozon'}</h1>
           <p>Новые → скан → ЧЗ (если нужен) → в доставку → этикетка PDF → акт/ШК</p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={handleSync} disabled={syncing || loading}>
+        <button type="button" className="btn btn--primary" onClick={handleSync} disabled={syncing || loading} {...uiHint('Обновить отправления и счётчики из Ozon для текущей вкладки.')}>
           {syncing ? 'Обновление…' : 'Обновить из Ozon'}
         </button>
       </header>
@@ -305,6 +306,13 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
             type="button"
             className={`assembly-stage${stage === item.key ? ' assembly-stage--active' : ''}`}
             onClick={() => setStage(item.key)}
+            {...uiHint(
+              item.key === 'new'
+                ? 'Новые отправления — скан баркода для перевода на сборку.'
+                : item.key === 'confirm'
+                  ? 'На сборке — привязка ЧЗ и передача в доставку.'
+                  : 'В доставке — печать этикеток и формирование акта.',
+            )}
           >
             <span className="assembly-stage__label">{item.label}</span>
             <span className="assembly-stage__count">{stageCount(counts, item.key)}</span>
@@ -327,7 +335,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
               autoComplete="off"
             />
           </label>
-          <button type="submit" className="btn btn--primary">
+          <button type="submit" className="btn btn--primary" {...uiHint(scanOnPicking ? 'Привязать код «Честный знак» к отправлению на сборке.' : 'Перевести отсканированное отправление на сборку.')}>
             {scanOnPicking ? 'Привязать ЧЗ' : 'На сборку'}
           </button>
         </form>
@@ -335,28 +343,33 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
       {stage === 'complete' && (
         <section className="panel assembly-scan-panel">
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => void handleAct()}
-            disabled={busyId === -2 || (data?.orders || []).length === 0}
-          >
-            {busyId === -2 ? 'Формирование…' : 'Сформировать акт и ШК'}
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => void handleLabelsAll()}
-            disabled={busyId === -1 || (data?.orders || []).length === 0}
-          >
-            Печать этикеток (до 20)
-          </button>
+          <span {...hintWrapProps('Сформировать акт и штрихкод для сдачи отправлений в пункт Ozon.')}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handleAct()}
+              disabled={busyId === -2 || (data?.orders || []).length === 0}
+            >
+              {busyId === -2 ? 'Формирование…' : 'Сформировать акт и ШК'}
+            </button>
+          </span>
+          <span {...hintWrapProps('Открыть PDF с этикетками до 20 отправлений для печати.')}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void handleLabelsAll()}
+              disabled={busyId === -1 || (data?.orders || []).length === 0}
+            >
+              Печать этикеток (до 20)
+            </button>
+          </span>
           {lastCarriageId ? (
             <button
               type="button"
               className="btn btn--ghost"
               onClick={() => void handleAct(lastCarriageId)}
               disabled={busyId === -2}
+              {...uiHint('Повторно сформировать документы для последней отгрузки.')}
             >
               Повторить документы
             </button>
@@ -410,6 +423,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
                         setPendingMarking(order)
                         scanRef.current?.focus()
                       }}
+                      {...uiHint('Перейти к сканированию кода «Честный знак» для этого отправления.')}
                     >
                       Скан ЧЗ
                       {order.marking_needed_count
@@ -418,14 +432,22 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
                     </button>
                   )}
                   {stage === 'confirm' && (
-                    <button
-                      type="button"
-                      className="btn btn--primary btn--small"
-                      onClick={() => void handleShip(order)}
-                      disabled={busyId === order.id || (order.requires_marking && !order.marking_bound)}
+                    <span
+                      {...hintWrapProps(
+                        order.requires_marking && !order.marking_bound
+                          ? 'Передать в доставку можно после привязки Честного знака.'
+                          : 'Передать отправление в статус «В доставку» в Ozon.',
+                      )}
                     >
-                      В доставку
-                    </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--small"
+                        onClick={() => void handleShip(order)}
+                        disabled={busyId === order.id || (order.requires_marking && !order.marking_bound)}
+                      >
+                        В доставку
+                      </button>
+                    </span>
                   )}
                   {order.requires_marking && !order.marking_bound && stage === 'confirm' && (
                     <span className="sellers-tag sellers-tag--warn">нужен ЧЗ</span>
@@ -436,6 +458,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
                       className="btn btn--secondary btn--small"
                       onClick={() => void handleLabel(order)}
                       disabled={busyId === order.id}
+                      {...uiHint('Открыть PDF-этикетку отправления для печати.')}
                     >
                       Этикетка
                     </button>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { fetchAssemblySellers, type SellerAssemblyCounters } from '../api/assembly'
 import { syncOrders } from '../api/orders'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
 export function AssemblySellersPage() {
@@ -97,7 +98,7 @@ export function AssemblySellersPage() {
               : 'Выберите селлера для подготовки и сборки заказов'}
           </p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={handleSyncAll} disabled={loading || syncing}>
+        <button type="button" className="btn btn--primary" onClick={handleSyncAll} disabled={loading || syncing} {...uiHint(marketplace === 'ozon' ? 'Обновить счётчики заказов Ozon для всех селлеров.' : 'Синхронизировать заказы и статусы WB для всех селлеров.')}>
           {syncing
             ? marketplace === 'ozon'
               ? 'Обновление Ozon…'
@@ -139,7 +140,7 @@ export function AssemblySellersPage() {
             {sellers.map((seller) => (
               <tr key={seller.id}>
                 <td>
-                  <Link to={`/assembly/${seller.id}`} className="assembly-seller-link">
+                  <Link to={`/assembly/${seller.id}`} className="assembly-seller-link" {...uiHint(`Открыть сборку FBS для селлера ${seller.company_name}.`)}>
                     {seller.company_name}
                   </Link>
                 </td>

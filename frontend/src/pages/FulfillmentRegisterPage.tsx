@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { registerFulfillment } from '../api/fulfillmentRegister'
 import { saveTokens } from '../api/tokens'
 import { useAuth } from '../context/AuthContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import '../pages/LoginPage.css'
 
 export function FulfillmentRegisterPage() {
@@ -88,13 +89,15 @@ export function FulfillmentRegisterPage() {
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </label>
           {error && <p className="login-form__error">{error}</p>}
-          <button type="submit" className="btn btn--primary btn--full" disabled={loading}>
-            {loading ? 'Создание…' : 'Создать фулфилмент'}
-          </button>
+          <span {...hintWrapProps('Создать аккаунт фулфилмента и войти в кабинет владельца.')}>
+            <button type="submit" className="btn btn--primary btn--full" disabled={loading}>
+              {loading ? 'Создание…' : 'Создать фулфилмент'}
+            </button>
+          </span>
         </form>
 
         <p className="login-card__footer">
-          Уже есть аккаунт? <Link to="/login">Войти</Link>
+          Уже есть аккаунт? <Link to="/login" {...uiHint('Перейти на страницу входа в CRM.')}>Войти</Link>
         </p>
       </div>
     </div>

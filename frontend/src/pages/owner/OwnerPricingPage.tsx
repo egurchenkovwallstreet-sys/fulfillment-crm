@@ -6,6 +6,7 @@ import {
   updatePriceGroup,
   type PriceGroupItem,
 } from '../../api/sellerAdmin'
+import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
 
 function formatPrice(value: string): string {
@@ -116,7 +117,7 @@ export function OwnerPricingPage() {
           <h1>Ценовые группы</h1>
           <p>Группы для тарифов обработки — используются при назначении тарифа селлеру</p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить список ценовых групп.')}>
           Обновить
         </button>
       </header>
@@ -139,7 +140,7 @@ export function OwnerPricingPage() {
             Порядок
             <input type="number" min="0" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
           </label>
-          <button type="submit" className="btn btn--primary" disabled={creating}>
+          <button type="submit" className="btn btn--primary" disabled={creating} {...uiHint('Создать новую ценовую группу для назначения тарифов селлерам.')}>
             {creating ? 'Создание…' : 'Создать'}
           </button>
         </form>
@@ -180,10 +181,10 @@ export function OwnerPricingPage() {
                             value={editSort}
                             onChange={(e) => setEditSort(e.target.value)}
                           />
-                          <button type="submit" className="btn btn--primary btn--sm" disabled={saving}>
+                          <button type="submit" className="btn btn--primary btn--sm" disabled={saving} {...uiHint('Сохранить изменения названия, цены и порядка группы.')}>
                             {saving ? '…' : 'Сохранить'}
                           </button>
-                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditId(null)}>
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditId(null)} {...uiHint('Отменить редактирование группы.')}>
                             Отмена
                           </button>
                         </form>
@@ -197,10 +198,10 @@ export function OwnerPricingPage() {
                       <td>{formatPrice(group.processing_price)}</td>
                       <td>{group.sort_order}</td>
                       <td>
-                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => startEdit(group)}>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => startEdit(group)} {...uiHint('Изменить название, цену и порядок этой группы.')}>
                           Изменить
                         </button>
-                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleDelete(group)}>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleDelete(group)} {...uiHint('Удалить группу — товары останутся без неё.')}>
                           Удалить
                         </button>
                       </td>

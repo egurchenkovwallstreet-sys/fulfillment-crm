@@ -13,6 +13,7 @@ import {
 } from '../api/sellerAdmin'
 import { copyToClipboard } from '../utils/copyToClipboard'
 import { SellerTariffModal } from '../components/SellerTariffModal'
+import { uiHint } from '../utils/uiHint'
 import './SellersManagePage.css'
 
 function inviteUrl(token: string | null): string {
@@ -196,7 +197,7 @@ export function SellersManagePage() {
           <h1>Селлеры</h1>
           <p>Создание, API-токены, редактирование и удаление селлеров</p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить список селлеров и их статусы.')}>
           Обновить
         </button>
       </header>
@@ -223,7 +224,7 @@ export function SellersManagePage() {
               <input type="checkbox" checked={createOzon} onChange={(e) => setCreateOzon(e.target.checked)} />
               Ozon
             </label>
-            <button type="submit" className="btn btn--primary" disabled={creating}>
+            <button type="submit" className="btn btn--primary" disabled={creating} {...uiHint('Создать нового селлера и ссылку для регистрации в личном кабинете.')}>
               {creating ? 'Создание…' : 'Создать'}
             </button>
           </div>
@@ -324,6 +325,7 @@ export function SellersManagePage() {
                         type="button"
                         className="btn btn--ghost btn--sm"
                         onClick={() => setTariffSeller(seller)}
+                        {...uiHint('Настроить тариф обработки для товаров селлера.')}
                       >
                         Тариф
                       </button>
@@ -336,6 +338,7 @@ export function SellersManagePage() {
                           type="button"
                           className="btn btn--ghost btn--sm"
                           onClick={() => copyInvite(seller)}
+                          {...uiHint('Скопировать ссылку приглашения для регистрации селлера в CRM.')}
                         >
                           {copiedId === seller.id
                             ? 'Скопировано'
@@ -350,6 +353,7 @@ export function SellersManagePage() {
                         type="button"
                         className="btn btn--ghost btn--sm"
                         onClick={() => openEdit(seller)}
+                        {...uiHint('Изменить название, маркетплейсы, токены и статус селлера.')}
                       >
                         Изменить
                       </button>
@@ -435,6 +439,7 @@ export function SellersManagePage() {
                           setSavingEdit(false)
                         }
                       }}
+                      {...uiHint('Удалить сохранённый токен WB у селлера.')}
                     >
                       Удалить токен
                     </button>
@@ -489,6 +494,7 @@ export function SellersManagePage() {
                           setSavingEdit(false)
                         }
                       }}
+                      {...uiHint('Удалить сохранённые ключи API Ozon у селлера.')}
                     >
                       Удалить ключи
                     </button>
@@ -498,10 +504,10 @@ export function SellersManagePage() {
             )}
 
             <div className="sellers-form__actions">
-              <button type="submit" className="btn btn--primary" disabled={savingEdit}>
+              <button type="submit" className="btn btn--primary" disabled={savingEdit} {...uiHint('Сохранить изменения названия, маркетплейсов и токенов селлера.')}>
                 {savingEdit ? 'Сохранение…' : 'Сохранить'}
               </button>
-              <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)}>
+              <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)} {...uiHint('Закрыть форму редактирования без сохранения.')}>
                 Отмена
               </button>
               <button
@@ -509,6 +515,7 @@ export function SellersManagePage() {
                 className="btn btn--danger-outline"
                 disabled={savingEdit}
                 onClick={() => void handleDeleteSeller()}
+                {...uiHint('Безвозвратно удалить селлера со всеми товарами и историей.')}
               >
                 Удалить селлера
               </button>

@@ -21,6 +21,7 @@ import { fetchSellerOzonWarehouses, fetchSellerWarehouses, type SellerOzonWareho
 import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './ArticleIntakePage.css'
 
 const STATUS_LABEL: Record<ArticleIntakeSession['status'], string> = {
@@ -417,7 +418,7 @@ export function ArticleIntakePage() {
             <h1>Приёмка с ячейками по артикулам</h1>
             <p>Скан → проверка артикула и цвета → ячейки → остатки на фулфилменте → выгрузка на {mpName}</p>
           </div>
-          <Link to="/warehouse" className="btn btn--secondary">← Склад</Link>
+          <Link to="/warehouse" className="btn btn--secondary" {...uiHint('Вернуться на главную страницу склада.')}>← Склад</Link>
         </header>
 
         <div className="art-home">
@@ -444,7 +445,7 @@ export function ArticleIntakePage() {
               )}
             </div>
             <div className="art-card__actions">
-              <button type="button" className="btn btn--primary" disabled={loading} onClick={() => void startNew()}>
+              <button type="button" className="btn btn--primary" disabled={loading} onClick={() => void startNew()} {...uiHint('Создать новую сессию приёмки для выбранного или нового клиента.')}>
                 Начать
               </button>
             </div>
@@ -458,7 +459,7 @@ export function ArticleIntakePage() {
               <ul className="art-session-list">
                 {sessions.slice(0, 12).map((item) => (
                   <li key={item.id}>
-                    <Link to={`/intake-article/${item.id}`}>
+                    <Link to={`/intake-article/${item.id}`} {...uiHint(`Открыть сессию приёмки #${item.id} — ${item.seller_name}.`)}>
                       #{item.id} · {item.seller_name} · {STATUS_LABEL[item.status]}
                       {item.marketplace_pushed_at ? ' · выгружено' : ' · продолжить'}
                       {' · '}{item.total_units} шт.
@@ -485,7 +486,7 @@ export function ArticleIntakePage() {
             {locked ? ' · заблокировано после выгрузки' : ''}
           </p>
         </div>
-        <Link to="/intake-article" className="btn btn--secondary">← Список</Link>
+        <Link to="/intake-article" className="btn btn--secondary" {...uiHint('Вернуться к списку всех сессий приёмки.')}>← Список</Link>
       </header>
 
       {session && (
@@ -518,6 +519,7 @@ export function ArticleIntakePage() {
                           type="button"
                           className={`btn btn--small${entryMode === 'piece' ? ' btn--primary' : ' btn--secondary'}`}
                           onClick={() => setEntryMode('piece')}
+                          {...uiHint('Вводить остатки по одному скану баркода (+1 за каждый скан).')}
                         >
                           По 1 (скан)
                         </button>
@@ -525,12 +527,13 @@ export function ArticleIntakePage() {
                           type="button"
                           className={`btn btn--small${entryMode === 'manual' ? ' btn--primary' : ' btn--secondary'}`}
                           onClick={() => setEntryMode('manual')}
+                          {...uiHint('Вводить остатки числом вручную для каждого размера.')}
                         >
                           Числом
                         </button>
                       </div>
                     </div>
-                    <button type="submit" className="btn btn--primary art-scan-row__submit" disabled={loading}>
+                    <button type="submit" className="btn btn--primary art-scan-row__submit" disabled={loading} {...uiHint(entryMode === 'piece' && activeProducts.length > 0 ? 'Добавить +1 к количеству отсканированного баркода.' : 'Проверить баркод и создать или дополнить группу артикула.')}>
                       {entryMode === 'piece' && activeProducts.length > 0 ? '+1 скан' : 'Проверить'}
                     </button>
                   </div>
@@ -553,14 +556,16 @@ export function ArticleIntakePage() {
                           ))}
                         </select>
                       </label>
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        disabled={loading || !activeGroupKey}
-                        onClick={() => void handleSaveQuantities()}
-                      >
-                        Сохранить количество
-                      </button>
+                      <span {...hintWrapProps('Сохранить введённые количества для всех размеров выбранной группы.')}>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={loading || !activeGroupKey}
+                          onClick={() => void handleSaveQuantities()}
+                        >
+                          Сохранить количество
+                        </button>
+                      </span>
                     </div>
                     <table className="art-modal__table">
                       <thead>
@@ -598,6 +603,7 @@ export function ArticleIntakePage() {
                                 type="button"
                                 className="btn btn--secondary btn--small"
                                 onClick={() => void handlePrintLabel(product)}
+                                {...uiHint('Напечатать этикетку ячейки для этого размера.')}
                               >
                                 Этикетка
                               </button>
@@ -605,6 +611,7 @@ export function ArticleIntakePage() {
                                 type="button"
                                 className="btn btn--danger-outline btn--small"
                                 onClick={() => void handleDeleteProduct(product)}
+                                {...uiHint('Удалить баркод, ячейку и количество из сессии приёмки.')}
                               >
                                 Удалить
                               </button>
@@ -652,14 +659,16 @@ export function ArticleIntakePage() {
                       <option value="add">Прибавить к ЛК</option>
                     </select>
                   </label>
-                  <button
-                    type="button"
-                    className="btn btn--secondary art-push-grid__btn"
-                    disabled={loading || !pushWarehouseId}
-                    onClick={() => void handlePush()}
-                  >
-                    Выгрузить
-                  </button>
+                  <span {...hintWrapProps(`Выгрузить остатки из CRM на ${mpName} — заменить или прибавить к ЛК.`)}>
+                    <button
+                      type="button"
+                      className="btn btn--secondary art-push-grid__btn"
+                      disabled={loading || !pushWarehouseId}
+                      onClick={() => void handlePush()}
+                    >
+                      Выгрузить
+                    </button>
+                  </span>
                 </div>
               </div>
             )}
@@ -671,6 +680,7 @@ export function ArticleIntakePage() {
                   className="btn btn--secondary"
                   disabled={loading}
                   onClick={() => void handleComplete()}
+                  {...uiHint('Закрыть сессию приёмки — дальнейшее редактирование будет недоступно.')}
                 >
                   Завершить приёмку
                 </button>
@@ -698,7 +708,7 @@ export function ArticleIntakePage() {
                 <button
                   type="button"
                   className="art-modal__photo-btn"
-                  title="Увеличить фото"
+                  {...uiHint('Увеличить фото товара для проверки артикула и цвета.')}
                   onClick={() =>
                     setZoomPhotoUrl(
                       preview.photo_url ||
@@ -751,6 +761,7 @@ export function ArticleIntakePage() {
                             type="button"
                             className="btn btn--secondary btn--small"
                             onClick={() => toggleExcludeItem(item.barcode)}
+                            {...uiHint(item.excluded ? 'Вернуть размер в список для создания ячейки.' : 'Исключить размер — ячейка для него не будет создана.')}
                           >
                             {item.excluded ? 'Вернуть' : 'Удалить ячейку'}
                           </button>
@@ -771,6 +782,7 @@ export function ArticleIntakePage() {
                   setPreviewItems([])
                   focusBarcode()
                 }}
+                {...uiHint('Закрыть окно проверки без создания ячеек.')}
               >
                 Отмена
               </button>
@@ -779,6 +791,7 @@ export function ArticleIntakePage() {
                 className="btn btn--primary"
                 disabled={loading}
                 onClick={() => void handleConfirmGroup()}
+                {...uiHint('Создать ячейки для всех размеров группы и перейти к вводу остатков.')}
               >
                 Сохранить ячейки
               </button>
@@ -796,7 +809,7 @@ export function ArticleIntakePage() {
               {cellHit.tech_size || '—'} · <code>{cellHit.barcode}</code>
             </p>
             <p className="art-cell-hit__qty">Количество: <strong>{cellHit.quantity}</strong></p>
-            <button type="button" className="btn btn--primary" onClick={() => setCellHit(null)}>
+            <button type="button" className="btn btn--primary" onClick={() => setCellHit(null)} {...uiHint('Закрыть подсказку с номером ячейки и продолжить сканирование.')}>
               Понятно
             </button>
           </div>
@@ -811,7 +824,7 @@ export function ArticleIntakePage() {
           aria-label="Фото товара"
           onClick={() => setZoomPhotoUrl(null)}
         >
-          <button type="button" className="art-photo-zoom__close" onClick={() => setZoomPhotoUrl(null)}>✕</button>
+          <button type="button" className="art-photo-zoom__close" onClick={() => setZoomPhotoUrl(null)} {...uiHint('Закрыть увеличенное фото товара.')}>✕</button>
           <img
             src={zoomPhotoUrl}
             alt="Фото товара"

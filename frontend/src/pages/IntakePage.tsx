@@ -21,6 +21,7 @@ import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } fro
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { printCellLabels } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './IntakePage.css'
 
 export function IntakePage() {
@@ -397,14 +398,16 @@ export function IntakePage() {
             <div className="intake-warehouses">
               <div className="intake-warehouses__head">
                 <span className="intake-field__label">Склад FBS (точка отгрузки WB)</span>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--small"
-                  onClick={handleSyncWarehouses}
-                  disabled={loading || !sellerId}
-                >
-                  Загрузить из WB
-                </button>
+                <span {...hintWrapProps('Подтянуть список FBS-складов селлера из личного кабинета WB.')}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--small"
+                    onClick={handleSyncWarehouses}
+                    disabled={loading || !sellerId}
+                  >
+                    Загрузить из WB
+                  </button>
+                </span>
               </div>
               {sellerId && enabledWarehouses.length === 0 && (
                 <p className="intake-hint">Нажмите «Загрузить из WB», чтобы получить склады</p>
@@ -479,14 +482,16 @@ export function IntakePage() {
 
             {isSyncAuto && (
             <div className="intake-wb-sync-auto">
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => void handleLoadWbSyncPreview()}
-                disabled={loading || !sellerId || !warehouseId}
-              >
-                {loading ? 'Загрузка…' : 'Загрузить остатки из WB'}
-              </button>
+              <span {...hintWrapProps('Загрузить все остатки с выбранного FBS-склада WB для автоматической сверки.')}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => void handleLoadWbSyncPreview()}
+                  disabled={loading || !sellerId || !warehouseId}
+                >
+                  {loading ? 'Загрузка…' : 'Загрузить остатки из WB'}
+                </button>
+              </span>
               {wbSyncPreview && (
                 <>
                   <p className="intake-hint">
@@ -518,30 +523,36 @@ export function IntakePage() {
                     </table>
                   </div>
                   <div className="intake-actions">
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => void handleApplyWbSyncAuto()}
-                      disabled={loading || selectedBarcodes.size < 1}
-                    >
-                      Применить сверку ({selectedBarcodes.size})
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--secondary"
-                      onClick={() => handlePrintWbSyncLabels(false)}
-                      disabled={wbSyncLabels.length < 1}
-                    >
-                      Печать выбранных этикеток
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--secondary"
-                      onClick={() => handlePrintWbSyncLabels(true)}
-                      disabled={wbSyncLabels.length < 1}
-                    >
-                      Печать всех этикеток
-                    </button>
+                    <span {...hintWrapProps('Применить сверку к отмеченным баркодам: остатки CRM и ячейки по WB.')}>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void handleApplyWbSyncAuto()}
+                        disabled={loading || selectedBarcodes.size < 1}
+                      >
+                        Применить сверку ({selectedBarcodes.size})
+                      </button>
+                    </span>
+                    <span {...hintWrapProps('Напечатать этикетки ячеек только для отмеченных позиций.')}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={() => handlePrintWbSyncLabels(false)}
+                        disabled={wbSyncLabels.length < 1}
+                      >
+                        Печать выбранных этикеток
+                      </button>
+                    </span>
+                    <span {...hintWrapProps('Напечатать этикетки ячеек для всех новых позиций после сверки.')}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={() => handlePrintWbSyncLabels(true)}
+                        disabled={wbSyncLabels.length < 1}
+                      >
+                        Печать всех этикеток
+                      </button>
+                    </span>
                   </div>
                 </>
               )}
@@ -551,16 +562,18 @@ export function IntakePage() {
             {!isSyncAuto && (
             <>
             {isSyncScan && (
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => void handleLoadWbSyncPreview()}
-                disabled={loading || !sellerId || !warehouseId}
-              >
-                {wbSyncPreview
-                  ? `Остатки WB загружены (${wbSyncPreview.items.length})`
-                  : 'Загрузить остатки из WB'}
-              </button>
+              <span {...hintWrapProps('Загрузить остатки WB для режима сверки по сканированию баркодов.')}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => void handleLoadWbSyncPreview()}
+                  disabled={loading || !sellerId || !warehouseId}
+                >
+                  {wbSyncPreview
+                    ? `Остатки WB загружены (${wbSyncPreview.items.length})`
+                    : 'Загрузить остатки из WB'}
+                </button>
+              </span>
             )}
 
             <label className="intake-field">
@@ -577,14 +590,16 @@ export function IntakePage() {
               />
             </label>
 
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={handleLookup}
-              disabled={loading || !sellerId || (!isOzon && !warehouseId)}
-            >
-              {loading ? 'Поиск…' : 'Найти товар (Enter)'}
-            </button>
+            <span {...hintWrapProps('Найти товар по баркоду в CRM и подтянуть остаток WB.')}>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={handleLookup}
+                disabled={loading || !sellerId || (!isOzon && !warehouseId)}
+              >
+                {loading ? 'Поиск…' : 'Найти товар (Enter)'}
+              </button>
+            </span>
 
             {lookup?.exists && lookup.product && (
               <div className="intake-info intake-info--exists">
@@ -717,20 +732,30 @@ export function IntakePage() {
                 )}
 
                 <div className="intake-actions">
-                  <button
-                    type="submit"
-                    className="btn btn--primary"
-                    disabled={loading || (isSyncMode && !isSyncScan && !verifiedStockMatch)}
-                  >
-                    {loading
-                      ? 'Сохранение…'
-                      : isSyncScan
-                        ? 'Сверить, назначить ячейку и печать'
+                  <span
+                    {...hintWrapProps(
+                      isSyncScan
+                        ? 'Сверить остаток, назначить ячейку и отправить этикетку на печать.'
                         : isSyncMode
-                          ? 'Установить остаток из WB'
-                          : 'Принять на склад'}
-                  </button>
-                  <button type="button" className="btn btn--secondary" onClick={resetForm}>
+                          ? 'Установить остаток CRM по данным WB после подтверждения сверки.'
+                          : 'Принять товар на склад CRM и обновить остатки в маркетплейсе.',
+                    )}
+                  >
+                    <button
+                      type="submit"
+                      className="btn btn--primary"
+                      disabled={loading || (isSyncMode && !isSyncScan && !verifiedStockMatch)}
+                    >
+                      {loading
+                        ? 'Сохранение…'
+                        : isSyncScan
+                          ? 'Сверить, назначить ячейку и печать'
+                          : isSyncMode
+                            ? 'Установить остаток из WB'
+                            : 'Принять на склад'}
+                    </button>
+                  </span>
+                  <button type="button" className="btn btn--secondary" onClick={resetForm} {...uiHint('Очистить форму и вернуться к сканированию баркода.')}>
                     Сбросить
                   </button>
                 </div>

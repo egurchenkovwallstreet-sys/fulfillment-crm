@@ -1,4 +1,5 @@
 import './CrmResultModal.css'
+import { uiHint } from '../utils/uiHint'
 
 export type CrmResultModalState = {
   kind: 'success' | 'error'
@@ -29,7 +30,7 @@ export function CrmResultModal({ modal, onClose }: Props) {
         <h2 id="crm-result-title">{modal.title}</h2>
         <p className="crm-result__message">{modal.message}</p>
         <div className="crm-result__actions">
-          <button type="button" className="btn btn--primary crm-result__ok" onClick={onClose}>
+          <button type="button" className="btn btn--primary crm-result__ok" onClick={onClose} {...uiHint('Закрыть сообщение и продолжить работу.')}>
             Понятно
           </button>
         </div>

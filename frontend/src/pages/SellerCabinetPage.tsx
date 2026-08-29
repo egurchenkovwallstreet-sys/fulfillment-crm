@@ -9,6 +9,7 @@ import {
 import { useMarketplace } from '../context/MarketplaceContext'
 import { StatCard } from '../components/StatCard'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './SellerCabinetPage.css'
 
 const STOCK_LABELS: Record<string, string> = {
@@ -91,7 +92,7 @@ export function SellerCabinetPage() {
             {isOzon ? ' · Seller API Ozon' : ' · Statistics API WB'}
           </p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
+        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить остатки, заказы и статистику отгрузок.')}>
           {loading ? 'Обновление…' : 'Обновить'}
         </button>
       </header>
@@ -165,15 +166,17 @@ export function SellerCabinetPage() {
               </div>
 
               <div className="seller-weekly-shipments__nav">
-                <button
-                  type="button"
-                  className="seller-weekly-shipments__arrow"
-                  onClick={() => setShipmentWeekIndex((index) => Math.min(index + 1, shipmentWeeks.length - 1))}
-                  disabled={shipmentWeekIndex >= shipmentWeeks.length - 1}
-                  aria-label="Предыдущая неделя"
-                >
-                  ←
-                </button>
+                <span {...hintWrapProps('Перейти к более ранней неделе отгрузок.')}>
+                  <button
+                    type="button"
+                    className="seller-weekly-shipments__arrow"
+                    onClick={() => setShipmentWeekIndex((index) => Math.min(index + 1, shipmentWeeks.length - 1))}
+                    disabled={shipmentWeekIndex >= shipmentWeeks.length - 1}
+                    aria-label="Предыдущая неделя"
+                  >
+                    ←
+                  </button>
+                </span>
                 <div className="seller-weekly-shipments__tabs" role="tablist" aria-label="Недели отгрузок">
                   {shipmentWeeks.map((week, index) => (
                     <button
@@ -183,20 +186,23 @@ export function SellerCabinetPage() {
                       aria-selected={index === shipmentWeekIndex}
                       className={`seller-weekly-shipments__tab${index === shipmentWeekIndex ? ' seller-weekly-shipments__tab--active' : ''}${week.is_current ? ' seller-weekly-shipments__tab--current' : ''}`}
                       onClick={() => setShipmentWeekIndex(index)}
+                      {...uiHint(`Показать отгрузки за неделю ${formatWeekRange(week)}.`)}
                     >
                       {week.is_current ? 'Текущая' : formatWeekRange(week)}
                     </button>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  className="seller-weekly-shipments__arrow"
-                  onClick={() => setShipmentWeekIndex((index) => Math.max(index - 1, 0))}
-                  disabled={shipmentWeekIndex <= 0}
-                  aria-label="Следующая неделя"
-                >
-                  →
-                </button>
+                <span {...hintWrapProps('Перейти к более поздней неделе отгрузок.')}>
+                  <button
+                    type="button"
+                    className="seller-weekly-shipments__arrow"
+                    onClick={() => setShipmentWeekIndex((index) => Math.max(index - 1, 0))}
+                    disabled={shipmentWeekIndex <= 0}
+                    aria-label="Следующая неделя"
+                  >
+                    →
+                  </button>
+                </span>
               </div>
 
               <div className="seller-chart seller-weekly-chart">
@@ -256,7 +262,7 @@ export function SellerCabinetPage() {
                       <ProductPhotoThumb url={item.photo_url} alt={item.name} />
                     </td>
                     <td>
-                      <Link to={`/cabinet/${encodeURIComponent(item.barcode)}`} className="seller-cabinet-link">
+                      <Link to={`/cabinet/${encodeURIComponent(item.barcode)}`} className="seller-cabinet-link" {...uiHint('Открыть детальную карточку товара с графиком заказов.')}>
                         {item.name}
                       </Link>
                     </td>

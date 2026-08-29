@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL } from '../constants/printAgent'
 import { refreshPrintBridgeStatus } from '../utils/printService'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import { useEffect, useState } from 'react'
 import './PrintAgentPage.css'
 
@@ -34,18 +35,20 @@ export function PrintAgentPage() {
           <p>Скачайте, запустите — стикеры FBS печатаются без диалога Chrome</p>
         </div>
         <div className="topbar__actions">
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => void runHealthCheck()}
-            disabled={checking}
-          >
-            {checking ? 'Проверка…' : 'Проверить снова'}
-          </button>
-          <a className="btn btn--primary" href={PRINT_AGENT_DOWNLOAD_URL} download>
+          <span {...hintWrapProps('Проверить, запущен ли агент печати на этом компьютере.')}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void runHealthCheck()}
+              disabled={checking}
+            >
+              {checking ? 'Проверка…' : 'Проверить снова'}
+            </button>
+          </span>
+          <a className="btn btn--primary" href={PRINT_AGENT_DOWNLOAD_URL} download {...uiHint('Скачать программу агента печати для Windows.')}>
             Скачать агент (.exe)
           </a>
-          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download>
+          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Скачать bat-установщик — рекомендуемый способ установки агента.')}>
             Установщик (.bat)
           </a>
         </div>
@@ -105,7 +108,7 @@ export function PrintAgentPage() {
             </li>
           </ul>
           <p>
-            Откройте <Link to="/assembly">Сборку FBS</Link> — в шапке должно быть «Печать: …имя принтера…», не «Chrome».
+            Откройте <Link to="/assembly" {...uiHint('Перейти к сборке FBS и проверить статус печати в шапке.')}>Сборку FBS</Link> — в шапке должно быть «Печать: …имя принтера…», не «Chrome».
           </p>
         </section>
 

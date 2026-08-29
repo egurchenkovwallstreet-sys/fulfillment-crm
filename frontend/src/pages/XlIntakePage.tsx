@@ -15,6 +15,7 @@ import {
   type XlIntakeSession,
 } from '../api/xlIntake'
 import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './XlIntakePage.css'
 
 const SCAN_IDLE_MS = 120
@@ -280,7 +281,7 @@ export function XlIntakePage() {
           </p>
         </div>
         {session && (
-          <Link to="/intake-xl" className="btn btn--secondary" data-allow-blur>
+          <Link to="/intake-xl" className="btn btn--secondary" data-allow-blur {...uiHint('Вернуться к списку XL-приёмок.')}>
             К списку
           </Link>
         )}
@@ -322,7 +323,7 @@ export function XlIntakePage() {
                 ))}
               </select>
             </label>
-            <button className="btn btn--primary" type="button" onClick={() => void startNew()} disabled={loading}>
+            <button className="btn btn--primary" type="button" onClick={() => void startNew()} disabled={loading} {...uiHint('Создать новую XL-сессию и перейти к сканированию баркодов.')}>
               Начать сканирование
             </button>
           </div>
@@ -349,7 +350,7 @@ export function XlIntakePage() {
                       <td>{item.unique_count}</td>
                       <td>{item.total_quantity}</td>
                       <td>
-                        <Link to={`/intake-xl/${item.id}`}>
+                        <Link to={`/intake-xl/${item.id}`} {...uiHint(item.status === 'completed' ? `Открыть завершённую приёмку ${item.seller_name}.` : `Продолжить сканирование для ${item.seller_name}.`)}>
                           {item.status === 'completed' ? 'Открыть' : 'Продолжить'}
                         </Link>
                       </td>
@@ -407,30 +408,36 @@ export function XlIntakePage() {
           />
 
           <div className="xl-scan-actions" data-allow-blur>
-            <button
-              className="btn btn--secondary"
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={loading || session.total_quantity < 1}
-            >
-              Сохранить
-            </button>
-            <button
-              className="btn btn--secondary"
-              type="button"
-              onClick={() => void handleExcel()}
-              disabled={session.total_quantity < 1}
-            >
-              Скачать Excel
-            </button>
-            <button
-              className="btn btn--danger"
-              type="button"
-              onClick={() => void handleComplete()}
-              disabled={loading || session.total_quantity < 1}
-            >
-              Завершить приёмку
-            </button>
+            <span {...hintWrapProps('Сохранить промежуточную контрольную точку — можно продолжить сканирование позже.')}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={loading || session.total_quantity < 1}
+              >
+                Сохранить
+              </button>
+            </span>
+            <span {...hintWrapProps('Скачать Excel-файл со списком отсканированных баркодов и количеств.')}>
+              <button
+                className="btn btn--secondary"
+                type="button"
+                onClick={() => void handleExcel()}
+                disabled={session.total_quantity < 1}
+              >
+                Скачать Excel
+              </button>
+            </span>
+            <span {...hintWrapProps('Завершить приёмку навсегда — сканирование и правки будут закрыты.')}>
+              <button
+                className="btn btn--danger"
+                type="button"
+                onClick={() => void handleComplete()}
+                disabled={loading || session.total_quantity < 1}
+              >
+                Завершить приёмку
+              </button>
+            </span>
           </div>
 
           <div className="xl-connect" data-allow-blur>
@@ -456,18 +463,20 @@ export function XlIntakePage() {
               <p className="xl-warn">Склады WB: {session.warehouse_sync_warning}</p>
             )}
             {(session.unmatched || []).length > 0 && (
-              <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)}>
+              <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)} {...uiHint('Показать баркоды, которых нет в личном кабинете WB.')}>
                 Баркоды не найдены в ЛК WB ({session.unmatched.length})
               </button>
             )}
-            <button
-              className="btn btn--primary"
-              type="button"
-              onClick={() => void handleConnectWb()}
-              disabled={loading || session.total_quantity < 1}
-            >
-              {session.status === 'applied' ? 'Применить новые баркоды' : 'Создать ячейки из каталога WB'}
-            </button>
+            <span {...hintWrapProps(session.status === 'applied' ? 'Подтянуть новые баркоды из WB и создать для них ячейки.' : 'Подключить API WB, создать ячейки и подтянуть карточки из каталога.')}>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => void handleConnectWb()}
+                disabled={loading || session.total_quantity < 1}
+              >
+                {session.status === 'applied' ? 'Применить новые баркоды' : 'Создать ячейки из каталога WB'}
+              </button>
+            </span>
           </div>
 
           <h2 className="xl-list-title">Список баркодов</h2>
@@ -507,6 +516,7 @@ export function XlIntakePage() {
                       type="button"
                       className="btn btn--danger-outline btn--small"
                       onClick={() => void handleDeleteLine(line.barcode)}
+                      {...uiHint('Удалить этот баркод из списка приёмки.')}
                     >
                       Удалить
                     </button>
@@ -528,12 +538,12 @@ export function XlIntakePage() {
               Баркодов: {session.unique_count}, штук: {session.total_quantity}
             </p>
             <div className="xl-saved-actions" data-allow-blur>
-              <button className="btn btn--secondary" type="button" onClick={() => void handleExcel()}>
+              <button className="btn btn--secondary" type="button" onClick={() => void handleExcel()} {...uiHint('Скачать Excel-файл со списком баркодов и количеств.')}>
                 Скачать Excel
               </button>
             </div>
             {(session.unmatched || []).length > 0 && (
-              <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)}>
+              <button className="btn btn--secondary" type="button" onClick={() => setShowUnmatched(true)} {...uiHint('Показать баркоды, не найденные в личном кабинете WB.')}>
                 Баркоды не найдены в ЛК WB ({session.unmatched.length})
               </button>
             )}
@@ -584,7 +594,7 @@ export function XlIntakePage() {
                 ))}
               </tbody>
             </table>
-            <button className="btn btn--primary" type="button" onClick={() => setShowUnmatched(false)}>
+            <button className="btn btn--primary" type="button" onClick={() => setShowUnmatched(false)} {...uiHint('Закрыть список баркодов, не найденных в WB.')}>
               Закрыть
             </button>
           </div>

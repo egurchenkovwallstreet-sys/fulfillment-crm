@@ -374,3 +374,95 @@ input[type='radio'] {
   border: 1px solid #fecaca;
   color: var(--color-danger-dark);
 }
+
+/* ── Hover hints (data-hint) ─────────────────────────────────────────────── */
+
+[data-hint] {
+  position: relative;
+}
+
+[data-hint]::after {
+  content: attr(data-hint);
+  position: absolute;
+  z-index: 1200;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  max-width: min(320px, 90vw);
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+[data-hint]::before {
+  content: '';
+  position: absolute;
+  z-index: 1200;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #0f172a;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+[data-hint]:hover::after,
+[data-hint]:hover::before,
+[data-hint]:focus-visible::after,
+[data-hint]:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+.hint-wrap {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.sidebar__link[data-hint]::after,
+.owner-subnav__link[data-hint]::after {
+  left: auto;
+  right: 0;
+  bottom: auto;
+  top: 50%;
+  transform: translate(calc(100% + 10px), -50%);
+  text-align: left;
+}
+
+.sidebar__link[data-hint]::before,
+.owner-subnav__link[data-hint]::before {
+  left: auto;
+  right: -2px;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent;
+  border-right-color: #0f172a;
+  border-top-color: transparent;
+}
+
+.assembly-marking-list__cell {
+  margin-top: 0.25rem;
+  font-size: 0.88rem;
+  color: var(--color-text-muted);
+}
+
+.assembly-marking-list__cell strong {
+  color: var(--color-text-strong);
+  font-size: 1rem;
+}
+

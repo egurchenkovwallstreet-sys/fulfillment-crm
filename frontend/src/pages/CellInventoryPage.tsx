@@ -16,6 +16,7 @@ import {
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { printCellLabel } from '../utils/cellLabelPrint'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './CellInventoryPage.css'
 
 export function CellInventoryPage() {
@@ -191,9 +192,11 @@ export function CellInventoryPage() {
                 placeholder="Номер ячейки, например 42"
                 autoComplete="off"
               />
-              <button type="submit" className="btn btn--primary" disabled={cellSearchLoading || !cellQuery.trim()}>
-                {cellSearchLoading ? '…' : 'Найти'}
-              </button>
+              <span {...hintWrapProps('Найти ячейку по номеру и показать привязанный товар.')}>
+                <button type="submit" className="btn btn--primary" disabled={cellSearchLoading || !cellQuery.trim()}>
+                  {cellSearchLoading ? '…' : 'Найти'}
+                </button>
+              </span>
             </div>
           </form>
         )}
@@ -215,7 +218,7 @@ export function CellInventoryPage() {
         <section className="panel cell-detail-panel">
           <div className="cell-detail-panel__head">
             <h2 className="section-title">Ячейка №{cellDetail.cell.number}</h2>
-            <button type="button" className="btn btn--ghost btn--small" onClick={() => setCellDetail(null)}>
+            <button type="button" className="btn btn--ghost btn--small" onClick={() => setCellDetail(null)} {...uiHint('Закрыть карточку ячейки и вернуться к списку.')}>
               Закрыть
             </button>
           </div>
@@ -279,6 +282,7 @@ export function CellInventoryPage() {
               className="btn btn--secondary"
               disabled={refreshing || loading}
               onClick={handleRefreshFromWb}
+              {...uiHint('Обновить названия, фото и размеры товаров из каталога WB.')}
             >
               {refreshing ? 'Обновление из WB…' : 'Обновить из WB'}
             </button>
@@ -327,6 +331,7 @@ export function CellInventoryPage() {
                       type="button"
                       className="btn btn--secondary btn--small"
                       onClick={() => handlePrint(product.id)}
+                      {...uiHint('Напечатать этикетку ячейки для этого товара.')}
                     >
                       Печать этикетки
                     </button>
@@ -337,6 +342,7 @@ export function CellInventoryPage() {
                         setMoveProductId(product.id)
                         setMoveCellId('')
                       }}
+                      {...uiHint('Перенести товар в другую ячейку склада.')}
                     >
                       Перенести
                     </button>
@@ -376,10 +382,10 @@ export function CellInventoryPage() {
                 </select>
               </label>
               <div className="cell-inventory-modal__actions">
-                <button type="submit" className="btn btn--primary" disabled={loading}>
+                <button type="submit" className="btn btn--primary" disabled={loading} {...uiHint('Переместить товар в выбранную ячейку и обновить привязку.')}>
                   Перенести
                 </button>
-                <button type="button" className="btn btn--secondary" onClick={() => setMoveProductId(null)}>
+                <button type="button" className="btn btn--secondary" onClick={() => setMoveProductId(null)} {...uiHint('Закрыть окно переноса без изменений.')}>
                   Отмена
                 </button>
               </div>

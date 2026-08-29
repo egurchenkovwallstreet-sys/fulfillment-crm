@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SellerWeeklyShipmentWeek, SellerWeeklyShipments } from '../api/sellerCabinet'
+import { uiHint, hintWrapProps } from '../utils/uiHint'
 
 function formatShortDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
@@ -69,15 +70,17 @@ export function WeeklyShipmentsPanel({
       </div>
 
       <div className="seller-weekly-shipments__nav">
-        <button
-          type="button"
-          className="seller-weekly-shipments__arrow"
-          onClick={() => setWeekIndex(Math.min(weekIndex + 1, weeks.length - 1))}
-          disabled={weekIndex >= weeks.length - 1}
-          aria-label="Предыдущая неделя"
-        >
-          ←
-        </button>
+        <span {...hintWrapProps('Показать более раннюю неделю отгрузок')}>
+          <button
+            type="button"
+            className="seller-weekly-shipments__arrow"
+            onClick={() => setWeekIndex(Math.min(weekIndex + 1, weeks.length - 1))}
+            disabled={weekIndex >= weeks.length - 1}
+            aria-label="Предыдущая неделя"
+          >
+            ←
+          </button>
+        </span>
         <div className="seller-weekly-shipments__tabs" role="tablist" aria-label="Недели отгрузок">
           {weeks.map((week, index) => (
             <button
@@ -87,20 +90,23 @@ export function WeeklyShipmentsPanel({
               aria-selected={index === weekIndex}
               className={`seller-weekly-shipments__tab${index === weekIndex ? ' seller-weekly-shipments__tab--active' : ''}${week.is_current ? ' seller-weekly-shipments__tab--current' : ''}`}
               onClick={() => setWeekIndex(index)}
+              {...uiHint(`Отгрузки за неделю ${formatWeekRange(week)}`)}
             >
               {week.is_current ? 'Текущая' : formatWeekRange(week)}
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="seller-weekly-shipments__arrow"
-          onClick={() => setWeekIndex(Math.max(weekIndex - 1, 0))}
-          disabled={weekIndex <= 0}
-          aria-label="Следующая неделя"
-        >
-          →
-        </button>
+        <span {...hintWrapProps('Показать более позднюю неделю отгрузок')}>
+          <button
+            type="button"
+            className="seller-weekly-shipments__arrow"
+            onClick={() => setWeekIndex(Math.max(weekIndex - 1, 0))}
+            disabled={weekIndex <= 0}
+            aria-label="Следующая неделя"
+          >
+            →
+          </button>
+        </span>
       </div>
 
       <div className="seller-chart seller-weekly-chart">

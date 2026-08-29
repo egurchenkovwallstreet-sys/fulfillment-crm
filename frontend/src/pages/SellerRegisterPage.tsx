@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { fetchInvitePreview, registerSeller } from '../api/sellerAdmin'
 import { saveTokens } from '../api/tokens'
 import { useAuth } from '../context/AuthContext'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './LoginPage.css'
 
 export function SellerRegisterPage() {
@@ -47,10 +48,10 @@ export function SellerRegisterPage() {
             Чтобы зарегистрировать селлера по этой ссылке, выйдите из текущего аккаунта
             или откройте ссылку в режиме инкогнито / другом браузере.
           </p>
-          <button type="button" className="btn btn--primary btn--full" onClick={logout}>
+          <button type="button" className="btn btn--primary btn--full" onClick={logout} {...uiHint('Выйти из текущего аккаунта, чтобы зарегистрировать селлера по ссылке.')}>
             Выйти и продолжить
           </button>
-          <Link to="/" className="btn btn--ghost btn--full" style={{ marginTop: '0.5rem' }}>
+          <Link to="/" className="btn btn--ghost btn--full" style={{ marginTop: '0.5rem' }} {...uiHint('Вернуться на главную страницу CRM.')}>
             Вернуться в CRM
           </Link>
         </div>
@@ -95,7 +96,7 @@ export function SellerRegisterPage() {
         <div className="login-card">
           <h1>Ссылка недействительна</h1>
           <p>Приглашение не найдено или отключено. Обратитесь к администратору фулфилмента.</p>
-          <Link to="/login" className="btn btn--primary btn--full">
+          <Link to="/login" className="btn btn--primary btn--full" {...uiHint('Перейти на страницу входа в CRM.')}>
             На страницу входа
           </Link>
         </div>
@@ -111,7 +112,7 @@ export function SellerRegisterPage() {
           <p>
             Для компании <strong>{companyName}</strong> уже зарегистрирован пользователь. Войдите в CRM.
           </p>
-          <Link to="/login" className="btn btn--primary btn--full">
+          <Link to="/login" className="btn btn--primary btn--full" {...uiHint('Войти в CRM под уже созданным аккаунтом селлера.')}>
             Войти
           </Link>
         </div>
@@ -167,9 +168,11 @@ export function SellerRegisterPage() {
 
           {error && <p className="login-form__error">{error}</p>}
 
-          <button type="submit" className="btn btn--primary btn--full" disabled={submitting}>
-            {submitting ? 'Создание…' : 'Создать аккаунт'}
-          </button>
+          <span {...hintWrapProps('Создать аккаунт селлера и войти в личный кабинет.')}>
+            <button type="submit" className="btn btn--primary btn--full" disabled={submitting}>
+              {submitting ? 'Создание…' : 'Создать аккаунт'}
+            </button>
+          </span>
         </form>
       </div>
     </div>

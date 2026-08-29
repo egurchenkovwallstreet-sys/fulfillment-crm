@@ -15,6 +15,7 @@ import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } fro
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
+import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './InventoryPage.css'
 
 type VerifyModal = {
@@ -260,7 +261,7 @@ export function InventoryPage() {
             Фактический пересчёт на фулфилменте → остаток в CRM → выбранные склады FBS в ЛК WB
           </p>
         </div>
-        <Link to="/warehouse" className="btn btn--secondary inventory-btn">
+        <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
           ← Склад
         </Link>
       </header>
@@ -290,14 +291,16 @@ export function InventoryPage() {
             <div className="inventory-setup__warehouses">
               <div className="inventory-setup__warehouses-head">
                 <strong>FBS-склады для остатков в WB</strong>
-                <button
-                  type="button"
-                  className="btn btn--secondary inventory-btn inventory-btn--compact"
-                  disabled={!sellerId || loading}
-                  onClick={() => void handleSyncWarehouses()}
-                >
-                  Загрузить из WB
-                </button>
+                <span {...hintWrapProps('Подтянуть список FBS-складов селлера из личного кабинета WB.')}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary inventory-btn inventory-btn--compact"
+                    disabled={!sellerId || loading}
+                    onClick={() => void handleSyncWarehouses()}
+                  >
+                    Загрузить из WB
+                  </button>
+                </span>
               </div>
               {warehouses.length === 0 ? (
                 <p className="inventory-hint">Выберите селлера и загрузите склады</p>
@@ -324,14 +327,16 @@ export function InventoryPage() {
               )}
             </div>
           </div>
-          <button
-            type="button"
-            className="btn btn--danger inventory-btn inventory-btn--large"
-            disabled={!sellerId || (!isOzon && warehouseIds.length < 1) || loading}
-            onClick={startSession}
-          >
-            Начать инвентаризацию
-          </button>
+          <span {...hintWrapProps('Начать сессию пересчёта: выберите селлера и хотя бы один FBS-склад.')}>
+            <button
+              type="button"
+              className="btn btn--danger inventory-btn inventory-btn--large"
+              disabled={!sellerId || (!isOzon && warehouseIds.length < 1) || loading}
+              onClick={startSession}
+            >
+              Начать инвентаризацию
+            </button>
+          </span>
         </section>
       ) : (
         <>
@@ -349,6 +354,7 @@ export function InventoryPage() {
                   type="button"
                   className="btn btn--danger inventory-btn"
                   onClick={finishSession}
+                  {...uiHint('Завершить сессию инвентаризации и вернуться к выбору селлера.')}
                 >
                   Завершить инвентаризацию
                 </button>
@@ -373,14 +379,16 @@ export function InventoryPage() {
                   inputMode="numeric"
                 />
               </label>
-              <button
-                type="button"
-                className="btn btn--secondary inventory-btn inventory-btn--lookup"
-                disabled={loading || !barcode.trim()}
-                onClick={() => void handleLookup()}
-              >
-                Найти товар
-              </button>
+              <span {...hintWrapProps('Найти товар по баркоду в CRM перед вводом фактического количества.')}>
+                <button
+                  type="button"
+                  className="btn btn--secondary inventory-btn inventory-btn--lookup"
+                  disabled={loading || !barcode.trim()}
+                  onClick={() => void handleLookup()}
+                >
+                  Найти товар
+                </button>
+              </span>
             </div>
 
             {lookup && (
@@ -460,6 +468,7 @@ export function InventoryPage() {
                     type="button"
                     className="btn btn--secondary inventory-btn inventory-btn--print"
                     onClick={handlePrintCellLabel}
+                    {...uiHint('Напечатать этикетку ячейки для текущего товара.')}
                   >
                     Распечатать этикетку ячейки
                   </button>
@@ -483,6 +492,7 @@ export function InventoryPage() {
                   type="submit"
                   className="btn btn--danger inventory-btn inventory-btn--large"
                   disabled={loading}
+                  {...uiHint('Записать фактическое количество в CRM и обновить остатки на FBS-складах WB.')}
                 >
                   {loading ? 'Обработка…' : 'Провести инвентаризацию'}
                 </button>
@@ -579,6 +589,7 @@ export function InventoryPage() {
               type="button"
               className="btn btn--primary inventory-btn inventory-btn--large inventory-modal__close"
               onClick={closeVerifyModal}
+              {...uiHint('Закрыть результат сверки и перейти к следующему баркоду.')}
             >
               Продолжить
             </button>

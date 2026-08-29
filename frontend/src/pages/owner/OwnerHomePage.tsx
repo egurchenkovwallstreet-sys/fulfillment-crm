@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
 
 const CARDS = [
@@ -36,7 +37,7 @@ export function OwnerHomePage() {
 
       <section className="owner-home-grid">
         {CARDS.map((card) => (
-          <Link key={card.to} to={card.to} className="owner-home-card">
+          <Link key={card.to} to={card.to} className="owner-home-card" {...uiHint(card.desc)}>
             <strong>{card.title}</strong>
             <span>{card.desc}</span>
           </Link>
