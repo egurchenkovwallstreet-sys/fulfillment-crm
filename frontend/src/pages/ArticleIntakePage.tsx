@@ -43,6 +43,7 @@ export function ArticleIntakePage() {
   const [pushMode, setPushMode] = useState<'replace' | 'add'>('replace')
   const [preview, setPreview] = useState<ArticleGroupPreview | null>(null)
   const [previewItems, setPreviewItems] = useState<ArticleGroupPreviewItem[]>([])
+  const [zoomPhotoUrl, setZoomPhotoUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
@@ -440,13 +441,41 @@ export function ArticleIntakePage() {
       {preview && (
         <div className="art-modal-backdrop" role="presentation">
           <div className="art-modal" role="dialog" aria-modal="true">
-            <h2>Новая группа: артикул + цвет</h2>
-            <p className="art-modal__meta">
-              Артикул <strong>{preview.article_label || preview.vendor_code || preview.article_id}</strong>
-              {' · '}цвет <strong>{preview.color_label}</strong>
-              {' · '}размеров: <strong>{preview.group_size ?? previewItems.filter((i) => !i.excluded).length}</strong>
-            </p>
-            <p className="art-modal__meta">{preview.title}</p>
+            <div className="art-modal__head">
+              <div className="art-modal__head-text">
+                <h2>Новая группа: артикул + цвет</h2>
+                <p className="art-modal__meta">
+                  Артикул <strong>{preview.article_label || preview.vendor_code || preview.article_id}</strong>
+                  {' · '}цвет <strong>{preview.color_label}</strong>
+                  {' · '}размеров:{' '}
+                  <strong>{preview.group_size ?? previewItems.filter((i) => !i.excluded).length}</strong>
+                </p>
+                <p className="art-modal__meta">{preview.title}</p>
+              </div>
+              {(preview.photo_url || previewItems.find((i) => i.barcode === preview.scanned_barcode)?.photo_url) && (
+                <button
+                  type="button"
+                  className="art-modal__photo-btn"
+                  title="Увеличить фото"
+                  onClick={() =>
+                    setZoomPhotoUrl(
+                      preview.photo_url ||
+                        previewItems.find((i) => i.barcode === preview.scanned_barcode)?.photo_url ||
+                        null,
+                    )
+                  }
+                >
+                  <img
+                    src={
+                      preview.photo_url ||
+                      previewItems.find((i) => i.barcode === preview.scanned_barcode)?.photo_url
+                    }
+                    alt=""
+                    className="art-modal__photo"
+                  />
+                </button>
+              )}
+            </div>
             <table className="art-modal__table">
               <thead>
                 <tr>
@@ -460,11 +489,16 @@ export function ArticleIntakePage() {
                 </tr>
               </thead>
               <tbody>
-                {previewItems.map((item) => (
-                  <tr
-                    key={item.barcode}
-                    className={item.excluded ? 'art-row--excluded' : ''}
-                  >
+                {previewItems.map((item) => {
+                  const isScanned = item.barcode === preview.scanned_barcode
+                  const rowClass = [
+                    item.excluded ? 'art-row--excluded' : '',
+                    isScanned ? 'art-row--scanned' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
+                  return (
+                  <tr key={item.barcode} className={rowClass || undefined}>
                     <td>{item.vendor_code || item.article_label || '—'}</td>
                     <td>{item.color_label || preview.color_label || '—'}</td>
                     <td>{item.size_label}</td>
@@ -483,7 +517,8 @@ export function ArticleIntakePage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
             <div className="art-modal__actions">
@@ -494,6 +529,7 @@ export function ArticleIntakePage() {
                 onClick={() => {
                   setPreview(null)
                   setPreviewItems([])
+                  setZoomPhotoUrl(null)
                   focusBarcode()
                 }}
               >
@@ -509,6 +545,30 @@ export function ArticleIntakePage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {zoomPhotoUrl && (
+        <div
+          className="art-photo-zoom"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Фото товара"
+          onClick={() => setZoomPhotoUrl(null)}
+        >
+          <button
+            type="button"
+            className="art-photo-zoom__close"
+            onClick={() => setZoomPhotoUrl(null)}
+          >
+            ✕
+          </button>
+          <img
+            src={zoomPhotoUrl}
+            alt="Фото товара"
+            className="art-photo-zoom__img"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 
