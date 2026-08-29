@@ -1,0 +1,136 @@
+.art-home {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.art-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.4rem;
+}
+
+.art-card h2 {
+  margin: 0 0 1rem;
+  font-size: 1.15rem;
+}
+
+.art-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.art-field input,
+.art-field select {
+  min-height: 46px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.art-scan-row {
+  display: grid;
+  grid-template-columns: 2fr 120px auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.art-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  font-size: 0.92rem;
+  color: #475569;
+}
+
+.art-stats strong {
+  color: #0f172a;
+}
+
+.art-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.art-modal {
+  background: #fff;
+  border-radius: 16px;
+  max-width: 720px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 1.5rem;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+}
+
+.art-modal h2 {
+  margin: 0 0 0.5rem;
+}
+
+.art-modal__meta {
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.art-modal__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.art-modal__table th,
+.art-modal__table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.55rem 0.4rem;
+  text-align: left;
+}
+
+.art-modal__table tr.art-row--excluded td {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.art-modal__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.art-push {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.art-push-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+@media (max-width: 800px) {
+  .art-home,
+  .art-scan-row,
+  .art-push-grid {
+    grid-template-columns: 1fr;
+  }
+}

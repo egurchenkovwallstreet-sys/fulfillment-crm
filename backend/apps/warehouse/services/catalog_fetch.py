@@ -24,6 +24,17 @@ class CatalogError(Exception):
   pass
 
 
+def normalize_barcode(value: str) -> str:
+  barcode = str(value or "").strip()
+  if not barcode:
+    return ""
+  if barcode.endswith(".0"):
+    head = barcode[:-2]
+    if head.isdigit():
+      return head
+  return barcode
+
+
 @dataclass
 class CatalogBarcodeItem:
   barcode: str
@@ -34,6 +45,7 @@ class CatalogBarcodeItem:
   wb_size: str
   photo_url: str
   requires_marking: bool
+  color_label: str = ""
   wb_stock_total: int = 0
   wb_stock_by_warehouse: dict[int, int] = field(default_factory=dict)
   cell_number: str = ""
@@ -59,6 +71,22 @@ def _get_token(seller: Seller) -> str:
     raise CatalogError(str(exc)) from exc
 
 
+def _color_from_wb_card(card: dict) -> str:
+  for item in card.get("characteristics") or []:
+    if not isinstance(item, dict):
+      continue
+    name = str(item.get("name") or item.get("charcName") or "").lower()
+    if "цвет" not in name and "color" not in name:
+      continue
+    value = item.get("value") or item.get("charcValue")
+    if isinstance(value, list):
+      value = value[0] if value else ""
+    text = str(value or "").strip()
+    if text:
+      return text
+  return ""
+
+
 def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
   items: list[CatalogBarcodeItem] = []
   seen_barcodes: set[str] = set()
@@ -72,12 +100,17 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
     vendor_code = str(card.get("vendorCode") or "").strip()
     photo_url = _pick_photo_url(card)
     need_kiz = bool(card.get("needKiz"))
+    color_label = _color_from_wb_card(card)
 
     size_rows: list[tuple[str, str, list[str]]] = []
     for size in card.get("sizes") or []:
       tech_size = str(size.get("techSize") or "").strip()
       wb_size = str(size.get("wbSize") or "").strip()
-      skus = [str(sku).strip() for sku in (size.get("skus") or []) if str(sku).strip()]
+      skus = [
+        normalize_barcode(str(sku))
+        for sku in (size.get("skus") or [])
+        if normalize_barcode(str(sku))
+      ]
       if skus:
         size_rows.append((wb_size, tech_size, skus))
 
@@ -98,10 +131,16 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
             wb_size=wb_size,
             photo_url=photo_url,
             requires_marking=need_kiz,
+            color_label=color_label,
           )
         )
 
   return items
+
+
+def parse_wb_card_to_items(card: dict) -> list[CatalogBarcodeItem]:
+  """Все баркоды одной карточки WB (артикул + цвет)."""
+  return _parse_cards_to_items([card])
 
 
 def _group_by_article(items: list[CatalogBarcodeItem]) -> list[CatalogArticle]:
@@ -274,6 +313,7 @@ def _serialize_item(item: CatalogBarcodeItem) -> dict:
     "tech_size": item.tech_size,
     "wb_size": item.wb_size,
     "size_label": item.tech_size or "—",
+    "color_label": item.color_label,
     "photo_url": item.photo_url,
     "requires_marking": item.requires_marking,
     "wb_stock_total": item.wb_stock_total,

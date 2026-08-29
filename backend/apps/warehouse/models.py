@@ -95,6 +95,13 @@ class Product(models.Model):
   tech_size = models.CharField("Размер (EU/тех.)", max_length=50, blank=True)
   wb_size = models.CharField("Размер (RU)", max_length=50, blank=True)
   photo_url = models.URLField("Фото WB", max_length=500, blank=True)
+  color_label = models.CharField("Цвет (из карточки МП)", max_length=200, blank=True)
+  article_group_key = models.CharField(
+    "Ключ группы артикул+цвет",
+    max_length=120,
+    blank=True,
+    db_index=True,
+  )
   quantity = models.PositiveIntegerField("Остаток", default=0)
   marketplace = models.CharField(
     "Маркетплейс",
@@ -246,3 +253,47 @@ class XlIntakeLine(models.Model):
 
   def __str__(self):
     return f"{self.barcode} × {self.quantity}"
+
+
+class ArticleIntakeSession(models.Model):
+  class Status(models.TextChoices):
+    ACTIVE = "active", "Приёмка"
+    COMPLETED = "completed", "Завершена"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="article_intake_sessions",
+  )
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.ACTIVE,
+    db_index=True,
+  )
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
+  )
+  confirmed_group_keys = models.JSONField("Подтверждённые группы", default=list, blank=True)
+  scan_count = models.PositiveIntegerField("Сканов", default=0)
+  total_units = models.PositiveIntegerField("Принято шт.", default=0)
+  created_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    related_name="article_intake_sessions",
+  )
+  created_at = models.DateTimeField(auto_now_add=True)
+  completed_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Приёмка по артикулам"
+    verbose_name_plural = "Приёмки по артикулам"
+    ordering = ["-created_at"]
+
+  def __str__(self):
+    return f"Артикул-приёмка #{self.pk} · {self.seller}"

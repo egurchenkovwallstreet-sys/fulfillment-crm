@@ -14,6 +14,7 @@ from apps.warehouse.services.catalog_fetch import (
   _group_by_article,
   _serialize_article,
   _serialize_item,
+  normalize_barcode,
 )
 from apps.warehouse.services.cells import _next_cell_number
 from apps.warehouse.services.size_sort import size_sort_key
@@ -58,10 +59,10 @@ def _barcodes(raw: dict) -> list[str]:
   if isinstance(barcodes, str):
     barcodes = [part.strip() for part in barcodes.split(",") if part.strip()]
   for item in barcodes:
-    value = str(item).strip()
+    value = normalize_barcode(str(item))
     if value and value not in codes:
       codes.append(value)
-  single = str(raw.get("barcode") or "").strip()
+  single = normalize_barcode(str(raw.get("barcode") or ""))
   if single:
     for part in single.split(","):
       value = part.strip()
@@ -71,6 +72,21 @@ def _barcodes(raw: dict) -> list[str]:
   if not codes and offer_id:
     codes.append(offer_id)
   return codes
+
+
+def _color_from_attributes(raw: dict) -> str:
+  for attr in raw.get("attributes") or []:
+    if not isinstance(attr, dict):
+      continue
+    name = str(attr.get("name") or "").lower()
+    if "цвет" not in name and "color" not in name:
+      continue
+    values = attr.get("values") or []
+    if values and isinstance(values[0], dict):
+      return str(values[0].get("value") or values[0].get("value_id") or "").strip()
+    if values:
+      return str(values[0]).strip()
+  return ""
 
 
 def _size_from_attributes(raw: dict) -> str:
@@ -128,6 +144,7 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
     vendor_code = str(card.get("offer_id") or "").strip()
     photo_url = _photo_url(card)
     tech_size = _size_from_attributes(card)
+    color_label = _color_from_attributes(card)
     requires_marking = _requires_marking(card)
     barcodes = _barcodes(card)
     if not barcodes:
@@ -146,10 +163,31 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
           wb_size=tech_size,
           photo_url=photo_url,
           requires_marking=requires_marking,
+          color_label=color_label,
         )
       )
-  items.sort(key=lambda item: (item.wb_nm_id, size_sort_key(item.tech_size, item.wb_size), item.barcode))
+  items.sort(key=lambda item: (item.wb_nm_id, item.color_label.lower(), size_sort_key(item.tech_size, item.wb_size), item.barcode))
   return items
+
+
+def fetch_ozon_catalog_items(seller: Seller) -> list[CatalogBarcodeItem]:
+  """Каталог Ozon селлера для поиска групп артикул+цвет."""
+  try:
+    client = ozon_client_for_seller(seller)
+    short = client.product_list_ids()
+    product_ids = []
+    for row in short:
+      try:
+        product_ids.append(int(row.get("product_id") or row.get("id") or 0))
+      except (TypeError, ValueError):
+        continue
+    product_ids = [item for item in product_ids if item]
+    cards = client.product_info_list(product_ids) if product_ids else []
+  except (OzonCountsError, OzonApiError) as exc:
+    raise CatalogError(str(exc)) from exc
+  if not cards and short:
+    cards = short
+  return _parse_cards_to_items(cards)
 
 
 def _stock_map(

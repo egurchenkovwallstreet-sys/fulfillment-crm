@@ -35,6 +35,14 @@ from .views_xl_intake import (
   XlIntakeSessionDetailView,
   XlIntakeSessionListCreateView,
 )
+from .views_article_intake import (
+  ArticleIntakeCompleteView,
+  ArticleIntakeConfirmGroupView,
+  ArticleIntakePushView,
+  ArticleIntakeScanView,
+  ArticleIntakeSessionDetailView,
+  ArticleIntakeSessionListCreateView,
+)
 
 urlpatterns = [
   path("sellers/", SellerListView.as_view(), name="warehouse_sellers"),
@@ -134,6 +142,36 @@ urlpatterns = [
     "xl-intake/sessions/<int:session_id>/complete/",
     XlIntakeCompleteView.as_view(),
     name="xl_intake_complete",
+  ),
+  path(
+    "article-intake/sessions/",
+    ArticleIntakeSessionListCreateView.as_view(),
+    name="article_intake_sessions",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/",
+    ArticleIntakeSessionDetailView.as_view(),
+    name="article_intake_session_detail",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/scan/",
+    ArticleIntakeScanView.as_view(),
+    name="article_intake_scan",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/confirm-group/",
+    ArticleIntakeConfirmGroupView.as_view(),
+    name="article_intake_confirm_group",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/push-marketplace/",
+    ArticleIntakePushView.as_view(),
+    name="article_intake_push",
+  ),
+  path(
+    "article-intake/sessions/<int:session_id>/complete/",
+    ArticleIntakeCompleteView.as_view(),
+    name="article_intake_complete",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
   path(

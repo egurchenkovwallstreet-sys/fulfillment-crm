@@ -23,6 +23,7 @@ import { SellerRegisterPage } from './pages/SellerRegisterPage'
 import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
 import { XlIntakePage } from './pages/XlIntakePage'
+import { ArticleIntakePage } from './pages/ArticleIntakePage'
 
 function HomeRedirect() {
   const { isSeller } = useAuth()
@@ -60,6 +61,8 @@ function AppRoutes() {
             <Route path="/intake" element={<IntakePage />} />
             <Route path="/intake-xl" element={<XlIntakePage />} />
             <Route path="/intake-xl/:sessionId" element={<XlIntakePage />} />
+            <Route path="/intake-article" element={<ArticleIntakePage />} />
+            <Route path="/intake-article/:sessionId" element={<ArticleIntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />

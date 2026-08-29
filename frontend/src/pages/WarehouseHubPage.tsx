@@ -872,9 +872,14 @@ export function WarehouseHubPage() {
             Сценарий 2: новый клиент с нулевыми остатками на FBS-складе. Физическая приёмка на фулфилменте
             → CRM выставляет остатки в WB.
           </p>
-          <Link to="/intake" className="btn btn--primary">
-            Открыть приёмку
-          </Link>
+          <div className="whub-actions">
+            <Link to="/intake" className="btn btn--primary">
+              Обычная приёмка
+            </Link>
+            <Link to="/intake-article" className="btn btn--secondary">
+              Приёмка с ячейками по артикулам
+            </Link>
+          </div>
         </section>
       )}
 

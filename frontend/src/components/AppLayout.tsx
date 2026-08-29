@@ -80,6 +80,16 @@ export function AppLayout() {
             </NavLink>
           )}
           {(isAdmin || isManager) && (
+            <NavLink
+              to="/intake-article"
+              className={({ isActive }) =>
+                `sidebar__link${isActive ? ' sidebar__link--active' : ''}`
+              }
+            >
+              Приёмка по артикулам
+            </NavLink>
+          )}
+          {(isAdmin || isManager) && (
             <NavLink to="/cells" className={({ isActive }) => `sidebar__link${isActive ? ' sidebar__link--active' : ''}`}>
               Ячейки
             </NavLink>

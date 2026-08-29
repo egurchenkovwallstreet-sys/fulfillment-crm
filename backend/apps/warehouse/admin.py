@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 
-from .models import Cell, PriceGroup, Product, StockOperation, XlIntakeLine, XlIntakeSession
+from .models import ArticleIntakeSession, Cell, PriceGroup, Product, StockOperation, XlIntakeLine, XlIntakeSession
 from .services.cell_delete import force_delete_cells
 
 
@@ -84,3 +84,10 @@ class XlIntakeSessionAdmin(admin.ModelAdmin):
   list_filter = ("status", "marketplace")
   search_fields = ("seller__company_name",)
   inlines = [XlIntakeLineInline]
+
+
+@admin.register(ArticleIntakeSession)
+class ArticleIntakeSessionAdmin(admin.ModelAdmin):
+  list_display = ("id", "seller", "marketplace", "status", "scan_count", "total_units", "created_at")
+  list_filter = ("status", "marketplace")
+  search_fields = ("seller__company_name",)
