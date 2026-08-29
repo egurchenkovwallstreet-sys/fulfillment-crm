@@ -277,11 +277,6 @@
   margin: 0;
 }
 
-.btn--small {
-  padding: 0.4rem 0.75rem;
-  font-size: 0.85rem;
-}
-
 .assembly-warehouses__hint {
   margin: 0 0 0.75rem;
   color: #64748b;

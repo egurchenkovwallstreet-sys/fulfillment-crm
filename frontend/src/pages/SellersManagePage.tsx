@@ -506,7 +506,7 @@ export function SellersManagePage() {
               </button>
               <button
                 type="button"
-                className="btn btn--danger"
+                className="btn btn--danger-outline"
                 disabled={savingEdit}
                 onClick={() => void handleDeleteSeller()}
               >

@@ -79,19 +79,7 @@
 }
 
 .seller-tariff-modal__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
   font-size: 0.9rem;
-  color: #334155;
-}
-
-.seller-tariff-modal__field input,
-.seller-tariff-modal__field select {
-  padding: 0.65rem 0.75rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 0.95rem;
 }
 
 .seller-tariff-modal__checkbox {
