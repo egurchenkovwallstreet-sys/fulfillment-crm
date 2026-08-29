@@ -25,8 +25,9 @@ const STATUS_LABEL: Record<ArticleIntakeSession['status'], string> = {
 export function ArticleIntakePage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { marketplace, mpName } = useMarketplace()
+  const { marketplace } = useMarketplace()
   const isOzon = marketplace === 'ozon'
+  const mpName = isOzon ? 'Ozon' : 'WB'
 
   const barcodeRef = useRef<HTMLInputElement>(null)
   const [sessions, setSessions] = useState<ArticleIntakeSession[]>([])
