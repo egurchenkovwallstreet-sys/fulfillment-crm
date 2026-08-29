@@ -1,7 +1,7 @@
-"""Фильтрация заказов по включённым складам WB селлера."""
+"""Фильтрация заказов по складам WB селлера."""
 from __future__ import annotations
 
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 
 from apps.sellers.models import Seller, SellerWarehouse
 
@@ -20,7 +20,7 @@ def get_enabled_wb_warehouse_ids(seller: Seller) -> set[int]:
 
 
 def get_enabled_warehouse_match_ids(seller: Seller) -> set[int]:
-  """ID складов и офисов WB для сопоставления с заказом."""
+  """ID складов и офисов WB для сопоставления с заказом (экран сборки FBS)."""
   match_ids: set[int] = set()
   for wh_id, office_id in SellerWarehouse.objects.filter(
     seller=seller,
@@ -50,6 +50,7 @@ def order_matches_enabled_warehouse(
 
 
 def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
+  """Галочка склада на экране «Сборка FBS» — не влияет на дашборд и биллинг."""
   if not seller_has_warehouse_config(seller):
     return True
   if wb_warehouse_id is None:
@@ -58,7 +59,12 @@ def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
 
 
 def filter_orders_for_seller(qs: QuerySet, seller: Seller) -> QuerySet:
-  """Только заказы включённых складов — как в live-счётчиках WB."""
+  """Все заказы селлера — без фильтра по галочке склада в сборке."""
+  return qs.filter(seller=seller)
+
+
+def filter_orders_for_assembly(qs: QuerySet, seller: Seller) -> QuerySet:
+  """Только заказы включённых складов — экран «Сборка FBS»."""
   if not seller_has_warehouse_config(seller):
     return qs.filter(seller=seller)
   enabled = get_enabled_wb_warehouse_ids(seller)
@@ -68,36 +74,11 @@ def filter_orders_for_seller(qs: QuerySet, seller: Seller) -> QuerySet:
 
 
 def filter_orders_for_seller_cabinet(qs: QuerySet, seller: Seller) -> QuerySet:
-  """Кабинет селлера: только обслуживаемые FBS-склады, без fallback на все заказы."""
-  enabled = get_enabled_wb_warehouse_ids(seller)
-  if not enabled:
-    return qs.none()
-  return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
+  """Кабинет селлера: все FBS-склады селлера."""
+  return qs.filter(seller=seller)
 
 
 def filter_orders_queryset(qs: QuerySet, *, seller: Seller | None = None) -> QuerySet:
   if seller is not None:
     return filter_orders_for_seller(qs, seller)
-  if not SellerWarehouse.objects.exists():
-    return qs
-  enabled_pairs = list(
-    SellerWarehouse.objects.filter(is_enabled=True).values_list(
-      "seller_id",
-      "wb_warehouse_id",
-    )
-  )
-  if not enabled_pairs:
-    return qs.none()
-  condition = Q()
-  sellers_with_config = set(
-    SellerWarehouse.objects.values_list("seller_id", flat=True).distinct()
-  )
-  for seller_id, wh_id in enabled_pairs:
-    condition |= Q(seller_id=seller_id, wb_warehouse_id=wh_id)
-  sellers_without_config = Seller.objects.exclude(id__in=sellers_with_config).values_list(
-    "id",
-    flat=True,
-  )
-  if sellers_without_config:
-    condition |= Q(seller_id__in=sellers_without_config)
-  return qs.filter(condition)
+  return qs

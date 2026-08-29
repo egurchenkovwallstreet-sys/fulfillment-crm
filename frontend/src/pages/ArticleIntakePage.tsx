@@ -407,7 +407,7 @@ export function ArticleIntakePage() {
     }
   }
 
-  const warehouses = isOzon ? ozonWarehouses : wbWarehouses.filter((wh) => wh.is_enabled)
+  const warehouses = isOzon ? ozonWarehouses : wbWarehouses
 
   if (!activeId) {
     return (

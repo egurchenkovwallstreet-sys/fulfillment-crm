@@ -283,10 +283,9 @@ class InventorySerializer(serializers.Serializer):
     found = SellerWarehouse.objects.filter(
       seller_id=seller_id,
       pk__in=warehouse_ids,
-      is_enabled=True,
     ).count()
     if found != len(warehouse_ids):
       raise serializers.ValidationError({
-        "warehouse_ids": "Один или несколько складов не найдены или отключены",
+        "warehouse_ids": "Один или несколько складов не найдены",
       })
     return attrs

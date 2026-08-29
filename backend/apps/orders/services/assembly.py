@@ -11,7 +11,7 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.orders.models import Order, PickList, PickListItem, Supply
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product
@@ -157,7 +157,7 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
   if not scan_value:
     raise AssemblyError("Пустой штрихкод")
 
-  base_qs = filter_orders_for_seller(
+  base_qs = filter_orders_for_assembly(
     Order.objects.filter(
       seller=seller,
       assembly_hidden=False,
@@ -635,9 +635,13 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
   return result["order"]
 
 
-def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
-  """Счётчики по БД + фильтр складов (для списков заказов в сборке)."""
-  qs = filter_orders_for_seller(Order.objects.filter(seller=seller), seller)
+def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
+  """Счётчики по БД; assembly_only — только включённые склады сборки FBS."""
+  base_qs = Order.objects.filter(seller=seller)
+  if assembly_only:
+    qs = filter_orders_for_assembly(base_qs, seller)
+  else:
+    qs = base_qs
   active = qs.exclude(status=Order.Status.CANCELLED)
 
   if seller.wb_counts_synced_at:
@@ -658,15 +662,15 @@ def get_seller_stage_counts(seller: Seller) -> dict[str, int]:
   }
 
 
-def get_seller_wb_tab_counts(seller: Seller) -> dict[str, int]:
+def get_seller_wb_tab_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
   """Счётчики вкладок как в ЛК WB — из live API после синка."""
-  if seller.wb_counts_synced_at:
+  if seller.wb_counts_synced_at and not assembly_only:
     return {
       "new": seller.wb_count_new,
       "in_picking": seller.wb_count_assembly,
       "in_delivery": seller.wb_count_delivery,
     }
-  stage = get_seller_stage_counts(seller)
+  stage = get_seller_stage_counts(seller, assembly_only=assembly_only)
   return {
     "new": stage["new"],
     "in_picking": stage["in_picking"],

@@ -54,11 +54,10 @@ def _resolve_warehouses(seller: Seller, warehouse_ids: list[int]) -> list[Seller
     SellerWarehouse.objects.filter(
       seller=seller,
       pk__in=unique_ids,
-      is_enabled=True,
     ).order_by("name", "id")
   )
   if len(warehouses) != len(unique_ids):
-    raise IntakeError("Один или несколько складов не найдены или отключены")
+    raise IntakeError("Один или несколько складов не найдены")
   return warehouses
 
 

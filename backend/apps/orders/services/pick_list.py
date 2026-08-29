@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.orders.models import Order, PickList, PickListItem
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.warehouse.models import Product
 
 
@@ -39,7 +39,7 @@ def _cell_sort_key(cell_number: str) -> tuple[int, int, str]:
 def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
   if stage == "confirm":
     qs = (
-      filter_orders_for_seller(
+      filter_orders_for_assembly(
         Order.objects.filter(seller=seller, assembly_hidden=False).filter(
           WB_STAGE_QUERIES["confirm"](),
         ),

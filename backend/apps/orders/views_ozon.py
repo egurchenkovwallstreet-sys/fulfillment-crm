@@ -21,8 +21,14 @@ from apps.sellers.serializers import SellerOzonWarehouseSerializer
 from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 
 
-def _ozon_stage_qs(seller, stage: str):
+def _ozon_stage_qs(seller, stage: str, *, assembly_only: bool = False):
   qs = OzonPosting.objects.filter(seller=seller).select_related("product", "product__cell")
+  if assembly_only:
+    from apps.orders.services.ozon_postings import _enabled_warehouse_ids
+
+    enabled_ids = _enabled_warehouse_ids(seller)
+    if enabled_ids is not None:
+      qs = qs.filter(ozon_warehouse_id__in=enabled_ids)
   if stage in ("new", ""):
     return qs.filter(crm_stage=OzonPosting.CrmStage.NEW, ozon_status="awaiting_packaging")
   if stage in ("confirm", "in_picking"):
@@ -47,10 +53,10 @@ class OzonAssemblySellerDetailView:
   def payload(seller, stage: str) -> dict:
     from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
 
-    tab_counts = get_seller_ozon_tab_counts(seller)
+    tab_counts = get_seller_ozon_tab_counts(seller, assembly_only=True)
     orders = [
       serialize_ozon_posting(item)
-      for item in _ozon_stage_qs(seller, stage or "new").order_by("in_process_at", "id")[:300]
+      for item in _ozon_stage_qs(seller, stage or "new", assembly_only=True).order_by("in_process_at", "id")[:300]
     ]
     warehouses = SellerOzonWarehouse.objects.filter(seller=seller).order_by("name", "ozon_warehouse_id")
     return {

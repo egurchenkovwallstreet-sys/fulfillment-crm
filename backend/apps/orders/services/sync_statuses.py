@@ -21,10 +21,7 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import (
-  filter_orders_for_seller,
-  is_warehouse_enabled,
-)
+from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 
 SYNC_VERSION = "delivery-v14"
 
@@ -106,19 +103,10 @@ def _collect_poll_order_ids(
   )
   if archive_orders:
     for order in archive_orders:
-      if is_warehouse_enabled(seller, order.warehouse_id):
-        poll_ids.add(order.wb_order_id)
+      poll_ids.add(order.wb_order_id)
   if delivery_supply_ids:
     poll_ids.update(delivery_supply_ids)
   return poll_ids
-
-
-def _scoped_order_ids(poll_ids: set[int], warehouse_map: WarehouseMap, seller: Seller) -> set[int]:
-  scoped: set[int] = set()
-  for order_id in poll_ids:
-    if is_warehouse_enabled(seller, warehouse_map.get(order_id)):
-      scoped.add(order_id)
-  return scoped
 
 
 def _apply_statuses_to_orders(seller: Seller, status_map: dict[int, dict]) -> int:
@@ -372,7 +360,7 @@ def sync_order_statuses_for_seller(
       archive_orders=archive_orders,
       delivery_supply_ids=delivery_supply_ids,
     )
-  scoped_ids = _scoped_order_ids(poll_ids, warehouse_map, seller)
+  scoped_ids = poll_ids
 
   if not poll_ids:
     counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}

@@ -49,7 +49,7 @@ def get_enabled_ozon_warehouses_meta(seller: Seller) -> list[dict]:
       "ozon_warehouse_id": wh.ozon_warehouse_id,
       "name": wh.name or f"Склад #{wh.ozon_warehouse_id}",
     }
-    for wh in SellerOzonWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name")
+    for wh in SellerOzonWarehouse.objects.filter(seller=seller).order_by("name")
   ]
 
 

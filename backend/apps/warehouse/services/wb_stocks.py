@@ -90,7 +90,7 @@ def push_wb_stock_increment(
 
 def get_enabled_seller_warehouses(seller: Seller) -> list[SellerWarehouse]:
   return list(
-    SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name", "id")
+    SellerWarehouse.objects.filter(seller=seller).order_by("name", "id")
   )
 
 
@@ -241,8 +241,6 @@ def transfer_wb_stock_between_warehouses(
 
   from_wh = get_seller_warehouse(seller, from_warehouse_id)
   to_wh = get_seller_warehouse(seller, to_warehouse_id)
-  if not from_wh.is_enabled or not to_wh.is_enabled:
-    raise WBStockError("Оба склада должны быть включены для работы")
 
   barcode = barcode.strip()
   from_amount = fetch_wb_stock_for_barcode(seller, from_wh, barcode)

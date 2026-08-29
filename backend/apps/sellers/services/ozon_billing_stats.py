@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from apps.integrations.marketplace import OZON
 from apps.orders.models import OzonPosting
-from apps.orders.services.ozon_postings import _enabled_warehouse_ids
 from apps.sellers.models import Seller
 from apps.sellers.services.calendar_periods import (
   calendar_week_bounds,
@@ -40,7 +39,6 @@ def load_weekly_ozon_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WE
 
   price_by_barcode = _barcode_price_map(seller, marketplace=OZON)
   fallback_tariff = _seller_fallback_tariff(seller, marketplace=OZON)
-  enabled_wh = _enabled_warehouse_ids(seller)
 
   qs = OzonPosting.objects.filter(
     seller=seller,
@@ -48,8 +46,6 @@ def load_weekly_ozon_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WE
     shipped_at__date__gte=oldest_week_start,
     shipped_at__date__lte=current_week_end,
   )
-  if enabled_wh is not None:
-    qs = qs.filter(ozon_warehouse_id__in=enabled_wh)
 
   for posting in qs.iterator():
     ship_date = timezone.localtime(posting.shipped_at).date()

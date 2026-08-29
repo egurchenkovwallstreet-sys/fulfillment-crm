@@ -303,7 +303,7 @@ export function InventoryPage() {
                 <p className="inventory-hint">Выберите селлера и загрузите склады</p>
               ) : (
                 <ul className="inventory-warehouse-list">
-                  {warehouses.filter((wh) => wh.is_enabled).map((wh) => (
+                  {warehouses.map((wh) => (
                     <li key={wh.id}>
                       <label>
                         <input

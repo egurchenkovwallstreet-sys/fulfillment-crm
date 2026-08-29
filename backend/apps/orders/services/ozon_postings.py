@@ -161,15 +161,10 @@ def sync_ozon_postings(seller: Seller, *, user=None) -> dict:
   except (OzonCountsError, OzonApiError) as exc:
     raise OzonPostingSyncError(str(exc)) from exc
 
-  enabled_ids = _enabled_warehouse_ids(seller)
-  created = updated = skipped = 0
+  created = updated = 0
   seen: set[str] = set()
   for raw in packaging + delivering:
     if not isinstance(raw, dict):
-      continue
-    warehouse_id = _warehouse_id(raw)
-    if enabled_ids is not None and warehouse_id and warehouse_id not in enabled_ids:
-      skipped += 1
       continue
     result = _upsert_posting(seller, raw)
     number = str(raw.get("posting_number") or "")
@@ -215,12 +210,11 @@ def sync_ozon_postings(seller: Seller, *, user=None) -> dict:
     seller=seller,
     action_type=AuditLog.ActionType.OTHER,
     message=f"Синхронизация отправлений Ozon: {len(seen)} шт.",
-    details={"created": created, "updated": updated, "skipped": skipped},
+    details={"created": created, "updated": updated},
   )
   return {
     "created": created,
     "updated": updated,
-    "skipped": skipped,
     "new": new_count,
     "in_picking": len(picking_ids),
     "in_delivery": delivery_count,

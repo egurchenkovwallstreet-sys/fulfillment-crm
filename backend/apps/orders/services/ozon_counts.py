@@ -65,11 +65,28 @@ def refresh_ozon_counts(seller: Seller) -> dict[str, int]:
   return counts
 
 
-def get_seller_ozon_tab_counts(seller: Seller) -> dict[str, int]:
+def get_seller_ozon_tab_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
+  if not assembly_only:
+    return {
+      "new": seller.ozon_count_new or 0,
+      "in_picking": seller.ozon_count_assembly or 0,
+      "in_delivery": seller.ozon_count_delivery or 0,
+    }
+
+  from apps.orders.models import OzonPosting
+  from apps.orders.services.ozon_postings import _enabled_warehouse_ids
+
+  qs = OzonPosting.objects.filter(seller=seller)
+  enabled_ids = _enabled_warehouse_ids(seller)
+  if enabled_ids is not None:
+    qs = qs.filter(ozon_warehouse_id__in=enabled_ids)
   return {
-    "new": seller.ozon_count_new or 0,
-    "in_picking": seller.ozon_count_assembly or 0,
-    "in_delivery": seller.ozon_count_delivery or 0,
+    "new": qs.filter(
+      crm_stage=OzonPosting.CrmStage.NEW,
+      ozon_status="awaiting_packaging",
+    ).count(),
+    "in_picking": qs.filter(crm_stage=OzonPosting.CrmStage.IN_PICKING).count(),
+    "in_delivery": qs.filter(crm_stage=OzonPosting.CrmStage.IN_DELIVERY).count(),
   }
 
 

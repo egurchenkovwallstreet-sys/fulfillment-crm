@@ -18,7 +18,7 @@ from apps.orders.services.supply_flow import (
 )
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from .services.supply_sync import sync_supplies_from_wb
-from apps.sellers.services.warehouse_filter import filter_orders_queryset
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, filter_orders_queryset
 
 from .models import Order, PickList, Supply
 from .serializers import (
@@ -388,7 +388,7 @@ class AssemblySellerListView(APIView):
       if marketplace == OZON:
         from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
 
-        tab_counts = get_seller_ozon_tab_counts(seller)
+        tab_counts = get_seller_ozon_tab_counts(seller, assembly_only=True)
         stage_counts = {
           "assembled": 0,
           "label_printed": 0,
@@ -398,8 +398,8 @@ class AssemblySellerListView(APIView):
           "cancelled": 0,
         }
       else:
-        tab_counts = get_seller_wb_tab_counts(seller)
-        stage_counts = get_seller_stage_counts(seller)
+        tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
+        stage_counts = get_seller_stage_counts(seller, assembly_only=True)
       total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
       payload.append({
         "id": seller.id,
@@ -431,8 +431,8 @@ class AssemblySellerDetailView(APIView):
       stage = request.query_params.get("stage", "new")
       return Response(OzonAssemblySellerDetailView.payload(seller, stage))
 
-    stage_counts = get_seller_stage_counts(seller)
-    tab_counts = get_seller_wb_tab_counts(seller)
+    stage_counts = get_seller_stage_counts(seller, assembly_only=True)
+    tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
     assembly_counts = get_assembly_stage_counts(seller)
     counts = {
       **stage_counts,
@@ -452,9 +452,9 @@ class AssemblySellerDetailView(APIView):
         "product", "product__cell",
       )
     else:
-      orders_qs = filter_orders_queryset(
+      orders_qs = filter_orders_for_assembly(
         visible_orders.select_related("product", "product__cell"),
-        seller=seller,
+        seller,
       )
       if stage in WB_STAGE_QUERIES:
         orders_qs = orders_qs.filter(WB_STAGE_QUERIES[stage]())

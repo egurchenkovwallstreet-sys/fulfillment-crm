@@ -54,9 +54,8 @@ export function IntakePage() {
     try {
       const data = await fetchSellerWarehouses(id)
       setWarehouses(data)
-      const enabled = data.filter((w) => w.is_enabled)
-      if (enabled.length === 1) {
-        setWarehouseId(enabled[0].id)
+      if (data.length === 1) {
+        setWarehouseId(data[0].id)
       }
     } catch {
       setWarehouses([])
@@ -358,7 +357,7 @@ export function IntakePage() {
   const isSyncMode = stockMode === 'sync_from_wb'
   const isSyncAuto = isSyncMode && syncVariant === 'auto'
   const isSyncScan = isSyncMode && syncVariant === 'scan'
-  const enabledWarehouses = warehouses.filter((w) => w.is_enabled)
+  const enabledWarehouses = warehouses
   const allSelected =
     wbSyncPreview != null &&
     wbSyncPreview.items.length > 0 &&

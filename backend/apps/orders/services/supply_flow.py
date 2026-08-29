@@ -20,7 +20,7 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking_verification import (
   VERIFY_ERROR,
   VERIFY_PENDING,
@@ -43,7 +43,7 @@ class SupplyFlowError(Exception):
 
 def _get_order(seller: Seller, order_id: int) -> Order:
   order = (
-    filter_orders_for_seller(
+    filter_orders_for_assembly(
       Order.objects.filter(pk=order_id, seller=seller).select_related("product"),
       seller,
     ).first()
@@ -376,7 +376,7 @@ def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
     wb_scanned_at__isnull=True,
     orders__id=OuterRef("pk"),
   )
-  return filter_orders_for_seller(
+  return filter_orders_for_assembly(
     Order.objects.filter(seller=seller, assembly_hidden=False)
     .filter(wb_in_delivery_q())
     .annotate(_awaiting_supply_scan=Exists(confirmed_unscanned_supply))
@@ -391,7 +391,7 @@ def count_delivery_stage_orders(seller: Seller) -> int:
 
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
   """Заказы вкладки «Новые» на странице сборки — как в ЛК WB + готовые к отправке."""
-  qs = filter_orders_for_seller(
+  qs = filter_orders_for_assembly(
     Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
@@ -413,7 +413,7 @@ def count_orders_ready_for_assembly(seller: Seller) -> int:
 
 def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
   """Счётчики вкладок сборки FBS (без скрытых заказов)."""
-  confirm_qs = filter_orders_for_seller(
+  confirm_qs = filter_orders_for_assembly(
     Order.objects.filter(seller=seller, assembly_hidden=False).filter(
       WB_STAGE_QUERIES["confirm"](),
     ),
@@ -428,7 +428,7 @@ def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
     in_delivery = seller.wb_count_delivery
   else:
     in_delivery = (
-      filter_orders_for_seller(
+      filter_orders_for_assembly(
         Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
         seller,
       ).count()

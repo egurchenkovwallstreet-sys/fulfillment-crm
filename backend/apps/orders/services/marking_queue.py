@@ -4,14 +4,14 @@ from __future__ import annotations
 from apps.orders.models import Order
 from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
 VERIFY_ERROR = "error"
 
 
 def _assembly_marking_orders_qs(seller: Seller):
-  return filter_orders_for_seller(
+  return filter_orders_for_assembly(
     Order.objects.filter(
       seller=seller,
       assembly_hidden=False,

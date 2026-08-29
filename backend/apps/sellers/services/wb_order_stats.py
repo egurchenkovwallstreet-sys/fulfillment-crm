@@ -177,5 +177,5 @@ def get_enabled_warehouses_meta(seller: Seller) -> list[dict]:
       "office_id": wh.office_id,
       "name": wh.name or f"Склад #{wh.wb_warehouse_id}",
     }
-    for wh in SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name")
+    for wh in SellerWarehouse.objects.filter(seller=seller).order_by("name")
   ]
