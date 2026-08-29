@@ -23,13 +23,15 @@ from apps.sellers.services.calendar_periods import (
 )
 from apps.sellers.services.warehouse_filter import (
   get_enabled_warehouse_match_ids,
+  is_warehouse_enabled,
   order_matches_enabled_warehouse,
   seller_has_warehouse_config,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.warehouse.models import Product
 
-CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
+CRM_SUPPLY_LEGACY_RE = re.compile(r"^CRM-(\d+)-")
+CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-S(\d+)-W(\d+)-")
 MAX_SUPPLY_ORDER_FETCHES = 300
 SHIPMENTS_WEEKS_HISTORY = 4
 WB_ORDERS_LOOKBACK_DAYS = 30
@@ -61,10 +63,51 @@ def _supply_handoff_at(wb_supply: dict):
 
 
 def _order_ids_from_wb_supply_name(name: str) -> list[int]:
-  match = CRM_SUPPLY_NAME_RE.match(name or "")
+  match = CRM_SUPPLY_LEGACY_RE.match(name or "")
   if not match:
     return []
   return [int(match.group(1))]
+
+
+def _supply_wb_warehouse_id(wb_supply: dict, *, crm_supply: Supply | None) -> int | None:
+  if crm_supply is not None and crm_supply.wb_warehouse_id is not None:
+    return crm_supply.wb_warehouse_id
+  match = CRM_SUPPLY_NAME_RE.match(str(wb_supply.get("name") or ""))
+  if match:
+    return int(match.group(2))
+  for key in ("warehouseId", "warehouse_id"):
+    raw = wb_supply.get(key)
+    if raw is None:
+      continue
+    try:
+      return int(raw)
+    except (TypeError, ValueError):
+      continue
+  return None
+
+
+def _supply_eligible_for_billing(
+  seller: Seller,
+  wb_supply: dict,
+  *,
+  crm_supply: Supply | None,
+  match_ids: set[int] | None,
+) -> tuple[bool, set[int] | None]:
+  """(включать поставку, фильтр складов на уровне заказа или None)."""
+  if match_ids is None:
+    return True, None
+  wh_id = _supply_wb_warehouse_id(wb_supply, crm_supply=crm_supply)
+  if wh_id is not None:
+    if not is_warehouse_enabled(seller, wh_id):
+      return False, None
+    return True, None
+  return True, match_ids
+
+
+def _supply_counts_for_billing(wb_supply: dict) -> bool:
+  if wb_supply.get("done"):
+    return True
+  return _supply_handoff_at(wb_supply) is not None
 
 
 def _barcode_price_map(seller: Seller, *, marketplace: str | None = None) -> dict[str, Decimal]:
@@ -257,7 +300,7 @@ def _build_week_payload(
 def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_HISTORY) -> dict:
   """
   Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
-  Источник: GET /api/v3/supplies (done) + order-ids из WB API.
+  Источник: GET /api/v3/supplies (scanDt или done) + order-ids из WB API.
   Учитываются все заказы в поставках, в т.ч. отгруженные до/вне CRM.
   """
   today = today_local()
@@ -292,7 +335,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
   api_fetches = 0
 
   for wb_supply in wb_supplies:
-    if not wb_supply.get("done"):
+    if not _supply_counts_for_billing(wb_supply):
       continue
 
     handoff_at = _supply_handoff_at(wb_supply)
@@ -307,10 +350,19 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
     if not wb_supply_id:
       continue
 
+    crm_supply = crm_supplies.get(wb_supply_id)
+    include_supply, order_match_ids = _supply_eligible_for_billing(
+      seller,
+      wb_supply,
+      crm_supply=crm_supply,
+      match_ids=match_ids,
+    )
+    if not include_supply:
+      continue
+
     if api_fetches >= MAX_SUPPLY_ORDER_FETCHES:
       break
 
-    crm_supply = crm_supplies.get(wb_supply_id)
     order_wb_ids = _fetch_supply_order_ids(client, wb_supply, crm_supply=crm_supply)
     api_fetches += 1
     time.sleep(REQUEST_INTERVAL_SEC)
@@ -321,7 +373,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
       order_index=order_index,
       price_by_barcode=price_by_barcode,
       fallback_tariff=fallback_tariff,
-      match_ids=match_ids,
+      match_ids=order_match_ids,
     )
     if order_count <= 0:
       continue
