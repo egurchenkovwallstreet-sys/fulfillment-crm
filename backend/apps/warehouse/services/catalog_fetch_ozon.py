@@ -24,6 +24,75 @@ from apps.warehouse.services.size_sort import size_sort_key
 OZON_COLOR_ATTR_IDS = {10096, 10097, 8229}
 OZON_SIZE_ATTR_IDS = {9535, 9508, 9456, 9455}
 
+# Артикул продавца вида «0331коричневый 56» → база 0331, цвет коричневый, размер 56.
+_VENDOR_CODE_PARTS_RE = re.compile(
+  r"^(?P<base>\d+)(?P<color>[а-яА-ЯёЁa-zA-Z]+)(?:[\s_-]+(?P<size>\d{1,3}))?$",
+  re.UNICODE,
+)
+
+
+def _parse_vendor_code(vendor_code: str) -> tuple[str, str, str] | None:
+  text = (vendor_code or "").strip()
+  if not text:
+    return None
+  match = _VENDOR_CODE_PARTS_RE.match(text)
+  if not match:
+    return None
+  base = match.group("base") or ""
+  color = (match.group("color") or "").strip()
+  size = (match.group("size") or "").strip()
+  if not base or not color or color.isdigit():
+    return None
+  return base, color, size
+
+
+def _color_from_vendor_code(vendor_code: str) -> str:
+  parsed = _parse_vendor_code(vendor_code)
+  return parsed[1] if parsed else ""
+
+
+def _size_from_vendor_code(vendor_code: str) -> str:
+  parsed = _parse_vendor_code(vendor_code)
+  return parsed[2] if parsed else ""
+
+
+def _base_article_from_vendor_code(vendor_code: str) -> str:
+  parsed = _parse_vendor_code(vendor_code)
+  return parsed[0] if parsed else ""
+
+
+def _color_for_card(vendor_code: str, raw: dict) -> str:
+  color = _color_from_attributes(raw)
+  if color:
+    return color
+  color = _color_from_vendor_code(vendor_code)
+  if color:
+    return color
+  return _color_from_name(raw)
+
+
+def _resolve_ozon_color(item: CatalogBarcodeItem, raw: dict | None = None) -> str:
+  color = (item.color_label or "").strip()
+  if color:
+    return color
+  color = _color_from_vendor_code(item.vendor_code)
+  if color:
+    return color
+  if raw:
+    color = _color_from_attributes(raw)
+  if color:
+    return color
+  if raw:
+    color = _color_from_name(raw)
+  return color
+
+
+def _resolve_ozon_size(vendor_code: str, raw: dict) -> str:
+  size = _size_from_attributes(raw)
+  if size:
+    return size
+  return _size_from_vendor_code(vendor_code)
+
 
 def _product_pk(raw: dict) -> int:
   try:
@@ -149,10 +218,17 @@ def _merge_attribute_cards(info_cards: list[dict], attr_cards: list[dict]) -> li
 
 
 def _article_label(raw: dict, vendor_code: str) -> str:
+  base = _base_article_from_vendor_code(vendor_code)
+  if base:
+    return base
+
   model = (raw.get("model_info") or {}) if isinstance(raw.get("model_info"), dict) else {}
   model_name = str(model.get("name") or "").strip()
+  parsed_name = _parse_vendor_code(model_name)
+  if parsed_name:
+    return parsed_name[0]
   if model_name:
-    return model_name
+    return re.sub(r"[-_/]\d{1,3}([A-Za-z]{1,3})?$", "", model_name).strip() or model_name
   if vendor_code:
     return re.sub(r"[-_/]\d{1,3}([A-Za-z]{1,3})?$", "", vendor_code).strip() or vendor_code
   try:
@@ -176,11 +252,7 @@ def _name_group_key(raw: dict) -> str:
 
 
 def ozon_group_key(item: CatalogBarcodeItem, raw: dict | None = None) -> str:
-  color = (item.color_label or "").strip().lower()
-  if not color and raw:
-    color = _color_from_name(raw).lower()
-  if not color and raw:
-    color = _name_group_key(raw)
+  color = _resolve_ozon_color(item, raw).strip().lower()
   if color:
     return f"ozon:{item.wb_nm_id}:{color}"
   return f"ozon:{item.wb_nm_id}:offer:{item.vendor_code or item.barcode}"
@@ -302,8 +374,8 @@ def _parse_cards_to_items(cards: list[dict]) -> tuple[list[CatalogBarcodeItem], 
     title = str(card.get("name") or "").strip()
     vendor_code = str(card.get("offer_id") or "").strip()
     photo_url = _photo_url(card)
-    tech_size = _size_from_attributes(card)
-    color_label = _color_from_attributes(card)
+    tech_size = _resolve_ozon_size(vendor_code, card)
+    color_label = _color_for_card(vendor_code, card)
     requires_marking = _requires_marking(card)
     barcodes = _barcodes(card)
     if not barcodes:
