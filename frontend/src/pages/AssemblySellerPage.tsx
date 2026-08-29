@@ -319,13 +319,6 @@ function WbAssemblySellerPage() {
     setStage('confirm')
   }
 
-  function orderExpectsMarking(barcode: string): boolean {
-    const listed = data?.orders.find((order) => order.barcode === barcode)
-    if (!listed) return false
-    if (!listed.requires_marking) return false
-    return !listed.marking_bound || listed.marking_verify_status === 'error'
-  }
-
   function handleTransferToAssembly() {
     const count = data?.assembly_eligible ?? 0
     if (!id || count < 1) return

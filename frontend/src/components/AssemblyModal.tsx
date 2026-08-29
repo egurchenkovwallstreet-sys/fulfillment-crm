@@ -27,34 +27,69 @@ type Props = {
   loading?: boolean
 }
 
+/** Пауза после открытия — Enter со сканера не закрывает окно сразу. */
+const SCAN_ERROR_ENTER_DELAY_MS = 800
+
 export function AssemblyModal({ modal, onClose, loading = false }: Props) {
   const primaryRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (modal.kind !== 'scan-error') {
-      primaryRef.current?.focus()
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Enter') return
-      // Сканер шлёт Enter после баркода — не закрываем окно ошибки сразу.
-      if (modal.kind === 'scan-error') return
-      e.preventDefault()
-      if (modal.kind === 'confirm' || loading) return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [modal, onClose, loading])
+  const scanErrorEnterReadyRef = useRef(false)
 
   const isScanError = modal.kind === 'scan-error'
   const isBlock = modal.kind === 'block'
 
+  function dismissScanError() {
+    if (modal.kind !== 'scan-error') return
+    modal.onDismiss?.()
+    onClose()
+  }
+
   function handlePrimaryClose() {
-    if (modal.kind === 'scan-error') {
-      modal.onDismiss?.()
+    if (isScanError) {
+      dismissScanError()
+      return
     }
     onClose()
   }
+
+  useEffect(() => {
+    scanErrorEnterReadyRef.current = false
+    let enterTimer: ReturnType<typeof setTimeout> | undefined
+
+    if (isScanError) {
+      enterTimer = window.setTimeout(() => {
+        scanErrorEnterReadyRef.current = true
+        primaryRef.current?.focus()
+      }, SCAN_ERROR_ENTER_DELAY_MS)
+    } else {
+      primaryRef.current?.focus()
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+
+      if (modal.kind === 'scan-error') {
+        if (!scanErrorEnterReadyRef.current) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          return
+        }
+        e.preventDefault()
+        modal.onDismiss?.()
+        onClose()
+        return
+      }
+
+      e.preventDefault()
+      if (modal.kind === 'confirm' || loading) return
+      onClose()
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      if (enterTimer) window.clearTimeout(enterTimer)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [modal, onClose, loading, isScanError])
 
   return (
     <div
@@ -76,6 +111,9 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
       >
         <h2 id="assembly-modal-title">{modal.title}</h2>
         <p className="assembly-modal__message">{modal.message}</p>
+        {isScanError && (
+          <p className="assembly-modal__hint">Нажмите «Понятно» или клавишу Enter на клавиатуре</p>
+        )}
         <div className="assembly-modal__actions">
           {modal.kind === 'confirm' ? (
             <>
