@@ -384,23 +384,34 @@ function WbAssemblySellerPage() {
     return () => window.clearInterval(interval)
   }, [id, stage, load])
 
-  function findOrderForBarcode(barcode: string): AssemblyOrder | undefined {
-    const trimmed = barcode.trim()
-    if (!trimmed || !data) return undefined
-    return data.orders.find(
-      (order) => order.barcode === trimmed || String(order.wb_order_id) === trimmed,
-    )
+  function normalizeScanCode(value: string): string {
+    let code = value.trim().replace(/\s/g, '')
+    if (code.endsWith('.0') && /^\d+\.0$/.test(code)) {
+      code = code.slice(0, -2)
+    }
+    return code
   }
 
-  function orderExpectsMarking(barcode: string): boolean {
-    const listed = findOrderForBarcode(barcode)
-    if (!listed) return false
-    if (!listed.requires_marking) return false
-    return !listed.marking_bound || listed.marking_verify_status === 'error'
+  function findOrderForBarcode(barcode: string): AssemblyOrder | undefined {
+    const trimmed = normalizeScanCode(barcode)
+    if (!trimmed || !data) return undefined
+    return data.orders.find((order) => {
+      const orderBarcode = normalizeScanCode(order.barcode || '')
+      return orderBarcode === trimmed || String(order.wb_order_id) === trimmed
+    })
+  }
+
+  function orderNeedsMarkingScan(order: AssemblyOrder): boolean {
+    if (!order.requires_marking) return false
+    return !order.marking_bound || order.marking_verify_status === 'error'
   }
 
   function shouldAwaitMarking(result: ScanBarcodeResult): boolean {
-    return result.action === 'await_marking' || Boolean(result.requires_marking)
+    return (
+      result.action === 'await_marking' ||
+      Boolean(result.requires_marking) ||
+      Boolean(result.order?.requires_marking)
+    )
   }
 
   function enterMarkingPhase(order: PrintOrder) {
@@ -828,50 +839,42 @@ function WbAssemblySellerPage() {
 
   async function handleBarcodeSubmit(e?: FormEvent, rawBarcode?: string) {
     e?.preventDefault()
-    const barcode = (rawBarcode ?? scanRef.current?.value ?? scanValue).trim()
+    const barcode = normalizeScanCode(rawBarcode ?? scanRef.current?.value ?? scanValue)
     if (!id || !barcode || scanPhaseRef.current === 'marking' || scanBusy) return
-    const expectsMarking = orderExpectsMarking(barcode)
-    const listedOrder = expectsMarking ? findOrderForBarcode(barcode) : undefined
+
+    const listedOrder = findOrderForBarcode(barcode)
+    const listRequiresMarking = listedOrder ? orderNeedsMarkingScan(listedOrder) : false
+
     setError('')
     setSuccess('')
     setScanBusy(true)
     scanRef.current?.blur()
-    setScanValue(barcode)
 
-    if (expectsMarking && listedOrder) {
+    if (listRequiresMarking && listedOrder) {
       enterMarkingPhase(listedOrder as unknown as PrintOrder)
     }
 
-    let markingOpened = Boolean(expectsMarking && listedOrder)
     try {
       const result = await scanOrderBarcode(id, barcode)
-      if (shouldAwaitMarking(result)) {
+      if (shouldAwaitMarking(result) || listRequiresMarking) {
         enterMarkingPhase(result.order)
-        markingOpened = true
+        if (result.message) setSuccess(result.message)
         void refreshMarkingStatus()
-      } else if (expectsMarking || markingOpened) {
-        setError(
-          result.message ||
-            'Товар с ЧЗ — дождитесь ответа CRM или обновите страницу (Ctrl+F5).',
-        )
-      } else {
-        const printWin = openPrintHolder()
-        try {
-          await finishPrint(result.order, printWin)
-        } catch (printErr) {
-          closePrintHolder(printWin)
-          throw printErr
-        }
-        void refreshMarkingStatus()
-        void load({ silent: true })
+        return
       }
+
+      const printWin = openPrintHolder()
+      try {
+        await finishPrint(result.order, printWin)
+      } catch (printErr) {
+        closePrintHolder(printWin)
+        throw printErr
+      }
+      void refreshMarkingStatus()
+      void load({ silent: true })
     } catch (err) {
-      if (!markingOpened) {
-        if (expectsMarking) {
-          resetScanFlow()
-        } else {
-          setScanValue('')
-        }
+      if (!listRequiresMarking) {
+        resetScanFlow()
       }
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
         resetScanFlow()
@@ -884,13 +887,13 @@ function WbAssemblySellerPage() {
             resetScanFlow()
           },
         })
+        return
+      }
+      setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
+      if (listRequiresMarking || scanPhaseRef.current === 'marking') {
+        focusMarkingInput()
       } else {
-        setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
-        if (!markingOpened) {
-          scanRef.current?.focus()
-        } else {
-          focusMarkingInput()
-        }
+        scanRef.current?.focus()
       }
     } finally {
       setScanBusy(false)
@@ -1209,9 +1212,9 @@ function WbAssemblySellerPage() {
       {stage === 'confirm' && !isBatchMode && (
         <section
           ref={scanPanelRef}
-          className={`panel assembly-scan-panel assembly-scan-live${scanPhase === 'marking' ? ' assembly-scan-panel--marking-active' : ''}`}
+          className={`panel assembly-scan-panel assembly-scan-live${markingInProgress ? ' assembly-scan-panel--marking-active' : ''}`}
         >
-          {scanPhase === 'barcode' ? (
+          {!markingInProgress ? (
             <>
               <h2 className="section-title">Сканируйте баркод заказа</h2>
               <p className="assembly-scan-hint">
@@ -1293,7 +1296,7 @@ function WbAssemblySellerPage() {
             </>
           )}
 
-          {lastPrinted && scanPhase === 'barcode' && orderCanDeliver(lastPrinted) && (
+          {lastPrinted && !markingInProgress && orderCanDeliver(lastPrinted) && (
             <div className="assembly-last-print assembly-last-print--ready">
               <p>
                 <strong>Шаг 4:</strong> WB #{lastPrinted.wb_order_id} готов к доставке
@@ -1336,7 +1339,7 @@ function WbAssemblySellerPage() {
         </section>
       )}
 
-      {stage === 'confirm' && readyToDeliverCount > 0 && scanPhase === 'barcode' && (
+      {stage === 'confirm' && readyToDeliverCount > 0 && !markingInProgress && (
         <section className="panel assembly-step-card assembly-step-card--delivery">
           <h2 className="section-title">Шаг 4 — готово к доставке: {readyToDeliverCount}</h2>
           <p>Стикер напечатан{readyToDeliverCount > 1 ? 'ы' : ''}, ЧЗ привязан (если нужен). Подтвердите передачу в WB.</p>

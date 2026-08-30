@@ -15,7 +15,11 @@ from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product
-from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+from apps.warehouse.services.marking_lookup import (
+  MarkingLookupError,
+  lookup_marking_for_barcode,
+  resolve_product_requires_marking,
+)
 
 
 class AssemblyError(Exception):
@@ -187,8 +191,37 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
   )
 
 
-def _order_requires_marking(order: Order) -> bool:
-  return resolve_product_requires_marking(order.product, order.barcode, order.seller)
+def _order_requires_marking(
+  order: Order,
+  *,
+  seller: Seller | None = None,
+  refresh_from_wb: bool = False,
+) -> bool:
+  seller = seller or order.seller
+  if resolve_product_requires_marking(order.product, order.barcode, seller):
+    return True
+  if not refresh_from_wb:
+    return False
+  try:
+    lookup = lookup_marking_for_barcode(seller, order.barcode)
+  except MarkingLookupError:
+    return False
+  if not lookup.requires_marking:
+    return False
+  product = order.product or Product.objects.filter(seller=seller, barcode=order.barcode).first()
+  if product:
+    update_fields = ["updated_at"]
+    if not product.requires_marking:
+      product.requires_marking = True
+      update_fields.append("requires_marking")
+    if lookup.title and not (product.name or "").strip():
+      product.name = lookup.title
+      update_fields.append("name")
+    product.save(update_fields=update_fields)
+    if order.product_id is None:
+      order.product = product
+      order.save(update_fields=["product", "updated_at"])
+  return True
 
 
 def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None) -> int:
@@ -301,7 +334,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       order.product = product
       order.save(update_fields=["product", "updated_at"])
 
-  requires_marking = _order_requires_marking(order)
+  requires_marking = _order_requires_marking(order, seller=seller, refresh_from_wb=True)
 
   if requires_marking:
     wb_status = (order.wb_supplier_status or "").strip()
