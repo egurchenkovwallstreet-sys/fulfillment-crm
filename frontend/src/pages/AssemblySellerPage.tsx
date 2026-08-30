@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -23,6 +23,7 @@ import {
   type PickList,
   type PrintOrder,
   type MarkingStatusResult,
+  type ScanBarcodeResult,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders, generatePickList } from '../api/orders'
@@ -326,14 +327,16 @@ function WbAssemblySellerPage() {
     }
   }, [id, refreshMarkingStatus])
 
+  useLayoutEffect(() => {
+    scanPhaseRef.current = scanPhase
+    if (stage !== 'confirm' || scanPhase !== 'marking') return
+    focusMarkingInput()
+  }, [scanPhase, stage])
+
   useEffect(() => {
     scanPhaseRef.current = scanPhase
-    if (stage !== 'confirm') return
-    if (scanPhase === 'marking') {
-      focusMarkingInput()
-    } else if (!scanBusy) {
-      window.setTimeout(() => scanRef.current?.focus(), 0)
-    }
+    if (stage !== 'confirm' || scanPhase === 'marking' || scanBusy) return
+    window.setTimeout(() => scanRef.current?.focus(), 0)
   }, [scanPhase, scanBusy, stage])
 
   useEffect(() => {
@@ -381,11 +384,33 @@ function WbAssemblySellerPage() {
     return () => window.clearInterval(interval)
   }, [id, stage, load])
 
+  function findOrderForBarcode(barcode: string): AssemblyOrder | undefined {
+    const trimmed = barcode.trim()
+    if (!trimmed || !data) return undefined
+    return data.orders.find(
+      (order) => order.barcode === trimmed || String(order.wb_order_id) === trimmed,
+    )
+  }
+
   function orderExpectsMarking(barcode: string): boolean {
-    const listed = data?.orders.find((order) => order.barcode === barcode)
+    const listed = findOrderForBarcode(barcode)
     if (!listed) return false
     if (!listed.requires_marking) return false
     return !listed.marking_bound || listed.marking_verify_status === 'error'
+  }
+
+  function shouldAwaitMarking(result: ScanBarcodeResult): boolean {
+    return result.action === 'await_marking' || Boolean(result.requires_marking)
+  }
+
+  function enterMarkingPhase(order: PrintOrder) {
+    flushSync(() => {
+      scanPhaseRef.current = 'marking'
+      setScanPhase('marking')
+      setPendingOrder(order)
+      setScanValue('')
+    })
+    focusMarkingInput()
   }
 
   function focusMarkingInput() {
@@ -801,44 +826,35 @@ function WbAssemblySellerPage() {
     }
   }
 
-  async function handleBarcodeSubmit(e?: FormEvent) {
+  async function handleBarcodeSubmit(e?: FormEvent, rawBarcode?: string) {
     e?.preventDefault()
-    if (!id || !scanValue.trim() || scanPhaseRef.current === 'marking' || scanBusy) return
-    const barcode = scanValue.trim()
+    const barcode = (rawBarcode ?? scanRef.current?.value ?? scanValue).trim()
+    if (!id || !barcode || scanPhaseRef.current === 'marking' || scanBusy) return
     const expectsMarking = orderExpectsMarking(barcode)
-    const listedOrder = expectsMarking
-      ? data?.orders.find((order) => order.barcode === barcode)
-      : undefined
+    const listedOrder = expectsMarking ? findOrderForBarcode(barcode) : undefined
     setError('')
     setSuccess('')
     setScanBusy(true)
     scanRef.current?.blur()
+    setScanValue(barcode)
 
     if (expectsMarking && listedOrder) {
-      flushSync(() => {
-        scanPhaseRef.current = 'marking'
-        setScanPhase('marking')
-        setPendingOrder(listedOrder as unknown as PrintOrder)
-        setScanValue('')
-      })
-      focusMarkingInput()
+      enterMarkingPhase(listedOrder as unknown as PrintOrder)
     }
 
+    let markingOpened = Boolean(expectsMarking && listedOrder)
     try {
       const result = await scanOrderBarcode(id, barcode)
-      if (result.action === 'await_marking') {
-        flushSync(() => {
-          scanPhaseRef.current = 'marking'
-          setScanPhase('marking')
-          setPendingOrder(result.order)
-          setScanValue('')
-        })
-        focusMarkingInput()
+      if (shouldAwaitMarking(result)) {
+        enterMarkingPhase(result.order)
+        markingOpened = true
         void refreshMarkingStatus()
+      } else if (expectsMarking || markingOpened) {
+        setError(
+          result.message ||
+            'Товар с ЧЗ — дождитесь ответа CRM или обновите страницу (Ctrl+F5).',
+        )
       } else {
-        if (expectsMarking) {
-          resetScanFlow()
-        }
         const printWin = openPrintHolder()
         try {
           await finishPrint(result.order, printWin)
@@ -850,12 +866,15 @@ function WbAssemblySellerPage() {
         void load({ silent: true })
       }
     } catch (err) {
-      if (expectsMarking) {
-        resetScanFlow()
-      } else {
-        setScanValue('')
+      if (!markingOpened) {
+        if (expectsMarking) {
+          resetScanFlow()
+        } else {
+          setScanValue('')
+        }
       }
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
+        resetScanFlow()
         playAssemblyScanErrorBeep()
         setModal({
           kind: 'scan-error',
@@ -867,7 +886,11 @@ function WbAssemblySellerPage() {
         })
       } else {
         setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
-        scanRef.current?.focus()
+        if (!markingOpened) {
+          scanRef.current?.focus()
+        } else {
+          focusMarkingInput()
+        }
       }
     } finally {
       setScanBusy(false)
@@ -934,8 +957,9 @@ function WbAssemblySellerPage() {
   function handleScanKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault()
+      const value = e.currentTarget.value
       e.currentTarget.blur()
-      void handleBarcodeSubmit()
+      void handleBarcodeSubmit(undefined, value)
     }
   }
 

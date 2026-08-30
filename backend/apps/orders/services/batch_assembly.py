@@ -485,7 +485,7 @@ def bind_wb_batch_scan(
   else:
     return {
       "complete": False,
-      "requires_marking": bool(state["marking_code"]) or False,
+      "requires_marking": _marking_required_for_batch_state(seller, pick_list, state),
       **state,
       "scan_kind": kind,
     }
@@ -533,6 +533,20 @@ def _same_sticker_scan(previous: str, new_value: str, seller: Seller, pick_list:
     if _order_matches_sticker_wb(order, previous) and _order_matches_sticker_wb(order, new_value):
       return True
   return _compact(previous) == _compact(new_value)
+
+
+def _marking_required_for_batch_state(seller: Seller, pick_list: PickList, state: dict) -> bool:
+  if state.get("marking_code"):
+    return True
+  barcode = (state.get("barcode") or "").strip()
+  if not barcode:
+    return False
+  for order in _pick_list_orders_wb(pick_list):
+    if order.barcode == barcode:
+      return _order_requires_marking(order)
+    if barcode.isdigit() and order.wb_order_id == int(barcode):
+      return _order_requires_marking(order)
+  return False
 
 
 def classify_wb_batch_scan(seller: Seller, scan: str, *, partial: dict | None = None) -> str:
