@@ -24,6 +24,7 @@ import { openPdfBase64 } from '../utils/browserPrint'
 import { closePrintHolder, openPrintHolder, printBatchRibbon } from '../utils/batchRibbonPrint'
 import { printSupplySticker } from '../utils/printService'
 import { BatchBindPanel } from '../components/BatchBindPanel'
+import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
@@ -55,6 +56,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
+  const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const skipStageLoad = useRef(true)
 
   const load = useCallback(async () => {
@@ -380,13 +382,25 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
   async function handleToggleWarehouse(warehouse: SellerOzonWarehouse) {
     setTogglingId(warehouse.id)
+    setPickListRefreshing(true)
+    setError('')
     try {
       await toggleSellerOzonWarehouse(sellerId, warehouse.id, !warehouse.is_enabled)
-      await load()
+      const payload = await syncOzonAssembly(sellerId, stage)
+      setData(payload)
+      if ((data?.assembly_workflow_mode ?? 'scan') === 'batch' && (stage === 'confirm' || stage === 'new')) {
+        try {
+          const result = await generateOzonPickList(sellerId)
+          setData((prev) => (prev ? { ...prev, active_pick_list: result.pick_list } : prev))
+        } catch {
+          // no postings for pick list yet
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось переключить склад')
     } finally {
       setTogglingId(null)
+      setPickListRefreshing(false)
     }
   }
 
@@ -477,7 +491,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
                 <input
                   type="checkbox"
                   checked={wh.is_enabled}
-                  disabled={togglingId === wh.id}
+                  disabled={togglingId === wh.id || pickListRefreshing}
                   onChange={() => void handleToggleWarehouse(wh)}
                 />
                 {wh.name || `Склад #${wh.ozon_warehouse_id}`}
@@ -754,6 +768,8 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
           </tbody>
         </table>
       </section>
+
+      <AssemblySyncOverlay visible={pickListRefreshing} marketplace="ozon" />
     </>
   )
 }

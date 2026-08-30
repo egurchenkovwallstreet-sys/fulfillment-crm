@@ -1,0 +1,181 @@
+.assembly-sync-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.assembly-sync-overlay__card {
+  width: min(420px, calc(100vw - 2rem));
+  padding: 1.75rem 1.5rem 1.5rem;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  text-align: center;
+}
+
+.assembly-sync-overlay__scene {
+  position: relative;
+  height: 88px;
+  margin-bottom: 1rem;
+}
+
+.assembly-sync-overlay__computer {
+  position: absolute;
+  left: 12%;
+  bottom: 0;
+  width: 72px;
+}
+
+.assembly-sync-overlay__screen {
+  display: block;
+  height: 42px;
+  border: 3px solid #334155;
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 100%);
+  animation: assembly-sync-screen 1.2s ease-in-out infinite;
+}
+
+.assembly-sync-overlay__keyboard {
+  display: block;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 0 0 4px 4px;
+  background: #64748b;
+}
+
+.assembly-sync-overlay__satellite {
+  position: absolute;
+  right: 10%;
+  top: 8px;
+  width: 56px;
+  animation: assembly-sync-satellite 2.4s ease-in-out infinite;
+}
+
+.assembly-sync-overlay__dish {
+  display: block;
+  width: 34px;
+  height: 18px;
+  margin: 0 auto;
+  border: 3px solid #475569;
+  border-bottom: none;
+  border-radius: 34px 34px 0 0;
+  transform: rotate(-18deg);
+}
+
+.assembly-sync-overlay__body {
+  display: block;
+  width: 14px;
+  height: 22px;
+  margin: 2px auto 0;
+  background: #64748b;
+  border-radius: 2px;
+}
+
+.assembly-sync-overlay__link {
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  top: 42%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #94a3b8, transparent);
+}
+
+.assembly-sync-overlay__pulse {
+  position: absolute;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b82f6;
+  opacity: 0;
+  animation: assembly-sync-pulse 1.6s linear infinite;
+}
+
+.assembly-sync-overlay__pulse--1 {
+  left: 8%;
+  animation-delay: 0s;
+}
+
+.assembly-sync-overlay__pulse--2 {
+  left: 46%;
+  animation-delay: 0.35s;
+}
+
+.assembly-sync-overlay__pulse--3 {
+  left: 84%;
+  animation-delay: 0.7s;
+}
+
+.assembly-sync-overlay--ozon .assembly-sync-overlay__pulse {
+  background: #005bff;
+}
+
+.assembly-sync-overlay--wb .assembly-sync-overlay__pulse {
+  background: #7b2cbf;
+}
+
+.assembly-sync-overlay__badge {
+  display: inline-block;
+  margin-bottom: 0.65rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+}
+
+.assembly-sync-overlay__badge--wb {
+  color: #fff;
+  background: linear-gradient(135deg, #7b2cbf, #9d4edd);
+}
+
+.assembly-sync-overlay__badge--ozon {
+  color: #fff;
+  background: linear-gradient(135deg, #005bff, #0080ff);
+}
+
+.assembly-sync-overlay__text {
+  margin: 0;
+  color: #334155;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+@keyframes assembly-sync-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes assembly-sync-screen {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes assembly-sync-satellite {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
