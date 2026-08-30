@@ -538,13 +538,13 @@
 }
 
 .assembly-scan-panel--marking-active {
-  border: 2px solid #f59e0b;
+  border: 3px solid #f59e0b;
   background: #fffbeb;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.22);
 }
 
 .assembly-scan-step--hidden {
-  display: none;
+  display: none !important;
 }
 
 .assembly-scan-input--marking {

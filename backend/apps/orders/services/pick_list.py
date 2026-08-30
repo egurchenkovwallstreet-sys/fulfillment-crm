@@ -7,6 +7,7 @@ from apps.orders.models import Order, PickList, PickListItem
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
+from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 
 
@@ -64,7 +65,11 @@ def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
 def _products_by_barcode(seller: Seller, barcodes: set[str]) -> dict[str, Product]:
   if not barcodes:
     return {}
-  products = Product.objects.filter(seller=seller, barcode__in=barcodes).select_related("cell")
+  products = Product.objects.filter(
+    seller=seller,
+    barcode__in=barcodes,
+    marketplace=MARKETPLACE_WB,
+  ).select_related("cell")
   return {product.barcode: product for product in products}
 
 
@@ -207,8 +212,9 @@ def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
 @transaction.atomic
 def generate_pick_list(seller: Seller, *, user=None) -> PickList:
   existing = (
-    PickList.objects.filter(seller=seller, is_completed=False)
+    PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
     .prefetch_related("items__cell", "items__product")
+    .order_by("-created_at")
     .first()
   )
   if existing and existing.items.exists():

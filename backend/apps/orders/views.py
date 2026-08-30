@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
 from apps.accounts.tenant import get_seller_for_user, sellers_for_user
-from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
+from apps.integrations.marketplace import OZON, WB, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
 
@@ -479,7 +479,7 @@ class AssemblySellerDetailView(APIView):
     orders = orders_qs.order_by("-created_at")[:300]
 
     active_pick_list = (
-      PickList.objects.filter(seller=seller, is_completed=False)
+      PickList.objects.filter(seller=seller, is_completed=False, marketplace=WB)
       .prefetch_related("items__cell", "items__product")
       .order_by("-created_at")
       .first()

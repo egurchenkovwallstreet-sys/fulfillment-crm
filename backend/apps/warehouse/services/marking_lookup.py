@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from apps.integrations.wb_content import lookup_need_kiz
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller
+from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 
 
@@ -53,10 +54,14 @@ def lookup_marking_for_barcode(seller: Seller, barcode: str) -> MarkingLookupRes
 
 
 def resolve_product_requires_marking(product: Product | None, barcode: str, seller: Seller) -> bool:
-  """Нужна ли маркировка для товара/баркода."""
-  if product and product.requires_marking:
-    return True
-  fallback = Product.objects.filter(seller=seller, barcode=barcode).first()
+  """Нужна ли маркировка для товара/баркода WB (не путать с карточкой Ozon)."""
+  if product is not None:
+    return bool(product.requires_marking)
+  fallback = Product.objects.filter(
+    seller=seller,
+    barcode=barcode,
+    marketplace=MARKETPLACE_WB,
+  ).first()
   if fallback:
     return fallback.requires_marking
   return False
