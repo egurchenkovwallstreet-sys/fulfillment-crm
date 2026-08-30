@@ -119,6 +119,7 @@ function WbAssemblySellerPage() {
   const id = Number(sellerId)
   const scanRef = useRef<HTMLInputElement>(null)
   const markingRef = useRef<HTMLInputElement>(null)
+  const scanPanelRef = useRef<HTMLElement>(null)
   const markingBufferRef = useRef('')
   const scanPhaseRef = useRef<ScanPhase>('barcode')
 
@@ -329,11 +330,11 @@ function WbAssemblySellerPage() {
     scanPhaseRef.current = scanPhase
     if (stage !== 'confirm') return
     if (scanPhase === 'marking') {
-      markingRef.current?.focus()
+      focusMarkingInput()
     } else if (!scanBusy) {
-      scanRef.current?.focus()
+      window.setTimeout(() => scanRef.current?.focus(), 0)
     }
-  }, [scanPhase, scanBusy, stage, data])
+  }, [scanPhase, scanBusy, stage])
 
   useEffect(() => {
     if (scanPhase !== 'marking') return
@@ -379,6 +380,21 @@ function WbAssemblySellerPage() {
     const interval = window.setInterval(() => void syncDelivery(), 5 * 60 * 1000)
     return () => window.clearInterval(interval)
   }, [id, stage, load])
+
+  function orderExpectsMarking(barcode: string): boolean {
+    const listed = data?.orders.find((order) => order.barcode === barcode)
+    if (!listed) return false
+    if (!listed.requires_marking) return false
+    return !listed.marking_bound || listed.marking_verify_status === 'error'
+  }
+
+  function focusMarkingInput() {
+    scanPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    window.requestAnimationFrame(() => {
+      markingRef.current?.focus()
+      window.setTimeout(() => markingRef.current?.focus(), 0)
+    })
+  }
 
   function resetScanFlow() {
     scanPhaseRef.current = 'barcode'
@@ -789,10 +805,25 @@ function WbAssemblySellerPage() {
     e?.preventDefault()
     if (!id || !scanValue.trim() || scanPhaseRef.current === 'marking' || scanBusy) return
     const barcode = scanValue.trim()
+    const expectsMarking = orderExpectsMarking(barcode)
+    const listedOrder = expectsMarking
+      ? data?.orders.find((order) => order.barcode === barcode)
+      : undefined
     setError('')
     setSuccess('')
     setScanBusy(true)
     scanRef.current?.blur()
+
+    if (expectsMarking && listedOrder) {
+      flushSync(() => {
+        scanPhaseRef.current = 'marking'
+        setScanPhase('marking')
+        setPendingOrder(listedOrder as unknown as PrintOrder)
+        setScanValue('')
+      })
+      focusMarkingInput()
+    }
+
     try {
       const result = await scanOrderBarcode(id, barcode)
       if (result.action === 'await_marking') {
@@ -802,9 +833,12 @@ function WbAssemblySellerPage() {
           setPendingOrder(result.order)
           setScanValue('')
         })
-        markingRef.current?.focus()
+        focusMarkingInput()
         void refreshMarkingStatus()
       } else {
+        if (expectsMarking) {
+          resetScanFlow()
+        }
         const printWin = openPrintHolder()
         try {
           await finishPrint(result.order, printWin)
@@ -816,7 +850,11 @@ function WbAssemblySellerPage() {
         void load({ silent: true })
       }
     } catch (err) {
-      setScanValue('')
+      if (expectsMarking) {
+        resetScanFlow()
+      } else {
+        setScanValue('')
+      }
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
         playAssemblyScanErrorBeep()
         setModal({
@@ -853,7 +891,7 @@ function WbAssemblySellerPage() {
     } catch (err) {
       closePrintHolder(printWin)
       setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
-      markingRef.current?.focus()
+      focusMarkingInput()
     } finally {
       setScanBusy(false)
     }
@@ -1146,6 +1184,7 @@ function WbAssemblySellerPage() {
 
       {stage === 'confirm' && !isBatchMode && (
         <section
+          ref={scanPanelRef}
           className={`panel assembly-scan-panel assembly-scan-live${scanPhase === 'marking' ? ' assembly-scan-panel--marking-active' : ''}`}
         >
           {scanPhase === 'barcode' ? (
