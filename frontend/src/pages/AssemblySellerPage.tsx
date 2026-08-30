@@ -149,7 +149,7 @@ function WbAssemblySellerPage() {
   const [pickListPreviewStage, setPickListPreviewStage] = useState<'new' | 'confirm' | null>(null)
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
-  const pickListBootStageRef = useRef<string>('')
+  const bootstrapKeyRef = useRef('')
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -188,14 +188,36 @@ function WbAssemblySellerPage() {
     }
   }, [id, load])
 
-  const refreshPickListForStage = useCallback(async (pickStage: 'new' | 'confirm') => {
+  const refreshPickListForStage = useCallback(async (
+    pickStage: 'new' | 'confirm',
+    options: {
+      syncFirst?: boolean
+      forceRegenerate?: boolean
+      freshData?: AssemblySellerDetail
+      showOverlay?: boolean
+    } = {},
+  ) => {
     if (!id) return
-    setPickListRefreshing(true)
+    const {
+      syncFirst = false,
+      forceRegenerate = false,
+      freshData,
+      showOverlay = forceRegenerate || syncFirst,
+    } = options
+    if (showOverlay) setPickListRefreshing(true)
     setError('')
     try {
-      await syncOrders(id, 'quick')
-      const fresh = await fetchAssemblySeller(id, stage || undefined)
-      setData(fresh)
+      if (syncFirst) {
+        await syncOrders(id, 'quick')
+      }
+
+      const fresh = freshData ?? (syncFirst
+        ? await fetchAssemblySeller(id, stage || undefined)
+        : data)
+      if (!fresh) return
+      if (syncFirst || freshData) {
+        setData(fresh)
+      }
 
       const enabled = fresh.warehouses.some((warehouse) => warehouse.is_enabled)
       if (!enabled) {
@@ -205,7 +227,12 @@ function WbAssemblySellerPage() {
       }
 
       if (pickStage === 'new') {
-        if (fresh.active_pick_list?.id) {
+        if (!forceRegenerate && fresh.active_pick_list?.items?.length) {
+          setPickListPreview(fresh.active_pick_list)
+          setPickListPreviewStage('new')
+          return
+        }
+        if (forceRegenerate && fresh.active_pick_list?.id) {
           try {
             await deletePickList(id, fresh.active_pick_list.id)
           } catch {
@@ -215,7 +242,9 @@ function WbAssemblySellerPage() {
         const pickList = await generatePickList(id)
         setPickListPreview(pickList)
         setPickListPreviewStage('new')
-        setData(await fetchAssemblySeller(id, stage || undefined))
+        if (forceRegenerate) {
+          setData(await fetchAssemblySeller(id, stage || undefined))
+        }
       } else {
         const result = await previewPickList(id, 'confirm')
         setPickListPreview(result.pick_list)
@@ -224,9 +253,32 @@ function WbAssemblySellerPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось обновить лист подбора')
     } finally {
-      setPickListRefreshing(false)
+      if (showOverlay) setPickListRefreshing(false)
     }
-  }, [id, stage])
+  }, [id, stage, data])
+
+  const bootstrapAssembly = useCallback(async () => {
+    if (!id || syncInFlightRef.current) return
+    syncInFlightRef.current = true
+    setSyncing(true)
+    setError('')
+    try {
+      await syncOrders(id, 'quick')
+      const fresh = await fetchAssemblySeller(id, stage || undefined)
+      setData(fresh)
+      if (stage === 'new' || stage === 'confirm') {
+        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
+          freshData: fresh,
+          showOverlay: false,
+        })
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+    } finally {
+      syncInFlightRef.current = false
+      setSyncing(false)
+    }
+  }, [id, stage, refreshPickListForStage])
 
   useEffect(() => {
     refreshPrintBridgeStatus()
@@ -245,16 +297,12 @@ function WbAssemblySellerPage() {
 
   useEffect(() => {
     if (!id) return
-    void runBackgroundSync()
-  }, [id, runBackgroundSync])
-
-  useEffect(() => {
-    if (!id || !data || (stage !== 'new' && stage !== 'confirm')) return
     const bootKey = `${id}:${stage}`
-    if (pickListBootStageRef.current === bootKey) return
+    if (bootstrapKeyRef.current === bootKey) return
+    bootstrapKeyRef.current = bootKey
     pickListBootStageRef.current = bootKey
-    void refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new')
-  }, [id, data?.seller.id, stage, refreshPickListForStage])
+    void bootstrapAssembly()
+  }, [id, stage, bootstrapAssembly])
 
   const refreshMarkingStatus = useCallback(async () => {
     if (!id) return
@@ -520,7 +568,10 @@ function WbAssemblySellerPage() {
       setSuccess(`Склады WB обновлены: ${result.total} шт.`)
       await load({ silent: true })
       if (stage === 'new' || stage === 'confirm') {
-        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new')
+        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
+          syncFirst: true,
+          forceRegenerate: true,
+        })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
@@ -543,7 +594,10 @@ function WbAssemblySellerPage() {
     try {
       await toggleSellerWarehouse(id, warehouseId, isEnabled)
       if (stage === 'new' || stage === 'confirm') {
-        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new')
+        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
+          syncFirst: true,
+          forceRegenerate: true,
+        })
       } else {
         await load({ silent: true })
       }
