@@ -209,33 +209,24 @@ def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
   }
 
 
-@transaction.atomic
-def generate_pick_list(seller: Seller, *, user=None, force: bool = False) -> PickList:
-  existing = (
+def _active_wb_pick_list(seller: Seller) -> PickList | None:
+  return (
     PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
     .prefetch_related("items__cell", "items__product")
     .order_by("-created_at")
     .first()
   )
-  if existing and existing.items.exists() and not force:
-    return existing
-  if existing and force:
-    delete_active_pick_list(seller, pick_list_id=existing.id, user=user)
 
-  orders = [
-    order for order in _orders_for_pick_list(seller, stage="new")
-    if order.pick_list_id is None
-  ]
 
-  if not orders:
-    raise PickListError("Нет новых заказов для формирования листа подбора")
+def _pick_list_has_scanned_orders(pick_list: PickList) -> bool:
+  return Order.objects.filter(pick_list=pick_list).exclude(
+    status__in=[Order.Status.NEW, Order.Status.IN_PICKING],
+  ).exists()
 
-  items, _orders_without_product = _group_orders_for_pick_list(seller, orders)
 
-  pick_list = PickList.objects.create(seller=seller, marketplace="wb")
+def _fill_pick_list_items(pick_list: PickList, items: list[dict]) -> list[int]:
   db_items: list[PickListItem] = []
   order_ids: list[int] = []
-
   for data in items:
     db_items.append(
       PickListItem(
@@ -247,13 +238,58 @@ def generate_pick_list(seller: Seller, *, user=None, force: bool = False) -> Pic
       )
     )
     order_ids.extend(data["order_ids"])
-
   PickListItem.objects.bulk_create(db_items)
+  return order_ids
 
-  Order.objects.filter(id__in=order_ids).update(
-    status=Order.Status.IN_PICKING,
-    pick_list=pick_list,
-  )
+
+@transaction.atomic
+def generate_pick_list(
+  seller: Seller,
+  *,
+  user=None,
+  force: bool = False,
+  stage: str = "new",
+) -> PickList:
+  """Сохранить лист подбора по включённым складам FBS для вкладки Новые или На сборке."""
+  if stage not in ("new", "confirm"):
+    stage = "new"
+
+  existing = _active_wb_pick_list(seller)
+  if existing and existing.items.exists() and not force:
+    return existing
+
+  orders = list(_orders_for_pick_list(seller, stage=stage))
+  if stage == "new" and not force:
+    orders = [order for order in orders if order.pick_list_id is None]
+
+  if not orders:
+    stage_label = "на сборке" if stage == "confirm" else "новых"
+    raise PickListError(
+      f"Нет {stage_label} заказов для листа подбора. "
+      "Включите склад FBS и обновите заказы.",
+    )
+
+  items, _orders_without_product = _group_orders_for_pick_list(seller, orders)
+
+  pick_list = existing
+  if pick_list and force:
+    if _pick_list_has_scanned_orders(pick_list):
+      pick_list.items.all().delete()
+      keep_ids = {order_id for data in items for order_id in data["order_ids"]}
+      Order.objects.filter(pick_list=pick_list).exclude(id__in=keep_ids).update(pick_list=None)
+    else:
+      delete_active_pick_list(seller, pick_list_id=pick_list.id, user=user)
+      pick_list = None
+
+  if pick_list is None:
+    pick_list = PickList.objects.create(seller=seller, marketplace="wb")
+
+  order_ids = _fill_pick_list_items(pick_list, items)
+  qs = Order.objects.filter(id__in=order_ids)
+  if stage == "new":
+    qs.update(status=Order.Status.IN_PICKING, pick_list=pick_list)
+  else:
+    qs.update(pick_list=pick_list)
 
   return pick_list
 

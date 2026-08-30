@@ -363,7 +363,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
     const printWin = openPrintHolder()
     try {
       const result = await fetchBatchRibbon(sellerId)
-      const printed = printBatchRibbon(result.items, true, printWin)
+      const printed = await printBatchRibbon(result.items, true, printWin)
       if (!printed) {
         closePrintHolder(printWin)
         setError('Не удалось открыть печать — разрешите всплывающие окна')

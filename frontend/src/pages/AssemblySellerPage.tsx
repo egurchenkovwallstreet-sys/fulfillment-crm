@@ -4,12 +4,10 @@ import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
   deleteAssemblyOrder,
-  deletePickList,
   fetchAssemblySeller,
   fetchBatchRibbon,
   fetchMarkingStatus,
   replaceOrderItem,
-  previewPickList,
   reprintOrderSticker,
   scanOrderBarcode,
   sendOrderToAssembly,
@@ -150,7 +148,6 @@ function WbAssemblySellerPage() {
   const verifyInFlightRef = useRef(false)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
-  const [pickListPreviewStage, setPickListPreviewStage] = useState<'new' | 'confirm' | null>(null)
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const bootstrapKeyRef = useRef('')
@@ -192,85 +189,13 @@ function WbAssemblySellerPage() {
     }
   }, [id, load])
 
-  const refreshPickListForStage = useCallback(async (
-    pickStage: 'new' | 'confirm',
-    options: {
-      syncFirst?: boolean
-      forceRegenerate?: boolean
-      freshData?: AssemblySellerDetail
-      showOverlay?: boolean
-    } = {},
-  ) => {
-    if (!id) return
-    const {
-      syncFirst = false,
-      forceRegenerate = false,
-      freshData,
-      showOverlay = forceRegenerate || syncFirst,
-    } = options
-    if (showOverlay) setPickListRefreshing(true)
-    setError('')
-    try {
-      if (syncFirst) {
-        await syncOrders(id, 'quick')
-      }
-
-      const fresh = freshData ?? (syncFirst
-        ? await fetchAssemblySeller(id, stage || undefined)
-        : data)
-      if (!fresh) return
-      if (syncFirst || freshData) {
-        setData(fresh)
-      }
-
-      const enabled = fresh.warehouses.some((warehouse) => warehouse.is_enabled)
-      if (!enabled) {
-        setPickListPreview(null)
-        setPickListPreviewStage(null)
-        return
-      }
-
-      if (pickStage === 'new') {
-        if (forceRegenerate) {
-          if (fresh.active_pick_list?.id) {
-            try {
-              await deletePickList(id, fresh.active_pick_list.id)
-            } catch {
-              // лист мог быть уже удалён или часть заказов уже собрана
-            }
-          }
-          try {
-            const pickList = await generatePickList(id, { force: true })
-            setPickListPreview(pickList)
-            setPickListPreviewStage('new')
-            setData(await fetchAssemblySeller(id, stage || undefined))
-            return
-          } catch {
-            // покажем preview по текущим складам, даже если сохранённый лист нельзя пересобрать
-          }
-        } else if (fresh.active_pick_list?.items?.length) {
-          setPickListPreview(fresh.active_pick_list)
-          setPickListPreviewStage('new')
-          return
-        }
-      }
-
-      const result = await previewPickList(id, pickStage)
-      setPickListPreview(result.pick_list)
-      setPickListPreviewStage(pickStage)
-      if (forceRegenerate) {
-        setData(await fetchAssemblySeller(id, stage || undefined))
-      }
-    } catch (err) {
-      if (forceRegenerate) {
-        setPickListPreview(null)
-        setPickListPreviewStage(pickStage)
-      }
-      setError(err instanceof Error ? err.message : 'Не удалось обновить лист подбора')
-    } finally {
-      if (showOverlay) setPickListRefreshing(false)
+  const applySavedPickList = useCallback((fresh: AssemblySellerDetail | null) => {
+    if (fresh?.active_pick_list?.items?.length) {
+      setPickListPreview(fresh.active_pick_list)
+      return
     }
-  }, [id, stage, data])
+    setPickListPreview(null)
+  }, [])
 
   const bootstrapAssembly = useCallback(async () => {
     if (!id || syncInFlightRef.current) return
@@ -282,10 +207,7 @@ function WbAssemblySellerPage() {
       const fresh = await fetchAssemblySeller(id, stage || undefined)
       setData(fresh)
       if (stage === 'new' || stage === 'confirm') {
-        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
-          freshData: fresh,
-          showOverlay: false,
-        })
+        applySavedPickList(fresh)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
@@ -293,7 +215,7 @@ function WbAssemblySellerPage() {
       syncInFlightRef.current = false
       setSyncing(false)
     }
-  }, [id, stage, refreshPickListForStage])
+  }, [id, stage, applySavedPickList])
 
   useEffect(() => {
     refreshPrintBridgeStatus()
@@ -619,13 +541,18 @@ function WbAssemblySellerPage() {
     setError('')
     setSuccess('')
     setRibbonPrinting(true)
-    const printWin = openPrintHolder()
+    const printWin = bridgeOk ? null : openPrintHolder()
     try {
       const result = await fetchBatchRibbon(id)
-      const printed = printBatchRibbon(result.items, true, printWin)
+      if (!result.items?.length) {
+        closePrintHolder(printWin)
+        setError('В ленте нет стикеров. Сначала сформируйте лист подбора по выбранному складу.')
+        return
+      }
+      const printed = await printBatchRibbon(result.items, true, printWin)
       if (!printed) {
         closePrintHolder(printWin)
-        setError('Не удалось открыть печать — разрешите всплывающие окна')
+        setError('Не удалось открыть печать — разрешите всплывающие окна или установите агент печати')
         return
       }
       setSuccess(
@@ -639,13 +566,35 @@ function WbAssemblySellerPage() {
     }
   }
 
+  async function handleGeneratePickList() {
+    if (!id || !data) return
+    const enabled = data.warehouses.some((warehouse) => warehouse.is_enabled)
+    if (!enabled) {
+      setError('Включите хотя бы один склад FBS — лист подбора строится только по выбранным складам.')
+      return
+    }
+    setError('')
+    setSuccess('')
+    setPickListRefreshing(true)
+    try {
+      const pickStage = stage === 'confirm' ? 'confirm' : 'new'
+      const pickList = await generatePickList(id, { force: true, stage: pickStage })
+      setPickListPreview(pickList)
+      setData(await fetchAssemblySeller(id, stage || undefined))
+      setSuccess(
+        `Лист подбора №${pickList.id}: ${pickList.total_quantity} зак. по выбранным складам. Нажмите «Скачать PDF».`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
+    } finally {
+      setPickListRefreshing(false)
+    }
+  }
+
   function handleDownloadPickListPdf() {
-    const pickList =
-      pickListPreviewStage === stage
-        ? pickListPreview
-        : (pickListPreview ?? data?.active_pick_list)
-    if (!pickList) {
-      setError('Лист подбора для выбранных складов пуст. Выберите склад FBS и обновите заказы.')
+    const pickList = pickListPreview ?? data?.active_pick_list
+    if (!pickList?.items?.length) {
+      setError('Сначала нажмите «Сформировать лист подбора» по выбранному складу.')
       return
     }
     if (!downloadPickListPdf(pickList)) {
@@ -659,14 +608,8 @@ function WbAssemblySellerPage() {
     setError('')
     try {
       const result = await syncSellerWarehouses(id)
-      setSuccess(`Склады WB обновлены: ${result.total} шт.`)
+      setSuccess(`Склады WB обновлены: ${result.total} шт. После выбора склада нажмите «Сформировать лист подбора».`)
       await load({ silent: true })
-      if (stage === 'new' || stage === 'confirm') {
-        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
-          syncFirst: true,
-          forceRegenerate: true,
-        })
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
     } finally {
@@ -687,15 +630,12 @@ function WbAssemblySellerPage() {
     setError('')
     try {
       await toggleSellerWarehouse(id, warehouseId, isEnabled)
-      if (stage === 'new' || stage === 'confirm') {
-        await refreshPickListForStage(stage === 'confirm' ? 'confirm' : 'new', {
-          syncFirst: true,
-          forceRegenerate: true,
-        })
-      } else {
-        await load({ silent: true })
-      }
-      setSuccess(isEnabled ? 'Склад включён' : 'Склад выключен')
+      await load({ silent: true })
+      setSuccess(
+        isEnabled
+          ? 'Склад включён. Нажмите «Сформировать лист подбора».'
+          : 'Склад выключен. Нажмите «Сформировать лист подбора», если нужен новый список.',
+      )
     } catch (err) {
       setData((current) => (
         current ? { ...current, warehouses: previousWarehouses } : current
@@ -724,8 +664,6 @@ function WbAssemblySellerPage() {
       return
     }
     setStage(nextStage)
-    setPickListPreview(null)
-    setPickListPreviewStage(null)
   }
 
   async function handleSendToAssembly(orderId: number) {
@@ -1110,8 +1048,7 @@ function WbAssemblySellerPage() {
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = assemblyEligible ?? 0
-  const displayPickList =
-    pickListPreviewStage === stage ? pickListPreview : pickListPreview ?? data.active_pick_list
+  const displayPickList = pickListPreview ?? data.active_pick_list
   const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
   const markingQueueBlocked =
     stage === 'confirm' && (markingStatus.errors_count > 0 || markingStatus.unbound_count > 0)
@@ -1139,8 +1076,8 @@ function WbAssemblySellerPage() {
           <h1>{data.seller.company_name}</h1>
           <p>
             {isBatchMode
-              ? 'Режим ленты: лист подбора → печать всех стикеров → связка баркод + стикер (+ ЧЗ).'
-              : 'На сборке: скан баркода → Честный знак → печать стикера. Лист подбора — PDF в шапке.'}
+              ? 'Режим ленты: сформируйте лист подбора → «Печать ленты стикеров» → связка баркод + стикер.'
+              : 'Режим скана: сформируйте лист подбора по складу → скачайте PDF → скан баркода → ЧЗ → печать стикера.'}
             {syncing ? ' · синхронизация с WB…' : ''}
             {refreshing && !syncing ? ' · обновление списка…' : ''}
             {bridgeOk === true && (
@@ -1185,7 +1122,18 @@ function WbAssemblySellerPage() {
           >
             Обновить заказы
           </button>
-          {(stage === 'new' || stage === 'confirm') && displayPickList && (
+          {(stage === 'new' || stage === 'confirm') && (
+            <button
+              type="button"
+              className={`btn ${!isBatchMode ? 'btn--primary' : 'btn--secondary'}`}
+              onClick={() => void handleGeneratePickList()}
+              disabled={loading || pickListRefreshing || togglingWarehouseId !== null}
+              {...uiHint('Собрать лист подбора только по включённым складам FBS текущей вкладки')}
+            >
+              {pickListRefreshing ? 'Формируем…' : 'Сформировать лист подбора'}
+            </button>
+          )}
+          {(stage === 'new' || stage === 'confirm') && displayPickList?.items?.length ? (
             <button
               type="button"
               className="btn btn--secondary"
@@ -1195,7 +1143,7 @@ function WbAssemblySellerPage() {
             >
               Скачать PDF (A4) · {displayPickList.total_quantity} зак.
             </button>
-          )}
+          ) : null}
           {stage === 'new' && bulkAssemblyCount > 0 && (
             <button
               type="button"
@@ -1207,13 +1155,13 @@ function WbAssemblySellerPage() {
               Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
-          {stage === 'confirm' && isBatchMode && data.active_pick_list && (
+          {stage === 'confirm' && isBatchMode && (displayPickList || data.active_pick_list) && (
             <button
               type="button"
               className="btn btn--primary"
               onClick={() => void handlePrintBatchRibbon()}
               disabled={loading || ribbonPrinting || ordersBusy}
-              {...uiHint('Печать одной лентой: инфо-стикер 58×40 перед каждым баркодом, затем стикеры заказов')}
+              {...uiHint('Печать ленты 58×40: инфо-стикер перед каждым баркодом, затем стикеры заказов')}
             >
               {ribbonPrinting ? 'Печать…' : 'Печать ленты стикеров'}
             </button>
@@ -1291,8 +1239,8 @@ function WbAssemblySellerPage() {
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
-            Выберите склады WB — лист подбора обновится сам. PDF скачивается кнопкой в шапке.
-            Отдельно «Передать на сборку» отправляет заказы в Wildberries.
+            Выберите склады FBS и нажмите «Сформировать лист подбора», затем «Скачать PDF».
+            «Передать на сборку» отдельно отправляет заказы в Wildberries.
           </p>
         </section>
       )}
@@ -1320,7 +1268,8 @@ function WbAssemblySellerPage() {
             <div>
               <h2 className="section-title">Сканируйте баркод заказа</h2>
               <p className="assembly-scan-hint">
-                Курсор уже в поле. После скана товара с ЧЗ сразу откроется окно DataMatrix, затем печать стикера.
+                Курсор уже в поле. Сначала «Сформировать лист подбора» и «Скачать PDF» в шапке.
+                После скана товара с ЧЗ сразу откроется окно DataMatrix, затем печать стикера.
               </p>
               <form onSubmit={handleBarcodeSubmit}>
                 <input
@@ -1461,8 +1410,9 @@ function WbAssemblySellerPage() {
           </button>
         </div>
         <p className="assembly-warehouses__hint">
-          Включите склады вашего фулфилмента — лист подбора и количество заказов обновятся автоматически.
-          {pickListRefreshing ? ' Обновляем данные…' : ''}
+          Включите склады вашего фулфилмента. Количество заказов обновится сразу.
+          Лист подбора — отдельной кнопкой «Сформировать лист подбора» (режим скана и режим ленты не смешиваются).
+          {pickListRefreshing ? ' Формируем лист подбора…' : ''}
         </p>
         {data.warehouses.length === 0 ? (
           <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB»</p>
@@ -1479,7 +1429,7 @@ function WbAssemblySellerPage() {
                     type="checkbox"
                     checked={wh.is_enabled}
                     onChange={(e) => void handleToggleWarehouse(wh.id, e.target.checked)}
-                    disabled={togglingWarehouseId === wh.id || pickListRefreshing}
+                    disabled={togglingWarehouseId === wh.id}
                   />
                   <span className="assembly-warehouses__name">{wh.name || `Склад #${wh.wb_warehouse_id}`}</span>
                 </label>

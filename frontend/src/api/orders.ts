@@ -124,9 +124,16 @@ export function fetchPickList(id: number) {
   return apiFetch<PickList>(`/api/orders/pick-lists/${id}/`)
 }
 
-export function generatePickList(sellerId: number, options?: { force?: boolean }) {
+export function generatePickList(
+  sellerId: number,
+  options?: { force?: boolean; stage?: 'new' | 'confirm' },
+) {
   return apiFetch<PickList>('/api/orders/pick-lists/generate/', {
     method: 'POST',
-    body: JSON.stringify({ seller_id: sellerId, force: Boolean(options?.force) }),
+    body: JSON.stringify({
+      seller_id: sellerId,
+      force: Boolean(options?.force),
+      stage: options?.stage || 'new',
+    }),
   })
 }

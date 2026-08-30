@@ -24,6 +24,7 @@ from apps.orders.services.ozon_assembly import OzonAssemblyError, bind_ozon_mark
 from apps.orders.services.pick_list import PickListError, _cell_sort_key, _product_size_label, _product_wb_article
 from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.warehouse.models import Product
 
 
@@ -31,8 +32,8 @@ def _compact(value: str) -> str:
   return re.sub(r"\s+", "", (value or "").strip())
 
 
-def _pick_list_orders_wb(pick_list: PickList):
-  return (
+def _pick_list_orders_wb(pick_list: PickList, seller: Seller | None = None):
+  qs = (
     Order.objects.filter(
       seller_id=pick_list.seller_id,
       pick_list=pick_list,
@@ -42,6 +43,7 @@ def _pick_list_orders_wb(pick_list: PickList):
     .select_related("product", "product__cell")
     .order_by("id")
   )
+  return filter_orders_for_assembly(qs, seller or pick_list.seller)
 
 
 def _pick_list_postings_ozon(pick_list: PickList):
@@ -127,7 +129,7 @@ def get_wb_batch_ribbon(seller: Seller) -> dict:
   if not pick_list or not pick_list.items.exists():
     raise AssemblyError("Сначала сформируйте лист подбора", code="no_pick_list")
 
-  orders = list(_pick_list_orders_wb(pick_list))
+  orders = list(_pick_list_orders_wb(pick_list, seller))
   pending = [
     order
     for order in orders
@@ -139,7 +141,11 @@ def get_wb_batch_ribbon(seller: Seller) -> dict:
     )
   ]
   if not pending:
-    raise AssemblyError("Все заказы из листа уже собраны", code="nothing_to_print")
+    raise AssemblyError(
+      "Нет стикеров для печати по выбранному складу. "
+      "Нажмите «Сформировать лист подбора», затем снова «Печать ленты стикеров».",
+      code="nothing_to_print",
+    )
 
   missing_stickers = [order for order in pending if not order.has_sticker or not order.sticker_file]
   if missing_stickers:

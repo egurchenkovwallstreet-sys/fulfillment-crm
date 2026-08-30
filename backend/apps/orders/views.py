@@ -379,6 +379,7 @@ class PickListGenerateView(APIView):
         seller,
         user=request.user,
         force=bool(serializer.validated_data.get("force")),
+        stage=serializer.validated_data.get("stage") or "new",
       )
     except PickListError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

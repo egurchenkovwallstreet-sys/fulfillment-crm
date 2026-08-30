@@ -1,4 +1,6 @@
-import { openPrintHolder, closePrintHolder } from './browserPrint'
+import { openPrintHolder, closePrintHolder, normalizeImageBase64 } from './browserPrint'
+import { bridgePrintImage, type PrintJobType } from './printBridge'
+import { getCachedPrintBridgeHealth } from './printService'
 
 export type BatchRibbonInfoItem = {
   type: 'info'
@@ -51,7 +53,7 @@ function infoLabelHtml(item: BatchRibbonInfoItem): string {
 }
 
 function stickerLabelHtml(base64: string): string {
-  const payload = (base64 || '').replace(/\s/g, '')
+  const payload = normalizeImageBase64(base64)
   return `
     <section class="label label--sticker">
       <img src="data:image/png;base64,${payload}" alt="" />
@@ -82,6 +84,10 @@ function ribbonStyles(): string {
       break-after: page;
       padding: 2mm 2.5mm;
       font-family: Arial, sans-serif;
+    }
+    .label:last-child {
+      page-break-after: auto;
+      break-after: auto;
     }
     .label--sticker { padding: 0; }
     .label--sticker img {
@@ -118,16 +124,13 @@ function ribbonStyles(): string {
   `
 }
 
-function buildRibbonHtml(items: BatchRibbonItem[], autoPrint: boolean): string {
-  const body = items
-    .map((item) => {
-      if (item.type === 'info') return infoLabelHtml(item)
-      if (item.format === 'png' && item.sticker_file) return stickerLabelHtml(item.sticker_file)
-      if (item.format === 'posting_number') return postingNumberLabelHtml(item)
-      return postingNumberLabelHtml(item)
-    })
-    .join('')
+function itemToHtml(item: BatchRibbonItem): string {
+  if (item.type === 'info') return infoLabelHtml(item)
+  if (item.format === 'png' && item.sticker_file) return stickerLabelHtml(item.sticker_file)
+  return postingNumberLabelHtml(item)
+}
 
+function buildRibbonHtml(items: BatchRibbonItem[]): string {
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -135,29 +138,218 @@ function buildRibbonHtml(items: BatchRibbonItem[], autoPrint: boolean): string {
   <title>Лента стикеров</title>
   <style>${ribbonStyles()}</style>
 </head>
-<body>${body}
-${autoPrint ? '<script>window.onload=function(){window.print();};</script>' : ''}
+<body>${items.map(itemToHtml).join('')}
 </body>
 </html>`
 }
 
-export function printBatchRibbon(items: BatchRibbonItem[], autoPrint = true, preopened?: Window | null): boolean {
-  const html = buildRibbonHtml(items, autoPrint)
-  if (preopened && !preopened.closed) {
+function drawRowsPng(title: string, rows: Array<[string, string]>): string {
+  const mm = 8
+  const width = 58 * mm
+  const height = 40 * mm
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, width, height)
+  ctx.strokeStyle = '#111111'
+  ctx.lineWidth = 3
+  ctx.strokeRect(6, 6, width - 12, height - 12)
+
+  ctx.fillStyle = '#111111'
+  ctx.textBaseline = 'middle'
+  let y = 36
+  if (title) {
+    ctx.font = 'bold 22px Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(title, width / 2, y, width - 28)
+    y += 32
+  }
+
+  ctx.textAlign = 'left'
+  for (const [key, value] of rows) {
+    ctx.font = '16px Arial, sans-serif'
+    ctx.fillStyle = '#444444'
+    ctx.fillText(key, 18, y, 120)
+    ctx.font = 'bold 20px Arial, sans-serif'
+    ctx.fillStyle = '#111111'
+    ctx.fillText(value || '—', 140, y, width - 160)
+    y += 36
+  }
+
+  const dataUrl = canvas.toDataURL('image/png')
+  return normalizeImageBase64(dataUrl)
+}
+
+function infoLabelPng(item: BatchRibbonInfoItem): string {
+  return drawRowsPng('', [
+    ['Ячейка', item.cell_number || '—'],
+    ['Размер', item.tech_size || '—'],
+    ['Баркод', item.barcode || '—'],
+    ['Артикул', item.article || '—'],
+    ['Кол-во', `${item.quantity ?? 0} шт.`],
+  ])
+}
+
+function postingLabelPng(item: BatchRibbonStickerItem): string {
+  return drawRowsPng('Стикер отправления', [
+    ['Номер', item.posting_number || '—'],
+    ['Баркод', item.barcode || '—'],
+  ])
+}
+
+function stickerPayload(item: BatchRibbonItem): string | null {
+  if (item.type === 'info') return infoLabelPng(item)
+  if (item.format === 'png' && item.sticker_file) {
+    return normalizeImageBase64(item.sticker_file)
+  }
+  if (item.type === 'sticker') return postingLabelPng(item)
+  return null
+}
+
+async function printRibbonViaBridge(items: BatchRibbonItem[]): Promise<void> {
+  const jobType: PrintJobType = 'fbs_sticker'
+  let printed = 0
+  try {
+    for (let index = 0; index < items.length; index += 1) {
+      const payload = stickerPayload(items[index])
+      if (!payload) {
+        throw new Error(`Не удалось подготовить этикетку ${index + 1} из ${items.length}`)
+      }
+      await bridgePrintImage(jobType, payload)
+      printed += 1
+    }
+  } catch (err) {
+    if (printed > 0) {
+      const reason = err instanceof Error ? err.message : 'ошибка принтера'
+      throw new Error(`Напечатано ${printed} из ${items.length}. Остановка: ${reason}`)
+    }
+    throw err
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+async function waitForImages(doc: Document): Promise<void> {
+  const images = Array.from(doc.images)
+  if (!images.length) return
+  await Promise.all(
+    images.map((img) => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const done = () => resolve()
+        img.addEventListener('load', done, { once: true })
+        img.addEventListener('error', done, { once: true })
+        window.setTimeout(done, 4000)
+      })
+    }),
+  )
+}
+
+async function printRibbonViaBrowser(
+  items: BatchRibbonItem[],
+  autoPrint: boolean,
+  preopened?: Window | null,
+): Promise<boolean> {
+  const html = buildRibbonHtml(items)
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+
+  let win = preopened && !preopened.closed ? preopened : null
+  try {
+    if (win) {
+      win.location.replace(url)
+    } else {
+      win = window.open(url, '_blank', 'width=420,height=640')
+    }
+  } catch {
+    win = null
+  }
+
+  if (!win) {
+    URL.revokeObjectURL(url)
+    return writeRibbonFallback(html, autoPrint)
+  }
+
+  await wait(300)
+  try {
+    await waitForImages(win.document)
+  } catch {
+    // печатаем даже если картинки грузились с ошибкой
+  }
+
+  if (autoPrint) {
     try {
-      preopened.document.open()
-      preopened.document.write(html)
-      preopened.document.close()
-      return true
+      win.focus()
+      win.print()
     } catch {
-      closePrintHolder(preopened)
+      URL.revokeObjectURL(url)
+      return false
     }
   }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  return true
+}
+
+function writeRibbonFallback(html: string, autoPrint: boolean): boolean {
   const win = window.open('', '_blank', 'width=420,height=640')
   if (!win) return false
-  win.document.write(html)
-  win.document.close()
+  try {
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+  } catch {
+    try {
+      win.close()
+    } catch {
+      // ignore
+    }
+    return false
+  }
+  void waitForImages(win.document).then(() => {
+    if (!autoPrint) return
+    try {
+      win.focus()
+      win.print()
+    } catch {
+      // ignore
+    }
+  })
   return true
+}
+
+export async function printBatchRibbon(
+  items: BatchRibbonItem[],
+  autoPrint = true,
+  preopened?: Window | null,
+): Promise<boolean> {
+  if (!items.length) {
+    closePrintHolder(preopened)
+    return false
+  }
+
+  const health = getCachedPrintBridgeHealth()
+  if (health?.ok) {
+    closePrintHolder(preopened)
+    try {
+      await printRibbonViaBridge(items)
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      if (message.startsWith('Напечатано ')) {
+        throw err
+      }
+    }
+  }
+
+  return printRibbonViaBrowser(items, autoPrint, preopened)
 }
 
 export { openPrintHolder, closePrintHolder }
