@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { ApiError } from '../api/client'
 import { batchBindScan, type BatchBindState } from '../api/assembly'
 import { playAssemblyScanErrorBeep } from './AssemblyModal'
-import { appendStickerHint } from './stickerLabel'
+import { appendStickerHint } from '../utils/stickerLabel'
 import './BatchBindPanel.css'
 
 const EMPTY_STATE: BatchBindState = {

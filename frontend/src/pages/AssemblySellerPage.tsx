@@ -53,7 +53,7 @@ import {
   refreshPrintBridgeStatus,
 } from '../utils/printService'
 import { downloadPickListPdf } from '../utils/pickListPrint'
-import { closePrintHolder, openPrintHolder, printBatchRibbon } from '../utils/batchRibbonPrint'
+import { printBatchRibbon } from '../utils/batchRibbonPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
