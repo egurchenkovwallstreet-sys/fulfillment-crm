@@ -854,10 +854,12 @@ function WbAssemblySellerPage() {
       enterMarkingPhase(listedOrder as unknown as PrintOrder)
     }
 
+    let markingUiOpen = listRequiresMarking
     try {
       const result = await scanOrderBarcode(id, barcode)
       if (shouldAwaitMarking(result) || listRequiresMarking) {
         enterMarkingPhase(result.order)
+        markingUiOpen = true
         if (result.message) setSuccess(result.message)
         void refreshMarkingStatus()
         return
@@ -873,7 +875,7 @@ function WbAssemblySellerPage() {
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
-      if (!listRequiresMarking) {
+      if (!markingUiOpen) {
         resetScanFlow()
       }
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
@@ -890,7 +892,7 @@ function WbAssemblySellerPage() {
         return
       }
       setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
-      if (listRequiresMarking || scanPhaseRef.current === 'marking') {
+      if (markingUiOpen) {
         focusMarkingInput()
       } else {
         scanRef.current?.focus()
