@@ -15,6 +15,7 @@ from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product
+from apps.warehouse.services.catalog_fetch import normalize_barcode
 from apps.warehouse.services.marking_lookup import (
   MarkingLookupError,
   lookup_marking_for_barcode,
@@ -62,11 +63,26 @@ def _get_client(seller: Seller) -> WBClient:
   return WBClient(token)
 
 
+def _normalize_scan_value(scan_value: str) -> str:
+  return normalize_barcode(str(scan_value or "").replace(" ", ""))
+
+
 def _match_order_by_scan(orders_qs, scan_value: str) -> Order | None:
-  order = orders_qs.filter(barcode=scan_value).first()
-  if not order and scan_value.isdigit():
-    order = orders_qs.filter(wb_order_id=int(scan_value)).first()
-  return order
+  scan_norm = _normalize_scan_value(scan_value)
+  if not scan_norm:
+    return None
+
+  order = orders_qs.filter(barcode=scan_norm).first()
+  if order:
+    return order
+
+  for candidate in orders_qs.only("id", "barcode", "wb_order_id"):
+    if _normalize_scan_value(candidate.barcode or "") == scan_norm:
+      return candidate
+
+  if scan_norm.isdigit():
+    return orders_qs.filter(wb_order_id=int(scan_norm)).first()
+  return None
 
 
 def _is_marking_retry_order(order: Order) -> bool:
@@ -126,13 +142,16 @@ def _get_active_pick_list(seller: Seller) -> PickList | None:
 
 
 def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
-  scan = scan_value.strip()
+  scan = _normalize_scan_value(scan_value)
   if not scan:
     return False
 
-  item_barcodes = set(
-    PickListItem.objects.filter(pick_list=pick_list).values_list("barcode", flat=True)
-  )
+  item_barcodes = {
+    normalized
+    for barcode in PickListItem.objects.filter(pick_list=pick_list).values_list("barcode", flat=True)
+    for normalized in [_normalize_scan_value(barcode or "")]
+    if normalized
+  }
   if scan in item_barcodes:
     return True
 
@@ -142,7 +161,7 @@ def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
       pick_list=pick_list,
       wb_order_id=int(scan),
     ).first()
-    if order and order.barcode in item_barcodes:
+    if order and _normalize_scan_value(order.barcode or "") in item_barcodes:
       return True
 
   return False
@@ -157,7 +176,7 @@ def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
 
 
 def _find_active_order(seller: Seller, scan_value: str) -> Order:
-  scan_value = scan_value.strip()
+  scan_value = _normalize_scan_value(scan_value)
   if not scan_value:
     raise AssemblyError("Пустой штрихкод")
 
@@ -305,7 +324,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   — без ЧЗ: сразу LABEL_PRINTED + печать;
   — с ЧЗ: ждём скан DataMatrix (стикер не печатаем).
   """
-  scan_value = scan_value.strip()
+  scan_value = _normalize_scan_value(scan_value)
   if not scan_value:
     raise AssemblyError("Пустой штрихкод")
 

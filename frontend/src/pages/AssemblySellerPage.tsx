@@ -390,12 +390,24 @@ function WbAssemblySellerPage() {
     return code
   }
 
+  function barcodeMatchesScan(orderBarcode: string, scan: string): boolean {
+    const left = normalizeScanCode(orderBarcode)
+    const right = normalizeScanCode(scan)
+    if (!left || !right) return false
+    if (left === right) return true
+    if (/^\d+$/.test(left) && /^\d+$/.test(right)) {
+      const stripLeadingZeros = (digits: string) => digits.replace(/^0+/, '') || '0'
+      return stripLeadingZeros(left) === stripLeadingZeros(right)
+    }
+    return false
+  }
+
   function findOrderForBarcode(barcode: string): AssemblyOrder | undefined {
     const trimmed = normalizeScanCode(barcode)
     if (!trimmed || !data) return undefined
     return data.orders.find((order) => {
-      const orderBarcode = normalizeScanCode(order.barcode || '')
-      return orderBarcode === trimmed || String(order.wb_order_id) === trimmed
+      if (barcodeMatchesScan(order.barcode || '', trimmed)) return true
+      return String(order.wb_order_id) === trimmed
     })
   }
 
@@ -843,11 +855,14 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
+    let keepMarkingUi = false
+
     if (listedNeedsMarking && listedOrder) {
       openMarkingScan(
         listedOrder as unknown as PrintOrder,
         `Заказ WB #${listedOrder.wb_order_id} — отсканируйте Честный знак`,
       )
+      keepMarkingUi = true
     }
 
     try {
@@ -855,7 +870,7 @@ function WbAssemblySellerPage() {
       const needsMarking =
         result.action === 'await_marking' ||
         Boolean(result.requires_marking) ||
-        Boolean(result.order?.requires_marking) ||
+        orderNeedsMarkingScan(result.order as unknown as AssemblyOrder) ||
         listedNeedsMarking
 
       if (needsMarking) {
@@ -864,6 +879,7 @@ function WbAssemblySellerPage() {
           result.message ||
             `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
         )
+        keepMarkingUi = true
         void refreshMarkingStatus()
         return
       }
@@ -878,29 +894,53 @@ function WbAssemblySellerPage() {
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
+      const errOrder =
+        err instanceof ApiError && err.order && typeof err.order === 'object'
+          ? (err.order as AssemblyOrder)
+          : undefined
+      const errNeedsMarking = errOrder ? orderNeedsMarkingScan(errOrder) : false
+
       if (listedNeedsMarking && listedOrder) {
         openMarkingScan(
           listedOrder as unknown as PrintOrder,
           `Заказ WB #${listedOrder.wb_order_id} — отсканируйте Честный знак`,
         )
-      } else {
+        keepMarkingUi = true
+      } else if (errNeedsMarking && errOrder) {
+        openMarkingScan(
+          errOrder as unknown as PrintOrder,
+          `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
+        )
+        keepMarkingUi = true
+      } else if (!keepMarkingUi) {
         resetScanFlow()
       }
+
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
-        resetScanFlow()
+        if (!keepMarkingUi) {
+          resetScanFlow()
+        }
         playAssemblyScanErrorBeep()
         setModal({
           kind: 'scan-error',
           title: 'Ошибка',
           message: 'Баркода нет в листе подбора!',
           onDismiss: () => {
-            resetScanFlow()
+            if (!keepMarkingUi) {
+              resetScanFlow()
+            } else {
+              focusMarkingInput()
+            }
           },
         })
+        if (keepMarkingUi) {
+          setError('Баркода нет в листе подбора! Обновите лист подбора или проверьте штрихкод.')
+          focusMarkingInput()
+        }
         return
       }
       setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
-      if (listedNeedsMarking) {
+      if (keepMarkingUi) {
         focusMarkingInput()
       } else {
         scanRef.current?.focus()
