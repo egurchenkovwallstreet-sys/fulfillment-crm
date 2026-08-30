@@ -300,7 +300,6 @@ function WbAssemblySellerPage() {
     const bootKey = `${id}:${stage}`
     if (bootstrapKeyRef.current === bootKey) return
     bootstrapKeyRef.current = bootKey
-    pickListBootStageRef.current = bootKey
     void bootstrapAssembly()
   }, [id, stage, bootstrapAssembly])
 
