@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { Link } from 'react-router-dom'
 import {
   bindOzonMarking,
+  bulkMoveOzonToAssembly,
+  bulkShipOzonPostings,
   fetchAssemblySeller,
   fetchOzonLabel,
   fetchOzonLabelsBulk,
@@ -44,6 +46,8 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const [pendingMarking, setPendingMarking] = useState<AssemblyOrder | null>(null)
   const [lastCarriageId, setLastCarriageId] = useState<number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
   const skipStageLoad = useRef(true)
 
   const load = useCallback(async () => {
@@ -90,6 +94,10 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
     }
     void load()
   }, [load])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [stage])
 
   useEffect(() => {
     scanRef.current?.focus()
@@ -154,6 +162,78 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       e.preventDefault()
       void handleScan()
     }
+  }
+
+  async function handleBulkToAssembly() {
+    const ids = Array.from(selectedIds)
+    if (ids.length < 1) return
+    setError('')
+    setSuccess('')
+    setBulkBusy(true)
+    try {
+      const result = await bulkMoveOzonToAssembly(sellerId, ids)
+      setSuccess(result.message)
+      setSelectedIds(new Set())
+      setStage('confirm')
+      setData(await fetchAssemblySeller(sellerId, 'confirm'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось перевести на сборку')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function handleBulkShip() {
+    const orders = data?.orders || []
+    const ids = orders
+      .filter(
+        (item) =>
+          selectedIds.has(item.id) &&
+          (!item.requires_marking || item.marking_bound),
+      )
+      .map((item) => item.id)
+    if (ids.length < 1) {
+      setError('Выберите отправления с привязанным ЧЗ (или без маркировки)')
+      return
+    }
+    setError('')
+    setSuccess('')
+    setBulkBusy(true)
+    try {
+      const result = await bulkShipOzonPostings(sellerId, ids)
+      setSuccess(result.message)
+      setSelectedIds(new Set())
+      setStage('complete')
+      setData(await fetchAssemblySeller(sellerId, 'complete'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось передать в доставку')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  function toggleSelected(orderId: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(orderId)) next.delete(orderId)
+      else next.add(orderId)
+      return next
+    })
+  }
+
+  function selectOurProducts() {
+    const ids = (data?.orders || [])
+      .filter((item) => item.fulfillment_coverage === 'our')
+      .map((item) => item.id)
+    setSelectedIds(new Set(ids))
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    if (!checked) {
+      setSelectedIds(new Set())
+      return
+    }
+    setSelectedIds(new Set((data?.orders || []).map((item) => item.id)))
   }
 
   async function handleShip(order: AssemblyOrder) {
@@ -254,6 +334,9 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
   const warehouses = (data?.warehouses || []) as unknown as SellerOzonWarehouse[]
   const counts = data?.counts
+  const orders = data?.orders || []
+  const selectedCount = selectedIds.size
+  const allSelected = orders.length > 0 && orders.every((item) => selectedIds.has(item.id))
   const scanOnPicking = stage === 'confirm'
   const scanLabel = scanOnPicking
     ? pendingMarking
@@ -382,9 +465,76 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
       <section className="panel">
         {loading && !data && <p>Загрузка…</p>}
+        <div className="assembly-ozon-legend">
+          <span className="assembly-ozon-legend__item">
+            <span className="assembly-ozon-legend__swatch assembly-ozon-legend__swatch--our" aria-hidden />
+            Наш товар — принят на фулфилменте, есть ячейка
+          </span>
+          <span className="assembly-ozon-legend__item">
+            <span className="assembly-ozon-legend__swatch assembly-ozon-legend__swatch--unknown" aria-hidden />
+            Не наш — артикула нет в CRM или ячейка не создана
+          </span>
+        </div>
+        {(stage === 'new' || stage === 'confirm') && orders.length > 0 && (
+          <div className="assembly-ozon-bulk">
+            <span className="assembly-ozon-bulk__count">Выбрано: {selectedCount}</span>
+            <button
+              type="button"
+              className="btn btn--ghost btn--small"
+              onClick={selectOurProducts}
+              {...uiHint('Отметить галочками только строки с нашим товаром (зелёные)')}
+            >
+              Выбрать наши
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--small"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={selectedCount === 0}
+              {...uiHint('Снять все галочки')}
+            >
+              Снять выбор
+            </button>
+            {stage === 'new' && (
+              <span {...hintWrapProps('Перевести отмеченные отправления на вкладку «На сборке»')}>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--small"
+                  onClick={() => void handleBulkToAssembly()}
+                  disabled={bulkBusy || selectedCount === 0}
+                >
+                  {bulkBusy ? 'Отправка…' : `На сборку (${selectedCount})`}
+                </button>
+              </span>
+            )}
+            {stage === 'confirm' && (
+              <span {...hintWrapProps('Передать отмеченные отправления в доставку Ozon (нужен ЧЗ, если требуется)')}>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--small"
+                  onClick={() => void handleBulkShip()}
+                  disabled={bulkBusy || selectedCount === 0}
+                >
+                  {bulkBusy ? 'Отправка…' : `В доставку (${selectedCount})`}
+                </button>
+              </span>
+            )}
+          </div>
+        )}
         <table className="assembly-table">
           <thead>
             <tr>
+              {(stage === 'new' || stage === 'confirm') && (
+                <th className="assembly-table__check">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) => toggleSelectAll(e.target.checked)}
+                    aria-label="Выбрать все"
+                    {...uiHint('Выбрать все отправления на странице')}
+                  />
+                </th>
+              )}
               <th>Отправление</th>
               <th>Ячейка</th>
               <th>Баркод</th>
@@ -394,15 +544,34 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
             </tr>
           </thead>
           <tbody>
-            {(data?.orders || []).length === 0 && !loading && (
+            {orders.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="assembly-table__empty">
+                <td colSpan={stage === 'new' || stage === 'confirm' ? 7 : 6} className="assembly-table__empty">
                   Нет отправлений в этой вкладке. Нажмите «Обновить из Ozon».
                 </td>
               </tr>
             )}
-            {(data?.orders || []).map((order) => (
-              <tr key={order.id}>
+            {orders.map((order) => (
+              <tr
+                key={order.id}
+                className={
+                  order.fulfillment_coverage === 'our'
+                    ? 'assembly-row--fulfillment-our'
+                    : order.fulfillment_coverage === 'unknown'
+                      ? 'assembly-row--fulfillment-unknown'
+                      : undefined
+                }
+              >
+                {(stage === 'new' || stage === 'confirm') && (
+                  <td className="assembly-table__check">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(order.id)}
+                      onChange={() => toggleSelected(order.id)}
+                      aria-label={`Выбрать ${order.posting_number || order.id}`}
+                    />
+                  </td>
+                )}
                 <td>
                   <strong>{order.posting_number || order.id}</strong>
                 </td>

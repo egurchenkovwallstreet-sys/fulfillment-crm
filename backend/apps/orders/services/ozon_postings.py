@@ -48,6 +48,19 @@ def _match_product(seller: Seller, barcode: str, offer_id: str) -> Product | Non
   )
 
 
+def posting_fulfillment_coverage(posting: OzonPosting, *, seller: Seller | None = None) -> str:
+  """
+  our — товар принят на фулфилменте и привязан к ячейке;
+  unknown — артикула нет в CRM или ячейка не создана.
+  """
+  product = posting.product
+  if product is None and seller is not None:
+    product = _match_product(seller, posting.barcode or "", posting.offer_id or "")
+  if product is not None and product.cell_id:
+    return "our"
+  return "unknown"
+
+
 def _products_payload(raw: dict) -> list[dict]:
   items = []
   for product_raw in raw.get("products") or []:
@@ -221,7 +234,7 @@ def sync_ozon_postings(seller: Seller, *, user=None) -> dict:
   }
 
 
-def serialize_ozon_posting(posting: OzonPosting) -> dict:
+def serialize_ozon_posting(posting: OzonPosting, *, seller: Seller | None = None) -> dict:
   cell_number = ""
   photo_url = ""
   tech_size = ""
@@ -229,6 +242,8 @@ def serialize_ozon_posting(posting: OzonPosting) -> dict:
     cell_number = posting.product.cell.number if posting.product.cell_id else ""
     photo_url = posting.product.photo_url or ""
     tech_size = posting.product.tech_size or posting.product.wb_size or ""
+  seller_ref = seller or posting.seller
+  coverage = posting_fulfillment_coverage(posting, seller=seller_ref)
   stage_label = {
     OzonPosting.CrmStage.NEW: "Новый",
     OzonPosting.CrmStage.IN_PICKING: "На сборке",
@@ -269,5 +284,6 @@ def serialize_ozon_posting(posting: OzonPosting) -> dict:
     "delivery_method_id": posting.delivery_method_id,
     "carriage_id": posting.carriage_id,
     "warehouse_quantity": posting.product.quantity if posting.product_id else None,
+    "fulfillment_coverage": coverage,
     "created_at": posting.created_at.isoformat() if posting.created_at else "",
   }

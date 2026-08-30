@@ -106,7 +106,60 @@ def scan_ozon_barcode(seller, barcode: str) -> dict:
     "success": True,
     "message": message,
     "action": "await_marking" if needs_marking else "scanned",
-    "posting": serialize_ozon_posting(posting),
+    "posting": serialize_ozon_posting(posting, seller=seller),
+    "counts": counts,
+  }
+
+
+def _move_posting_to_picking(posting: OzonPosting) -> bool:
+  if posting.crm_stage != OzonPosting.CrmStage.NEW:
+    return False
+  posting.crm_stage = OzonPosting.CrmStage.IN_PICKING
+  posting.save(update_fields=["crm_stage", "updated_at"])
+  return True
+
+
+def bulk_move_ozon_to_assembly(seller, posting_ids: list[int]) -> dict:
+  if not posting_ids:
+    raise OzonAssemblyError("Выберите хотя бы одно отправление")
+  moved: list[dict] = []
+  skipped: list[dict] = []
+  for raw_id in posting_ids:
+    try:
+      posting_id = int(raw_id)
+    except (TypeError, ValueError):
+      skipped.append({"posting_id": raw_id, "error": "Некорректный ID"})
+      continue
+    posting = (
+      OzonPosting.objects.select_related("product", "product__cell")
+      .filter(pk=posting_id, seller=seller)
+      .first()
+    )
+    if not posting:
+      skipped.append({"posting_id": posting_id, "error": "Отправление не найдено"})
+      continue
+    if posting.crm_stage != OzonPosting.CrmStage.NEW:
+      skipped.append({
+        "posting_id": posting_id,
+        "error": "Уже не во вкладке «Новые»",
+      })
+      continue
+    _move_posting_to_picking(posting)
+    moved.append(serialize_ozon_posting(posting, seller=seller))
+  if not moved:
+    raise OzonAssemblyError(
+      skipped[0]["error"] if len(skipped) == 1 else "Не удалось перевести выбранные отправления",
+    )
+  counts = _save_seller_counts(seller)
+  message = f"На сборку: {len(moved)} отправлений"
+  if skipped:
+    message += f" (пропущено: {len(skipped)})"
+  return {
+    "success": True,
+    "message": message,
+    "moved_count": len(moved),
+    "skipped": skipped,
+    "postings": moved,
     "counts": counts,
   }
 
@@ -169,7 +222,7 @@ def bind_ozon_marking(seller, posting_id: int, marking_code: str) -> dict:
     "success": True,
     "message": message,
     "action": action,
-    "posting": serialize_ozon_posting(posting),
+    "posting": serialize_ozon_posting(posting, seller=seller),
     "counts": _seller_counts(seller),
   }
 
@@ -300,9 +353,38 @@ def ship_ozon_posting(seller, posting_id: int, *, user=None) -> dict:
       f"{posting.posting_number} передано к отгрузке. "
       "Через минуту нажмите «Этикетка» — Ozon готовит PDF."
     ),
-    "posting": serialize_ozon_posting(posting),
+    "posting": serialize_ozon_posting(posting, seller=seller),
     "counts": counts,
     "stock": stock,
+  }
+
+
+def bulk_ship_ozon_postings(seller, posting_ids: list[int], *, user=None) -> dict:
+  if not posting_ids:
+    raise OzonAssemblyError("Выберите хотя бы одно отправление")
+  shipped: list[dict] = []
+  errors: list[dict] = []
+  for raw_id in posting_ids:
+    try:
+      posting_id = int(raw_id)
+      result = ship_ozon_posting(seller, posting_id, user=user)
+      shipped.append(result.get("posting") or {})
+    except OzonAssemblyError as exc:
+      errors.append({"posting_id": raw_id, "error": str(exc)})
+  if not shipped:
+    raise OzonAssemblyError(
+      errors[0]["error"] if len(errors) == 1 else "Не удалось передать выбранные отправления",
+    )
+  counts = _save_seller_counts(seller)
+  message = f"В доставку: {len(shipped)} отправлений"
+  if errors:
+    message += f" (ошибок: {len(errors)})"
+  return {
+    "success": True,
+    "message": message,
+    "shipped_count": len(shipped),
+    "errors": errors,
+    "counts": counts,
   }
 
 
@@ -322,7 +404,7 @@ def fetch_ozon_label(seller, posting_id: int) -> dict:
     "success": True,
     "filename": f"{posting.posting_number}.pdf",
     "pdf_base64": base64.b64encode(pdf).decode("ascii"),
-    "posting": serialize_ozon_posting(posting),
+    "posting": serialize_ozon_posting(posting, seller=seller),
   }
 
 

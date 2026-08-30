@@ -10,6 +10,8 @@ from apps.orders.services.ozon_act import OzonActError, fetch_ozon_act_docs, for
 from apps.orders.services.ozon_assembly import (
   OzonAssemblyError,
   bind_ozon_marking,
+  bulk_move_ozon_to_assembly,
+  bulk_ship_ozon_postings,
   fetch_ozon_label,
   fetch_ozon_labels_bulk,
   scan_ozon_barcode,
@@ -55,7 +57,7 @@ class OzonAssemblySellerDetailView:
 
     tab_counts = get_seller_ozon_tab_counts(seller, assembly_only=True)
     orders = [
-      serialize_ozon_posting(item)
+      serialize_ozon_posting(item, seller=seller)
       for item in _ozon_stage_qs(seller, stage or "new", assembly_only=True).order_by("in_process_at", "id")[:300]
     ]
     warehouses = SellerOzonWarehouse.objects.filter(seller=seller).order_by("name", "ozon_warehouse_id")
@@ -85,9 +87,14 @@ class OzonAssemblyScanView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     barcode = str(request.data.get("barcode") or "")
+    posting_ids = request.data.get("posting_ids") or []
     try:
-      result = scan_ozon_barcode(seller, barcode)
-    except OzonAssemblyError as exc:
+      if posting_ids:
+        ids = [int(item) for item in posting_ids]
+        result = bulk_move_ozon_to_assembly(seller, ids)
+      else:
+        result = scan_ozon_barcode(seller, barcode)
+    except (OzonAssemblyError, TypeError, ValueError) as exc:
       return _error_response(exc)
     return Response(result)
 
@@ -116,8 +123,16 @@ class OzonAssemblyShipView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     posting_id = request.data.get("posting_id") or request.data.get("order_id")
+    posting_ids = request.data.get("posting_ids") or []
     try:
-      result = ship_ozon_posting(seller, int(posting_id), user=request.user)
+      if posting_ids:
+        result = bulk_ship_ozon_postings(
+          seller,
+          [int(item) for item in posting_ids],
+          user=request.user,
+        )
+      else:
+        result = ship_ozon_posting(seller, int(posting_id), user=request.user)
     except (OzonAssemblyError, TypeError, ValueError) as exc:
       return _error_response(exc)
     return Response(result)

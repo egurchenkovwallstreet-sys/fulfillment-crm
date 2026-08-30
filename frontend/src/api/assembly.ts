@@ -51,6 +51,7 @@ export interface AssemblyOrder {
   delivery_method_id?: number | null
   carriage_id?: number | null
   warehouse_quantity: number | null
+  fulfillment_coverage?: 'our' | 'unknown'
   created_at: string
 }
 
@@ -331,6 +332,19 @@ export function scanOzonBarcode(sellerId: number, barcode: string) {
   })
 }
 
+export function bulkMoveOzonToAssembly(sellerId: number, postingIds: number[]) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    moved_count?: number
+    skipped?: Array<{ posting_id: number; error: string }>
+    counts: Record<string, number>
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-scan/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_ids: postingIds }),
+  })
+}
+
 export function bindOzonMarking(sellerId: number, postingId: number, markingCode: string) {
   return apiFetch<{
     success: boolean
@@ -354,6 +368,19 @@ export function shipOzonPosting(sellerId: number, postingId: number) {
   }>(`/api/orders/assembly/sellers/${sellerId}/ozon-ship/`, {
     method: 'POST',
     body: JSON.stringify({ posting_id: postingId }),
+  })
+}
+
+export function bulkShipOzonPostings(sellerId: number, postingIds: number[]) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    shipped_count?: number
+    errors?: Array<{ posting_id: number; error: string }>
+    counts: Record<string, number>
+  }>(`/api/orders/assembly/sellers/${sellerId}/ozon-ship/`, {
+    method: 'POST',
+    body: JSON.stringify({ posting_ids: postingIds }),
   })
 }
 
