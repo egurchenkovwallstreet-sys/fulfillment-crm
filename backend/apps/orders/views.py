@@ -375,7 +375,11 @@ class PickListGenerateView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     try:
-      pick_list = generate_pick_list(seller, user=request.user)
+      pick_list = generate_pick_list(
+        seller,
+        user=request.user,
+        force=bool(serializer.validated_data.get("force")),
+      )
     except PickListError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 

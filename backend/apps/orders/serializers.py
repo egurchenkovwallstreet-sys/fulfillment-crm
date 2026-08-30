@@ -265,6 +265,7 @@ class OrderSyncSerializer(serializers.Serializer):
 
 class PickListGenerateSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField()
+  force = serializers.BooleanField(required=False, default=False)
 
   def validate_seller_id(self, value):
     if not Seller.objects.filter(pk=value, is_active=True).exists():

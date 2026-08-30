@@ -124,6 +124,7 @@ function WbAssemblySellerPage() {
   const scanPhaseRef = useRef<ScanPhase>('barcode')
   const markingLockRef = useRef(false)
   const scanBusyRef = useRef(false)
+  const barcodeApiInFlightRef = useRef(false)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(null)
   const [stage, setStage] = useState('new')
@@ -230,30 +231,41 @@ function WbAssemblySellerPage() {
       }
 
       if (pickStage === 'new') {
-        if (!forceRegenerate && fresh.active_pick_list?.items?.length) {
+        if (forceRegenerate) {
+          if (fresh.active_pick_list?.id) {
+            try {
+              await deletePickList(id, fresh.active_pick_list.id)
+            } catch {
+              // лист мог быть уже удалён или часть заказов уже собрана
+            }
+          }
+          try {
+            const pickList = await generatePickList(id, { force: true })
+            setPickListPreview(pickList)
+            setPickListPreviewStage('new')
+            setData(await fetchAssemblySeller(id, stage || undefined))
+            return
+          } catch {
+            // покажем preview по текущим складам, даже если сохранённый лист нельзя пересобрать
+          }
+        } else if (fresh.active_pick_list?.items?.length) {
           setPickListPreview(fresh.active_pick_list)
           setPickListPreviewStage('new')
           return
         }
-        if (forceRegenerate && fresh.active_pick_list?.id) {
-          try {
-            await deletePickList(id, fresh.active_pick_list.id)
-          } catch {
-            // active list may already be gone
-          }
-        }
-        const pickList = await generatePickList(id)
-        setPickListPreview(pickList)
-        setPickListPreviewStage('new')
-        if (forceRegenerate) {
-          setData(await fetchAssemblySeller(id, stage || undefined))
-        }
-      } else {
-        const result = await previewPickList(id, 'confirm')
-        setPickListPreview(result.pick_list)
-        setPickListPreviewStage('confirm')
+      }
+
+      const result = await previewPickList(id, pickStage)
+      setPickListPreview(result.pick_list)
+      setPickListPreviewStage(pickStage)
+      if (forceRegenerate) {
+        setData(await fetchAssemblySeller(id, stage || undefined))
       }
     } catch (err) {
+      if (forceRegenerate) {
+        setPickListPreview(null)
+        setPickListPreviewStage(pickStage)
+      }
       setError(err instanceof Error ? err.message : 'Не удалось обновить лист подбора')
     } finally {
       if (showOverlay) setPickListRefreshing(false)
@@ -429,14 +441,17 @@ function WbAssemblySellerPage() {
   }
 
   function openMarkingScan(order: PrintOrder, message?: string) {
+    const alreadyOpen = markingLockRef.current && scanPhaseRef.current === 'marking'
     markingLockRef.current = true
     scanPhaseRef.current = 'marking'
     flushSync(() => {
       setScanPhase('marking')
       setPendingOrder(order)
       setScanValue('')
-      markingBufferRef.current = ''
-      setMarkingValue('')
+      if (!alreadyOpen) {
+        markingBufferRef.current = ''
+        setMarkingValue('')
+      }
     })
     if (message) setSuccess(message)
     focusMarkingInput()
@@ -626,8 +641,13 @@ function WbAssemblySellerPage() {
 
   function handleDownloadPickListPdf() {
     const pickList =
-      (pickListPreviewStage === stage ? pickListPreview : null) ?? data?.active_pick_list
-    if (!pickList) return
+      pickListPreviewStage === stage
+        ? pickListPreview
+        : (pickListPreview ?? data?.active_pick_list)
+    if (!pickList) {
+      setError('Лист подбора для выбранных складов пуст. Выберите склад FBS и обновите заказы.')
+      return
+    }
     if (!downloadPickListPdf(pickList)) {
       setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
     }
@@ -882,6 +902,7 @@ function WbAssemblySellerPage() {
     setError('')
     setSuccess('')
     scanBusyRef.current = true
+    barcodeApiInFlightRef.current = true
     setScanBusy(true)
     scanRef.current?.blur()
 
@@ -890,6 +911,8 @@ function WbAssemblySellerPage() {
         listedOrder as unknown as PrintOrder,
         `Заказ WB #${listedOrder.wb_order_id} — отсканируйте Честный знак`,
       )
+      scanBusyRef.current = false
+      setScanBusy(false)
     }
 
     try {
@@ -966,6 +989,7 @@ function WbAssemblySellerPage() {
         scanRef.current?.focus()
       }
     } finally {
+      barcodeApiInFlightRef.current = false
       scanBusyRef.current = false
       setScanBusy(false)
     }
@@ -974,12 +998,17 @@ function WbAssemblySellerPage() {
   async function handleMarkingSubmit(e?: FormEvent, rawCode?: string) {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
-    if (!id || !pendingOrder || !code || scanBusy) return
+    if (!id || !pendingOrder || !code || scanBusyRef.current) return
     setSuccess('')
     setError('')
+    scanBusyRef.current = true
     setScanBusy(true)
     const printWin = openPrintHolder()
     try {
+      const started = Date.now()
+      while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
+        await new Promise((resolve) => window.setTimeout(resolve, 40))
+      }
       const result = await bindMarking(id, pendingOrder.id, code)
       await finishPrint(result.order, printWin)
       window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
@@ -990,6 +1019,7 @@ function WbAssemblySellerPage() {
       setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
       focusMarkingInput()
     } finally {
+      scanBusyRef.current = false
       setScanBusy(false)
     }
   }
@@ -1342,7 +1372,6 @@ function WbAssemblySellerPage() {
                   autoCorrect="off"
                   spellCheck={false}
                   autoFocus
-                  disabled={scanBusy}
                 />
               </form>
               <div className="assembly-scan-actions">

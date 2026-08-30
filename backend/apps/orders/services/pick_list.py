@@ -210,15 +210,17 @@ def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
 
 
 @transaction.atomic
-def generate_pick_list(seller: Seller, *, user=None) -> PickList:
+def generate_pick_list(seller: Seller, *, user=None, force: bool = False) -> PickList:
   existing = (
     PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
     .prefetch_related("items__cell", "items__product")
     .order_by("-created_at")
     .first()
   )
-  if existing and existing.items.exists():
+  if existing and existing.items.exists() and not force:
     return existing
+  if existing and force:
+    delete_active_pick_list(seller, pick_list_id=existing.id, user=user)
 
   orders = [
     order for order in _orders_for_pick_list(seller, stage="new")

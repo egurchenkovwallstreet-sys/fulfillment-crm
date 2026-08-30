@@ -44,7 +44,14 @@ export async function printFbsSticker(
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<PrintChannel> {
-  if (await printViaBridge('fbs_sticker', base64)) {
+  const bridgeAttempt = printViaBridge('fbs_sticker', base64)
+  const winner = await Promise.race([
+    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+    new Promise<'no'>((resolve) => {
+      window.setTimeout(() => resolve('no'), 400)
+    }),
+  ])
+  if (winner === 'bridge') {
     closePrintHolder(preopened)
     return 'bridge'
   }
