@@ -543,6 +543,10 @@
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
 }
 
+.assembly-scan-step--hidden {
+  display: none;
+}
+
 .assembly-scan-input--marking {
   border-color: #f59e0b;
   background: #fffbeb;
