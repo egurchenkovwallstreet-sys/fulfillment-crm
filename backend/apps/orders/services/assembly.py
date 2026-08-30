@@ -115,7 +115,7 @@ def _reset_marking_for_retry(order: Order, seller: Seller, *, user=None) -> None
 
 def _get_active_pick_list(seller: Seller) -> PickList | None:
   return (
-    PickList.objects.filter(seller=seller, is_completed=False)
+    PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
     .order_by("-created_at")
     .first()
   )

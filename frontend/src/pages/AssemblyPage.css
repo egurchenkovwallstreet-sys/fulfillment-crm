@@ -823,3 +823,21 @@
   margin: 0.35rem 1.25rem 0.35rem 0;
   font-size: 0.95rem;
 }
+
+.assembly-mode-toggle {
+  display: inline-flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.assembly-mode-toggle .btn {
+  border-radius: 0;
+  border: none;
+  min-width: 4.5rem;
+}
+
+.assembly-mode-toggle .btn--active-mode {
+  background: #1e40af;
+  color: #fff;
+}

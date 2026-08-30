@@ -5,7 +5,8 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
 from apps.accounts.tenant import get_seller_for_user
-from apps.orders.models import OzonPosting
+from apps.orders.models import OzonPosting, PickList
+from apps.orders.serializers import PickListSerializer
 from apps.orders.services.ozon_act import OzonActError, fetch_ozon_act_docs, form_ozon_acts
 from apps.orders.services.ozon_assembly import (
   OzonAssemblyError,
@@ -61,8 +62,15 @@ class OzonAssemblySellerDetailView:
       for item in _ozon_stage_qs(seller, stage or "new", assembly_only=True).order_by("in_process_at", "id")[:300]
     ]
     warehouses = SellerOzonWarehouse.objects.filter(seller=seller).order_by("name", "ozon_warehouse_id")
+    active_pick_list = (
+      PickList.objects.filter(seller=seller, marketplace="ozon", is_completed=False)
+      .prefetch_related("items__cell", "items__product")
+      .order_by("-created_at")
+      .first()
+    )
     return {
       "seller": {"id": seller.id, "company_name": seller.company_name},
+      "assembly_workflow_mode": seller.assembly_workflow_mode,
       "marketplace": "ozon",
       "ozon_assembly_ready": True,
       "counts": {
@@ -73,7 +81,9 @@ class OzonAssemblySellerDetailView:
       "assembly_eligible": tab_counts["new"],
       "orders": orders,
       "pick_list": None,
-      "active_pick_list": None,
+      "active_pick_list": (
+        PickListSerializer(active_pick_list).data if active_pick_list else None
+      ),
       "supplies_forming": 0,
       "warehouses": SellerOzonWarehouseSerializer(warehouses, many=True).data,
     }

@@ -57,6 +57,7 @@ export interface AssemblyOrder {
 
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
+  assembly_workflow_mode?: 'scan' | 'batch'
   counts: Record<string, number>
   assembly_eligible?: number
   supplies_forming: number
@@ -249,6 +250,98 @@ export function scanOrderBarcode(sellerId: number, barcode: string) {
     method: 'POST',
     body: JSON.stringify({ barcode }),
   })
+}
+
+export type AssemblyWorkflowMode = 'scan' | 'batch'
+
+export function setAssemblyWorkflowMode(sellerId: number, mode: AssemblyWorkflowMode) {
+  return apiFetch<{ success: boolean; assembly_workflow_mode: AssemblyWorkflowMode }>(
+    `/api/orders/assembly/sellers/${sellerId}/workflow-mode/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    },
+  )
+}
+
+export type BatchRibbonItem =
+  | {
+      type: 'info'
+      cell_number: string
+      tech_size: string
+      barcode: string
+      article: string
+      quantity: number
+    }
+  | {
+      type: 'sticker'
+      format: 'png' | 'pdf_bulk' | 'posting_number'
+      order_id?: number
+      wb_order_id?: number
+      posting_id?: number
+      posting_number?: string
+      barcode?: string
+      sticker_file?: string
+      sticker_part_a?: string
+      sticker_part_b?: string
+      pdf_base64?: string
+      requires_marking?: boolean
+    }
+
+export interface BatchRibbonResult {
+  success: boolean
+  pick_list_id: number
+  marketplace: string
+  items: BatchRibbonItem[]
+  groups_count: number
+  stickers_count: number
+  labels_from_ozon?: boolean
+}
+
+export function fetchBatchRibbon(sellerId: number) {
+  return apiFetch<BatchRibbonResult>(`/api/orders/assembly/sellers/${sellerId}/batch-ribbon/`, {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export interface BatchBindState {
+  barcode: string
+  sticker_scan: string
+  marking_code: string
+}
+
+export interface BatchBindResult extends BatchBindState {
+  success: boolean
+  complete: boolean
+  requires_marking?: boolean
+  scan_kind?: string
+  message?: string
+  order_id?: number
+  wb_order_id?: number
+  posting_id?: number
+  posting_number?: string
+  order?: PrintOrder
+}
+
+export function batchBindScan(
+  sellerId: number,
+  payload: BatchBindState & { scan?: string },
+) {
+  return apiFetch<BatchBindResult>(`/api/orders/assembly/sellers/${sellerId}/batch-bind/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function generateOzonPickList(sellerId: number) {
+  return apiFetch<{ success: boolean; pick_list: PickList }>(
+    `/api/orders/assembly/sellers/${sellerId}/ozon-pick-list/`,
+    {
+      method: 'POST',
+      body: '{}',
+    },
+  )
 }
 
 export function bindMarking(sellerId: number, orderId: number, markingCode: string) {

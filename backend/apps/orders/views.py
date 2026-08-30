@@ -22,6 +22,8 @@ from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, f
 
 from .models import Order, PickList, Supply
 from .serializers import (
+  AssemblyWorkflowModeSerializer,
+  BatchBindScanSerializer,
   BindMarkingSerializer,
   OrderActionSerializer,
   OrderAssemblySerializer,
@@ -62,6 +64,14 @@ from .services.supply_flow import (
   send_supply_to_delivery,
 )
 from .services.pick_list import PickListError, delete_active_pick_list, generate_pick_list, preview_pick_list
+from .services.batch_assembly import (
+  bind_ozon_batch_scan,
+  bind_wb_batch_scan,
+  generate_ozon_pick_list,
+  get_ozon_batch_ribbon,
+  get_wb_batch_ribbon,
+)
+from .services.ozon_assembly import OzonAssemblyError
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
@@ -484,6 +494,7 @@ class AssemblySellerDetailView(APIView):
 
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
+      "assembly_workflow_mode": seller.assembly_workflow_mode,
       "counts": counts,
       "assembly_eligible": assembly_counts["new"],
       "supplies_forming": supplies_forming,
@@ -705,6 +716,125 @@ class AssemblyVerifyMarkingView(APIView):
       "success": True,
       "results": results,
     })
+
+
+class AssemblyWorkflowModeView(APIView):
+  """Режим сборки FBS: scan (пошагово) или batch (лента стикеров)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = AssemblyWorkflowModeSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    seller.assembly_workflow_mode = serializer.validated_data["mode"]
+    seller.save(update_fields=["assembly_workflow_mode", "updated_at"])
+    return Response({
+      "success": True,
+      "assembly_workflow_mode": seller.assembly_workflow_mode,
+    })
+
+
+class AssemblyBatchRibbonView(APIView):
+  """Данные для печати ленты: инфо-стикер 58×40 + стикеры заказов по группам баркода."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    marketplace = parse_marketplace(request)
+    try:
+      if marketplace == OZON:
+        ribbon = get_ozon_batch_ribbon(seller)
+      else:
+        ribbon = get_wb_batch_ribbon(seller)
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+
+    return Response({"success": True, **ribbon})
+
+
+class AssemblyBatchBindView(APIView):
+  """Связка баркод + стикер (+ ЧЗ) в режиме ленты; автоопределение типа скана."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = BatchBindScanSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    marketplace = parse_marketplace(request)
+
+    try:
+      if marketplace == OZON:
+        result = bind_ozon_batch_scan(
+          seller,
+          scan=data.get("scan") or "",
+          barcode=data.get("barcode") or "",
+          sticker_scan=data.get("sticker_scan") or "",
+          marking_code=data.get("marking_code") or "",
+          user=request.user,
+        )
+      else:
+        result = bind_wb_batch_scan(
+          seller,
+          scan=data.get("scan") or "",
+          barcode=data.get("barcode") or "",
+          sticker_scan=data.get("sticker_scan") or "",
+          marking_code=data.get("marking_code") or "",
+          user=request.user,
+        )
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+    except OzonAssemblyError as exc:
+      return _error_response_ozon(exc)
+
+    payload = {"success": True, **result}
+    if result.get("complete") and result.get("order_id"):
+      order = Order.objects.filter(pk=result["order_id"], seller=seller).first()
+      if order:
+        payload["order"] = OrderPrintSerializer(order).data
+    return Response(payload)
+
+
+def _error_response_ozon(exc):
+  payload = {"detail": str(exc)}
+  code = getattr(exc, "code", "") or ""
+  if code:
+    payload["code"] = code
+  return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AssemblyOzonPickListView(APIView):
+  """Сформировать лист подбора Ozon из отправлений на сборке."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      pick_list = generate_ozon_pick_list(seller, user=request.user)
+    except PickListError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    pick_list = (
+      PickList.objects.filter(pk=pick_list.pk)
+      .prefetch_related("items__cell", "items__product")
+      .first()
+    )
+    return Response({
+      "success": True,
+      "pick_list": PickListSerializer(pick_list).data,
+    }, status=status.HTTP_201_CREATED)
 
 
 class AssemblyReplaceOrderView(APIView):

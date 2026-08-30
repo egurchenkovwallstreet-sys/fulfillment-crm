@@ -1,10 +1,13 @@
 from django.urls import path
 
 from .views import (
+  AssemblyBatchBindView,
+  AssemblyBatchRibbonView,
   AssemblyMarkingStatusView,
   AssemblyBindMarkingView,
   AssemblyDeleteOrderView,
   AssemblyDeletePickListView,
+  AssemblyOzonPickListView,
   AssemblyReprintStickerView,
   AssemblyReplaceOrderView,
   AssemblyScanPrintView,
@@ -16,6 +19,7 @@ from .views import (
   AssemblyPickListPreviewView,
   AssemblyStartView,
   AssemblyVerifyMarkingView,
+  AssemblyWorkflowModeView,
   OrderListView,
   OrderStatsView,
   OrderSyncView,
@@ -69,6 +73,26 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/delete-order/",
       AssemblyDeleteOrderView.as_view(),
       name="assembly-delete-order",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/workflow-mode/",
+      AssemblyWorkflowModeView.as_view(),
+      name="assembly-workflow-mode",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/batch-ribbon/",
+      AssemblyBatchRibbonView.as_view(),
+      name="assembly-batch-ribbon",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/batch-bind/",
+      AssemblyBatchBindView.as_view(),
+      name="assembly-batch-bind",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/ozon-pick-list/",
+      AssemblyOzonPickListView.as_view(),
+      name="assembly-ozon-pick-list",
     ),
     path(
       "assembly/sellers/<int:seller_id>/scan-print/",

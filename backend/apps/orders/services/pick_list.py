@@ -224,7 +224,7 @@ def generate_pick_list(seller: Seller, *, user=None) -> PickList:
 
   items, _orders_without_product = _group_orders_for_pick_list(seller, orders)
 
-  pick_list = PickList.objects.create(seller=seller)
+  pick_list = PickList.objects.create(seller=seller, marketplace="wb")
   db_items: list[PickListItem] = []
   order_ids: list[int] = []
 

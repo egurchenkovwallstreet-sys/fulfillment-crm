@@ -5,19 +5,25 @@ import {
   bulkMoveOzonToAssembly,
   bulkShipOzonPostings,
   fetchAssemblySeller,
+  fetchBatchRibbon,
   fetchOzonLabel,
   fetchOzonLabelsBulk,
   formOzonAct,
+  generateOzonPickList,
   scanOzonBarcode,
+  setAssemblyWorkflowMode,
   shipOzonPosting,
   syncOzonAssembly,
   type AssemblyOrder,
   type AssemblySellerDetail,
+  type AssemblyWorkflowMode,
 } from '../api/assembly'
 import { toggleSellerOzonWarehouse, type SellerOzonWarehouse } from '../api/sellers'
 import { ApiError } from '../api/client'
 import { openPdfBase64 } from '../utils/browserPrint'
+import { closePrintHolder, openPrintHolder, printBatchRibbon } from '../utils/batchRibbonPrint'
 import { printSupplySticker } from '../utils/printService'
+import { BatchBindPanel } from '../components/BatchBindPanel'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
@@ -48,6 +54,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const skipStageLoad = useRef(true)
 
   const load = useCallback(async () => {
@@ -320,6 +327,57 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
     }
   }
 
+  async function handleWorkflowModeChange(mode: AssemblyWorkflowMode) {
+    if (!data) return
+    setError('')
+    try {
+      const result = await setAssemblyWorkflowMode(sellerId, mode)
+      setData({ ...data, assembly_workflow_mode: result.assembly_workflow_mode })
+      setSuccess(mode === 'batch' ? 'Режим: лента стикеров' : 'Режим: пошаговый скан')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сменить режим сборки')
+    }
+  }
+
+  async function handleGenerateOzonPickList() {
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await generateOzonPickList(sellerId)
+      setData((prev) => (prev ? { ...prev, active_pick_list: result.pick_list } : prev))
+      setSuccess(`Лист подбора Ozon №${result.pick_list.id}: ${result.pick_list.total_quantity} поз.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handlePrintBatchRibbon() {
+    setError('')
+    setSuccess('')
+    setRibbonPrinting(true)
+    const printWin = openPrintHolder()
+    try {
+      const result = await fetchBatchRibbon(sellerId)
+      const printed = printBatchRibbon(result.items, true, printWin)
+      if (!printed) {
+        closePrintHolder(printWin)
+        setError('Не удалось открыть печать — разрешите всплывающие окна')
+        return
+      }
+      setSuccess(
+        `Лента отправлена на печать: ${result.stickers_count} этикеток в ${result.groups_count} группах`,
+      )
+    } catch (err) {
+      closePrintHolder(printWin)
+      setError(err instanceof Error ? err.message : 'Не удалось подготовить ленту')
+    } finally {
+      setRibbonPrinting(false)
+    }
+  }
+
   async function handleToggleWarehouse(warehouse: SellerOzonWarehouse) {
     setTogglingId(warehouse.id)
     try {
@@ -335,6 +393,8 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const warehouses = (data?.warehouses || []) as unknown as SellerOzonWarehouse[]
   const counts = data?.counts
   const orders = data?.orders || []
+  const workflowMode: AssemblyWorkflowMode = data?.assembly_workflow_mode ?? 'scan'
+  const isBatchMode = workflowMode === 'batch'
   const selectedCount = selectedIds.size
   const allSelected = orders.length > 0 && orders.every((item) => selectedIds.has(item.id))
   const scanOnPicking = stage === 'confirm'
@@ -352,11 +412,57 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
             <Link to="/assembly" {...uiHint('Вернуться к списку селлеров Ozon для сборки FBS.')}>← Селлеры Ozon</Link>
           </p>
           <h1>{data?.seller.company_name || 'Сборка Ozon'}</h1>
-          <p>Новые → скан → ЧЗ (если нужен) → в доставку → этикетка PDF → акт/ШК</p>
+          <p>
+            {isBatchMode
+              ? 'Лента: лист подбора → печать этикеток → связка баркод + номер отправления (+ ЧЗ)'
+              : 'Новые → скан → ЧЗ (если нужен) → в доставку → этикетка PDF → акт/ШК'}
+          </p>
         </div>
-        <button type="button" className="btn btn--primary" onClick={handleSync} disabled={syncing || loading} {...uiHint('Обновить отправления и счётчики из Ozon для текущей вкладки.')}>
-          {syncing ? 'Обновление…' : 'Обновить из Ozon'}
-        </button>
+        <div className="topbar__actions">
+          <div className="assembly-mode-toggle" {...uiHint('Режим 1 — пошаговый скан. Режим 2 — лента стикеров и связка.')}>
+            <button
+              type="button"
+              className={`btn btn--ghost${!isBatchMode ? ' btn--active-mode' : ''}`}
+              onClick={() => void handleWorkflowModeChange('scan')}
+              disabled={loading || workflowMode === 'scan'}
+            >
+              Скан
+            </button>
+            <button
+              type="button"
+              className={`btn btn--ghost${isBatchMode ? ' btn--active-mode' : ''}`}
+              onClick={() => void handleWorkflowModeChange('batch')}
+              disabled={loading || workflowMode === 'batch'}
+            >
+              Лента
+            </button>
+          </div>
+          {stage === 'confirm' && isBatchMode && (
+            <>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void handleGenerateOzonPickList()}
+                disabled={loading}
+              >
+                Лист подбора
+              </button>
+              {data?.active_pick_list && (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handlePrintBatchRibbon()}
+                  disabled={loading || ribbonPrinting}
+                >
+                  {ribbonPrinting ? 'Печать…' : 'Печать ленты'}
+                </button>
+              )}
+            </>
+          )}
+          <button type="button" className="btn btn--primary" onClick={handleSync} disabled={syncing || loading} {...uiHint('Обновить отправления и счётчики из Ozon для текущей вкладки.')}>
+            {syncing ? 'Обновление…' : 'Обновить из Ozon'}
+          </button>
+        </div>
       </header>
 
       {error && <div className="alert alert--error">{error}</div>}
@@ -403,7 +509,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
         ))}
       </nav>
 
-      {(stage === 'new' || stage === 'confirm') && (
+      {(stage === 'new' || stage === 'confirm') && !isBatchMode && (
         <form className="panel assembly-scan-panel" onSubmit={handleScan}>
           <label>
             {scanLabel}
@@ -422,6 +528,16 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
             {scanOnPicking ? 'Привязать ЧЗ' : 'На сборку'}
           </button>
         </form>
+      )}
+
+      {stage === 'confirm' && isBatchMode && (
+        <BatchBindPanel
+          sellerId={sellerId}
+          disabled={loading || !data?.active_pick_list}
+          onBound={() => load()}
+          onSuccess={setSuccess}
+          onError={setError}
+        />
       )}
 
       {stage === 'complete' && (

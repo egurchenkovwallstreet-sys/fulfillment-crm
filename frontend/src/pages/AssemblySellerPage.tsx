@@ -6,6 +6,7 @@ import {
   deleteAssemblyOrder,
   deletePickList,
   fetchAssemblySeller,
+  fetchBatchRibbon,
   fetchMarkingStatus,
   replaceOrderItem,
   previewPickList,
@@ -13,16 +14,18 @@ import {
   scanOrderBarcode,
   sendOrderToAssembly,
   sendOrderToDelivery,
+  setAssemblyWorkflowMode,
   startAssembly,
   verifyMarking,
   type AssemblyOrder,
   type AssemblySellerDetail,
+  type AssemblyWorkflowMode,
   type PickList,
   type PrintOrder,
   type MarkingStatusResult,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
-import { syncOrders } from '../api/orders'
+import { syncOrders, generatePickList } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
@@ -35,6 +38,7 @@ import {
   type StageKey,
 } from '../utils/assemblyWorkflow'
 import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } from '../components/AssemblyModal'
+import { BatchBindPanel } from '../components/BatchBindPanel'
 import {
   AssemblyMarkingListModal,
   AssemblyMarkingPanels,
@@ -49,6 +53,7 @@ import {
   refreshPrintBridgeStatus,
 } from '../utils/printService'
 import { downloadPickListPdf } from '../utils/pickListPrint'
+import { closePrintHolder, openPrintHolder, printBatchRibbon } from '../utils/batchRibbonPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
@@ -141,6 +146,7 @@ function WbAssemblySellerPage() {
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
   const [pickListPreviewStage, setPickListPreviewStage] = useState<'new' | 'confirm' | null>(null)
+  const [ribbonPrinting, setRibbonPrinting] = useState(false)
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -407,6 +413,44 @@ function WbAssemblySellerPage() {
     }
   }
 
+  async function handleWorkflowModeChange(mode: AssemblyWorkflowMode) {
+    if (!id || !data) return
+    setError('')
+    try {
+      const result = await setAssemblyWorkflowMode(id, mode)
+      setData({ ...data, assembly_workflow_mode: result.assembly_workflow_mode })
+      setSuccess(mode === 'batch' ? 'Режим: лента стикеров' : 'Режим: пошаговый скан')
+      resetScanFlow()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сменить режим сборки')
+    }
+  }
+
+  async function handlePrintBatchRibbon() {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setRibbonPrinting(true)
+    const printWin = openPrintHolder()
+    try {
+      const result = await fetchBatchRibbon(id)
+      const printed = printBatchRibbon(result.items, true, printWin)
+      if (!printed) {
+        closePrintHolder(printWin)
+        setError('Не удалось открыть печать — разрешите всплывающие окна')
+        return
+      }
+      setSuccess(
+        `Лента отправлена на печать: ${result.stickers_count} стикеров в ${result.groups_count} группах`,
+      )
+    } catch (err) {
+      closePrintHolder(printWin)
+      setError(err instanceof Error ? err.message : 'Не удалось подготовить ленту стикеров')
+    } finally {
+      setRibbonPrinting(false)
+    }
+  }
+
   async function handleGeneratePickList() {
     if (!id) return
     const pickStage: 'new' | 'confirm' = stage === 'confirm' ? 'confirm' : 'new'
@@ -414,6 +458,14 @@ function WbAssemblySellerPage() {
     setSuccess('')
     setLoading(true)
     try {
+      if (pickStage === 'new') {
+        const pickList = await generatePickList(id)
+        setPickListPreview(pickList)
+        setPickListPreviewStage('new')
+        setSuccess(`Лист подбора №${pickList.id}: ${pickList.total_quantity} заказов. Скачайте PDF или передайте на сборку.`)
+        await load({ silent: true })
+        return
+      }
       const result = await previewPickList(id, pickStage)
       setPickListPreview(result.pick_list)
       setPickListPreviewStage(pickStage)
@@ -821,6 +873,9 @@ function WbAssemblySellerPage() {
 
   if (!data) return null
 
+  const workflowMode: AssemblyWorkflowMode = data.assembly_workflow_mode ?? 'scan'
+  const isBatchMode = workflowMode === 'batch'
+
   const counts = data.counts
   const assemblyEligible = data.assembly_eligible
 
@@ -863,7 +918,9 @@ function WbAssemblySellerPage() {
           </p>
           <h1>{data.seller.company_name}</h1>
           <p>
-            На сборке: скан баркода → Честный знак → печать стикера. Лист подбора — PDF в шапке.
+            {isBatchMode
+              ? 'Режим ленты: лист подбора → печать всех стикеров → связка баркод + стикер (+ ЧЗ).'
+              : 'На сборке: скан баркода → Честный знак → печать стикера. Лист подбора — PDF в шапке.'}
             {syncing ? ' · синхронизация с WB…' : ''}
             {refreshing && !syncing ? ' · обновление списка…' : ''}
             {bridgeOk === true && (
@@ -881,6 +938,24 @@ function WbAssemblySellerPage() {
           </p>
         </div>
         <div className="topbar__actions">
+          <div className="assembly-mode-toggle" {...uiHint('Режим 1 — пошаговый скан. Режим 2 — лента стикеров и связка.')}>
+            <button
+              type="button"
+              className={`btn btn--ghost${!isBatchMode ? ' btn--active-mode' : ''}`}
+              onClick={() => void handleWorkflowModeChange('scan')}
+              disabled={loading || workflowMode === 'scan'}
+            >
+              Скан
+            </button>
+            <button
+              type="button"
+              className={`btn btn--ghost${isBatchMode ? ' btn--active-mode' : ''}`}
+              onClick={() => void handleWorkflowModeChange('batch')}
+              disabled={loading || workflowMode === 'batch'}
+            >
+              Лента
+            </button>
+          </div>
           <button
             type="button"
             className="btn btn--secondary"
@@ -923,6 +998,17 @@ function WbAssemblySellerPage() {
               {...uiHint('Отправить выбранные новые заказы в статус «На сборке» в WB')}
             >
               Передать на сборку ({bulkAssemblyCount})
+            </button>
+          )}
+          {stage === 'confirm' && isBatchMode && data.active_pick_list && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handlePrintBatchRibbon()}
+              disabled={loading || ribbonPrinting || ordersBusy}
+              {...uiHint('Печать одной лентой: инфо-стикер 58×40 перед каждым баркодом, затем стикеры заказов')}
+            >
+              {ribbonPrinting ? 'Печать…' : 'Печать ленты стикеров'}
             </button>
           )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
@@ -1004,7 +1090,21 @@ function WbAssemblySellerPage() {
         </section>
       )}
 
-      {stage === 'confirm' && (
+      {stage === 'confirm' && isBatchMode && (
+        <BatchBindPanel
+          sellerId={id}
+          disabled={loading || !data.active_pick_list}
+          onBound={async () => {
+            window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
+            await refreshMarkingStatus()
+            await load({ silent: true })
+          }}
+          onSuccess={setSuccess}
+          onError={setError}
+        />
+      )}
+
+      {stage === 'confirm' && !isBatchMode && (
         <section
           className={`panel assembly-scan-panel assembly-scan-live${scanPhase === 'marking' ? ' assembly-scan-panel--marking-active' : ''}`}
         >

@@ -30,6 +30,15 @@ class Seller(models.Model):
   ozon_count_assembly = models.PositiveIntegerField("Ozon: на сборке", default=0)
   ozon_count_delivery = models.PositiveIntegerField("Ozon: в доставке", default=0)
   ozon_counts_synced_at = models.DateTimeField("Ozon: счётчики обновлены", null=True, blank=True)
+  assembly_workflow_mode = models.CharField(
+    "Режим сборки FBS",
+    max_length=10,
+    choices=(
+      ("scan", "Пошаговый скан"),
+      ("batch", "Лента стикеров"),
+    ),
+    default="scan",
+  )
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
 

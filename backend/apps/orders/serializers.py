@@ -297,6 +297,17 @@ class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 
 
+class AssemblyWorkflowModeSerializer(serializers.Serializer):
+  mode = serializers.ChoiceField(choices=("scan", "batch"))
+
+
+class BatchBindScanSerializer(serializers.Serializer):
+  scan = serializers.CharField(max_length=500, required=False, allow_blank=True)
+  barcode = serializers.CharField(max_length=200, required=False, allow_blank=True)
+  sticker_scan = serializers.CharField(max_length=200, required=False, allow_blank=True)
+  marking_code = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+
 class SupplyOrderSerializer(serializers.ModelSerializer):
   cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
   status_display = serializers.CharField(source="get_status_display", read_only=True)
