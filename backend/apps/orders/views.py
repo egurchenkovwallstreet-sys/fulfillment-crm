@@ -205,7 +205,10 @@ class OrderStatsView(APIView):
         marketplace,
       ).count()
 
-    products_qs = Product.objects.filter(marketplace=marketplace)
+    products_qs = Product.objects.filter(
+      marketplace=marketplace,
+      seller__in=sellers_for_user(user),
+    )
     if user.role == "seller" and user.seller_id:
       products_qs = products_qs.filter(seller_id=user.seller_id)
     data["sku_count"] = products_qs.count()
