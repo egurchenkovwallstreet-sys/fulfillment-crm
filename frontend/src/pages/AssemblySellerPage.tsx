@@ -559,7 +559,7 @@ function WbAssemblySellerPage() {
     setError('')
     setSuccess('')
     setRibbonPrinting(true)
-    const printWin = bridgeOk ? null : openPrintHolder()
+    const printWin = openPrintHolder()
     try {
       const result = await fetchBatchRibbon(id)
       if (!result.items?.length) {

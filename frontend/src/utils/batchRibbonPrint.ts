@@ -231,12 +231,6 @@ async function printRibbonViaBridge(items: BatchRibbonItem[]): Promise<void> {
   }
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
-}
-
 async function waitForImages(doc: Document): Promise<void> {
   const images = Array.from(doc.images)
   if (!images.length) return
@@ -259,26 +253,28 @@ async function printRibbonViaBrowser(
   preopened?: Window | null,
 ): Promise<boolean> {
   const html = buildRibbonHtml(items)
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
 
   let win = preopened && !preopened.closed ? preopened : null
-  try {
-    if (win) {
-      win.location.replace(url)
-    } else {
-      win = window.open(url, '_blank', 'width=420,height=640')
-    }
-  } catch {
-    win = null
-  }
-
   if (!win) {
-    URL.revokeObjectURL(url)
+    win = window.open('', '_blank', 'width=420,height=640')
+  }
+  if (!win) {
     return writeRibbonFallback(html, autoPrint)
   }
 
-  await wait(300)
+  try {
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+  } catch {
+    try {
+      win.close()
+    } catch {
+      // ignore
+    }
+    return writeRibbonFallback(html, autoPrint)
+  }
+
   try {
     await waitForImages(win.document)
   } catch {
@@ -290,11 +286,9 @@ async function printRibbonViaBrowser(
       win.focus()
       win.print()
     } catch {
-      URL.revokeObjectURL(url)
       return false
     }
   }
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
   return true
 }
 
@@ -337,19 +331,25 @@ export async function printBatchRibbon(
 
   const health = getCachedPrintBridgeHealth()
   if (health?.ok) {
-    closePrintHolder(preopened)
     try {
       await printRibbonViaBridge(items)
+      closePrintHolder(preopened)
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : ''
       if (message.startsWith('Напечатано ')) {
+        closePrintHolder(preopened)
         throw err
       }
+      // Мост недоступен — печать через Chrome, окно preopened не закрываем
     }
   }
 
-  return printRibbonViaBrowser(items, autoPrint, preopened)
+  const printed = await printRibbonViaBrowser(items, autoPrint, preopened)
+  if (!printed) {
+    closePrintHolder(preopened)
+  }
+  return printed
 }
 
 export { openPrintHolder, closePrintHolder }
