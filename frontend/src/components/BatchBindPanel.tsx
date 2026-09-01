@@ -102,12 +102,12 @@ export function BatchBindPanel({
   const fields = requiresMarking
     ? [
         { key: 'barcode', label: '1. Баркод', value: bindState.barcode },
-        { key: 'sticker_scan', label: '2. Стикер заказа', value: bindState.sticker_scan },
+        { key: 'sticker_scan', label: '2. QR стикера WB', value: bindState.sticker_scan },
         { key: 'marking_code', label: '3. Честный знак', value: bindState.marking_code ? '••• привязан' : '' },
       ]
     : [
         { key: 'barcode', label: '1. Баркод', value: bindState.barcode },
-        { key: 'sticker_scan', label: '2. Стикер заказа', value: bindState.sticker_scan },
+        { key: 'sticker_scan', label: '2. QR стикера WB', value: bindState.sticker_scan },
       ]
 
   return (
@@ -119,7 +119,8 @@ export function BatchBindPanel({
         </button>
       </div>
       <p className="batch-bind__hint">
-        Сканируйте баркод, стикер заказа{requiresMarking ? ' и Честный знак' : ''} в любом порядке.
+        Сканируйте баркод товара, затем <strong>QR-код</strong> с наклеенного стикера WB
+        (буквенный код, не цифры partA/partB на этикетке){requiresMarking ? ' и Честный знак' : ''}.
         CRM сама определит тип скана.
       </p>
       <div className="batch-bind__fields">

@@ -37,6 +37,15 @@ def _crm_sticker_keys(seller: Seller) -> set[str]:
     key = normalize_sticker_key(part_a, part_b)
     if key:
       keys.add(key)
+  scan_codes = (
+    Order.objects.filter(seller=seller)
+    .exclude(sticker_scan_code="")
+    .values_list("sticker_scan_code", flat=True)
+  )
+  for code in scan_codes:
+    token = (code or "").strip()
+    if token:
+      keys.add(token)
   return keys
 
 
@@ -202,11 +211,15 @@ def scan_off_crm_shipments(
 
       part_a = str(sticker.get("partA") or "")
       part_b = str(sticker.get("partB") or "")
+      scan_code = str(sticker.get("barcode") or "").strip()
       sticker_key = normalize_sticker_key(part_a, part_b)
-      if not sticker_key:
+      if not sticker_key and not scan_code:
         continue
 
-      if sticker_key in crm_keys:
+      if sticker_key and sticker_key in crm_keys:
+        stats["skipped_crm_sticker"] += 1
+        continue
+      if scan_code and scan_code in crm_keys:
         stats["skipped_crm_sticker"] += 1
         continue
 

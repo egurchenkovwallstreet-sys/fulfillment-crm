@@ -55,6 +55,12 @@ class Order(models.Model):
   sticker_file = models.TextField("Стикер (base64)", blank=True)
   sticker_part_a = models.CharField("Стикер partA", max_length=50, blank=True)
   sticker_part_b = models.CharField("Стикер partB", max_length=50, blank=True)
+  sticker_scan_code = models.CharField(
+    "QR-код стикера WB",
+    max_length=64,
+    blank=True,
+    help_text="Закодированное значение из API WB (поле barcode) — то, что читает QR на стикере",
+  )
   sticker_fetched_at = models.DateTimeField(null=True, blank=True)
   marking_code = models.CharField("Код Честного знака", max_length=500, blank=True)
   marking_bound = models.BooleanField("Маркировка привязана", default=False)

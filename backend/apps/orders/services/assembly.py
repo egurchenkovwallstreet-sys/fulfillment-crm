@@ -1,3 +1,5 @@
+import re
+
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -31,6 +33,35 @@ class AssemblyError(Exception):
     self.order = order
 
 
+def normalize_wb_sticker_scan(scan: str) -> str:
+  """QR/DataMatrix со стикера WB — буквенно-цифровой код (API поле barcode, не partA/partB)."""
+  raw = str(scan or "").replace("\x1d", "").replace("\x1e", "")
+  raw = raw.strip()
+  raw = re.sub(r"\s+", "", raw)
+  if len(raw) >= 3 and raw[0] == "]" and raw[1].isalpha() and raw[2].isalnum():
+    raw = raw[3:]
+  return raw
+
+
+def _sticker_scan_tokens(value: str) -> set[str]:
+  base = normalize_wb_sticker_scan(value)
+  if not base:
+    return set()
+  tokens = {base, base.lower(), base.upper()}
+  for prefix in ("!", "*", "#"):
+    if base.startswith(prefix):
+      stripped = base[len(prefix) :]
+      if stripped:
+        tokens.update({stripped, stripped.lower(), stripped.upper()})
+  return tokens
+
+
+def sticker_scans_match(left: str, right: str) -> bool:
+  left_tokens = _sticker_scan_tokens(left)
+  right_tokens = _sticker_scan_tokens(right)
+  return bool(left_tokens & right_tokens)
+
+
 def format_sticker_number(order: Order) -> str:
   part_a = (order.sticker_part_a or "").strip()
   part_b = (order.sticker_part_b or "").strip()
@@ -40,6 +71,9 @@ def format_sticker_number(order: Order) -> str:
 
 
 def _sticker_hint(order: Order) -> str:
+  scan_code = (order.sticker_scan_code or "").strip()
+  if scan_code:
+    return f" QR стикера: {scan_code}."
   number = format_sticker_number(order)
   if not number:
     return ""
@@ -318,6 +352,7 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
     order.sticker_file = data.get("file") or ""
     order.sticker_part_a = str(data.get("partA") or "")
     order.sticker_part_b = str(data.get("partB") or "")
+    order.sticker_scan_code = str(data.get("barcode") or "").strip()
     order.has_sticker = bool(order.sticker_file)
     order.sticker_fetched_at = now
     order.save(
@@ -325,6 +360,7 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
         "sticker_file",
         "sticker_part_a",
         "sticker_part_b",
+        "sticker_scan_code",
         "has_sticker",
         "sticker_fetched_at",
         "updated_at",
