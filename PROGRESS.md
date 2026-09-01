@@ -132,7 +132,7 @@
 | 24.08.2026 | **Суммы ₽ в отгрузках кабинета** | ✅ | заказы × тариф по дням и неделе |
 | 24.08.2026 | **Отгрузки: все заказы WB** | ✅ | не только CRM; order-ids из WB API |
 | 24.08.2026 | **Админ `/billing`** | ✅ | все селлеры + итого, 4 недели, таблица |
-| 24.08.2026 | **§9 + §10 в сборке FBS** | ✅ | QR поставки, блокировка шагов, автосписание |
+| 01.09.2026 | **§10 Списание: CRM-only + off-CRM панель** | ✅ | Лист+стикер+ЧЗ при «В доставку»; без автосписания при sync; ежедневный scan + дашборд |
 | 24.08.2026 | **Аудит реализации vs ТЗ** | ✅ | Журнал приведён к коду; очередь — §11 |
 | 25.08.2026 | **Сборка FBS: лист подбора, удаление заказа, PDF** | ✅ | `bf1c0a9`, `b193547`; `assembly_hidden`, preview pick list |
 | 25.08.2026 | **Одна поставка WB на склад + артикул/размер в листе** | ✅ | `a243096`, `Supply.wb_warehouse_id` |
@@ -166,7 +166,8 @@
 - **orders** — Order, Supply, PickList; sync, статусы, лист подбора, сборка, supply_flow
   - `services/wb_status.py` — «В доставке» = `complete + waiting`; «Ждёт сортировки» в ЛК
   - `services/sync_statuses.py` — sync, reconcile, poll архив + поставки, `SYNC_VERSION = delivery-v14`
-  - `services/supply_sync.py` — импорт поставок WB (в т.ч. из ЛК), scanDt, списание
+  - `services/supply_sync.py` — импорт поставок WB (в т.ч. из ЛК), scanDt; **без автосписания**
+  - `services/off_crm_shipments.py` — ежедневный поиск отгрузок вне CRM, API панели дашборда
   - `services/supply_flow.py` — одна поставка/склад, `delivery_stage_orders_queryset`
   - `services/assembly.py` — `get_seller_wb_tab_counts()` (кэш live API)
 

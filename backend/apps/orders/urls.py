@@ -40,6 +40,12 @@ from .views_ozon import (
   OzonAssemblyShipView,
   OzonAssemblySyncView,
 )
+from .views_off_crm import (
+  OffCrmShipmentDeductView,
+  OffCrmShipmentSellerDetailView,
+  OffCrmShipmentSkipView,
+  OffCrmShipmentSummaryView,
+)
 
 urlpatterns = [
     path("", OrderListView.as_view(), name="order-list"),
@@ -174,4 +180,24 @@ urlpatterns = [
     path("supplies/<int:supply_id>/", SupplyDetailView.as_view(), name="supply-detail"),
     path("supplies/<int:supply_id>/deliver/", SupplyDeliverView.as_view(), name="supply-deliver"),
     path("supplies/<int:supply_id>/barcode/", SupplyBarcodeView.as_view(), name="supply-barcode"),
+    path(
+      "off-crm-shipments/summary/",
+      OffCrmShipmentSummaryView.as_view(),
+      name="off-crm-shipment-summary",
+    ),
+    path(
+      "off-crm-shipments/sellers/<int:seller_id>/",
+      OffCrmShipmentSellerDetailView.as_view(),
+      name="off-crm-shipment-seller-detail",
+    ),
+    path(
+      "off-crm-shipments/<int:shipment_id>/deduct/",
+      OffCrmShipmentDeductView.as_view(),
+      name="off-crm-shipment-deduct",
+    ),
+    path(
+      "off-crm-shipments/<int:shipment_id>/skip/",
+      OffCrmShipmentSkipView.as_view(),
+      name="off-crm-shipment-skip",
+    ),
 ]

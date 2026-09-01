@@ -29,4 +29,8 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.sync_ozon_orders",
         "schedule": 60.0,
     },
+    "scan-off-crm-shipments": {
+        "task": "apps.integrations.tasks.scan_off_crm_shipments",
+        "schedule": crontab(hour=4, minute=0),
+    },
 }

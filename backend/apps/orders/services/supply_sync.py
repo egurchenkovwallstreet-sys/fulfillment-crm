@@ -13,10 +13,6 @@ from apps.orders.services.assembly import AssemblyError, _get_client
 from apps.orders.services.supply_flow import refresh_supply_readiness
 from apps.orders.services.wb_status import WB_STATUS_AFTER_DELIVER, WB_SUPPLIER_DELIVERY
 from apps.sellers.models import Seller
-from apps.warehouse.services.stock_deduction import (
-  deduct_pending_delivery_stock,
-  deduct_stock_for_confirmed_supply,
-)
 
 # Старый формат: CRM-{wb_order_id}-...
 CRM_SUPPLY_LEGACY_RE = re.compile(r"^CRM-(\d+)-")
@@ -154,13 +150,6 @@ def _process_wb_supply(
       crm_orders,
       scanned_at=scanned_at,
     )
-
-    deduction = deduct_stock_for_confirmed_supply(supply)
-    stats["stock_deducted"] += deduction["deducted"]
-    stats["stock_already"] += deduction["already_deducted"]
-    stats["stock_errors"] += len(deduction["errors"])
-    if deduction["errors"]:
-      stats["stock_error_samples"].extend(deduction["errors"][:3])
   else:
     refresh_supply_readiness(supply)
 
@@ -175,8 +164,9 @@ def sync_supplies_from_wb(
   """
   Подтянуть поставки из WB в CRM.
 
-  Поставки с done=true (переданы в доставку, в т.ч. из ЛК WB) всегда обрабатываются:
-  заказы привязываются к Supply, статусы обновляются, остатки списываются.
+  Поставки с done=true (переданы в доставку, в т.ч. из ЛК WB) обрабатываются:
+  заказы привязываются к Supply, статусы обновляются. Списание остатков — только
+  через кнопку «Передать в доставку» в CRM или вручную из панели off-CRM.
   """
   client = _get_client(seller)
   try:
@@ -197,10 +187,6 @@ def sync_supplies_from_wb(
     "wb_supplies_total": len(wb_supplies),
     "done_supplies": 0,
     "open_supplies": 0,
-    "stock_deducted": 0,
-    "stock_already": 0,
-    "stock_errors": 0,
-    "stock_error_samples": [],
   }
 
   done_supplies: list[dict] = []
@@ -237,14 +223,6 @@ def sync_supplies_from_wb(
     open_fetches += 1
     _process_wb_supply(seller, client, wb_supply, stats=stats)
 
-  pending = deduct_pending_delivery_stock(seller)
-  stats["pending_stock_deducted"] = pending["deducted"]
-  stats["pending_stock_already"] = pending["already_deducted"]
-  stats["pending_no_supply"] = pending["no_supply"]
-  if pending["errors"]:
-    stats["stock_errors"] += len(pending["errors"])
-    stats["stock_error_samples"].extend(pending["errors"][:3])
-
   return stats
 
 
@@ -280,7 +258,6 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
   now = timezone.now()
   supplies_scanned = 0
   orders_closed = 0
-  stock_deducted = 0
 
   for supply in supplies:
     scanned_at = scan_by_id.get(supply.wb_supply_id)
@@ -296,13 +273,8 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
     orders = list(supply.orders.all())
     orders_closed += _sync_crm_orders_delivery_status(orders, scanned_at=scanned_at)
 
-    if supply.status == Supply.Status.CONFIRMED and not supply.stock_deducted:
-      deduction = deduct_stock_for_confirmed_supply(supply)
-      stock_deducted += deduction["deducted"]
-
   return {
     "supplies_checked": len(wb_supplies),
     "supplies_scanned": supplies_scanned,
     "orders_closed": orders_closed,
-    "stock_deducted": stock_deducted,
   }

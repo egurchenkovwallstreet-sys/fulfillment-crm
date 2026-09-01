@@ -2,13 +2,67 @@
 from __future__ import annotations
 
 from apps.integrations.models import AuditLog
-from apps.orders.models import Order, Supply
+from apps.orders.models import Order, PickList, Supply
+from apps.orders.services.marking_verification import order_marking_ready
 from apps.warehouse.models import Product, StockOperation
 from apps.warehouse.services.cells import refresh_cell_occupied
+from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
 
 class StockDeductionError(Exception):
   pass
+
+
+def normalize_sticker_key(part_a: str, part_b: str) -> str:
+  a = (part_a or "").strip()
+  b = (part_b or "").strip()
+  if a and b:
+    return f"{a}|{b}"
+  return a or b
+
+
+def order_on_active_pick_list(order: Order) -> bool:
+  if not order.pick_list_id:
+    return False
+  pick_list = order.pick_list
+  if pick_list is None:
+    pick_list = PickList.objects.filter(pk=order.pick_list_id).first()
+  return pick_list is not None and not pick_list.is_completed
+
+
+def order_sticker_printed_in_crm(order: Order) -> bool:
+  part_a = (order.sticker_part_a or "").strip()
+  part_b = (order.sticker_part_b or "").strip()
+  if part_a and part_b and order.has_sticker:
+    return True
+  return order.status in (Order.Status.LABEL_PRINTED, Order.Status.MARKED) and bool(
+    part_a and part_b
+  )
+
+
+def assert_order_ready_for_crm_stock_deduction(order: Order) -> None:
+  """Списание через CRM только после листа подбора, стикера и ЧЗ (если нужен)."""
+  if not order_on_active_pick_list(order):
+    raise StockDeductionError(
+      "Заказ не в активном листе подбора — списание только после сборки в CRM",
+    )
+  if not order_sticker_printed_in_crm(order):
+    raise StockDeductionError(
+      "Стикер FBS не распечатан через CRM — сначала завершите сборку",
+    )
+  if resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    if not order_marking_ready(order):
+      raise StockDeductionError(
+        "Честный знак не привязан или не подтверждён WB — списание невозможно",
+      )
+
+
+def order_has_crm_shipment_deduction(order: Order) -> bool:
+  needle = f"заказ #{order.wb_order_id}"
+  return StockOperation.objects.filter(
+    operation_type=StockOperation.OperationType.SHIPMENT,
+    comment__contains=needle,
+  ).exists()
 
 
 def resolve_order_product(order: Order) -> Product | None:
@@ -66,8 +120,12 @@ def deduct_stock_for_delivery(
   order: Order,
   supply: Supply,
   user=None,
+  require_crm_checks: bool = False,
 ) -> dict:
   """Списать 1 шт. с остатка ячейки. Идемпотентно по складской операции заказа."""
+  if require_crm_checks:
+    assert_order_ready_for_crm_stock_deduction(order)
+
   if order_stock_already_deducted(order, supply):
     product = resolve_order_product(order)
     _refresh_supply_stock_flag(supply)
@@ -208,3 +266,91 @@ def deduct_stock_for_confirmed_supply(
       })
 
   return {"deducted": deducted, "already_deducted": already, "errors": errors}
+
+
+def _off_crm_shipment_comment(*, wb_order_id: int, sticker_number: str) -> str:
+  sticker = (sticker_number or "").strip() or "—"
+  return f"Списание: отгрузка вне CRM, стикер {sticker}, заказ #{wb_order_id}"
+
+
+def off_crm_shipment_already_deducted(*, wb_order_id: int, sticker_number: str) -> bool:
+  return StockOperation.objects.filter(
+    operation_type=StockOperation.OperationType.SHIPMENT,
+    comment=_off_crm_shipment_comment(wb_order_id=wb_order_id, sticker_number=sticker_number),
+  ).exists()
+
+
+def deduct_stock_for_off_crm_shipment(
+  *,
+  seller,
+  barcode: str,
+  wb_order_id: int,
+  sticker_number: str,
+  user=None,
+) -> dict:
+  """Ручное списание по решению менеджера для отгрузки через ЛК WB."""
+  if off_crm_shipment_already_deducted(
+    wb_order_id=wb_order_id,
+    sticker_number=sticker_number,
+  ):
+    product = Product.objects.filter(seller=seller, barcode=barcode).first()
+    return {
+      "deducted": False,
+      "already_deducted": True,
+      "quantity": product.quantity if product else 0,
+      "cell_number": product.cell.number if product and product.cell_id else "",
+      "barcode": barcode,
+    }
+
+  product = Product.objects.filter(seller=seller, barcode=barcode).select_related("cell").first()
+  if not product:
+    raise StockDeductionError(
+      f"Товар {barcode} не принят на склад CRM — сначала выполните приёмку",
+    )
+  if product.quantity < 1:
+    raise StockDeductionError(
+      f"Недостаточно остатка: баркод {barcode}, "
+      f"ячейка №{product.cell.number}, остаток {product.quantity} шт.",
+    )
+
+  product.quantity -= 1
+  product.save(update_fields=["quantity", "updated_at"])
+  refresh_cell_occupied(product.cell)
+
+  comment = _off_crm_shipment_comment(
+    wb_order_id=wb_order_id,
+    sticker_number=sticker_number,
+  )
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.SHIPMENT,
+    quantity=1,
+    performed_by=user,
+    comment=comment,
+  )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.SUPPLY,
+    message=(
+      f"Списание вне CRM: 1 шт., баркод {product.barcode}, "
+      f"заказ WB #{wb_order_id}, стикер {sticker_number or '—'}"
+    ),
+    details={
+      "wb_order_id": wb_order_id,
+      "barcode": barcode,
+      "product_id": product.id,
+      "cell": product.cell.number,
+      "quantity_after": product.quantity,
+      "off_crm": True,
+    },
+  )
+
+  return {
+    "deducted": True,
+    "already_deducted": False,
+    "quantity": product.quantity,
+    "cell_number": product.cell.number,
+    "barcode": product.barcode,
+  }

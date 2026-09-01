@@ -214,6 +214,11 @@ class OrderStatsView(APIView):
         sellers_for_user(user).filter(is_active=True),
         marketplace,
       ).count()
+      if marketplace == WB:
+        from apps.orders.services.off_crm_shipments import pending_off_crm_count
+
+        seller_ids = list(sellers_for_user(user).values_list("id", flat=True))
+        data["off_crm_pending_count"] = pending_off_crm_count(seller_ids=seller_ids)
 
     products_qs = Product.objects.filter(
       marketplace=marketplace,

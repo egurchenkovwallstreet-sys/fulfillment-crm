@@ -231,3 +231,65 @@ class OzonPosting(models.Model):
 
   def __str__(self):
     return self.posting_number
+
+
+class OffCrmShipment(models.Model):
+  class Status(models.TextChoices):
+    PENDING = "pending", "Ожидает решения"
+    DEDUCTED = "deducted", "Списано"
+    SKIPPED = "skipped", "Не списывать"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="off_crm_shipments",
+  )
+  crm_order = models.ForeignKey(
+    Order,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="off_crm_shipments",
+  )
+  wb_order_id = models.BigIntegerField("ID заказа WB", db_index=True)
+  barcode = models.CharField("Баркод", max_length=100, db_index=True)
+  sticker_part_a = models.CharField("Стикер partA", max_length=50)
+  sticker_part_b = models.CharField("Стикер partB", max_length=50)
+  sticker_number = models.CharField("Номер стикера", max_length=120, blank=True)
+  wb_supply_id = models.CharField("ID поставки WB", max_length=100, blank=True, db_index=True)
+  wb_warehouse_id = models.BigIntegerField("ID склада WB", null=True, blank=True, db_index=True)
+  warehouse_name = models.CharField("Склад", max_length=200, blank=True)
+  quantity = models.PositiveIntegerField("Количество", default=1)
+  shipped_at = models.DateTimeField("Отгружено в WB", null=True, blank=True, db_index=True)
+  detected_at = models.DateTimeField("Обнаружено", auto_now_add=True)
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.PENDING,
+    db_index=True,
+  )
+  resolved_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="resolved_off_crm_shipments",
+  )
+  resolved_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Отгрузка вне CRM"
+    verbose_name_plural = "Отгрузки вне CRM"
+    ordering = ["-shipped_at", "-detected_at"]
+    constraints = [
+      models.UniqueConstraint(
+        fields=["seller", "sticker_part_a", "sticker_part_b"],
+        name="uniq_off_crm_sticker_per_seller",
+      ),
+    ]
+    indexes = [
+      models.Index(fields=["seller", "status"]),
+    ]
+
+  def __str__(self):
+    return f"WB #{self.wb_order_id} ({self.get_status_display()})"

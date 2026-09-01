@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ProcessFlow } from '../components/ProcessFlow'
+import { OffCrmShipmentsModal } from '../components/OffCrmShipmentsModal'
 import { StatCard } from '../components/StatCard'
 import {
   fetchOrderStats,
@@ -11,6 +12,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { uiHint } from '../utils/uiHint'
+import '../components/OffCrmShipmentsModal.css'
 
 const STATS_POLL_MS = 60_000
 
@@ -43,6 +45,7 @@ export function DashboardPage() {
   const [statsLoading, setStatsLoading] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [statsError, setStatsError] = useState('')
+  const [offCrmModalOpen, setOffCrmModalOpen] = useState(false)
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true)
@@ -183,6 +186,26 @@ export function DashboardPage() {
         />
       </section>
 
+      {(isAdmin || isManager) && marketplace === 'wb' && (
+        <section className="panel off-crm-dashboard-panel">
+          <div className="off-crm-dashboard-panel__row">
+            <div>
+              <h2 className="section-title">Отгрузки вне CRM</h2>
+              <p>Заказы, отправленные через ЛК WB без сборки в CRM — требуется решение менеджера</p>
+              <p className="off-crm-dashboard-panel__count">{stats.off_crm_pending_count ?? 0}</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setOffCrmModalOpen(true)}
+              {...uiHint('Открыть список по селлерам и списать или пропустить')}
+            >
+              {(stats.off_crm_pending_count ?? 0) > 0 ? 'Проверить и списать' : 'Открыть список'}
+            </button>
+          </div>
+        </section>
+      )}
+
       {(isAdmin || isManager) && <ProcessFlow />}
 
       <section className="panels">
@@ -224,6 +247,12 @@ export function DashboardPage() {
           </ul>
         </div>
       </section>
+
+      <OffCrmShipmentsModal
+        open={offCrmModalOpen}
+        onClose={() => setOffCrmModalOpen(false)}
+        onResolved={loadStats}
+      />
     </>
   )
 }

@@ -1,0 +1,157 @@
+.off-crm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.off-crm-modal {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 760px;
+  width: 100%;
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+  border: 2px solid #f59e0b;
+}
+
+.off-crm-modal__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.off-crm-modal__header h2 {
+  margin: 0 0 0.35rem;
+}
+
+.off-crm-modal__header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.off-crm-modal__error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.off-crm-modal__count {
+  margin: 0 0 1rem;
+}
+
+.off-crm-modal__muted {
+  color: #64748b;
+}
+
+.off-crm-modal__back {
+  margin-bottom: 0.75rem;
+}
+
+.off-crm-modal__seller-title {
+  margin: 0 0 1rem;
+}
+
+.off-crm-seller-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.off-crm-seller-list__item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.off-crm-seller-list__item:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.off-crm-seller-list__badge {
+  background: #f59e0b;
+  color: #fff;
+  border-radius: 999px;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  padding: 0 0.5rem;
+}
+
+.off-crm-order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.off-crm-order-list__item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+
+.off-crm-order-list__meta {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.92rem;
+}
+
+.off-crm-order-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.off-crm-dashboard-panel {
+  border: 2px solid #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, #fff 100%);
+}
+
+.off-crm-dashboard-panel__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.off-crm-dashboard-panel__count {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #b45309;
+  margin: 0.25rem 0 0;
+}
+
+.off-crm-dashboard-panel p {
+  margin: 0;
+  color: #92400e;
+}

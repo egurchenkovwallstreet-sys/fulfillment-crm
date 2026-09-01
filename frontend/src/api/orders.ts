@@ -20,6 +20,7 @@ export interface OrderStats {
   in_assembly?: number
   in_delivery?: number
   sellers_count?: number
+  off_crm_pending_count?: number
   sku_count: number
   stats_source?: 'cache' | 'database'
   counts_synced_at?: string | null

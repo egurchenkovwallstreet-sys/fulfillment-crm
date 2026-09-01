@@ -61,3 +61,15 @@ def sync_ozon_orders():
     logger.warning("Ozon order sync errors: %s", errors)
   logger.info("Ozon order sync done: %s sellers", len(results))
   return {"results": results, "errors": errors}
+
+
+@shared_task
+def scan_off_crm_shipments():
+  """Ежедневный поиск отгрузок через ЛК WB без стикера CRM."""
+  from apps.orders.services.off_crm_shipments import scan_off_crm_shipments_all_sellers
+
+  result = scan_off_crm_shipments_all_sellers()
+  if result["errors"]:
+    logger.warning("Off-CRM shipment scan errors: %s", result["errors"])
+  logger.info("Off-CRM shipment scan done: %s sellers", len(result["results"]))
+  return result

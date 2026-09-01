@@ -32,6 +32,8 @@ from apps.warehouse.services.stock_deduction import (
   StockDeductionError,
   check_stock_for_delivery,
   deduct_stock_for_delivery,
+  order_on_active_pick_list,
+  order_sticker_printed_in_crm,
 )
 
 
@@ -44,7 +46,8 @@ class SupplyFlowError(Exception):
 def _get_order(seller: Seller, order_id: int) -> Order:
   order = (
     filter_orders_for_assembly(
-      Order.objects.filter(pk=order_id, seller=seller).select_related("product"),
+      Order.objects.filter(pk=order_id, seller=seller)
+      .select_related("product", "pick_list"),
       seller,
     ).first()
   )
@@ -67,6 +70,10 @@ def order_can_send_to_assembly(order: Order) -> bool:
 
 def order_can_send_to_delivery(order: Order) -> bool:
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
+    return False
+  if not order_on_active_pick_list(order):
+    return False
+  if not order_sticker_printed_in_crm(order):
     return False
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
     return False
@@ -345,7 +352,12 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   supply.supply_barcode_printed = bool(supply_barcode_file)
   supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
 
-  stock_info = deduct_stock_for_delivery(order=order, supply=supply, user=user)
+  stock_info = deduct_stock_for_delivery(
+    order=order,
+    supply=supply,
+    user=user,
+    require_crm_checks=True,
+  )
 
   AuditLog.objects.create(
     user=user,
@@ -536,6 +548,10 @@ def order_delivery_block_reason(order: Order) -> str | None:
     return None
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
     return "Не на сборке WB"
+  if not order_on_active_pick_list(order):
+    return "Заказ не в листе подбора — сформируйте лист и соберите"
+  if not order_sticker_printed_in_crm(order):
+    return "Нет стикера FBS — отсканируйте в сборке"
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
     return "Нет стикера FBS — отсканируйте в сборке"
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
