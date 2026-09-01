@@ -240,10 +240,9 @@ export type StockTransferResultView = {
 
 export function buildTransferResultView(
   payload: StockTransferSingleResult | StockTransferBulkResult,
-  *,
-  fromName: string,
-  toName: string,
+  options: { fromName: string; toName: string },
 ): StockTransferResultView {
+  const { fromName, toName } = options
   if ('item' in payload) {
     const item = payload.item
     return {

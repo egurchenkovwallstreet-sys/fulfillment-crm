@@ -18,8 +18,17 @@ def stamp_in_delivery_at(order: Order, *, at=None) -> None:
   order.save(update_fields=["in_delivery_at", "updated_at"])
 
 
+def _order_has_marking_data(order: Order) -> bool:
+  return bool(
+    (order.marking_code or "").strip()
+    or order.marking_bound
+    or (order.marking_verify_status or "").strip()
+    or (order.marking_verify_error or "").strip()
+  )
+
+
 def _clear_order_marking(order: Order) -> bool:
-  if not (order.marking_code or "").strip():
+  if not _order_has_marking_data(order):
     return False
   order.marking_code = ""
   order.marking_bound = False
@@ -38,7 +47,11 @@ def _clear_order_marking(order: Order) -> bool:
 
 
 def _clear_posting_marking(posting: OzonPosting) -> bool:
-  has_code = bool((posting.marking_code or "").strip()) or bool(posting.marking_codes)
+  has_code = (
+    bool((posting.marking_code or "").strip())
+    or bool(posting.marking_codes)
+    or posting.marking_bound
+  )
   if not has_code:
     return False
   posting.marking_code = ""
@@ -75,4 +88,27 @@ def clear_expired_marking_codes(*, hours: int = MARKING_RETENTION_HOURS) -> dict
     "ozon_cleared": ozon_cleared,
     "cutoff": cutoff.isoformat(),
     "retention_hours": hours,
+  }
+
+
+def clear_all_delivered_marking_codes() -> dict:
+  """Срочный сброс: удалить все ЧЗ у заказов, уже переданных в доставку."""
+  wb_cleared = 0
+  wb_orders = Order.objects.filter(
+    status__in=[Order.Status.IN_DELIVERY, Order.Status.SHIPPED],
+  )
+  for order in wb_orders.iterator():
+    if _clear_order_marking(order):
+      wb_cleared += 1
+
+  ozon_cleared = 0
+  ozon_postings = OzonPosting.objects.filter(crm_stage=OzonPosting.CrmStage.IN_DELIVERY)
+  for posting in ozon_postings.iterator():
+    if _clear_posting_marking(posting):
+      ozon_cleared += 1
+
+  return {
+    "wb_cleared": wb_cleared,
+    "ozon_cleared": ozon_cleared,
+    "mode": "all_delivered",
   }
