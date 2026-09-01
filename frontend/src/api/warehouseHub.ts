@@ -196,6 +196,91 @@ export function fetchStockOverview(sellerId: number) {
   return apiFetch<StockOverview>(`/api/warehouse/sellers/${sellerId}/stock-overview/`)
 }
 
+export type StockTransferWarehouseDelta = {
+  name: string
+  before: number
+  after: number
+}
+
+export type StockTransferResultItem = {
+  barcode: string
+  quantity_requested: number
+  quantity_moved: number
+  total_before: number
+  total_after: number
+  from_warehouse: StockTransferWarehouseDelta
+  to_warehouse: StockTransferWarehouseDelta
+  ok: boolean
+}
+
+export type StockTransferSingleResult = {
+  success: boolean
+  ok: boolean
+  item: StockTransferResultItem
+}
+
+export type StockTransferBulkResult = {
+  success: boolean
+  ok: boolean
+  transferred: number
+  skipped: number
+  requested_count: number
+  errors: Array<{ product_id: number; barcode: string; error: string }>
+  items: StockTransferResultItem[]
+  from_warehouse_name?: string
+  to_warehouse_name?: string
+}
+
+export type StockTransferResultView = {
+  ok: boolean
+  summary: string
+  items: StockTransferResultItem[]
+  errors: Array<{ barcode: string; error: string }>
+}
+
+export function buildTransferResultView(
+  payload: StockTransferSingleResult | StockTransferBulkResult,
+  *,
+  fromName: string,
+  toName: string,
+): StockTransferResultView {
+  if ('item' in payload) {
+    const item = payload.item
+    return {
+      ok: payload.ok,
+      summary: payload.ok
+        ? `Все ${item.quantity_moved} шт. перенесены «${fromName}» → «${toName}». Итого по баркоду без изменений.`
+        : `Перенос выполнен, но остатки не совпали с ожиданием. Проверьте таблицу ниже.`,
+      items: [item],
+      errors: [],
+    }
+  }
+
+  const bulk = payload
+  const parts: string[] = []
+  parts.push(`Перенесено: ${bulk.transferred} из ${bulk.requested_count}`)
+  if (bulk.skipped > 0) {
+    parts.push(`пропущено (0 на «${fromName}»): ${bulk.skipped}`)
+  }
+  if (bulk.errors.length > 0) {
+    parts.push(`ошибок: ${bulk.errors.length}`)
+  }
+  if (bulk.ok) {
+    parts.push('все остатки перенесены, сумма по баркодам сохранена')
+  } else if (bulk.transferred > 0) {
+    parts.push('есть позиции с расхождениями или ошибками')
+  } else {
+    parts.push('ничего не перенесено')
+  }
+
+  return {
+    ok: bulk.ok,
+    summary: parts.join(' · '),
+    items: bulk.items,
+    errors: bulk.errors.map((row) => ({ barcode: row.barcode, error: row.error })),
+  }
+}
+
 export function transferStock(
   sellerId: number,
   payload: {
@@ -205,17 +290,10 @@ export function transferStock(
     quantity: number
   },
 ) {
-  return apiFetch(`/api/warehouse/sellers/${sellerId}/stock-transfer/`, {
+  return apiFetch<StockTransferSingleResult>(`/api/warehouse/sellers/${sellerId}/stock-transfer/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-}
-
-export type StockTransferBulkResult = {
-  success: boolean
-  transferred: number
-  skipped: number
-  errors: Array<{ product_id: number; barcode: string; error: string }>
 }
 
 export function transferStockBulk(

@@ -232,6 +232,41 @@ def distribute_stocks_evenly_bulk(
   }
 
 
+def format_transfer_item(
+  *,
+  barcode: str,
+  quantity_requested: int,
+  transfer: dict,
+) -> dict:
+  """Строка отчёта: было → стало по складам."""
+  from_wh = transfer["from_warehouse"]
+  to_wh = transfer["to_warehouse"]
+  moved = int(transfer.get("quantity") or quantity_requested)
+  total_before = int(from_wh["previous"]) + int(to_wh["previous"])
+  total_after = int(transfer.get("total") or total_before)
+  from_ok = int(from_wh["previous"]) - moved == int(from_wh["new"])
+  to_ok = int(to_wh["previous"]) + moved == int(to_wh["new"])
+  total_ok = total_before == total_after
+  return {
+    "barcode": barcode,
+    "quantity_requested": quantity_requested,
+    "quantity_moved": moved,
+    "total_before": total_before,
+    "total_after": total_after,
+    "from_warehouse": {
+      "name": from_wh["name"],
+      "before": int(from_wh["previous"]),
+      "after": int(from_wh["new"]),
+    },
+    "to_warehouse": {
+      "name": to_wh["name"],
+      "before": int(to_wh["previous"]),
+      "after": int(to_wh["new"]),
+    },
+    "ok": from_ok and to_ok and total_ok,
+  }
+
+
 @transaction.atomic
 def perform_stock_transfer(
   seller: Seller,
@@ -299,14 +334,22 @@ def perform_stock_transfer(
     details=result,
   )
 
+  item = format_transfer_item(
+    barcode=product.barcode,
+    quantity_requested=quantity,
+    transfer=result,
+  )
+
   return {
     "success": True,
+    "ok": item["ok"],
     "product": {
       "id": product.id,
       "barcode": product.barcode,
       "crm_quantity": product.quantity,
     },
     "transfer": result,
+    "item": item,
   }
 
 
@@ -346,6 +389,10 @@ def transfer_stocks_bulk(
   skipped = 0
   errors: list[dict] = []
   results: list[dict] = []
+  items: list[dict] = []
+
+  from_wh_name = ""
+  to_wh_name = ""
 
   for product in products:
     quantity = _source_quantity(stock_map, product.barcode, from_warehouse_id)
@@ -359,7 +406,7 @@ def transfer_stocks_bulk(
       })
       continue
     try:
-      result = perform_stock_transfer(
+      payload = perform_stock_transfer(
         seller,
         product_id=product.id,
         from_warehouse_id=from_warehouse_id,
@@ -368,12 +415,18 @@ def transfer_stocks_bulk(
         user=user,
       )
       transferred += 1
+      item = payload["item"]
+      items.append(item)
+      if not from_wh_name:
+        from_wh_name = item["from_warehouse"]["name"]
+        to_wh_name = item["to_warehouse"]["name"]
       results.append({
         "product_id": product.id,
         "barcode": product.barcode,
         "quantity": quantity,
         "skipped": False,
-        "transfer": result.get("transfer"),
+        "ok": item["ok"],
+        "item": item,
       })
     except StockTransferError as exc:
       errors.append({
@@ -387,10 +440,24 @@ def transfer_stocks_bulk(
       f"Не удалось перенести ни одного товара. Пример: {errors[0]['error']}",
     )
 
+  requested_count = len(products)
+  all_ok = (
+    len(errors) == 0
+    and skipped == 0
+    and transferred > 0
+    and bool(items)
+    and all(item["ok"] for item in items)
+  )
+
   return {
     "success": True,
+    "ok": all_ok,
     "transferred": transferred,
     "skipped": skipped,
     "errors": errors,
     "results": results,
+    "items": items,
+    "from_warehouse_name": from_wh_name,
+    "to_warehouse_name": to_wh_name,
+    "requested_count": requested_count,
   }

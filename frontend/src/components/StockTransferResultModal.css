@@ -1,0 +1,116 @@
+.stock-transfer-result-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.stock-transfer-result-backdrop--ok {
+  background: rgba(21, 128, 61, 0.82);
+}
+
+.stock-transfer-result-backdrop--fail {
+  background: rgba(127, 29, 29, 0.88);
+}
+
+.stock-transfer-result {
+  width: min(920px, 96vw);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  padding: 1.75rem 1.5rem 1.25rem;
+  border-radius: 20px;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.35);
+}
+
+.stock-transfer-result--ok {
+  background: #f0fdf4;
+  border: 4px solid #16a34a;
+}
+
+.stock-transfer-result--fail {
+  background: #fff1f2;
+  border: 4px solid #dc2626;
+}
+
+.stock-transfer-result h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.45rem;
+}
+
+.stock-transfer-result--ok h2 {
+  color: #166534;
+}
+
+.stock-transfer-result--fail h2 {
+  color: #991b1b;
+}
+
+.stock-transfer-result__summary {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.stock-transfer-result--ok .stock-transfer-result__summary {
+  color: #14532d;
+}
+
+.stock-transfer-result--fail .stock-transfer-result__summary {
+  color: #7f1d1d;
+}
+
+.stock-transfer-result__table-wrap {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.stock-transfer-result__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.stock-transfer-result__table th,
+.stock-transfer-result__table td {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.stock-transfer-result__table th {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.stock-transfer-result__row--bad {
+  background: rgba(254, 226, 226, 0.65);
+}
+
+.stock-transfer-result__errors {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  color: #991b1b;
+}
+
+.stock-transfer-result__actions {
+  display: flex;
+  justify-content: center;
+}
+
+.stock-transfer-result__ok {
+  min-width: 200px;
+}
+
+.stock-transfer-result--ok .stock-transfer-result__ok {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.stock-transfer-result--fail .stock-transfer-result__ok {
+  background: #dc2626;
+  border-color: #dc2626;
+}

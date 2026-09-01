@@ -10,7 +10,9 @@ import {
   previewStockImport,
   transferStock,
   transferStockBulk,
+  buildTransferResultView,
   distributeStockEvenly,
+  type StockTransferResultView,
   pushOzonStocks,
   type OnboardingPreview,
   type StockImportPreview,
@@ -27,6 +29,7 @@ import {
   type SellerWarehouse,
 } from '../api/sellers'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { StockTransferResultModal } from '../components/StockTransferResultModal'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './WarehouseHubPage.css'
 
@@ -85,6 +88,7 @@ export function WarehouseHubPage() {
   const [toWh, setToWh] = useState<number | ''>('')
   const [transferQty, setTransferQty] = useState(1)
   const [transferAllFromSource, setTransferAllFromSource] = useState(false)
+  const [transferResult, setTransferResult] = useState<StockTransferResultView | null>(null)
   const [selectedDistributeIds, setSelectedDistributeIds] = useState<Set<number>>(new Set())
 
   const canTransfer = (stockOverview?.warehouses.length ?? 0) >= 2
@@ -473,11 +477,10 @@ export function WarehouseHubPage() {
         to_warehouse_id: Number(toWh),
         product_ids: productIds,
       })
-      let msg = `Перенесено: ${result.transferred} товаров`
-      if (result.skipped > 0) msg += `, пропущено (0 на «${fromWarehouseName}»): ${result.skipped}`
-      if (result.errors.length > 0) msg += `, ошибок: ${result.errors.length}`
-      msg += `. Суммарный остаток по баркодам не изменился.`
-      setSuccess(msg)
+      setTransferResult(buildTransferResultView(result, {
+        fromName: fromWarehouseName,
+        toName: toWarehouseName,
+      }))
       setSelectedDistributeIds(new Set())
       await handleLoadStockOverview()
     } catch (err) {
@@ -526,15 +529,16 @@ export function WarehouseHubPage() {
     setLoading(true)
     setError('')
     try {
-      await transferStock(Number(sellerId), {
+      const result = await transferStock(Number(sellerId), {
         product_id: transferProduct.product_id,
         from_warehouse_id: Number(fromWh),
         to_warehouse_id: Number(toWh),
         quantity,
       })
-      setSuccess(
-        `Перенесено ${quantity} шт. (${transferProduct.barcode}) «${fromWarehouseName}» → «${toWarehouseName}». Сумма по складам не изменилась.`,
-      )
+      setTransferResult(buildTransferResultView(result, {
+        fromName: fromWarehouseName,
+        toName: toWarehouseName,
+      }))
       setTransferProduct(null)
       await handleLoadStockOverview()
     } catch (err) {
@@ -1299,6 +1303,13 @@ export function WarehouseHubPage() {
             </div>
           )}
         </section>
+      )}
+
+      {transferResult && (
+        <StockTransferResultModal
+          result={transferResult}
+          onClose={() => setTransferResult(null)}
+        />
       )}
     </>
   )
