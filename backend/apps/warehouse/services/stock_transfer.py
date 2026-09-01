@@ -308,3 +308,89 @@ def perform_stock_transfer(
     },
     "transfer": result,
   }
+
+
+def _source_quantity(stock_map: dict, barcode: str, from_warehouse_id: int) -> int:
+  data = stock_map.get(barcode, {"by_warehouse": {}})
+  return int((data.get("by_warehouse") or {}).get(from_warehouse_id, 0))
+
+
+def transfer_stocks_bulk(
+  seller: Seller,
+  *,
+  from_warehouse_id: int,
+  to_warehouse_id: int,
+  product_ids: list[int] | None = None,
+  user=None,
+) -> dict:
+  """Перенести весь остаток каждого баркода со склада-источника на склад-назначение."""
+  if from_warehouse_id == to_warehouse_id:
+    raise StockTransferError("Выберите разные склады")
+
+  qs = Product.objects.filter(seller=seller).select_related("cell").order_by("cell__number")
+  if product_ids is not None:
+    qs = qs.filter(pk__in=product_ids)
+    if not qs.exists():
+      raise StockTransferError("Не найдены товары для переноса")
+
+  products = list(qs)
+  if not products:
+    raise StockTransferError("Нет товаров для переноса")
+
+  try:
+    stock_map = fetch_summed_wb_stocks(seller, [product.barcode for product in products])
+  except WBStockError as exc:
+    raise StockTransferError(str(exc)) from exc
+
+  transferred = 0
+  skipped = 0
+  errors: list[dict] = []
+  results: list[dict] = []
+
+  for product in products:
+    quantity = _source_quantity(stock_map, product.barcode, from_warehouse_id)
+    if quantity <= 0:
+      skipped += 1
+      results.append({
+        "product_id": product.id,
+        "barcode": product.barcode,
+        "skipped": True,
+        "reason": "zero_on_source",
+      })
+      continue
+    try:
+      result = perform_stock_transfer(
+        seller,
+        product_id=product.id,
+        from_warehouse_id=from_warehouse_id,
+        to_warehouse_id=to_warehouse_id,
+        quantity=quantity,
+        user=user,
+      )
+      transferred += 1
+      results.append({
+        "product_id": product.id,
+        "barcode": product.barcode,
+        "quantity": quantity,
+        "skipped": False,
+        "transfer": result.get("transfer"),
+      })
+    except StockTransferError as exc:
+      errors.append({
+        "product_id": product.id,
+        "barcode": product.barcode,
+        "error": str(exc),
+      })
+
+  if transferred == 0 and errors:
+    raise StockTransferError(
+      f"Не удалось перенести ни одного товара. Пример: {errors[0]['error']}",
+    )
+
+  return {
+    "success": True,
+    "transferred": transferred,
+    "skipped": skipped,
+    "errors": errors,
+    "results": results,
+  }

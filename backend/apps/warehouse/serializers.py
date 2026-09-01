@@ -231,6 +231,21 @@ class StockDistributeSerializer(serializers.Serializer):
   )
 
 
+class StockTransferBulkSerializer(serializers.Serializer):
+  from_warehouse_id = serializers.IntegerField()
+  to_warehouse_id = serializers.IntegerField()
+  product_ids = serializers.ListField(
+    child=serializers.IntegerField(min_value=1),
+    required=False,
+    allow_empty=True,
+  )
+
+  def validate(self, attrs):
+    if attrs["from_warehouse_id"] == attrs["to_warehouse_id"]:
+      raise serializers.ValidationError("Выберите разные склады «откуда» и «куда»")
+    return attrs
+
+
 class StockFileApplySerializer(serializers.Serializer):
   warehouse_id = serializers.IntegerField()
   rows = serializers.ListField(child=serializers.DictField(), min_length=1)

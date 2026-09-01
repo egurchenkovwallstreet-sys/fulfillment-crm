@@ -22,6 +22,7 @@ from .views import (
   StockFilePreviewView,
   StockOverviewView,
   StockTransferView,
+  StockTransferBulkView,
   StockDistributeView,
   OzonStocksPushView,
 )
@@ -106,6 +107,11 @@ urlpatterns = [
     "sellers/<int:seller_id>/stock-transfer/",
     StockTransferView.as_view(),
     name="stock_transfer",
+  ),
+  path(
+    "sellers/<int:seller_id>/stock-transfer-bulk/",
+    StockTransferBulkView.as_view(),
+    name="stock_transfer_bulk",
   ),
   path(
     "sellers/<int:seller_id>/stock-distribute/",

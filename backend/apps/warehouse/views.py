@@ -24,6 +24,7 @@ from .serializers import (
   StockFileApplySerializer,
   StockOperationSerializer,
   StockTransferSerializer,
+  StockTransferBulkSerializer,
   StockDistributeSerializer,
   WbSyncAutoSerializer,
   WbSyncPreviewSerializer,
@@ -46,6 +47,7 @@ from .services.stock_transfer import (
   build_stock_overview,
   distribute_stocks_evenly_bulk,
   perform_stock_transfer,
+  transfer_stocks_bulk,
 )
 from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
 from .services.wb_sync_intake import (
@@ -612,6 +614,29 @@ class StockTransferView(APIView):
         from_warehouse_id=serializer.validated_data["from_warehouse_id"],
         to_warehouse_id=serializer.validated_data["to_warehouse_id"],
         quantity=serializer.validated_data["quantity"],
+        user=request.user,
+      )
+    except StockTransferError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+class StockTransferBulkView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = _require_seller(request, seller_id)
+    serializer = StockTransferBulkSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    product_ids = serializer.validated_data.get("product_ids")
+    if product_ids is not None and len(product_ids) == 0:
+      product_ids = None
+    try:
+      result = transfer_stocks_bulk(
+        seller,
+        from_warehouse_id=serializer.validated_data["from_warehouse_id"],
+        to_warehouse_id=serializer.validated_data["to_warehouse_id"],
+        product_ids=product_ids,
         user=request.user,
       )
     except StockTransferError as exc:

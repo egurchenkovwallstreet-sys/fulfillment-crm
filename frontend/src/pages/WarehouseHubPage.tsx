@@ -9,6 +9,7 @@ import {
   fetchStockOverview,
   previewStockImport,
   transferStock,
+  transferStockBulk,
   distributeStockEvenly,
   pushOzonStocks,
   type OnboardingPreview,
@@ -56,6 +57,10 @@ function mapOzonWarehouses(rows: SellerOzonWarehouse[]): HubWarehouse[] {
   }))
 }
 
+function qtyOnWarehouse(product: StockOverviewProduct, warehouseId: number): number {
+  return product.by_warehouse.find((row) => row.warehouse_id === warehouseId)?.quantity ?? 0
+}
+
 export function WarehouseHubPage() {
   const { marketplace } = useMarketplace()
   const isOzon = marketplace === 'ozon'
@@ -79,7 +84,22 @@ export function WarehouseHubPage() {
   const [fromWh, setFromWh] = useState<number | ''>('')
   const [toWh, setToWh] = useState<number | ''>('')
   const [transferQty, setTransferQty] = useState(1)
+  const [transferAllFromSource, setTransferAllFromSource] = useState(false)
   const [selectedDistributeIds, setSelectedDistributeIds] = useState<Set<number>>(new Set())
+
+  const canTransfer = (stockOverview?.warehouses.length ?? 0) >= 2
+  const fromWarehouseName = stockOverview?.warehouses.find((wh) => wh.id === fromWh)?.name ?? ''
+  const toWarehouseName = stockOverview?.warehouses.find((wh) => wh.id === toWh)?.name ?? ''
+
+  const transferableProducts = useMemo(() => {
+    if (!stockOverview || !fromWh) return []
+    return stockOverview.products.filter((product) => qtyOnWarehouse(product, Number(fromWh)) > 0)
+  }, [stockOverview, fromWh])
+
+  const selectedTransferableProducts = useMemo(
+    () => transferableProducts.filter((product) => selectedDistributeIds.has(product.product_id)),
+    [transferableProducts, selectedDistributeIds],
+  )
 
   const canDistributeEvenly = (stockOverview?.warehouses.length ?? 0) >= 2
 
@@ -423,9 +443,86 @@ export function WarehouseHubPage() {
     void runDistributeEvenly()
   }
 
+  function openTransferModal(product: StockOverviewProduct) {
+    setTransferProduct(product)
+    setTransferAllFromSource(false)
+    const sourceQty = fromWh ? qtyOnWarehouse(product, Number(fromWh)) : 0
+    setTransferQty(sourceQty > 0 ? sourceQty : 1)
+  }
+
+  function validateTransferWarehouses(): boolean {
+    if (!fromWh || !toWh) {
+      setError('Выберите склады «откуда» и «куда»')
+      return false
+    }
+    if (fromWh === toWh) {
+      setError('Склады «откуда» и «куда» должны отличаться')
+      return false
+    }
+    return true
+  }
+
+  async function runTransferBulk(productIds?: number[]) {
+    if (!sellerId || !validateTransferWarehouses()) return
+    setLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await transferStockBulk(Number(sellerId), {
+        from_warehouse_id: Number(fromWh),
+        to_warehouse_id: Number(toWh),
+        product_ids: productIds,
+      })
+      let msg = `Перенесено: ${result.transferred} товаров`
+      if (result.skipped > 0) msg += `, пропущено (0 на «${fromWarehouseName}»): ${result.skipped}`
+      if (result.errors.length > 0) msg += `, ошибок: ${result.errors.length}`
+      msg += `. Суммарный остаток по баркодам не изменился.`
+      setSuccess(msg)
+      setSelectedDistributeIds(new Set())
+      await handleLoadStockOverview()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка переноса')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleTransferSelected() {
+    const ids = selectedTransferableProducts.map((product) => product.product_id)
+    if (ids.length === 0) {
+      setError('Отметьте товары с остатком на выбранном складе «откуда»')
+      return
+    }
+    if (!window.confirm(
+      `Перенести весь остаток ${ids.length} выбранных товаров со склада «${fromWarehouseName}» на «${toWarehouseName}»?`,
+    )) return
+    void runTransferBulk(ids)
+  }
+
+  function handleTransferAll() {
+    if (!transferableProducts.length) {
+      setError(`На складе «${fromWarehouseName || 'откуда'}» нет остатков для переноса`)
+      return
+    }
+    if (!window.confirm(
+      `Перенести весь остаток всех ${transferableProducts.length} товаров со склада «${fromWarehouseName}» на «${toWarehouseName}»?`,
+    )) return
+    void runTransferBulk()
+  }
+
   async function handleTransferSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!sellerId || !transferProduct || !fromWh || !toWh) return
+    if (!sellerId || !transferProduct || !validateTransferWarehouses()) return
+    const maxQty = qtyOnWarehouse(transferProduct, Number(fromWh))
+    const quantity = transferAllFromSource ? maxQty : transferQty
+    if (quantity <= 0) {
+      setError('На складе «откуда» нет остатка для переноса')
+      return
+    }
+    if (quantity > maxQty) {
+      setError(`На складе «откуда» только ${maxQty} шт.`)
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -433,9 +530,11 @@ export function WarehouseHubPage() {
         product_id: transferProduct.product_id,
         from_warehouse_id: Number(fromWh),
         to_warehouse_id: Number(toWh),
-        quantity: transferQty,
+        quantity,
       })
-      setSuccess(`Перенесено ${transferQty} шт. Сумма по складам не изменилась.`)
+      setSuccess(
+        `Перенесено ${quantity} шт. (${transferProduct.barcode}) «${fromWarehouseName}» → «${toWarehouseName}». Сумма по складам не изменилась.`,
+      )
       setTransferProduct(null)
       await handleLoadStockOverview()
     } catch (err) {
@@ -905,8 +1004,51 @@ export function WarehouseHubPage() {
       {tab === 'transfer' && !isOzon && (
         <section className="panel">
           <p className="whub-hint">
-            Перенос остатков между FBS-складами WB. Суммарный остаток баркода в CRM не меняется.
+            Перенос остатков между FBS-складами WB. На складе «куда» количество суммируется.
+            Общий остаток баркода в CRM не меняется.
           </p>
+
+          {stockOverview && canTransfer && (
+            <div className="whub-transfer-route panel panel--accent">
+              <h3 className="section-title">Маршрут переноса</h3>
+              <div className="whub-transfer-route__fields">
+                <label>
+                  Откуда
+                  <select
+                    value={fromWh}
+                    onChange={(e) => setFromWh(e.target.value ? Number(e.target.value) : '')}
+                  >
+                    <option value="">— выберите склад —</option>
+                    {stockOverview.warehouses.map((wh) => (
+                      <option key={wh.id} value={wh.id}>
+                        {wh.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Куда
+                  <select
+                    value={toWh}
+                    onChange={(e) => setToWh(e.target.value ? Number(e.target.value) : '')}
+                  >
+                    <option value="">— выберите склад —</option>
+                    {stockOverview.warehouses.map((wh) => (
+                      <option key={wh.id} value={wh.id} disabled={wh.id === fromWh}>
+                        {wh.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="whub-hint">
+                {fromWh && toWh
+                  ? `Доступно для переноса с «${fromWarehouseName}»: ${transferableProducts.length} товаров`
+                  : 'Выберите оба склада — затем переносите один товар, выбранные или все'}
+              </p>
+            </div>
+          )}
+
           <div className="whub-transfer-toolbar">
             <span {...hintWrapProps('Обновить таблицу остатков по FBS-складам WB из личного кабинета.')}>
               <button
@@ -948,6 +1090,52 @@ export function WarehouseHubPage() {
                 onClick={handleDistributeSelected}
               >
                 Распределить выбранные ({selectedDistributeIds.size})
+              </button>
+            </span>
+            <span
+              {...hintWrapProps(
+                !canTransfer || !fromWh || !toWh
+                  ? 'Сначала выберите склады «откуда» и «куда».'
+                  : `Перенести весь остаток выбранных товаров (${selectedTransferableProducts.length}) с «${fromWarehouseName}» на «${toWarehouseName}».`,
+              )}
+            >
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={
+                  !sellerId
+                  || loading
+                  || !canTransfer
+                  || !fromWh
+                  || !toWh
+                  || selectedTransferableProducts.length === 0
+                }
+                onClick={handleTransferSelected}
+              >
+                Перенести выбранные ({selectedTransferableProducts.length})
+              </button>
+            </span>
+            <span
+              {...hintWrapProps(
+                !canTransfer || !fromWh || !toWh
+                  ? 'Сначала выберите склады «откуда» и «куда».'
+                  : `Перенести весь остаток всех ${transferableProducts.length} товаров с «${fromWarehouseName}» на «${toWarehouseName}».`,
+              )}
+            >
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={
+                  !sellerId
+                  || loading
+                  || !canTransfer
+                  || !fromWh
+                  || !toWh
+                  || transferableProducts.length === 0
+                }
+                onClick={handleTransferAll}
+              >
+                Перенести все ({transferableProducts.length})
               </button>
             </span>
           </div>
@@ -1027,13 +1215,13 @@ export function WarehouseHubPage() {
                       <button
                         type="button"
                         className="btn btn--small btn--primary"
-                        onClick={() => {
-                          setTransferProduct(product)
-                          setFromWh('')
-                          setToWh('')
-                          setTransferQty(1)
-                        }}
-                        {...uiHint('Перенести часть остатка с одного FBS-склада на другой.')}
+                        disabled={!canTransfer || !fromWh || !toWh || loading}
+                        onClick={() => openTransferModal(product)}
+                        {...uiHint(
+                          !fromWh || !toWh
+                            ? 'Сначала выберите склады «откуда» и «куда» в блоке выше.'
+                            : `Перенести часть или весь остаток с «${fromWarehouseName}» на «${toWarehouseName}».`,
+                        )}
                       >
                         Перенести
                       </button>
@@ -1053,43 +1241,54 @@ export function WarehouseHubPage() {
               >
                 <h3>Перераспределение</h3>
                 <p><code>{transferProduct.barcode}</code> · яч. {transferProduct.cell_number}</p>
-                <label>
-                  Со склада
-                  <select value={fromWh} onChange={(e) => setFromWh(e.target.value ? Number(e.target.value) : '')} required>
-                    <option value="">—</option>
-                    {stockOverview.warehouses.map((wh) => {
-                      const qty = transferProduct.by_warehouse.find((x) => x.warehouse_id === wh.id)?.quantity ?? 0
-                      return (
-                        <option key={wh.id} value={wh.id} disabled={qty < 1}>
-                          {wh.name} ({qty} шт.)
-                        </option>
-                      )
-                    })}
-                  </select>
-                </label>
-                <label>
-                  На склад
-                  <select value={toWh} onChange={(e) => setToWh(e.target.value ? Number(e.target.value) : '')} required>
-                    <option value="">—</option>
-                    {stockOverview.warehouses.map((wh) => (
-                      <option key={wh.id} value={wh.id} disabled={wh.id === fromWh}>
-                        {wh.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <p className="whub-hint">
+                  {fromWh && toWh
+                    ? `«${fromWarehouseName}» → «${toWarehouseName}» · на «куда» доступно ${qtyOnWarehouse(transferProduct, Number(toWh))} шт.`
+                    : 'Выберите склады в блоке «Маршрут переноса»'}
+                </p>
+                {fromWh ? (
+                  <p className="whub-hint">
+                    На «откуда»: {qtyOnWarehouse(transferProduct, Number(fromWh))} шт.
+                  </p>
+                ) : null}
                 <label>
                   Количество
                   <input
                     type="number"
                     min={1}
-                    value={transferQty}
-                    onChange={(e) => setTransferQty(Number(e.target.value))}
+                    max={fromWh ? qtyOnWarehouse(transferProduct, Number(fromWh)) : undefined}
+                    value={transferAllFromSource
+                      ? (fromWh ? qtyOnWarehouse(transferProduct, Number(fromWh)) : transferQty)
+                      : transferQty}
+                    onChange={(e) => {
+                      setTransferAllFromSource(false)
+                      setTransferQty(Number(e.target.value))
+                    }}
+                    disabled={transferAllFromSource}
                     required
                   />
                 </label>
+                <label className="whub-transfer-modal__check">
+                  <input
+                    type="checkbox"
+                    checked={transferAllFromSource}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setTransferAllFromSource(checked)
+                      if (checked && fromWh) {
+                        setTransferQty(qtyOnWarehouse(transferProduct, Number(fromWh)))
+                      }
+                    }}
+                  />
+                  Весь остаток со склада «откуда»
+                </label>
                 <div className="whub-actions">
-                  <button type="submit" className="btn btn--primary" disabled={loading} {...uiHint('Перенести указанное количество между FBS-складами WB.')}>
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    disabled={loading || !fromWh || !toWh}
+                    {...uiHint('Перенести указанное количество между FBS-складами WB.')}
+                  >
                     Перенести
                   </button>
                   <button type="button" className="btn btn--secondary" onClick={() => setTransferProduct(null)} {...uiHint('Закрыть окно перераспределения без изменений.')}>

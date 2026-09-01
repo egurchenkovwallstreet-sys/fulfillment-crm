@@ -211,6 +211,30 @@ export function transferStock(
   })
 }
 
+export type StockTransferBulkResult = {
+  success: boolean
+  transferred: number
+  skipped: number
+  errors: Array<{ product_id: number; barcode: string; error: string }>
+}
+
+export function transferStockBulk(
+  sellerId: number,
+  payload: {
+    from_warehouse_id: number
+    to_warehouse_id: number
+    product_ids?: number[]
+  },
+) {
+  return apiFetch<StockTransferBulkResult>(
+    `/api/warehouse/sellers/${sellerId}/stock-transfer-bulk/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
 export type StockDistributeResult = {
   success: boolean
   distributed: number
