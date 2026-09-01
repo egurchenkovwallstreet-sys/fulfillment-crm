@@ -57,6 +57,7 @@ import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
 import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { uiHint, hintWrapProps } from '../utils/uiHint'
+import { readAssemblySellerCache, writeAssemblySellerCache } from '../utils/assemblyCache'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
@@ -124,7 +125,9 @@ function WbAssemblySellerPage() {
   const scanBusyRef = useRef(false)
   const barcodeApiInFlightRef = useRef(false)
 
-  const [data, setData] = useState<AssemblySellerDetail | null>(null)
+  const [data, setData] = useState<AssemblySellerDetail | null>(
+    () => readAssemblySellerCache(id, 'new'),
+  )
   const [stage, setStage] = useState('new')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -138,7 +141,6 @@ function WbAssemblySellerPage() {
   const [syncing, setSyncing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [togglingWarehouseId, setTogglingWarehouseId] = useState<number | null>(null)
-  const initialLoadDoneRef = useRef(false)
   const syncInFlightRef = useRef(false)
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
@@ -150,26 +152,33 @@ function WbAssemblySellerPage() {
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
-  const bootstrapKeyRef = useRef('')
+  const bgSyncSellerRef = useRef<number | null>(null)
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
     if (!id) return
-    const silent = opts?.silent ?? false
+    const pickStage = opts?.stageKey ?? stage
+    const silent = opts?.silent ?? true
     if (silent) {
       setRefreshing(true)
     } else {
-    setLoading(true)
+      setError('')
     }
-    setError('')
     try {
-      setData(await fetchAssemblySeller(id, stage || undefined))
+      const fresh = await fetchAssemblySeller(id, pickStage || undefined)
+      setData(fresh)
+      writeAssemblySellerCache(id, pickStage, fresh)
+      if (pickStage === 'new' || pickStage === 'confirm') {
+        if (fresh.active_pick_list?.items?.length) {
+          setPickListPreview(fresh.active_pick_list)
+        }
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      }
     } finally {
       if (silent) {
         setRefreshing(false)
-      } else {
-      setLoading(false)
       }
     }
   }, [id, stage])
@@ -181,8 +190,8 @@ function WbAssemblySellerPage() {
     try {
       await syncOrders(id, 'quick')
       await load({ silent: true })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+    } catch {
+      // Фоновая синхронизация WB — не блокируем экран
     } finally {
       syncInFlightRef.current = false
       setSyncing(false)
@@ -197,26 +206,6 @@ function WbAssemblySellerPage() {
     setPickListPreview(null)
   }, [])
 
-  const bootstrapAssembly = useCallback(async () => {
-    if (!id || syncInFlightRef.current) return
-    syncInFlightRef.current = true
-    setSyncing(true)
-    setError('')
-    try {
-      await syncOrders(id, 'quick')
-      const fresh = await fetchAssemblySeller(id, stage || undefined)
-      setData(fresh)
-      if (stage === 'new' || stage === 'confirm') {
-        applySavedPickList(fresh)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
-    } finally {
-      syncInFlightRef.current = false
-      setSyncing(false)
-    }
-  }, [id, stage, applySavedPickList])
-
   useEffect(() => {
     refreshPrintBridgeStatus()
       .then((health) => {
@@ -228,17 +217,46 @@ function WbAssemblySellerPage() {
 
   useEffect(() => {
     if (!id) return
-    void load({ silent: initialLoadDoneRef.current })
-    initialLoadDoneRef.current = true
-  }, [id, stage, load])
+    let cancelled = false
+
+    const cached = readAssemblySellerCache(id, stage)
+    if (cached) {
+      setData(cached)
+      applySavedPickList(cached)
+    }
+
+    void (async () => {
+      setRefreshing(true)
+      setError('')
+      try {
+        const fresh = await fetchAssemblySeller(id, stage || undefined)
+        if (cancelled) return
+        setData(fresh)
+        writeAssemblySellerCache(id, stage, fresh)
+        applySavedPickList(fresh)
+      } catch (err) {
+        if (!cancelled && !cached) {
+          setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+        }
+      } finally {
+        if (!cancelled) setRefreshing(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, stage, applySavedPickList])
 
   useEffect(() => {
     if (!id) return
-    const bootKey = `${id}:${stage}`
-    if (bootstrapKeyRef.current === bootKey) return
-    bootstrapKeyRef.current = bootKey
-    void bootstrapAssembly()
-  }, [id, stage, bootstrapAssembly])
+    if (bgSyncSellerRef.current === id) return
+    bgSyncSellerRef.current = id
+    const timer = window.setTimeout(() => {
+      void runBackgroundSync()
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [id, runBackgroundSync])
 
   const refreshMarkingStatus = useCallback(async () => {
     if (!id) return
@@ -658,7 +676,7 @@ function WbAssemblySellerPage() {
       })
       return
     }
-    const gate = canSwitchToStage(nextStage, data.counts)
+    const gate = canSwitchToStage(nextStage, counts)
     if (!gate.ok) {
       setModal({ kind: 'block', title: 'Переход заблокирован', message: gate.reason })
       return
@@ -690,8 +708,19 @@ function WbAssemblySellerPage() {
     if (!id) return
     setError('')
     setSuccess('Обновление заказов…')
-    await runBackgroundSync()
-    setSuccess('Заказы обновлены')
+    syncInFlightRef.current = true
+    setSyncing(true)
+    try {
+      await syncOrders(id, 'quick')
+      await load({ silent: true })
+      setSuccess('Заказы обновлены')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка синхронизации с WB')
+      setSuccess('')
+    } finally {
+      syncInFlightRef.current = false
+      setSyncing(false)
+    }
   }
 
   function handleSendToDelivery(order: AssemblyOrder) {
@@ -1022,22 +1051,12 @@ function WbAssemblySellerPage() {
     setMarkingValue(next)
   }
 
-  if (!data && loading) {
-    return (
-      <div className="loading-screen">
-        <div className="loading-screen__spinner" />
-        <p>Загрузка…</p>
-      </div>
-    )
-  }
-
-  if (!data) return null
-
-  const workflowMode: AssemblyWorkflowMode = data.assembly_workflow_mode ?? 'scan'
+  const workflowMode: AssemblyWorkflowMode = data?.assembly_workflow_mode ?? 'scan'
   const isBatchMode = workflowMode === 'batch'
 
-  const counts = data.counts
-  const assemblyEligible = data.assembly_eligible
+  const counts = data?.counts ?? {}
+  const assemblyEligible = data?.assembly_eligible
+  const sellerName = data?.seller.company_name ?? 'Сборка FBS'
 
   function stageCount(key: string): number {
     if (key === 'confirm') return counts.in_picking ?? 0
@@ -1048,8 +1067,9 @@ function WbAssemblySellerPage() {
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = assemblyEligible ?? 0
-  const displayPickList = pickListPreview ?? data.active_pick_list
-  const readyToDeliverCount = data.orders.filter((order) => orderCanDeliver(order)).length
+  const displayPickList = pickListPreview ?? data?.active_pick_list
+  const orders = data?.orders ?? []
+  const readyToDeliverCount = orders.filter((order) => orderCanDeliver(order)).length
   const markingQueueBlocked =
     stage === 'confirm' && (markingStatus.errors_count > 0 || markingStatus.unbound_count > 0)
   const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
@@ -1071,9 +1091,9 @@ function WbAssemblySellerPage() {
       <header className="topbar">
         <div>
           <p className="assembly-breadcrumb">
-            <Link to="/assembly">Сборка FBS</Link> / {data.seller.company_name}
+            <Link to="/assembly">Сборка FBS</Link> / {sellerName}
           </p>
-          <h1>{data.seller.company_name}</h1>
+          <h1>{sellerName}</h1>
           <p>
             {isBatchMode
               ? 'Режим ленты: сформируйте лист подбора → «Печать ленты стикеров» → связка баркод + стикер.'
@@ -1155,7 +1175,7 @@ function WbAssemblySellerPage() {
               Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
-          {stage === 'confirm' && isBatchMode && (displayPickList || data.active_pick_list) && (
+          {stage === 'confirm' && isBatchMode && (displayPickList || data?.active_pick_list) && (
             <button
               type="button"
               className="btn btn--primary"
@@ -1188,6 +1208,17 @@ function WbAssemblySellerPage() {
       </header>
 
       {error && <div className="alert alert--error">{error}</div>}
+      {!data && (refreshing || syncing) && !error && (
+        <div className="alert alert--success">Загружаем данные селлера…</div>
+      )}
+      {!data && !refreshing && !syncing && error && (
+        <div className="panel">
+          <p>Не удалось загрузить кабинет сборки.</p>
+          <button type="button" className="btn btn--primary" onClick={() => void load({ silent: false, stageKey: stage })}>
+            Повторить
+          </button>
+        </div>
+      )}
       {success && <div className="alert alert--success">{success}</div>}
 
       <section className="assembly-workflow panel">
@@ -1248,7 +1279,7 @@ function WbAssemblySellerPage() {
       {stage === 'confirm' && isBatchMode && (
         <BatchBindPanel
           sellerId={id}
-          disabled={loading || !data.active_pick_list}
+          disabled={loading || !data?.active_pick_list}
           onBound={async () => {
             window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
             await refreshMarkingStatus()
@@ -1414,11 +1445,11 @@ function WbAssemblySellerPage() {
           Лист подбора — отдельной кнопкой «Сформировать лист подбора» (режим скана и режим ленты не смешиваются).
           {pickListRefreshing ? ' Формируем лист подбора…' : ''}
         </p>
-        {data.warehouses.length === 0 ? (
+        {(data?.warehouses.length ?? 0) === 0 ? (
           <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB»</p>
         ) : (
           <ul className="assembly-warehouses__list">
-            {data.warehouses.map((wh) => (
+            {(data?.warehouses ?? []).map((wh) => (
               <li key={wh.id} className={wh.is_enabled ? '' : 'assembly-warehouses__item--off'}>
                 <label className="assembly-warehouses__toggle" {...uiHint(
                   wh.is_enabled
@@ -1462,11 +1493,13 @@ function WbAssemblySellerPage() {
               </tr>
             </thead>
             <tbody>
-              {data.orders.length === 0 ? (
+              {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="assembly-table__empty">Нет заказов на этой вкладке</td>
+                  <td colSpan={10} className="assembly-table__empty">
+                    {refreshing || syncing ? 'Загрузка заказов…' : 'Нет заказов на этой вкладке'}
+                  </td>
                 </tr>
-              ) : data.orders.map((order) => {
+              ) : orders.map((order) => {
                 const blockReason = orderBlockReason(order)
                 return (
                 <tr key={order.id}>

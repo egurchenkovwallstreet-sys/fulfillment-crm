@@ -26,6 +26,7 @@ import { printSupplySticker } from '../utils/printService'
 import { BatchBindPanel } from '../components/BatchBindPanel'
 import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
+import { readAssemblySellerCache, writeAssemblySellerCache } from '../utils/assemblyCache'
 import './AssemblyPage.css'
 
 const STAGES = [
@@ -42,9 +43,12 @@ function stageCount(counts: Record<string, number> | undefined, key: string): nu
 
 export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const scanRef = useRef<HTMLInputElement>(null)
-  const [data, setData] = useState<AssemblySellerDetail | null>(null)
+  const [data, setData] = useState<AssemblySellerDetail | null>(
+    () => readAssemblySellerCache(sellerId, 'new'),
+  )
   const [stage, setStage] = useState('new')
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [error, setError] = useState('')
@@ -59,37 +63,69 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const skipStageLoad = useRef(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
+  const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
+    const pickStage = opts?.stageKey ?? stage
+    const silent = opts?.silent ?? true
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+      setError('')
+    }
     try {
-      setData(await fetchAssemblySeller(sellerId, stage))
+      const fresh = await fetchAssemblySeller(sellerId, pickStage)
+      setData(fresh)
+      writeAssemblySellerCache(sellerId, pickStage, fresh)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      }
     } finally {
-      setLoading(false)
+      if (silent) {
+        setRefreshing(false)
+      } else {
+        setLoading(false)
+      }
     }
   }, [sellerId, stage])
 
   useEffect(() => {
     skipStageLoad.current = true
     let cancelled = false
-    async function boot() {
-      setSyncing(true)
-      setError('')
+
+    const cached = readAssemblySellerCache(sellerId, stage)
+    if (cached) setData(cached)
+
+    void (async () => {
+      setRefreshing(true)
       try {
-        const payload = await syncOzonAssembly(sellerId, stage)
-        if (!cancelled) setData(payload)
-      } catch (err) {
+        const fromDb = await fetchAssemblySeller(sellerId, stage)
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Ошибка синхронизации Ozon')
-          await load()
+          setData(fromDb)
+          writeAssemblySellerCache(sellerId, stage, fromDb)
         }
+      } catch (err) {
+        if (!cancelled && !cached) {
+          setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+        }
+      } finally {
+        if (!cancelled) setRefreshing(false)
+      }
+
+      setSyncing(true)
+      try {
+        const synced = await syncOzonAssembly(sellerId, stage)
+        if (!cancelled) {
+          setData(synced)
+          writeAssemblySellerCache(sellerId, stage, synced)
+        }
+      } catch {
+        // Фоновая синхронизация Ozon — оставляем данные из БД
       } finally {
         if (!cancelled) setSyncing(false)
       }
-    }
-    void boot()
+    })()
+
     return () => {
       cancelled = true
     }
@@ -101,8 +137,10 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       skipStageLoad.current = false
       return
     }
-    void load()
-  }, [load])
+    const cached = readAssemblySellerCache(sellerId, stage)
+    if (cached) setData(cached)
+    void load({ silent: true, stageKey: stage })
+  }, [load, sellerId, stage])
 
   useEffect(() => {
     setSelectedIds(new Set())
@@ -430,6 +468,8 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
             {isBatchMode
               ? 'Лента: лист подбора → печать этикеток → связка баркод + номер отправления (+ ЧЗ)'
               : 'Новые → скан → ЧЗ (если нужен) → в доставку → этикетка PDF → акт/ШК'}
+            {syncing ? ' · синхронизация с Ozon…' : ''}
+            {refreshing && !syncing ? ' · обновление списка…' : ''}
           </p>
         </div>
         <div className="topbar__actions">
