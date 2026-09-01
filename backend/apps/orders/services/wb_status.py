@@ -1,6 +1,7 @@
 """Сопоставление статусов Wildberries FBS и CRM."""
 
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.orders.models import Order
 
@@ -132,6 +133,9 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
     if order.status != Order.Status.IN_DELIVERY:
       order.status = Order.Status.IN_DELIVERY
       changed_fields.add("status")
+    if order.in_delivery_at is None:
+      order.in_delivery_at = timezone.now()
+      changed_fields.add("in_delivery_at")
   elif supplier_status == WB_SUPPLIER_DELIVERY:
     if order.status == Order.Status.IN_DELIVERY:
       order.status = Order.Status.SHIPPED

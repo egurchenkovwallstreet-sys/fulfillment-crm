@@ -73,3 +73,14 @@ def scan_off_crm_shipments():
     logger.warning("Off-CRM shipment scan errors: %s", result["errors"])
   logger.info("Off-CRM shipment scan done: %s sellers", len(result["results"]))
   return result
+
+
+@shared_task
+def clear_expired_marking_codes():
+  """Удалить коды ЧЗ из БД через 3 часа после передачи в доставку."""
+  from apps.orders.services.marking_cleanup import clear_expired_marking_codes as run_cleanup
+
+  result = run_cleanup()
+  if result["wb_cleared"] or result["ozon_cleared"]:
+    logger.info("Expired marking codes cleared: %s", result)
+  return result

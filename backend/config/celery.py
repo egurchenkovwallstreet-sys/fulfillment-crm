@@ -33,4 +33,8 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.scan_off_crm_shipments",
         "schedule": crontab(hour=4, minute=0),
     },
+    "clear-expired-marking-codes": {
+        "task": "apps.integrations.tasks.clear_expired_marking_codes",
+        "schedule": crontab(minute="*/15"),
+    },
 }

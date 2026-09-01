@@ -69,6 +69,9 @@ def _sync_crm_orders_delivery_status(
       if order.status != Order.Status.SHIPPED:
         order.status = Order.Status.SHIPPED
         update_fields.append("status")
+      if order.in_delivery_at is None:
+        order.in_delivery_at = scanned_at
+        update_fields.append("in_delivery_at")
     else:
       if order.wb_status != WB_STATUS_AFTER_DELIVER:
         order.wb_status = WB_STATUS_AFTER_DELIVER
@@ -76,6 +79,9 @@ def _sync_crm_orders_delivery_status(
       if order.status != Order.Status.IN_DELIVERY:
         order.status = Order.Status.IN_DELIVERY
         update_fields.append("status")
+      if order.in_delivery_at is None:
+        order.in_delivery_at = timezone.now()
+        update_fields.append("in_delivery_at")
     if update_fields:
       update_fields.append("updated_at")
       order.save(update_fields=update_fields)

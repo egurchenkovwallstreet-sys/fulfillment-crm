@@ -344,8 +344,16 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   order.status = Order.Status.IN_DELIVERY
   order.wb_supplier_status = WB_SUPPLIER_DELIVERY
   order.wb_status = WB_STATUS_AFTER_DELIVER
+  if order.in_delivery_at is None:
+    order.in_delivery_at = timezone.now()
   order.save(
-    update_fields=["status", "wb_supplier_status", "wb_status", "updated_at"],
+    update_fields=[
+      "status",
+      "wb_supplier_status",
+      "wb_status",
+      "in_delivery_at",
+      "updated_at",
+    ],
   )
 
   supply.status = Supply.Status.CONFIRMED
