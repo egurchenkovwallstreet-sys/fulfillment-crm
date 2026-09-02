@@ -1,0 +1,28 @@
+---
+description: Always commit and push after completing code changes
+alwaysApply: true
+---
+
+# Auto commit and push
+
+After finishing a task that changes project files, **always commit and push** without waiting for the user to ask.
+
+## When to commit
+
+- Feature, fix, or refactor is done and files were modified
+- Do **not** commit secrets (`.env`, credentials, tokens)
+- Do **not** commit unrelated local edits — only files from the current task
+
+## Workflow
+
+1. `git status` + `git diff` — review what will be committed
+2. Stage only relevant files
+3. Write a concise commit message (why, not just what)
+4. Commit and `git push` to the tracked remote branch
+5. Tell the user the commit hash and that push succeeded
+
+## Exceptions
+
+- User explicitly says not to commit/push
+- Nothing to commit (no changes)
+- Commit or push fails — fix and retry; report if blocked (auth, conflicts)
