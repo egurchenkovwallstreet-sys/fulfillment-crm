@@ -122,3 +122,63 @@
   color: #64748b;
   font-size: 0.9rem;
 }
+
+.sellers-warehouses-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sellers-warehouses-block__empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.sellers-warehouses-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sellers-warehouses-group + .sellers-warehouses-group {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.sellers-warehouses-group__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.sellers-warehouses-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sellers-warehouses-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sellers-warehouses-list__meta {
+  display: block;
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}

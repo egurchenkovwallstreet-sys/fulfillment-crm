@@ -8,6 +8,7 @@ from apps.accounts.tenant import get_seller_for_user
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer, SellerWarehouseToggleSerializer
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
+from apps.sellers.services.warehouse_manage import WarehouseManageError, delete_seller_wb_warehouse
 
 
 class SellerWarehouseListView(APIView):
@@ -60,3 +61,13 @@ class SellerWarehouseToggleView(APIView):
       "success": True,
       "warehouse": SellerWarehouseSerializer(warehouse).data,
     })
+
+  def delete(self, request, seller_id, warehouse_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    try:
+      result = delete_seller_wb_warehouse(seller, warehouse_id, user=request.user)
+    except WarehouseManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **result})

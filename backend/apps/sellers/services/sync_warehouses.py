@@ -7,6 +7,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
+from apps.sellers.services.warehouse_manage import excluded_wb_warehouse_ids
 
 
 class WarehouseSyncError(Exception):
@@ -40,11 +41,16 @@ def sync_seller_warehouses(seller: Seller, *, user=None) -> dict:
   now = timezone.now()
   created = 0
   updated = 0
+  skipped = 0
+  excluded = excluded_wb_warehouse_ids(seller)
   for item in remote:
     wh_id = item.get("id")
     if wh_id is None:
       continue
     wh_id = int(wh_id)
+    if wh_id in excluded:
+      skipped += 1
+      continue
     _, was_created = SellerWarehouse.objects.update_or_create(
       seller=seller,
       wb_warehouse_id=wh_id,
@@ -65,11 +71,12 @@ def sync_seller_warehouses(seller: Seller, *, user=None) -> dict:
     seller=seller,
     action_type=AuditLog.ActionType.WB_SYNC,
     message=f"Синхронизация складов WB: {len(remote)} шт.",
-    details={"created": created, "updated": updated, "total": len(remote)},
+    details={"created": created, "updated": updated, "skipped_excluded": skipped, "total": len(remote)},
   )
 
   return {
     "created": created,
     "updated": updated,
+    "skipped_excluded": skipped,
     "total": len(remote),
   }

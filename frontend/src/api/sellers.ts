@@ -21,6 +21,13 @@ export function syncSellerWarehouses(sellerId: number) {
   )
 }
 
+export function deleteSellerWarehouse(sellerId: number, warehouseId: number) {
+  return apiFetch<{ success: boolean; detail: string }>(
+    `/api/sellers/${sellerId}/warehouses/${warehouseId}/`,
+    { method: 'DELETE' },
+  )
+}
+
 export function toggleSellerWarehouse(sellerId: number, warehouseId: number, isEnabled: boolean) {
   return apiFetch<{ success: boolean; warehouse: SellerWarehouse }>(
     `/api/sellers/${sellerId}/warehouses/${warehouseId}/`,
@@ -58,5 +65,12 @@ export function toggleSellerOzonWarehouse(sellerId: number, warehouseId: number,
       method: 'PATCH',
       body: JSON.stringify({ is_enabled: isEnabled }),
     },
+  )
+}
+
+export function deleteSellerOzonWarehouse(sellerId: number, warehouseId: number) {
+  return apiFetch<{ success: boolean; detail: string }>(
+    `/api/sellers/${sellerId}/ozon-warehouses/${warehouseId}/`,
+    { method: 'DELETE' },
   )
 }

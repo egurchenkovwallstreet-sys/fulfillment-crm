@@ -10,6 +10,7 @@ from apps.sellers.models import Seller, SellerOzonWarehouse
 from apps.sellers.serializers import SellerManageSerializer, SellerOzonWarehouseSerializer, SellerWarehouseToggleSerializer
 from apps.sellers.services.seller_manage import SellerManageError, apply_ozon_keys, clear_ozon_keys
 from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
+from apps.sellers.services.warehouse_manage import WarehouseManageError, delete_seller_ozon_warehouse
 
 
 class SellerMarketplaceFlagsView(APIView):
@@ -123,3 +124,13 @@ class SellerOzonWarehouseToggleView(APIView):
       "success": True,
       "warehouse": SellerOzonWarehouseSerializer(warehouse).data,
     })
+
+  def delete(self, request, seller_id, warehouse_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    try:
+      result = delete_seller_ozon_warehouse(seller, warehouse_id, user=request.user)
+    except WarehouseManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"success": True, **result})

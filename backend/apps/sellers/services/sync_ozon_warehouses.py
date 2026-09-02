@@ -7,6 +7,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.ozon_client import OzonApiError
 from apps.orders.services.ozon_counts import OzonCountsError, ozon_client_for_seller
 from apps.sellers.models import Seller, SellerOzonWarehouse
+from apps.sellers.services.warehouse_manage import excluded_ozon_warehouse_ids
 
 
 class OzonWarehouseSyncError(Exception):
@@ -29,11 +30,17 @@ def sync_seller_ozon_warehouses(seller: Seller, *, user=None) -> dict:
   now = timezone.now()
   created = 0
   updated = 0
+  skipped = 0
+  excluded = excluded_ozon_warehouse_ids(seller)
   for item in remote:
     if not isinstance(item, dict):
       continue
     wh_id = item.get("warehouse_id") or item.get("id")
     if wh_id is None:
+      continue
+    wh_id = int(wh_id)
+    if wh_id in excluded:
+      skipped += 1
       continue
     status = str(item.get("status") or "").lower()
     if status in {"disabled", "blocked"}:
@@ -57,6 +64,6 @@ def sync_seller_ozon_warehouses(seller: Seller, *, user=None) -> dict:
     seller=seller,
     action_type=AuditLog.ActionType.OTHER,
     message=f"Синхронизация складов Ozon: {len(remote)} шт.",
-    details={"created": created, "updated": updated, "total": len(remote)},
+    details={"created": created, "updated": updated, "skipped_excluded": skipped, "total": len(remote)},
   )
-  return {"created": created, "updated": updated, "total": len(remote)}
+  return {"created": created, "updated": updated, "skipped_excluded": skipped, "total": len(remote)}

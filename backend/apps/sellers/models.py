@@ -114,6 +114,39 @@ class SellerOzonWarehouse(models.Model):
     return f"{self.seller} · {label}"
 
 
+class ExcludedSellerWarehouse(models.Model):
+  """Склад, удалённый из CRM — синхронизация не должна возвращать его в списки."""
+
+  MARKETPLACE_WB = "wb"
+  MARKETPLACE_OZON = "ozon"
+  MARKETPLACE_CHOICES = (
+    (MARKETPLACE_WB, "Wildberries"),
+    (MARKETPLACE_OZON, "Ozon"),
+  )
+
+  seller = models.ForeignKey(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="excluded_warehouses",
+  )
+  marketplace = models.CharField("Маркетплейс", max_length=10, choices=MARKETPLACE_CHOICES)
+  warehouse_external_id = models.BigIntegerField("ID склада в ЛК")
+  excluded_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    verbose_name = "Исключённый склад селлера"
+    verbose_name_plural = "Исключённые склады селлеров"
+    constraints = [
+      models.UniqueConstraint(
+        fields=["seller", "marketplace", "warehouse_external_id"],
+        name="uniq_excluded_seller_warehouse",
+      ),
+    ]
+
+  def __str__(self):
+    return f"{self.seller} · {self.marketplace} #{self.warehouse_external_id}"
+
+
 class SellerInvite(models.Model):
   """Одноразовая ссылка для регистрации селлера в CRM."""
 

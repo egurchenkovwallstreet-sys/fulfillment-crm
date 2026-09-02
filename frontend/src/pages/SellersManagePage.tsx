@@ -11,6 +11,16 @@ import {
   updateSeller,
   type SellerManageItem,
 } from '../api/sellerAdmin'
+import {
+  deleteSellerOzonWarehouse,
+  deleteSellerWarehouse,
+  fetchSellerOzonWarehouses,
+  fetchSellerWarehouses,
+  syncSellerOzonWarehouses,
+  syncSellerWarehouses,
+  type SellerOzonWarehouse,
+  type SellerWarehouse,
+} from '../api/sellers'
 import { copyToClipboard } from '../utils/copyToClipboard'
 import { SellerTariffModal } from '../components/SellerTariffModal'
 import { uiHint } from '../utils/uiHint'
@@ -43,6 +53,11 @@ export function SellersManagePage() {
   const [editOzonClientId, setEditOzonClientId] = useState('')
   const [editOzonApiKey, setEditOzonApiKey] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+  const [wbWarehouses, setWbWarehouses] = useState<SellerWarehouse[]>([])
+  const [ozonWarehouses, setOzonWarehouses] = useState<SellerOzonWarehouse[]>([])
+  const [warehousesLoading, setWarehousesLoading] = useState(false)
+  const [warehousesSyncing, setWarehousesSyncing] = useState(false)
+  const [warehouseDeletingId, setWarehouseDeletingId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -68,7 +83,95 @@ export function SellersManagePage() {
     setEditWbToken('')
     setEditOzonClientId(seller.ozon_client_id || '')
     setEditOzonApiKey('')
+    setWbWarehouses([])
+    setOzonWarehouses([])
     setError('')
+    void loadSellerWarehouses(seller)
+  }
+
+  async function loadSellerWarehouses(seller: SellerManageItem) {
+    setWarehousesLoading(true)
+    try {
+      const tasks: Promise<void>[] = []
+      if (seller.wb_enabled) {
+        tasks.push(
+          fetchSellerWarehouses(seller.id).then((rows) => {
+            setWbWarehouses(rows)
+          }),
+        )
+      }
+      if (seller.ozon_enabled) {
+        tasks.push(
+          fetchSellerOzonWarehouses(seller.id).then((rows) => {
+            setOzonWarehouses(rows)
+          }),
+        )
+      }
+      await Promise.all(tasks)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить склады')
+    } finally {
+      setWarehousesLoading(false)
+    }
+  }
+
+  async function handleSyncWarehouses() {
+    if (!editSeller) return
+    setWarehousesSyncing(true)
+    setError('')
+    try {
+      if (editSeller.wb_enabled) {
+        const wb = await syncSellerWarehouses(editSeller.id)
+        setWbWarehouses(wb.warehouses)
+      }
+      if (editSeller.ozon_enabled) {
+        const oz = await syncSellerOzonWarehouses(editSeller.id)
+        setOzonWarehouses(oz.warehouses)
+      }
+      setMessage('Склады обновлены из маркетплейса')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка синхронизации складов')
+    } finally {
+      setWarehousesSyncing(false)
+    }
+  }
+
+  async function handleDeleteWarehouse(
+    marketplace: 'wb' | 'ozon',
+    warehouse: SellerWarehouse | SellerOzonWarehouse,
+  ) {
+    if (!editSeller) return
+    const label =
+      marketplace === 'wb'
+        ? (warehouse as SellerWarehouse).name ||
+          `Склад WB #${(warehouse as SellerWarehouse).wb_warehouse_id}`
+        : (warehouse as SellerOzonWarehouse).name ||
+          `Склад Ozon #${(warehouse as SellerOzonWarehouse).ozon_warehouse_id}`
+    if (
+      !window.confirm(
+        `Удалить склад «${label}» из CRM?\n\nОн исчезнет из сборки, приёмки и инвентаризации. Повторная синхронизация не вернёт его в список.`,
+      )
+    ) {
+      return
+    }
+    setWarehouseDeletingId(warehouse.id)
+    setError('')
+    try {
+      const result =
+        marketplace === 'wb'
+          ? await deleteSellerWarehouse(editSeller.id, warehouse.id)
+          : await deleteSellerOzonWarehouse(editSeller.id, warehouse.id)
+      if (marketplace === 'wb') {
+        setWbWarehouses((rows) => rows.filter((row) => row.id !== warehouse.id))
+      } else {
+        setOzonWarehouses((rows) => rows.filter((row) => row.id !== warehouse.id))
+      }
+      setMessage(result.detail)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить склад')
+    } finally {
+      setWarehouseDeletingId(null)
+    }
   }
 
   async function handleCreate(e: FormEvent) {
@@ -500,6 +603,103 @@ export function SellersManagePage() {
                     </button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {(editWbEnabled || editOzonEnabled) && (
+              <div className="sellers-form__block sellers-warehouses-block">
+                <div className="sellers-warehouses-block__head">
+                  <strong>Склады FBS</strong>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    disabled={warehousesLoading || warehousesSyncing || savingEdit}
+                    onClick={() => void handleSyncWarehouses()}
+                    {...uiHint('Подтянуть склады из WB/Ozon. Удалённые ранее склады не вернутся.')}
+                  >
+                    {warehousesSyncing ? 'Синхронизация…' : 'Обновить из ЛК'}
+                  </button>
+                </div>
+                <p className="sellers-ozon-hint">
+                  Удалённый склад исчезает из всех списков CRM и не появится снова при синхронизации.
+                  Чтобы временно скрыть склад без удаления — используйте сборку FBS (галочка «Обслуживаем»).
+                </p>
+                {warehousesLoading ? (
+                  <p className="sellers-warehouses-block__empty">Загрузка складов…</p>
+                ) : (
+                  <>
+                    {editWbEnabled && (
+                      <div className="sellers-warehouses-group">
+                        <span className="sellers-warehouses-group__title">Wildberries</span>
+                        {wbWarehouses.length === 0 ? (
+                          <p className="sellers-warehouses-block__empty">
+                            Нет складов. Подключите токен WB и нажмите «Обновить из ЛК».
+                          </p>
+                        ) : (
+                          <ul className="sellers-warehouses-list">
+                            {wbWarehouses.map((warehouse) => (
+                              <li key={warehouse.id} className="sellers-warehouses-list__item">
+                                <div>
+                                  <strong>{warehouse.name || `Склад #${warehouse.wb_warehouse_id}`}</strong>
+                                  {warehouse.address && (
+                                    <span className="sellers-warehouses-list__meta">{warehouse.address}</span>
+                                  )}
+                                  {!warehouse.is_enabled && (
+                                    <span className="sellers-tag sellers-tag--muted">выключен в сборке</span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn--danger-outline btn--sm"
+                                  disabled={warehouseDeletingId === warehouse.id || savingEdit}
+                                  onClick={() => void handleDeleteWarehouse('wb', warehouse)}
+                                  {...uiHint('Удалить склад из CRM навсегда.')}
+                                >
+                                  {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                    {editOzonEnabled && (
+                      <div className="sellers-warehouses-group">
+                        <span className="sellers-warehouses-group__title">Ozon</span>
+                        {ozonWarehouses.length === 0 ? (
+                          <p className="sellers-warehouses-block__empty">
+                            Нет складов. Подключите ключи Ozon и нажмите «Обновить из ЛК».
+                          </p>
+                        ) : (
+                          <ul className="sellers-warehouses-list">
+                            {ozonWarehouses.map((warehouse) => (
+                              <li key={warehouse.id} className="sellers-warehouses-list__item">
+                                <div>
+                                  <strong>{warehouse.name || `Склад #${warehouse.ozon_warehouse_id}`}</strong>
+                                  {warehouse.is_rfbs && (
+                                    <span className="sellers-tag sellers-tag--muted">rFBS</span>
+                                  )}
+                                  {!warehouse.is_enabled && (
+                                    <span className="sellers-tag sellers-tag--muted">выключен в сборке</span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn--danger-outline btn--sm"
+                                  disabled={warehouseDeletingId === warehouse.id || savingEdit}
+                                  onClick={() => void handleDeleteWarehouse('ozon', warehouse)}
+                                  {...uiHint('Удалить склад из CRM навсегда.')}
+                                >
+                                  {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
