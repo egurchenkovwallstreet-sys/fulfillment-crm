@@ -243,6 +243,7 @@ class XlIntakeLine(models.Model):
   barcode = models.CharField("Баркод", max_length=100)
   quantity = models.PositiveIntegerField("Количество", default=0)
   applied_quantity = models.PositiveIntegerField("Уже применено в CRM", default=0)
+  cell_number = models.CharField("Ячейка", max_length=50, blank=True, default="")
   sort_order = models.PositiveIntegerField("Порядковый номер баркода")
 
   class Meta:

@@ -16,13 +16,14 @@ import {
 } from '../api/xlIntake'
 import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
+import { printCellLabel, type CellLabelData } from '../utils/cellLabelPrint'
 import './XlIntakePage.css'
 
 const SCAN_IDLE_MS = 120
 const STATUS_LABEL: Record<XlIntakeSession['status'], string> = {
   scanning: 'Сканирование',
   saved: 'Сохранена',
-  applied: 'Ячейки созданы',
+  applied: 'Карточки WB',
   completed: 'Завершена',
 }
 
@@ -97,6 +98,9 @@ export function XlIntakePage() {
       try {
         const next = await scanXlBarcode(activeId, value)
         setSession(next)
+        if (next.print_cell_label && next.cell_label) {
+          printCellLabel(next.cell_label as CellLabelData, true)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Ошибка скана')
       } finally {
@@ -227,16 +231,15 @@ export function XlIntakePage() {
       const next = await connectXlWb(activeId, token.trim())
       setSession(next)
       setToken('')
-      const created = next.created_products ?? 0
       const updated = next.updated_products ?? 0
-      if (created === 0 && updated === 0) {
+      if (updated === 0 && (next.matched_count ?? 0) === 0) {
         setSuccess('Новых позиций для применения нет — всё уже в CRM.')
       } else if ((next.matched_count ?? 0) === 0) {
         setSuccess('')
-        setError('Ни один баркод не найден в ЛК WB. Ячейки не созданы.')
+        setError('Ни один баркод не найден в ЛК WB. Карточки не обновлены.')
       } else {
         setSuccess(
-          `Ячеек создано: ${created}, обновлено: ${updated}. Можно продолжать сканирование.`,
+          `Карточки WB обновлены: ${updated}. Не найдено в ЛК: ${next.unmatched_count ?? 0}.`,
         )
       }
       if ((next.unmatched || []).length > 0) setShowUnmatched(true)
@@ -276,8 +279,8 @@ export function XlIntakePage() {
         <div>
           <h1>Приёмка в XL</h1>
           <p>
-            Новый клиент без API: скан каждой единицы → список баркодов → Excel. Ячейки и фото
-            появятся после токена WB. На склад WB не отправляем.
+            Скан каждой единицы → ячейка сразу (без токена WB) → Excel. После токена WB CRM
+            подтянет название, фото и размер по баркоду. На склад WB не отправляем.
           </p>
         </div>
         {session && (
@@ -389,6 +392,13 @@ export function XlIntakePage() {
             </div>
           </div>
 
+          {session.last_cell_number && (
+            <div className="xl-cell-display" aria-live="polite">
+              <span className="xl-cell-display__label">Ячейка</span>
+              <span className="xl-cell-display__value">{session.last_cell_number}</span>
+            </div>
+          )}
+
           {session.last_barcode && <p className="xl-last-code">{session.last_barcode}</p>}
 
           <input
@@ -441,10 +451,10 @@ export function XlIntakePage() {
           </div>
 
           <div className="xl-connect" data-allow-blur>
-            <h3>{session.status === 'applied' ? 'Обновить ячейки из WB' : 'Подключить API WB'}</h3>
+            <h3>{session.status === 'applied' ? 'Обновить карточки WB' : 'Подключить API WB'}</h3>
             <p>
-              CRM подтянет карточки, фото и расставит ячейки. После создания ячеек можно продолжать
-              сканирование и снова применить WB для новых баркодов.
+              CRM подтянет название, фото и размер по баркоду. Ячейки уже созданы при сканировании —
+              токен только дополняет карточки товара.
             </p>
             {!session.has_wb_token && (
               <label className="xl-field">
@@ -467,14 +477,14 @@ export function XlIntakePage() {
                 Баркоды не найдены в ЛК WB ({session.unmatched.length})
               </button>
             )}
-            <span {...hintWrapProps(session.status === 'applied' ? 'Подтянуть новые баркоды из WB и создать для них ячейки.' : 'Подключить API WB, создать ячейки и подтянуть карточки из каталога.')}>
+            <span {...hintWrapProps(session.status === 'applied' ? 'Подтянуть карточки WB для новых баркодов.' : 'Подключить API WB и обогатить ячейки данными из каталога.')}>
               <button
                 className="btn btn--primary"
                 type="button"
                 onClick={() => void handleConnectWb()}
                 disabled={loading || session.total_quantity < 1}
               >
-                {session.status === 'applied' ? 'Применить новые баркоды' : 'Создать ячейки из каталога WB'}
+                {session.status === 'applied' ? 'Обновить карточки WB' : 'Подключить API WB'}
               </button>
             </span>
           </div>
@@ -485,6 +495,7 @@ export function XlIntakePage() {
               <tr>
                 <th>№</th>
                 <th>Баркод</th>
+                <th>Ячейка</th>
                 <th>Количество</th>
                 <th />
               </tr>
@@ -497,6 +508,7 @@ export function XlIntakePage() {
                 >
                   <td>{line.sort_order}</td>
                   <td>{line.barcode}</td>
+                  <td className="xl-cell-col">{line.cell_number || '—'}</td>
                   <td>
                     <input
                       className="xl-qty-input"
@@ -556,6 +568,7 @@ export function XlIntakePage() {
                 <tr>
                   <th>№</th>
                   <th>Баркод</th>
+                  <th>Ячейка</th>
                   <th>Количество</th>
                 </tr>
               </thead>
@@ -564,6 +577,7 @@ export function XlIntakePage() {
                   <tr key={line.barcode}>
                     <td>{line.sort_order}</td>
                     <td>{line.barcode}</td>
+                    <td>{line.cell_number || '—'}</td>
                     <td>{line.quantity}</td>
                   </tr>
                 ))}
@@ -577,7 +591,7 @@ export function XlIntakePage() {
         <div className="xl-modal" role="dialog" aria-modal="true">
           <div className="xl-modal__box">
             <h2>Не найдены в личном кабинете WB</h2>
-            <p>Ячейки для этих баркодов не создавались.</p>
+            <p>Карточки WB для этих баркодов не найдены — ячейки уже созданы при сканировании.</p>
             <table className="xl-table">
               <thead>
                 <tr>

@@ -9,6 +9,7 @@ export type XlIntakeLine = {
   quantity: number
   applied_quantity?: number
   sort_order: number
+  cell_number?: string
 }
 
 export type XlIntakeUnmatched = {
@@ -27,6 +28,16 @@ export type XlIntakeSession = {
   last_barcode: string
   last_sort_order: number
   last_quantity: number
+  last_cell_number?: string
+  print_cell_label?: boolean
+  cell_label?: {
+    product_id?: number
+    seller_name: string
+    cell_number: string
+    barcode: string
+    marketplace?: string
+    marketplace_label?: string
+  } | null
   lines: XlIntakeLine[]
   unmatched: XlIntakeUnmatched[]
   warehouse_sync_warning: string

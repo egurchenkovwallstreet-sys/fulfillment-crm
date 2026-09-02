@@ -1,6 +1,7 @@
-"""Приёмка в XL: поштучный скан без API, Excel, ячейки после подключения WB."""
+"""Приёмка в XL: поштучный скан без API, Excel, ячейки при скане, карточки WB после токена."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 
 from django.db import transaction
@@ -16,6 +17,7 @@ from apps.sellers.services.invite import ensure_seller_invite
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 from apps.warehouse.models import Product, StockOperation, XlIntakeLine, XlIntakeSession
 from apps.warehouse.services.catalog_fetch import CatalogError, fetch_seller_catalog_items
+from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
 
 try:
@@ -26,6 +28,14 @@ except ImportError:  # pragma: no cover
 
 class XlIntakeError(Exception):
   pass
+
+
+@dataclass
+class XlScanResult:
+  session: XlIntakeSession
+  cell_number: str = ""
+  print_cell_label: bool = False
+  cell_label: dict | None = None
 
 
 def _normalize_barcode(value: str) -> str:
@@ -39,12 +49,29 @@ def _can_scan(session: XlIntakeSession) -> bool:
   return session.status != XlIntakeSession.Status.COMPLETED
 
 
-def serialize_line(line: XlIntakeLine) -> dict:
+def _line_cell_number(line: XlIntakeLine, seller: Seller, marketplace: str) -> str:
+  if (line.cell_number or "").strip():
+    return line.cell_number.strip()
+  product = (
+    Product.objects.filter(seller=seller, barcode=line.barcode, marketplace=marketplace)
+    .select_related("cell")
+    .first()
+  )
+  if product and product.cell_id:
+    return product.cell.number
+  return ""
+
+
+def serialize_line(line: XlIntakeLine, *, seller: Seller | None = None, marketplace: str = WB) -> dict:
+  cell_number = ""
+  if seller is not None:
+    cell_number = _line_cell_number(line, seller, marketplace)
   return {
     "barcode": line.barcode,
     "quantity": line.quantity,
     "applied_quantity": line.applied_quantity,
     "sort_order": line.sort_order,
+    "cell_number": cell_number,
   }
 
 
@@ -54,24 +81,27 @@ def serialize_session(
   last_line: XlIntakeLine | None = None,
 ) -> dict:
   lines_obj = list(session.lines.order_by("sort_order"))
-  lines = [serialize_line(line) for line in lines_obj]
+  mp = session.marketplace or WB
+  lines = [serialize_line(line, seller=session.seller, marketplace=mp) for line in lines_obj]
   unique_count = len(lines_obj)
   total_quantity = sum(line.quantity for line in lines_obj)
   last = last_line or getattr(session, "_last_line", None)
   if last is None and lines_obj:
     last = lines_obj[-1]
+  last_cell_number = _line_cell_number(last, session.seller, mp) if last else ""
   return {
     "id": session.id,
     "status": session.status,
     "seller_id": session.seller_id,
     "seller_name": session.seller.company_name,
     "has_wb_token": bool(session.seller.wb_api_token_encrypted),
-    "marketplace": session.marketplace or WB,
+    "marketplace": mp,
     "unique_count": unique_count,
     "total_quantity": total_quantity,
     "last_barcode": last.barcode if last else "",
     "last_sort_order": last.sort_order if last else 0,
     "last_quantity": last.quantity if last else 0,
+    "last_cell_number": last_cell_number,
     "lines": lines,
     "unmatched": session.unmatched or [],
     "warehouse_sync_warning": session.warehouse_sync_warning,
@@ -124,8 +154,65 @@ def create_session_for_seller(*, seller: Seller, user=None, marketplace: str = W
   return session
 
 
+def _product_for_barcode(session: XlIntakeSession, barcode: str) -> Product | None:
+  return (
+    Product.objects.select_for_update()
+    .select_related("cell", "seller")
+    .filter(
+      seller_id=session.seller_id,
+      barcode=barcode,
+      marketplace=session.marketplace or WB,
+    )
+    .first()
+  )
+
+
+def _record_xl_intake_stock(*, product: Product, session: XlIntakeSession, user=None) -> None:
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.INTAKE,
+    quantity=1,
+    performed_by=user,
+    comment=f"XL-приёмка #{session.id}",
+  )
+
+
+def _bind_product_on_scan(
+  session: XlIntakeSession,
+  *,
+  barcode: str,
+  line: XlIntakeLine,
+  user=None,
+) -> tuple[Product, bool]:
+  """Привязать баркод к ячейке. Возвращает (product, created_new_cell)."""
+  product = _product_for_barcode(session, barcode)
+  if product:
+    product.quantity += 1
+    product.save(update_fields=["quantity", "updated_at"])
+    _record_xl_intake_stock(product=product, session=session, user=user)
+    cell_number = product.cell.number
+    if line.cell_number != cell_number:
+      line.cell_number = cell_number
+      line.save(update_fields=["cell_number"])
+    return product, False
+
+  cell = create_cell_with_next_number(session.seller, session.marketplace or WB)
+  product = Product.objects.create(
+    seller=session.seller,
+    barcode=barcode,
+    cell=cell,
+    quantity=1,
+    marketplace=session.marketplace or WB,
+  )
+  refresh_cell_occupied(cell)
+  _record_xl_intake_stock(product=product, session=session, user=user)
+  line.cell_number = cell.number
+  line.save(update_fields=["cell_number"])
+  return product, True
+
+
 @transaction.atomic
-def scan_unit(session: XlIntakeSession, barcode: str) -> XlIntakeSession:
+def scan_unit(session: XlIntakeSession, barcode: str, *, user=None) -> XlScanResult:
   session = XlIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   if not _can_scan(session):
     raise XlIntakeError("Приёмка завершена — сканирование закрыто")
@@ -139,6 +226,7 @@ def scan_unit(session: XlIntakeSession, barcode: str) -> XlIntakeSession:
     .filter(session=session, barcode=barcode)
     .first()
   )
+  is_rescan = line is not None
   if line:
     line.quantity += 1
     line.save(update_fields=["quantity"])
@@ -157,8 +245,24 @@ def scan_unit(session: XlIntakeSession, barcode: str) -> XlIntakeSession:
       sort_order=max_order + 1,
     )
 
-  session._last_line = line  # noqa: SLF001 — передаём в serialize через параметр
-  return session
+  product, created_new_cell = _bind_product_on_scan(
+    session,
+    barcode=barcode,
+    line=line,
+    user=user,
+  )
+  cell_number = product.cell.number
+  session._last_line = line  # noqa: SLF001
+
+  print_cell_label = created_new_cell and not is_rescan
+  cell_label = build_cell_label_data(product) if print_cell_label else None
+
+  return XlScanResult(
+    session=session,
+    cell_number=cell_number,
+    print_cell_label=print_cell_label,
+    cell_label=cell_label,
+  )
 
 
 def last_scanned_line(session: XlIntakeSession) -> XlIntakeLine | None:
@@ -176,8 +280,15 @@ def update_line_quantity(session: XlIntakeSession, *, barcode: str, quantity: in
   line = XlIntakeLine.objects.select_for_update().filter(session=session, barcode=barcode).first()
   if not line:
     raise XlIntakeError("Строка не найдена")
+  delta = quantity - line.quantity
   line.quantity = quantity
   line.save(update_fields=["quantity"])
+  if delta:
+    product = _product_for_barcode(session, barcode)
+    if product:
+      product.quantity = max(0, product.quantity + delta)
+      product.save(update_fields=["quantity", "updated_at"])
+      refresh_cell_occupied(product.cell)
   session._last_line = line  # noqa: SLF001
   return session
 
@@ -188,9 +299,16 @@ def delete_line(session: XlIntakeSession, *, barcode: str) -> XlIntakeSession:
   if not _can_scan(session):
     raise XlIntakeError("Приёмка завершена — редактирование закрыто")
   barcode = _normalize_barcode(barcode)
-  deleted, _ = XlIntakeLine.objects.filter(session=session, barcode=barcode).delete()
-  if not deleted:
+  line = XlIntakeLine.objects.select_for_update().filter(session=session, barcode=barcode).first()
+  if not line:
     raise XlIntakeError("Строка не найдена")
+  removed_qty = line.quantity
+  product = _product_for_barcode(session, barcode)
+  line.delete()
+  if product and removed_qty:
+    product.quantity = max(0, product.quantity - removed_qty)
+    product.save(update_fields=["quantity", "updated_at"])
+    refresh_cell_occupied(product.cell)
   return session
 
 
@@ -224,11 +342,17 @@ def build_excel_bytes(session: XlIntakeSession) -> bytes:
   wb = Workbook()
   ws = wb.active
   ws.title = "Приёмка"
-  ws.append(["Баркод", "Количество"])
+  ws.append(["Баркод", "Количество", "Ячейка"])
+  mp = session.marketplace or WB
   for line in session.lines.order_by("sort_order"):
-    ws.append([line.barcode, line.quantity])
+    ws.append([
+      line.barcode,
+      line.quantity,
+      _line_cell_number(line, session.seller, mp),
+    ])
   ws.column_dimensions["A"].width = 24
   ws.column_dimensions["B"].width = 14
+  ws.column_dimensions["C"].width = 14
 
   buffer = BytesIO()
   wb.save(buffer)
@@ -283,11 +407,6 @@ def apply_after_wb(
     line.barcode: line.quantity
     for line in session.lines.order_by("sort_order")
   }
-  delta_by_barcode = {
-    line.barcode: line.quantity - line.applied_quantity
-    for line in session.lines.order_by("sort_order")
-    if line.quantity > line.applied_quantity
-  }
   scanned = set(qty_by_barcode)
   matched_items = [item for item in catalog_items if item.barcode in scanned]
   matched_barcodes = {item.barcode for item in matched_items}
@@ -296,32 +415,6 @@ def apply_after_wb(
     for barcode in qty_by_barcode
     if barcode not in matched_barcodes
   ]
-
-  if not delta_by_barcode:
-    session.unmatched = unmatched
-    session.warehouse_sync_warning = warehouse_warning[:500]
-    session.save(update_fields=["unmatched", "warehouse_sync_warning"])
-    return {
-      **serialize_session(session),
-      "created_products": 0,
-      "updated_products": 0,
-      "created_cells": [],
-      "unmatched_count": len(unmatched),
-      "matched_count": len(matched_items),
-    }
-
-  if not matched_items:
-    session.unmatched = unmatched
-    session.warehouse_sync_warning = warehouse_warning[:500]
-    session.save(update_fields=["unmatched", "warehouse_sync_warning"])
-    return {
-      **serialize_session(session),
-      "created_products": 0,
-      "updated_products": 0,
-      "created_cells": [],
-      "unmatched_count": len(unmatched),
-      "matched_count": 0,
-    }
 
   created_products = 0
   updated_products = 0
@@ -333,27 +426,28 @@ def apply_after_wb(
       for line in session.lines.select_for_update().order_by("sort_order")
     }
     for item in matched_items:
-      delta = delta_by_barcode.get(item.barcode, 0)
-      if delta <= 0:
+      line = lines_by_barcode.get(item.barcode)
+      if not line:
         continue
-      line = lines_by_barcode[item.barcode]
       product = (
         Product.objects.select_related("cell")
         .filter(seller=seller, barcode=item.barcode, marketplace=session.marketplace)
         .first()
       )
       if product:
-        product.quantity += delta
         _apply_card_fields(product, item)
         product.save()
         updated_products += 1
+        if not line.cell_number and product.cell_id:
+          line.cell_number = product.cell.number
+          line.save(update_fields=["cell_number"])
       else:
         cell = create_cell_with_next_number(seller, session.marketplace)
         product = Product.objects.create(
           seller=seller,
           barcode=item.barcode,
           cell=cell,
-          quantity=delta,
+          quantity=line.quantity,
           marketplace=session.marketplace,
         )
         _apply_card_fields(product, item)
@@ -361,14 +455,16 @@ def apply_after_wb(
         refresh_cell_occupied(cell)
         created_products += 1
         created_cells.append(cell.number)
+        line.cell_number = cell.number
+        line.save(update_fields=["cell_number"])
+        StockOperation.objects.create(
+          product=product,
+          operation_type=StockOperation.OperationType.INTAKE,
+          quantity=line.quantity,
+          performed_by=user,
+          comment=f"XL-приёмка #{session.id} (legacy)",
+        )
 
-      StockOperation.objects.create(
-        product=product,
-        operation_type=StockOperation.OperationType.INTAKE,
-        quantity=delta,
-        performed_by=user,
-        comment=f"XL-приёмка #{session.id}",
-      )
       line.applied_quantity = line.quantity
       line.save(update_fields=["applied_quantity"])
 
@@ -385,7 +481,7 @@ def apply_after_wb(
     seller=seller,
     action_type=AuditLog.ActionType.INTAKE,
     message=(
-      f"XL-приёмка #{session.id}: карточки WB, ячеек {created_products}, "
+      f"XL-приёмка #{session.id}: карточки WB обновлены ({updated_products}), "
       f"не найдено в ЛК {len(unmatched)}"
     ),
     details={

@@ -83,10 +83,14 @@ class XlIntakeScanView(APIView):
     session = _session_or_404(session_id)
     barcode = str(request.data.get("barcode") or "")
     try:
-      session = scan_unit(session, barcode)
+      result = scan_unit(session, barcode, user=request.user)
     except XlIntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    return Response(serialize_session(session, last_line=last_scanned_line(session)))
+    payload = serialize_session(result.session, last_line=last_scanned_line(result.session))
+    payload["print_cell_label"] = result.print_cell_label
+    payload["cell_label"] = result.cell_label
+    payload["last_cell_number"] = result.cell_number
+    return Response(payload)
 
 
 class XlIntakeLineUpdateView(APIView):
