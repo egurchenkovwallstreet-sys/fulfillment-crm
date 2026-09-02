@@ -23,6 +23,7 @@ export type XlIntakeSession = {
   seller_id: number
   seller_name: string
   has_wb_token: boolean
+  marketplace?: string
   unique_count: number
   total_quantity: number
   last_barcode: string
