@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
-from apps.accounts.tenant import get_seller_for_user, sellers_for_user
+from apps.accounts.tenant import get_product_for_user, get_seller_for_user, sellers_for_user, stock_operations_for_user
 from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller
 
@@ -190,10 +190,7 @@ class ProductCellLabelView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, product_id):
-    product = get_object_or_404(
-      Product.objects.select_related("cell", "seller"),
-      pk=product_id,
-    )
+    product = get_product_for_user(request.user, product_id)
     return Response(build_cell_label_data(product))
 
 
@@ -203,10 +200,10 @@ class ProductMoveCellView(APIView):
   def post(self, request, product_id):
     serializer = MoveCellSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    product = get_object_or_404(
-      Product.objects.select_related("cell", "seller"),
-      pk=product_id,
-    )
+    product = get_product_for_user(request.user, product_id)
+    cell_id = serializer.validated_data["cell_id"]
+    if not Cell.objects.filter(pk=cell_id, seller_id=product.seller_id).exists():
+      return Response({"detail": "Ячейка не найдена у этого селлера"}, status=status.HTTP_400_BAD_REQUEST)
     try:
       product = move_product_to_cell(
         product=product,
@@ -410,7 +407,8 @@ class IntakeHistoryView(APIView):
 
   def get(self, request):
     ops = (
-      StockOperation.objects.filter(
+      stock_operations_for_user(request.user)
+      .filter(
         operation_type__in=[
           StockOperation.OperationType.INTAKE,
           StockOperation.OperationType.ADJUSTMENT,

@@ -1,13 +1,12 @@
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_intake_session_for_user, get_seller_for_user, intake_sessions_for_user
 from apps.integrations.marketplace import parse_marketplace
-from apps.sellers.models import Seller
 from apps.warehouse.models import XlIntakeSession
 from apps.warehouse.services.xl_intake import (
   XlIntakeError,
@@ -25,11 +24,8 @@ from apps.warehouse.services.xl_intake import (
 )
 
 
-def _session_or_404(session_id: int) -> XlIntakeSession:
-  return get_object_or_404(
-    XlIntakeSession.objects.select_related("seller").prefetch_related("lines"),
-    pk=session_id,
-  )
+def _session_or_404(user, session_id: int) -> XlIntakeSession:
+  return get_intake_session_for_user(user, XlIntakeSession, session_id, prefetch_lines=True)
 
 
 class XlIntakeSessionListCreateView(APIView):
@@ -38,7 +34,7 @@ class XlIntakeSessionListCreateView(APIView):
   def get(self, request):
     marketplace = parse_marketplace(request)
     sessions = (
-      XlIntakeSession.objects.filter(marketplace=marketplace)
+      intake_sessions_for_user(request.user, XlIntakeSession, marketplace=marketplace)
       .select_related("seller")
       .prefetch_related("lines")
       .order_by("-created_at")[:100]
@@ -51,7 +47,9 @@ class XlIntakeSessionListCreateView(APIView):
     marketplace = parse_marketplace(request)
     try:
       if seller_id:
-        seller = get_object_or_404(Seller, pk=seller_id, is_active=True)
+        seller = get_seller_for_user(request.user, seller_id, active_only=True)
+        if not seller:
+          return Response(status=status.HTTP_404_NOT_FOUND)
         session = create_session_for_seller(
           seller=seller,
           user=request.user,
@@ -72,7 +70,7 @@ class XlIntakeSessionDetailView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     return Response(serialize_session(session))
 
 
@@ -80,7 +78,7 @@ class XlIntakeScanView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     barcode = str(request.data.get("barcode") or "")
     try:
       result = scan_unit(session, barcode, user=request.user)
@@ -97,7 +95,7 @@ class XlIntakeLineUpdateView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     barcode = str(request.data.get("barcode") or "")
     try:
       quantity = int(request.data.get("quantity") or 0)
@@ -114,7 +112,7 @@ class XlIntakeLineDeleteView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     barcode = str(request.data.get("barcode") or "")
     try:
       session = delete_line(session, barcode=barcode)
@@ -127,7 +125,7 @@ class XlIntakeSaveView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       session = save_session(session, user=request.user)
     except XlIntakeError as exc:
@@ -139,7 +137,7 @@ class XlIntakeExcelView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       payload = build_excel_bytes(session)
     except XlIntakeError as exc:
@@ -157,7 +155,7 @@ class XlIntakeConnectWbView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     token = str(request.data.get("token") or "")
     try:
       result = apply_after_wb(session, token=token, user=request.user)
@@ -170,7 +168,7 @@ class XlIntakeCompleteView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       session = complete_session(session, user=request.user)
     except XlIntakeError as exc:

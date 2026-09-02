@@ -1,12 +1,11 @@
-from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
+from apps.accounts.tenant import get_intake_session_for_user, intake_sessions_for_user
 from apps.integrations.marketplace import parse_marketplace
-from apps.sellers.models import Seller
 from apps.warehouse.models import ArticleIntakeSession
 from apps.warehouse.services.article_intake import (
   ArticleIntakeError,
@@ -22,11 +21,8 @@ from apps.warehouse.services.article_intake import (
 )
 
 
-def _session_or_404(session_id: int) -> ArticleIntakeSession:
-  return get_object_or_404(
-    ArticleIntakeSession.objects.select_related("seller"),
-    pk=session_id,
-  )
+def _session_or_404(user, session_id: int) -> ArticleIntakeSession:
+  return get_intake_session_for_user(user, ArticleIntakeSession, session_id)
 
 
 class ArticleIntakeSessionListCreateView(APIView):
@@ -35,7 +31,7 @@ class ArticleIntakeSessionListCreateView(APIView):
   def get(self, request):
     marketplace = parse_marketplace(request)
     sessions = (
-      ArticleIntakeSession.objects.filter(marketplace=marketplace)
+      intake_sessions_for_user(request.user, ArticleIntakeSession, marketplace=marketplace)
       .select_related("seller")
       .order_by("-created_at")[:100]
     )
@@ -61,7 +57,7 @@ class ArticleIntakeSessionDetailView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     return Response(serialize_session(session))
 
 
@@ -69,7 +65,7 @@ class ArticleIntakeScanView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     barcode = str(request.data.get("barcode") or "")
     scan_mode = str(request.data.get("scan_mode") or "lookup")
     try:
@@ -93,7 +89,7 @@ class ArticleIntakeIncrementView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     barcode = str(request.data.get("barcode") or "")
     try:
       result = increment_product(session, barcode=barcode, user=request.user)
@@ -106,7 +102,7 @@ class ArticleIntakeConfirmGroupView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     scanned_barcode = str(request.data.get("scanned_barcode") or "")
     items = request.data.get("items") or []
     if not isinstance(items, list):
@@ -128,7 +124,7 @@ class ArticleIntakeSaveQuantitiesView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     group_key = str(request.data.get("group_key") or "")
     items = request.data.get("items") or []
     if not isinstance(items, list):
@@ -149,7 +145,7 @@ class ArticleIntakeDeleteProductView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       product_id = int(request.data.get("product_id") or 0)
     except (TypeError, ValueError):
@@ -165,7 +161,7 @@ class ArticleIntakePushView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       warehouse_id = int(request.data.get("warehouse_id") or 0)
     except (TypeError, ValueError):
@@ -187,7 +183,7 @@ class ArticleIntakeCompleteView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, session_id):
-    session = _session_or_404(session_id)
+    session = _session_or_404(request.user, session_id)
     try:
       session = complete_session(session, user=request.user)
     except ArticleIntakeError as exc:

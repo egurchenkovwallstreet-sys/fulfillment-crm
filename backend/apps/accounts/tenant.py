@@ -74,3 +74,60 @@ def fulfillment_for_staff_user(user: User) -> Fulfillment | None:
   if user.role == User.Role.SELLER:
     return None
   return get_user_fulfillment(user)
+
+
+def intake_sessions_for_user(user: User, model, *, marketplace: str | None = None):
+  """XL / article intake sessions scoped to the user's fulfillment."""
+  qs = model.objects.filter(seller__in=sellers_for_user(user))
+  if marketplace:
+    qs = qs.filter(marketplace=marketplace)
+  return qs
+
+
+def get_intake_session_for_user(user: User, model, session_id: int, *, prefetch_lines: bool = False):
+  qs = model.objects.filter(seller__in=sellers_for_user(user)).select_related("seller")
+  if prefetch_lines:
+    qs = qs.prefetch_related("lines")
+  from django.shortcuts import get_object_or_404
+  return get_object_or_404(qs, pk=session_id)
+
+
+def products_for_user(user: User):
+  from apps.warehouse.models import Product
+  return Product.objects.filter(seller__in=sellers_for_user(user))
+
+
+def get_product_for_user(user: User, product_id: int):
+  from django.shortcuts import get_object_or_404
+  return get_object_or_404(
+    products_for_user(user).select_related("cell", "seller"),
+    pk=product_id,
+  )
+
+
+def get_supply_for_user(user: User, supply_id: int):
+  from django.shortcuts import get_object_or_404
+  from apps.orders.models import Supply
+  return get_object_or_404(
+    Supply.objects.filter(seller__in=sellers_for_user(user))
+    .select_related("seller")
+    .prefetch_related("orders__product", "orders__seller"),
+    pk=supply_id,
+  )
+
+
+def get_off_crm_shipment_for_user(user: User, shipment_id: int):
+  from django.shortcuts import get_object_or_404
+  from apps.orders.models import OffCrmShipment
+  if user.role == User.Role.SELLER:
+    if not user.seller_id:
+      return get_object_or_404(OffCrmShipment.objects.none(), pk=shipment_id)
+    qs = OffCrmShipment.objects.filter(seller_id=user.seller_id)
+  else:
+    qs = OffCrmShipment.objects.filter(seller__in=sellers_for_user(user))
+  return get_object_or_404(qs.select_related("seller"), pk=shipment_id)
+
+
+def stock_operations_for_user(user: User):
+  from apps.warehouse.models import StockOperation
+  return StockOperation.objects.filter(product__seller__in=sellers_for_user(user))

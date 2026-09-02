@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsManager
-from apps.accounts.tenant import get_seller_for_user, sellers_for_user
+from apps.accounts.tenant import get_seller_for_user, get_supply_for_user, sellers_for_user
 from apps.integrations.marketplace import OZON, WB, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.serializers import SellerWarehouseSerializer
@@ -1079,14 +1079,7 @@ class SupplyDetailView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, supply_id):
-    supply = (
-      Supply.objects.filter(pk=supply_id)
-      .select_related("seller")
-      .prefetch_related("orders__product", "orders__seller")
-      .first()
-    )
-    if not supply:
-      return Response(status=status.HTTP_404_NOT_FOUND)
+    supply = get_supply_for_user(request.user, supply_id)
     refresh_supply_readiness(supply)
     return Response(SupplySerializer(supply).data)
 
@@ -1096,9 +1089,7 @@ class SupplyDeliverView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, supply_id):
-    supply = Supply.objects.filter(pk=supply_id).select_related("seller").first()
-    if not supply:
-      return Response(status=status.HTTP_404_NOT_FOUND)
+    supply = get_supply_for_user(request.user, supply_id)
 
     try:
       result = send_supply_to_delivery(supply.seller, supply.id, user=request.user)
@@ -1151,9 +1142,7 @@ class SupplyBarcodeView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, supply_id):
-    supply = Supply.objects.filter(pk=supply_id).select_related("seller").first()
-    if not supply:
-      return Response(status=status.HTTP_404_NOT_FOUND)
+    supply = get_supply_for_user(request.user, supply_id)
 
     try:
       result = fetch_supply_barcode(supply.seller, supply.id)
