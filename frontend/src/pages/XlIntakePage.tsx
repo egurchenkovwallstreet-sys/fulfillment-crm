@@ -27,6 +27,16 @@ const STATUS_LABEL: Record<XlIntakeSession['status'], string> = {
   completed: 'Завершена',
 }
 
+function cellLabelFromSession(data: XlIntakeSession): CellLabelData | null {
+  if (!data.last_cell_number || !data.last_barcode) return null
+  return {
+    seller_name: data.seller_name,
+    cell_number: data.last_cell_number,
+    barcode: data.last_barcode,
+    marketplace: data.marketplace,
+  }
+}
+
 export function XlIntakePage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -46,6 +56,7 @@ export function XlIntakePage() {
   const [loading, setLoading] = useState(false)
   const [showUnmatched, setShowUnmatched] = useState(false)
   const [resultModal, setResultModal] = useState<CrmResultModalState | null>(null)
+  const [lastCellLabel, setLastCellLabel] = useState<CellLabelData | null>(null)
 
   const activeId = sessionId ? Number(sessionId) : null
   const canScan = session?.status !== 'completed'
@@ -87,6 +98,21 @@ export function XlIntakePage() {
     focusBarcode()
   }, [canScan, focusBarcode, session?.id])
 
+  useEffect(() => {
+    if (session) {
+      setLastCellLabel(cellLabelFromSession(session))
+    }
+  }, [session?.last_barcode, session?.last_cell_number, session?.seller_name, session?.marketplace])
+
+  function handleReprintCellLabel() {
+    if (!lastCellLabel) return
+    if (!printCellLabel(lastCellLabel, true)) {
+      setError('Не удалось открыть окно печати — разрешите всплывающие окна')
+      return
+    }
+    focusBarcode()
+  }
+
   const submitScan = useCallback(
     async (raw: string) => {
       if (!activeId || !canScan || scanBusy.current) return
@@ -98,6 +124,9 @@ export function XlIntakePage() {
       try {
         const next = await scanXlBarcode(activeId, value)
         setSession(next)
+        setLastCellLabel(
+          (next.cell_label as CellLabelData | null | undefined) ?? cellLabelFromSession(next),
+        )
         if (next.print_cell_label && next.cell_label) {
           printCellLabel(next.cell_label as CellLabelData, true)
         }
@@ -393,9 +422,18 @@ export function XlIntakePage() {
           </div>
 
           {session.last_cell_number && (
-            <div className="xl-cell-display" aria-live="polite">
+            <div className="xl-cell-display" aria-live="polite" data-allow-blur>
               <span className="xl-cell-display__label">Ячейка</span>
               <span className="xl-cell-display__value">{session.last_cell_number}</span>
+              <button
+                type="button"
+                className="btn btn--secondary xl-cell-display__reprint"
+                onClick={handleReprintCellLabel}
+                disabled={!lastCellLabel}
+                {...uiHint('Повторно отправить этикетку ячейки на печать.')}
+              >
+                Распечатать ещё раз
+              </button>
             </div>
           )}
 

@@ -255,7 +255,7 @@ def scan_unit(session: XlIntakeSession, barcode: str, *, user=None) -> XlScanRes
   session._last_line = line  # noqa: SLF001
 
   print_cell_label = created_new_cell and not is_rescan
-  cell_label = build_cell_label_data(product) if print_cell_label else None
+  cell_label = build_cell_label_data(product)
 
   return XlScanResult(
     session=session,

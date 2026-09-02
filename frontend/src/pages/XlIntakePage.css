@@ -143,6 +143,13 @@
   color: #78350f;
 }
 
+.xl-cell-display__reprint {
+  margin-top: 0.85rem;
+  min-height: 48px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
 .xl-cell-col {
   font-weight: 800;
   font-size: 1.1rem;
