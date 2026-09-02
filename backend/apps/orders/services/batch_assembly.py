@@ -177,6 +177,42 @@ def _orders_matching_barcode(orders: list[Order], barcode: str) -> list[Order]:
   ]
 
 
+def _raise_sticker_barcode_mismatch(
+  pick_list: PickList,
+  *,
+  barcode: str,
+  sticker_scan: str,
+  seller: Seller | None = None,
+) -> None:
+  """Стикер найден в листе, но не от заказа с этим баркодом."""
+  orders = list(_pick_list_orders_wb(pick_list, seller))
+  barcode_norm = _normalize_scan_value(barcode)
+  sticker_orders = [order for order in orders if _order_matches_sticker_wb(order, sticker_scan)]
+  barcode_orders = _orders_matching_barcode(orders, barcode_norm)
+
+  if sticker_orders and barcode_orders:
+    sticker_order = sticker_orders[0]
+    if sticker_order.id not in {order.id for order in barcode_orders}:
+      raise AssemblyError(
+        f"Стикер заказа WB #{sticker_order.wb_order_id} "
+        f"(баркод {sticker_order.barcode or '—'}) не совпадает с отсканированным баркодом "
+        f"{barcode_norm}. Наклейте правильный стикер или отсканируйте верный баркод.",
+        code="sticker_mismatch",
+        order=sticker_order,
+      )
+
+  hint_order = barcode_orders[0] if len(barcode_orders) == 1 else (
+    sticker_orders[0] if len(sticker_orders) == 1 else None
+  )
+  raise AssemblyError(
+    "Стикер не совпадает с отсканированным баркодом. "
+    "Отсканируйте QR-код с наклеенного стикера WB (буквенный код), "
+    "не цифры partA/partB с этикетки.",
+    code="sticker_mismatch",
+    order=hint_order,
+  )
+
+
 def _info_label_payload(*, cell_number: str, tech_size: str, barcode: str, article: str, quantity: int) -> dict:
   return {
     "type": "info",
@@ -432,13 +468,11 @@ def _resolve_wb_order_for_bind(
       order.refresh_from_db(fields=["sticker_part_a", "sticker_part_b", "sticker_scan_code"])
     matched = [order for order in candidates if _order_matches_sticker_wb(order, sticker_scan)]
   if not matched:
-    hint_order = candidates[0] if len(candidates) == 1 else None
-    raise AssemblyError(
-      "Стикер не совпадает ни с одним заказом этого баркода в листе подбора. "
-      "Отсканируйте QR-код с наклеенного стикера WB (буквенный код), "
-      "не цифры partA/partB с этикетки.",
-      code="sticker_mismatch",
-      order=hint_order,
+    _raise_sticker_barcode_mismatch(
+      pick_list,
+      barcode=barcode,
+      sticker_scan=sticker_scan,
+      seller=seller,
     )
   if len(matched) > 1:
     raise AssemblyError(
@@ -682,6 +716,16 @@ def classify_wb_batch_scan(seller: Seller, scan: str, *, partial: dict | None = 
     scoped = _orders_matching_barcode(orders, partial_barcode)
     if any(_order_matches_sticker_wb(order, scan_value) for order in scoped):
       return "sticker"
+    sticker_orders = [order for order in orders if _order_matches_sticker_wb(order, scan_value)]
+    if sticker_orders and scoped:
+      wrong = sticker_orders[0]
+      raise AssemblyError(
+        f"Стикер заказа WB #{wrong.wb_order_id} "
+        f"(баркод {wrong.barcode or '—'}) не совпадает с отсканированным баркодом "
+        f"{partial_barcode}. Наклейте правильный стикер или отсканируйте верный баркод.",
+        code="sticker_mismatch",
+        order=wrong,
+      )
 
   if partial.get("sticker_scan") and not partial_barcode and barcode_matches:
     return "barcode"
@@ -761,8 +805,19 @@ def _resolve_ozon_posting_for_bind(
 
   matched = [posting for posting in barcode_matches if _posting_matches_sticker_ozon(posting, sticker_scan)]
   if not matched:
+    sticker_matches = [
+      posting for posting in postings if _posting_matches_sticker_ozon(posting, sticker_scan)
+    ]
+    if sticker_matches and barcode_matches:
+      wrong = sticker_matches[0]
+      raise OzonAssemblyError(
+        f"Стикер отправления {wrong.posting_number} "
+        f"(баркод {wrong.barcode or wrong.offer_id or '—'}) не совпадает с отсканированным баркодом "
+        f"{barcode}. Наклейте правильный стикер или отсканируйте верный баркод.",
+        code="sticker_mismatch",
+      )
     raise OzonAssemblyError(
-      "Стикер не совпадает ни с одним отправлением этого баркода",
+      "Стикер не совпадает с отсканированным баркодом",
       code="sticker_mismatch",
     )
   if len(matched) > 1:

@@ -2,6 +2,18 @@
   margin-top: 1rem;
 }
 
+.batch-bind--live {
+  padding: 1.35rem 1.5rem;
+  border: 3px solid #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.18);
+}
+
+.batch-bind--live .section-title {
+  font-size: 1.35rem;
+  margin-bottom: 0.4rem;
+}
+
 .batch-bind__head {
   display: flex;
   align-items: center;
@@ -11,14 +23,14 @@
 
 .batch-bind__hint {
   margin: 0.5rem 0 0.75rem;
-  color: var(--text-muted, #666);
+  color: #64748b;
   font-size: 0.92rem;
 }
 
 .batch-bind__fields {
   display: grid;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .batch-bind__field {
@@ -28,7 +40,7 @@
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--border, #ddd);
   border-radius: 8px;
-  background: #fafafa;
+  background: #fff;
 }
 
 .batch-bind__field--filled {
@@ -47,36 +59,27 @@
   font-size: 0.92rem;
 }
 
-.batch-bind__scan .input--scan {
+.batch-bind__scan {
+  margin-top: 0.25rem;
+}
+
+.batch-bind__scan-input {
   width: 100%;
-}
-
-.batch-bind__error-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(120, 0, 0, 0.45);
-  padding: 1rem;
-}
-
-.batch-bind__error-card {
-  width: min(420px, 100%);
+  padding: 1.15rem 1.2rem;
+  font-size: 1.65rem;
+  letter-spacing: 0.03em;
+  border: 2px solid #2563eb;
+  border-radius: 8px;
+  box-sizing: border-box;
   background: #fff;
-  border: 3px solid #c62828;
-  border-radius: 12px;
-  padding: 1rem 1.1rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
-.batch-bind__error-card strong {
-  color: #c62828;
-  font-size: 1.1rem;
+.batch-bind__scan-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
-.batch-bind__error-card p {
-  margin: 0.75rem 0 1rem;
-  line-height: 1.45;
+.batch-bind__scan-input:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }

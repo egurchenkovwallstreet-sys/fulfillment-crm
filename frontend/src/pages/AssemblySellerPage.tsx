@@ -1279,7 +1279,7 @@ function WbAssemblySellerPage() {
       {stage === 'confirm' && isBatchMode && (
         <BatchBindPanel
           sellerId={id}
-          disabled={loading || !data?.active_pick_list}
+          disabled={!data?.active_pick_list}
           onBound={async () => {
             window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
             await refreshMarkingStatus()

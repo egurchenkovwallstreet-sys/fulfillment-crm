@@ -3,7 +3,10 @@ import { ApiError } from '../api/client'
 import { batchBindScan, type BatchBindState } from '../api/assembly'
 import { playAssemblyScanErrorBeep } from './AssemblyModal'
 import { appendStickerHint } from '../utils/stickerLabel'
+import './AssemblyModal.css'
 import './BatchBindPanel.css'
+
+const SCAN_ERROR_ENTER_DELAY_MS = 800
 
 const EMPTY_STATE: BatchBindState = {
   barcode: '',
@@ -27,22 +30,60 @@ export function BatchBindPanel({
   onSuccess,
 }: BatchBindPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const errorDismissRef = useRef<HTMLButtonElement>(null)
+  const scanErrorEnterReadyRef = useRef(false)
   const [scanValue, setScanValue] = useState('')
   const [bindState, setBindState] = useState<BatchBindState>(EMPTY_STATE)
   const [requiresMarking, setRequiresMarking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
+  const [modalErrorCode, setModalErrorCode] = useState<string | null>(null)
+
+  const focusScanInput = useCallback(() => {
+    window.setTimeout(() => {
+      if (disabled) return
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+  }, [disabled])
 
   useEffect(() => {
-    if (!disabled) inputRef.current?.focus()
-  }, [disabled, bindState])
+    if (!disabled && !busy) {
+      focusScanInput()
+    }
+  }, [disabled, busy, bindState, focusScanInput])
+
+  useEffect(() => {
+    scanErrorEnterReadyRef.current = false
+    if (!modalError) return
+
+    const enterTimer = window.setTimeout(() => {
+      scanErrorEnterReadyRef.current = true
+      errorDismissRef.current?.focus()
+    }, SCAN_ERROR_ENTER_DELAY_MS)
+
+    function onKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key !== 'Enter' || !scanErrorEnterReadyRef.current) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      setModalError(null)
+      setModalErrorCode(null)
+      focusScanInput()
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.clearTimeout(enterTimer)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [modalError, focusScanInput])
 
   const resetBind = useCallback(() => {
     setBindState(EMPTY_STATE)
     setRequiresMarking(false)
     setScanValue('')
-    inputRef.current?.focus()
-  }, [])
+    focusScanInput()
+  }, [focusScanInput])
 
   const processScan = useCallback(
     async (rawScan: string) => {
@@ -50,6 +91,8 @@ export function BatchBindPanel({
       if (!scan || busy || disabled) return
       setBusy(true)
       setModalError(null)
+      setModalErrorCode(null)
+      let hadError = false
       try {
         const result = await batchBindScan(sellerId, {
           scan,
@@ -58,7 +101,11 @@ export function BatchBindPanel({
         if (result.complete) {
           onSuccess?.(result.message || 'Связка завершена')
           resetBind()
-          await onBound()
+          try {
+            await onBound()
+          } finally {
+            focusScanInput()
+          }
           return
         }
         setBindState({
@@ -68,23 +115,29 @@ export function BatchBindPanel({
         })
         setRequiresMarking(Boolean(result.requires_marking))
         setScanValue('')
+        focusScanInput()
       } catch (err) {
+        hadError = true
         playAssemblyScanErrorBeep()
+        const errorCode = err instanceof ApiError ? err.code : undefined
         const message =
           err instanceof ApiError
             ? appendStickerHint(err.message, err.order as { sticker_part_a?: string; sticker_part_b?: string } | undefined)
             : err instanceof Error
               ? err.message
               : 'Ошибка связки'
+        setModalErrorCode(errorCode || null)
         setModalError(message)
         onError?.(message)
         setScanValue('')
       } finally {
         setBusy(false)
-        inputRef.current?.focus()
+        if (!hadError) {
+          focusScanInput()
+        }
       }
     },
-    [bindState, busy, disabled, onBound, onError, onSuccess, resetBind, sellerId],
+    [bindState, busy, disabled, focusScanInput, onBound, onError, onSuccess, resetBind, sellerId],
   )
 
   function handleSubmit(e?: FormEvent) {
@@ -110,8 +163,20 @@ export function BatchBindPanel({
         { key: 'sticker_scan', label: '2. QR стикера WB', value: bindState.sticker_scan },
       ]
 
+  const isScanError =
+    modalErrorCode === 'sticker_mismatch' ||
+    modalErrorCode === 'barcode_conflict' ||
+    modalErrorCode === 'sticker_conflict' ||
+    modalErrorCode === 'not_in_pick_list'
+
+  function dismissError() {
+    setModalError(null)
+    setModalErrorCode(null)
+    focusScanInput()
+  }
+
   return (
-    <section className="batch-bind card">
+    <section className="batch-bind batch-bind--live card">
       <div className="batch-bind__head">
         <h2 className="section-title">Связка после печати</h2>
         <button type="button" className="btn btn--ghost btn--sm" onClick={resetBind} disabled={busy}>
@@ -121,7 +186,7 @@ export function BatchBindPanel({
       <p className="batch-bind__hint">
         Сканируйте баркод товара, затем <strong>QR-код</strong> с наклеенного стикера WB
         (буквенный код, не цифры partA/partB на этикетке){requiresMarking ? ' и Честный знак' : ''}.
-        CRM сама определит тип скана.
+        CRM проверит, что стикер относится к этому баркоду.
       </p>
       <div className="batch-bind__fields">
         {fields.map((field) => (
@@ -138,24 +203,35 @@ export function BatchBindPanel({
         <input
           ref={inputRef}
           type="text"
-          className="input input--scan"
+          className="batch-bind__scan-input"
           value={scanValue}
           onChange={(e) => setScanValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Скан баркода, стикера или ЧЗ…"
           disabled={busy || disabled}
           autoComplete="off"
+          autoFocus
         />
       </form>
 
       {modalError && (
-        <div className="batch-bind__error-modal" role="alert">
-          <div className="batch-bind__error-card">
-            <strong>Ошибка</strong>
-            <p>{modalError}</p>
-            <button type="button" className="btn btn--danger" onClick={() => setModalError(null)}>
-              Понятно
-            </button>
+        <div
+          className={`assembly-modal-backdrop${isScanError ? ' assembly-modal-backdrop--scan-error' : ''}`}
+          role="alert"
+        >
+          <div className={`assembly-modal${isScanError ? ' assembly-modal--scan-error' : ''}`}>
+            <h2>{isScanError ? 'Ошибка связки' : 'Ошибка'}</h2>
+            <p className={isScanError ? 'assembly-modal__message' : undefined}>{modalError}</p>
+            <div className="assembly-modal__actions">
+              <button
+                ref={errorDismissRef}
+                type="button"
+                className={`btn btn--primary${isScanError ? ' assembly-modal__ok' : ''}`}
+                onClick={dismissError}
+              >
+                Понятно
+              </button>
+            </div>
           </div>
         </div>
       )}

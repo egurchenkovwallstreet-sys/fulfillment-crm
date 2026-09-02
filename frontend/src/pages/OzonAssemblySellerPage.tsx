@@ -587,7 +587,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       {stage === 'confirm' && isBatchMode && (
         <BatchBindPanel
           sellerId={sellerId}
-          disabled={loading || !data?.active_pick_list}
+          disabled={!data?.active_pick_list}
           onBound={() => load()}
           onSuccess={setSuccess}
           onError={setError}
