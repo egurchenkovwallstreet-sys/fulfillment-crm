@@ -301,6 +301,11 @@ class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 
 
+class ReprintStickerSerializer(serializers.Serializer):
+  order_id = serializers.IntegerField()
+  confirmed = serializers.BooleanField()
+
+
 class AssemblyWorkflowModeSerializer(serializers.Serializer):
   mode = serializers.ChoiceField(choices=("scan", "batch"))
 

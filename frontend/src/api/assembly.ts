@@ -195,12 +195,12 @@ export function fetchAssemblySeller(sellerId: number, stage?: string) {
   return apiFetch<AssemblySellerDetail>(`/api/orders/assembly/sellers/${sellerId}/${qs}`)
 }
 
-export function reprintOrderSticker(sellerId: number, orderId: number) {
+export function reprintOrderSticker(sellerId: number, orderId: number, confirmed = true) {
   return apiFetch<ScanBarcodeResult>(
     `/api/orders/assembly/sellers/${sellerId}/reprint-sticker/`,
     {
       method: 'POST',
-      body: JSON.stringify({ order_id: orderId }),
+      body: JSON.stringify({ order_id: orderId, confirmed }),
     },
   )
 }
@@ -351,16 +351,26 @@ export function bindMarking(sellerId: number, orderId: number, markingCode: stri
   })
 }
 
-export interface MarkingStatusResult {
+export interface AssemblyQueueStatus {
   success: boolean
+  in_assembly_count: number
+  ready_count: number
   errors_count: number
-  unbound_count: number
+  in_assembly: AssemblyOrder[]
+  ready: AssemblyOrder[]
   errors: AssemblyOrder[]
-  unbound: AssemblyOrder[]
 }
 
+/** @deprecated use AssemblyQueueStatus */
+export type MarkingStatusResult = AssemblyQueueStatus
+
+export function fetchAssemblyQueueStatus(sellerId: number) {
+  return apiFetch<AssemblyQueueStatus>(`/api/orders/assembly/sellers/${sellerId}/marking-status/`)
+}
+
+/** @deprecated use fetchAssemblyQueueStatus */
 export function fetchMarkingStatus(sellerId: number) {
-  return apiFetch<MarkingStatusResult>(`/api/orders/assembly/sellers/${sellerId}/marking-status/`)
+  return fetchAssemblyQueueStatus(sellerId)
 }
 
 export function verifyMarking(sellerId: number, orderIds?: number[]) {

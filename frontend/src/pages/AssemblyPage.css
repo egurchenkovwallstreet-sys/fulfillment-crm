@@ -701,6 +701,27 @@
   margin-bottom: 1rem;
 }
 
+.assembly-marking-panels--triple {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.assembly-marking-panel--work {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #c2410c;
+}
+
+.assembly-marking-panel--work.assembly-marking-panel--alert {
+  background: #ffedd5;
+  border-color: #fb923c;
+}
+
+.assembly-marking-panel--ready {
+  background: #ecfdf5;
+  border-color: #86efac;
+  color: #166534;
+}
+
 .assembly-marking-panel {
   display: flex;
   flex-direction: column;
@@ -780,6 +801,13 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
+}
+
+.assembly-marking-list__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: stretch;
 }
 
 .assembly-marking-list__body {

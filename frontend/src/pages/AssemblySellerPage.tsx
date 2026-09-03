@@ -39,9 +39,9 @@ import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } fro
 import { BatchBindPanel } from '../components/BatchBindPanel'
 import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import {
-  AssemblyMarkingListModal,
-  AssemblyMarkingPanels,
-  type MarkingPanelKind,
+  AssemblyQueueListModal,
+  AssemblyQueuePanels,
+  type AssemblyQueuePanelKind,
 } from '../components/AssemblyMarkingPanels'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
@@ -67,10 +67,12 @@ const MARKING_VERIFY_INTERVAL_MS = 3000
 
 const EMPTY_MARKING_STATUS: MarkingStatusResult = {
   success: true,
+  in_assembly_count: 0,
+  ready_count: 0,
   errors_count: 0,
-  unbound_count: 0,
+  in_assembly: [],
+  ready: [],
   errors: [],
-  unbound: [],
 }
 
 const STAGES = [
@@ -145,7 +147,7 @@ function WbAssemblySellerPage() {
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
   const [bridgePrinter, setBridgePrinter] = useState('')
   const [markingStatus, setMarkingStatus] = useState<MarkingStatusResult>(EMPTY_MARKING_STATUS)
-  const [markingListKind, setMarkingListKind] = useState<MarkingPanelKind | null>(null)
+  const [markingListKind, setMarkingListKind] = useState<AssemblyQueuePanelKind | null>(null)
   const [scanBusy, setScanBusy] = useState(false)
   const verifyInFlightRef = useRef(false)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
@@ -364,8 +366,16 @@ function WbAssemblySellerPage() {
     })
   }
 
+  function isScannableAssemblyOrder(order: AssemblyOrder): boolean {
+    if (order.marking_verify_status === 'error') return true
+    if (order.status === 'label_printed' || order.status === 'marked') return false
+    return order.status === 'in_picking' || order.status === 'assembled'
+  }
+
   function pickOrderForScan(orders: AssemblyOrder[]): AssemblyOrder | undefined {
-    return orders.find((order) => orderNeedsMarkingScan(order)) ?? orders[0]
+    const active = orders.filter(isScannableAssemblyOrder)
+    if (!active.length) return undefined
+    return active.find((order) => orderNeedsMarkingScan(order)) ?? active[0]
   }
 
   function barcodeInPickLists(barcode: string): boolean {
@@ -377,7 +387,9 @@ function WbAssemblySellerPage() {
 
   function orderNeedsMarkingScan(order: AssemblyOrder): boolean {
     if (!order.requires_marking) return false
-    return !order.marking_bound || order.marking_verify_status === 'error'
+    if (order.marking_verify_status === 'error') return true
+    if (order.status === 'label_printed' || order.status === 'marked') return false
+    return order.status === 'in_picking' || order.status === 'assembled'
   }
 
   function openMarkingScan(order: PrintOrder, message?: string) {
@@ -434,19 +446,11 @@ function WbAssemblySellerPage() {
   }
 
   async function finishPrint(order: PrintOrder, preopened?: Window | null) {
-    let file = (order.sticker_file || '').trim()
-    if (!file && id) {
-      try {
-        const reprinted = await reprintOrderSticker(id, order.id)
-        file = (reprinted.order.sticker_file || '').trim()
-      } catch {
-        // ниже покажем ошибку, если файла так и нет
-      }
-    }
+    const file = (order.sticker_file || '').trim()
     if (!file) {
       closePrintHolder(preopened)
       throw new Error(
-        `WB не вернул стикер для заказа #${order.wb_order_id}. Нажмите «Печать ещё раз» или обновите заказы.`,
+        `WB не вернул стикер для заказа #${order.wb_order_id}. Обновите заказы или обратитесь к администратору.`,
       )
     }
     setStickerPreview(file)
@@ -454,10 +458,41 @@ function WbAssemblySellerPage() {
     const channel = await printSticker(file, preopened)
     const via = channel === 'bridge' ? 'Xprinter (мост)' : 'Chrome'
     setSuccess(
-      `Стикер WB #${order.wb_order_id} → ${via}. Передайте в доставку (шаг 4).`,
+      `Стикер WB #${order.wb_order_id} → ${via}. Заказ перенесён в «Готовые».`,
     )
     resetScanFlow(true)
     setStage('confirm')
+    void refreshMarkingStatus()
+  }
+
+  function confirmReprintSticker(order: AssemblyOrder, onDone?: () => void) {
+    setModal({
+      kind: 'confirm',
+      title: 'Повторная печать стикера',
+      message:
+        `Стикер заказа WB #${order.wb_order_id} уже был напечатан.\n\n` +
+        'Печатать повторно только если стикер повреждён или потерян. Продолжить?',
+      confirmLabel: 'Печать ещё раз',
+      onConfirm: () => void runReprintSticker(order.id, onDone),
+    })
+  }
+
+  async function runReprintSticker(orderId: number, onDone?: () => void) {
+    if (!id) return
+    setLoading(true)
+    setError('')
+    const printWin = openPrintHolder()
+    try {
+      const result = await reprintOrderSticker(id, orderId, true)
+      await printSticker(result.order.sticker_file, printWin)
+      setSuccess(`Стикер заказа WB #${result.order.wb_order_id} отправлен на печать`)
+      onDone?.()
+    } catch (err) {
+      closePrintHolder(printWin)
+      setError(err instanceof Error ? err.message : 'Не удалось распечатать стикер')
+    } finally {
+      setLoading(false)
+    }
   }
 
   function handleTransferToAssembly() {
@@ -762,6 +797,7 @@ function WbAssemblySellerPage() {
       setStickerPreview(null)
       setStage('complete')
       await load()
+      await refreshMarkingStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
     } finally {
@@ -770,23 +806,22 @@ function WbAssemblySellerPage() {
   }
 
   function handleSendAllReadyToDelivery() {
-    if (!data) return
     if (markingQueueBlocked) {
       setModal({
         kind: 'block',
-        title: 'Сначала закройте ЧЗ',
+        title: 'Сначала закройте ошибки ЧЗ',
         message:
-          'Есть ошибки ЧЗ или товары без привязки. Откройте панели «Ошибки ЧЗ» и «Без ЧЗ», ' +
-          'завершите сборку, затем передавайте в доставку.',
+          'Есть заказы с отклонённым Честным знаком. Откройте панель «Ошибки ЧЗ», ' +
+          'замените товар и повторите сборку, затем передавайте в доставку.',
       })
       return
     }
-    const ready = data.orders.filter((order) => orderCanDeliver(order))
+    const ready = markingStatus.ready.filter((order) => orderCanDeliver(order))
     if (ready.length === 0) {
       setModal({
         kind: 'block',
         title: 'Нет готовых заказов',
-        message: 'Сначала отсканируйте баркоды, распечатайте стикеры FBS и привяжите ЧЗ (если нужен).',
+        message: 'Сначала отсканируйте баркоды и распечатайте стикеры — заказы появятся в «Готовые».',
       })
       return
     }
@@ -823,28 +858,12 @@ function WbAssemblySellerPage() {
       setSuccess(`Шаг 4: передано в доставку ${delivered} из ${ready.length}`)
       setStage('complete')
       await load()
+      await refreshMarkingStatus()
     }
     if (errors.length > 0) {
       setError(errors[0])
     }
     setLoading(false)
-  }
-
-  async function handleReprintSticker(orderId: number) {
-    if (!id) return
-    setLoading(true)
-    setError('')
-    const printWin = openPrintHolder()
-    try {
-      const result = await reprintOrderSticker(id, orderId)
-      await printSticker(result.order.sticker_file, printWin)
-      setSuccess(`Стикер заказа WB #${result.order.wb_order_id} отправлен на печать`)
-    } catch (err) {
-      closePrintHolder(printWin)
-      setError(err instanceof Error ? err.message : 'Не удалось распечатать стикер')
-    } finally {
-      setLoading(false)
-    }
   }
 
   async function handleBarcodeSubmit(e?: FormEvent, rawBarcode?: string) {
@@ -861,11 +880,6 @@ function WbAssemblySellerPage() {
       return
     }
 
-    const listedOrder = pickOrderForScan(findOrdersForBarcode(barcode))
-    const listedNeedsMarking = listedOrder ? orderNeedsMarkingScan(listedOrder) : false
-    const pickListHit = barcodeInPickLists(barcode)
-    const shouldLockMarking = listedNeedsMarking || (pickListHit && Boolean(listedOrder?.requires_marking))
-
     setError('')
     setSuccess('')
     scanBusyRef.current = true
@@ -873,24 +887,11 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
-    if (shouldLockMarking && listedOrder) {
-      openMarkingScan(
-        listedOrder as unknown as PrintOrder,
-        `Заказ WB #${listedOrder.wb_order_id} — отсканируйте Честный знак`,
-      )
-      scanBusyRef.current = false
-      setScanBusy(false)
-    }
-
     try {
       const result = await scanOrderBarcode(id, barcode)
-      const needsMarking =
-        shouldLockMarking ||
-        result.action === 'await_marking' ||
-        Boolean(result.requires_marking) ||
-        orderNeedsMarkingScan(result.order as unknown as AssemblyOrder)
+      const needsMarking = result.action === 'await_marking'
 
-      if (needsMarking || markingLockRef.current) {
+      if (needsMarking) {
         openMarkingScan(
           result.order,
           result.message ||
@@ -915,18 +916,27 @@ function WbAssemblySellerPage() {
           ? (err.order as AssemblyOrder)
           : undefined
       const errNeedsMarking = errOrder ? orderNeedsMarkingScan(errOrder) : false
-      const keepMarkingUi = shouldLockMarking || markingLockRef.current || errNeedsMarking
+      const keepMarkingUi = markingLockRef.current || errNeedsMarking
 
-      if (keepMarkingUi) {
-        const lockOrder = listedOrder ?? errOrder
-        if (lockOrder) {
-          openMarkingScan(
-            lockOrder as unknown as PrintOrder,
-            `Заказ WB #${lockOrder.wb_order_id} — отсканируйте Честный знак`,
-          )
-        }
+      if (keepMarkingUi && errOrder) {
+        openMarkingScan(
+          errOrder as unknown as PrintOrder,
+          `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
+        )
       } else {
         resetScanFlow()
+      }
+
+      if (err instanceof ApiError && err.code === 'already_printed') {
+        void refreshMarkingStatus()
+        void load({ silent: true })
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Стикер уже напечатан — заказ в «Готовые».',
+        )
+        resetScanFlow(true)
+        return
       }
 
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
@@ -983,6 +993,11 @@ function WbAssemblySellerPage() {
       void load({ silent: true })
     } catch (err) {
       closePrintHolder(printWin)
+      if (err instanceof ApiError && err.code === 'already_printed') {
+        void refreshMarkingStatus()
+        void load({ silent: true })
+        resetScanFlow(true)
+      }
       setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
       focusMarkingInput()
     } finally {
@@ -1069,9 +1084,9 @@ function WbAssemblySellerPage() {
   const bulkAssemblyCount = assemblyEligible ?? 0
   const displayPickList = pickListPreview ?? data?.active_pick_list
   const orders = data?.orders ?? []
-  const readyToDeliverCount = orders.filter((order) => orderCanDeliver(order)).length
-  const markingQueueBlocked =
-    stage === 'confirm' && (markingStatus.errors_count > 0 || markingStatus.unbound_count > 0)
+  const readyOrders = markingStatus.ready
+  const readyToDeliverCount = readyOrders.filter((order) => orderCanDeliver(order)).length
+  const markingQueueBlocked = stage === 'confirm' && markingStatus.errors_count > 0
   const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
@@ -1082,9 +1097,11 @@ function WbAssemblySellerPage() {
   const markingListOrders =
     markingListKind === 'errors'
       ? markingStatus.errors
-      : markingListKind === 'unbound'
-        ? markingStatus.unbound
-        : []
+      : markingListKind === 'ready'
+        ? markingStatus.ready
+        : markingListKind === 'in_assembly'
+          ? markingStatus.in_assembly
+          : []
 
   return (
     <>
@@ -1190,8 +1207,8 @@ function WbAssemblySellerPage() {
             <span
               {...hintWrapProps(
                 markingQueueBlocked
-                  ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
-                  : 'Передать все собранные заказы в поставку и в доставку WB',
+                  ? 'Сначала закройте ошибки ЧЗ'
+                  : 'Передать все собранные заказы из «Готовые» в доставку WB',
               )}
             >
               <button
@@ -1240,9 +1257,10 @@ function WbAssemblySellerPage() {
       </section>
 
       {stage === 'confirm' && (
-        <AssemblyMarkingPanels
+        <AssemblyQueuePanels
+          inAssemblyCount={markingStatus.in_assembly_count}
+          readyCount={markingStatus.ready_count}
           errorsCount={markingStatus.errors_count}
-          unboundCount={markingStatus.unbound_count}
           onOpenList={setMarkingListKind}
         />
       )}
@@ -1385,7 +1403,7 @@ function WbAssemblySellerPage() {
               <span
                 {...hintWrapProps(
                   markingQueueBlocked
-                    ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
+                    ? 'Сначала закройте ошибки ЧЗ'
                     : 'Добавить заказ в поставку WB и перевести в доставку',
                 )}
               >
@@ -1404,17 +1422,6 @@ function WbAssemblySellerPage() {
           {stickerPreview && (
             <div className="assembly-sticker-preview">
               <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => {
-                  const win = openPrintHolder()
-                  void printSticker(stickerPreview, win).catch(() => closePrintHolder(win))
-                }}
-                {...uiHint('Повторно отправить последний стикер FBS на принтер')}
-              >
-                Печать ещё раз
-              </button>
             </div>
           )}
         </section>
@@ -1423,7 +1430,10 @@ function WbAssemblySellerPage() {
       {stage === 'confirm' && readyToDeliverCount > 0 && !markingInProgress && (
         <section className="panel assembly-step-card assembly-step-card--delivery">
           <h2 className="section-title">Шаг 4 — готово к доставке: {readyToDeliverCount}</h2>
-          <p>Стикер напечатан{readyToDeliverCount > 1 ? 'ы' : ''}, ЧЗ привязан (если нужен). Подтвердите передачу в WB.</p>
+          <p>
+            Заказы в «Готовые» ({markingStatus.ready_count}). Подтвердите передачу в WB — список
+            открывается по зелёному счётчику.
+          </p>
         </section>
       )}
 
@@ -1496,7 +1506,11 @@ function WbAssemblySellerPage() {
               {orders.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="assembly-table__empty">
-                    {refreshing || syncing ? 'Загрузка заказов…' : 'Нет заказов на этой вкладке'}
+                    {refreshing || syncing
+                      ? 'Загрузка заказов…'
+                      : stage === 'confirm'
+                        ? 'Все заказы собраны — см. зелёный счётчик «Готовые»'
+                        : 'Нет заказов на этой вкладке'}
                   </td>
                 </tr>
               ) : orders.map((order) => {
@@ -1552,17 +1566,7 @@ function WbAssemblySellerPage() {
                     )}
                   </td>
                     <td>
-                      {order.has_sticker ? (
-                        <button
-                          type="button"
-                          className="btn btn--small btn--secondary"
-                          onClick={() => handleReprintSticker(order.id)}
-                          disabled={loading || syncing}
-                          {...uiHint('Повторно напечатать стикер FBS для этого заказа')}
-                        >
-                          Распечатать
-                        </button>
-                      ) : '—'}
+                      {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
                     </td>
                   <td className="assembly-table__actions">
                       {showAssemblyButton(order) && stage !== 'complete' && (
@@ -1580,7 +1584,7 @@ function WbAssemblySellerPage() {
                       <span
                         {...hintWrapProps(
                           markingQueueBlocked
-                            ? 'Сначала закройте ошибки ЧЗ и привяжите ЧЗ ко всем товарам'
+                            ? 'Сначала закройте ошибки ЧЗ'
                             : 'Добавить заказ в поставку WB',
                         )}
                       >
@@ -1631,12 +1635,29 @@ function WbAssemblySellerPage() {
       )}
 
       {markingListKind && (
-        <AssemblyMarkingListModal
+        <AssemblyQueueListModal
           kind={markingListKind}
           orders={markingListOrders}
           loading={loading}
           onClose={() => setMarkingListKind(null)}
           onReplace={markingListKind === 'errors' ? (order) => void handleReplaceOrderFromList(order) : undefined}
+          onReprint={
+            markingListKind === 'ready'
+              ? (order) => confirmReprintSticker(order, () => setMarkingListKind(null))
+              : undefined
+          }
+          onDeliver={
+            markingListKind === 'ready'
+              ? (order) => {
+                  if (!orderCanDeliver(order)) {
+                    setError(orderBlockReason(order) || 'Заказ пока нельзя передать в доставку')
+                    return
+                  }
+                  setMarkingListKind(null)
+                  handleSendToDelivery(order)
+                }
+              : undefined
+          }
         />
       )}
 

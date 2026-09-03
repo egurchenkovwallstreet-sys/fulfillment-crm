@@ -34,6 +34,7 @@ from .serializers import (
   PickListGenerateSerializer,
   PickListSerializer,
   ReplaceOrderSerializer,
+  ReprintStickerSerializer,
   ScanPrintSerializer,
   SellerAssemblyCountersSerializer,
   SupplyBulkDeliverSerializer,
@@ -51,7 +52,7 @@ from .services.assembly import (
   scan_order_barcode,
   start_assembly,
 )
-from .services.marking_queue import get_marking_queue_status
+from .services.assembly_queue import get_assembly_queue_status, order_in_assembly
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
@@ -489,7 +490,9 @@ class AssemblySellerDetailView(APIView):
       else:
         orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
-    orders = orders_qs.order_by("-created_at")[:300]
+    orders = list(orders_qs.order_by("-created_at")[:300])
+    if stage == "confirm":
+      orders = [order for order in orders if order_in_assembly(order)]
 
     active_pick_list = (
       PickList.objects.filter(seller=seller, is_completed=False, marketplace=WB)
@@ -682,7 +685,7 @@ class AssemblyBindMarkingView(APIView):
 
 
 class AssemblyMarkingStatusView(APIView):
-  """Счётчики и списки очереди ЧЗ (ошибки / без привязки)."""
+  """Счётчики очереди сборки: на сборке / готовые / ошибки ЧЗ."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
@@ -690,13 +693,15 @@ class AssemblyMarkingStatusView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
-    status_data = get_marking_queue_status(seller)
+    status_data = get_assembly_queue_status(seller)
     return Response({
       "success": True,
+      "in_assembly_count": status_data["in_assembly_count"],
+      "ready_count": status_data["ready_count"],
       "errors_count": status_data["errors_count"],
-      "unbound_count": status_data["unbound_count"],
+      "in_assembly": OrderAssemblySerializer(status_data["in_assembly"], many=True).data,
+      "ready": OrderAssemblySerializer(status_data["ready"], many=True).data,
       "errors": OrderAssemblySerializer(status_data["errors"], many=True).data,
-      "unbound": OrderAssemblySerializer(status_data["unbound"], many=True).data,
     })
 
 
@@ -887,8 +892,17 @@ class AssemblyReprintStickerView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
-    serializer = OrderActionSerializer(data=request.data)
+    serializer = ReprintStickerSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+
+    if not serializer.validated_data["confirmed"]:
+      return Response(
+        {
+          "detail": "Повторная печать стикера требует подтверждения менеджера.",
+          "code": "confirm_required",
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+      )
 
     order = Order.objects.filter(
       pk=serializer.validated_data["order_id"],

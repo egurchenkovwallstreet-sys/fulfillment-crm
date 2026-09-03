@@ -3,21 +3,45 @@ import { ProductPhotoThumb } from './ProductPhotoThumb'
 import { formatStickerNumber } from '../utils/stickerLabel'
 import { uiHint } from '../utils/uiHint'
 
-export type MarkingPanelKind = 'errors' | 'unbound'
+export type AssemblyQueuePanelKind = 'in_assembly' | 'ready' | 'errors'
 
-type AssemblyMarkingPanelsProps = {
+type AssemblyQueuePanelsProps = {
+  inAssemblyCount: number
+  readyCount: number
   errorsCount: number
-  unboundCount: number
-  onOpenList: (kind: MarkingPanelKind) => void
+  onOpenList: (kind: AssemblyQueuePanelKind) => void
 }
 
-export function AssemblyMarkingPanels({
+export function AssemblyQueuePanels({
+  inAssemblyCount,
+  readyCount,
   errorsCount,
-  unboundCount,
   onOpenList,
-}: AssemblyMarkingPanelsProps) {
+}: AssemblyQueuePanelsProps) {
   return (
-    <section className="assembly-marking-panels">
+    <section className="assembly-marking-panels assembly-marking-panels--triple">
+      <button
+        type="button"
+        className={`assembly-marking-panel assembly-marking-panel--work${inAssemblyCount > 0 ? ' assembly-marking-panel--alert' : ''}`}
+        onClick={() => onOpenList('in_assembly')}
+        {...uiHint(
+          'Заказы, где ещё не отсканирован баркод или не напечатан стикер. Нажмите — список с ячейками.',
+        )}
+      >
+        <span className="assembly-marking-panel__count">{inAssemblyCount}</span>
+        <span className="assembly-marking-panel__label">На сборке</span>
+      </button>
+      <button
+        type="button"
+        className="assembly-marking-panel assembly-marking-panel--ready"
+        onClick={() => onOpenList('ready')}
+        {...uiHint(
+          'Собранные заказы: баркод отсканирован, стикер напечатан, ЧЗ привязан (если нужен). Готовы к доставке.',
+        )}
+      >
+        <span className="assembly-marking-panel__count">{readyCount}</span>
+        <span className="assembly-marking-panel__label">Готовые</span>
+      </button>
       <button
         type="button"
         className={`assembly-marking-panel${errorsCount > 0 ? ' assembly-marking-panel--alert' : ' assembly-marking-panel--ok'}`}
@@ -29,41 +53,45 @@ export function AssemblyMarkingPanels({
         <span className="assembly-marking-panel__count">{errorsCount}</span>
         <span className="assembly-marking-panel__label">Ошибки ЧЗ</span>
       </button>
-      <button
-        type="button"
-        className={`assembly-marking-panel${unboundCount > 0 ? ' assembly-marking-panel--alert' : ' assembly-marking-panel--ok'}`}
-        onClick={() => onOpenList('unbound')}
-        {...uiHint(
-          'Товары с обязательной маркировкой без привязанного ЧЗ. Отсканируйте DataMatrix в поле сканирования справа.',
-        )}
-      >
-        <span className="assembly-marking-panel__count">{unboundCount}</span>
-        <span className="assembly-marking-panel__label">Без ЧЗ</span>
-      </button>
     </section>
   )
 }
 
-type AssemblyMarkingListModalProps = {
-  kind: MarkingPanelKind
+/** @deprecated use AssemblyQueuePanels */
+export const AssemblyMarkingPanels = AssemblyQueuePanels
+export type MarkingPanelKind = AssemblyQueuePanelKind
+
+type AssemblyQueueListModalProps = {
+  kind: AssemblyQueuePanelKind
   orders: AssemblyOrder[]
   loading?: boolean
   onClose: () => void
   onReplace?: (order: AssemblyOrder) => void
+  onReprint?: (order: AssemblyOrder) => void
+  onDeliver?: (order: AssemblyOrder) => void
 }
 
-export function AssemblyMarkingListModal({
+export function AssemblyQueueListModal({
   kind,
   orders,
   loading = false,
   onClose,
   onReplace,
-}: AssemblyMarkingListModalProps) {
-  const title = kind === 'errors' ? 'Ошибки Честного знака' : 'Товары без привязки ЧЗ'
+  onReprint,
+  onDeliver,
+}: AssemblyQueueListModalProps) {
+  const title =
+    kind === 'errors'
+      ? 'Ошибки Честного знака'
+      : kind === 'ready'
+        ? 'Готовые к доставке'
+        : 'На сборке'
   const emptyText =
     kind === 'errors'
       ? 'Нет заказов с отклонённым ЧЗ'
-      : 'Все товары с обязательной маркировкой обработаны'
+      : kind === 'ready'
+        ? 'Пока нет собранных заказов — отсканируйте баркод в панели справа'
+        : 'Все заказы собраны — новые появятся после передачи на сборку'
 
   return (
     <div className="assembly-marking-modal-backdrop" role="presentation" onClick={onClose}>
@@ -117,26 +145,57 @@ export function AssemblyMarkingListModal({
                       <p className="assembly-marking-list__error">{order.marking_verify_error}</p>
                     )}
                   </div>
-                  {kind === 'errors' && onReplace && (
-                    <button
-                      type="button"
-                      className="btn btn--small btn--primary"
-                      onClick={() => onReplace(order)}
-                      disabled={loading}
-                      {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
-                    >
-                      Заменить товар
-                    </button>
-                  )}
+                  <div className="assembly-marking-list__actions">
+                    {kind === 'errors' && onReplace && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => onReplace(order)}
+                        disabled={loading}
+                        {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
+                      >
+                        Заменить товар
+                      </button>
+                    )}
+                    {kind === 'ready' && onReprint && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        onClick={() => onReprint(order)}
+                        disabled={loading}
+                        {...uiHint('Повторная печать только если стикер повреждён — с подтверждением')}
+                      >
+                        Печать ещё раз
+                      </button>
+                    )}
+                    {kind === 'ready' && onDeliver && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => onDeliver(order)}
+                        disabled={loading || !order.can_send_to_delivery}
+                        {...uiHint('Передать заказ в доставку WB')}
+                      >
+                        В доставку
+                      </button>
+                    )}
+                  </div>
                 </li>
               )
             })}
           </ul>
         )}
         <p className="assembly-marking-modal__hint">
-          Сканируйте баркод и ЧЗ в панели справа — тот же порядок, что при основной сборке.
+          {kind === 'in_assembly'
+            ? 'Сканируйте баркод (и ЧЗ при необходимости) в панели справа — заказ сразу перейдёт в «Готовые».'
+            : kind === 'ready'
+              ? 'Повторная печать стикера — только через подтверждение менеджера.'
+              : 'После замены товара повторите сборку: баркод → ЧЗ → печать стикера.'}
         </p>
       </div>
     </div>
   )
 }
+
+/** @deprecated use AssemblyQueueListModal */
+export const AssemblyMarkingListModal = AssemblyQueueListModal

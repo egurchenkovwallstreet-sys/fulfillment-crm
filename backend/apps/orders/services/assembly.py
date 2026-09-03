@@ -24,6 +24,7 @@ from apps.warehouse.services.marking_lookup import (
   lookup_marking_for_barcode,
   resolve_product_requires_marking,
 )
+from apps.warehouse.services.stock_deduction import order_sticker_printed_in_crm
 
 
 class AssemblyError(Exception):
@@ -119,9 +120,14 @@ def _barcodes_match(left: str, right: str) -> bool:
 
 
 def _order_needs_marking_scan(order: Order) -> bool:
+  """Нужен ли скан DataMatrix прямо сейчас (не путать с «ждёт проверки WB» после печати)."""
   if not _order_requires_marking(order):
     return False
-  return (not order.marking_bound) or (order.marking_verify_status or "").strip() == "error"
+  if (order.marking_verify_status or "").strip() == "error":
+    return True
+  if order.status in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
+    return False
+  return order.status in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED)
 
 
 def _match_order_by_scan(orders_qs, scan_value: str) -> Order | None:
@@ -292,34 +298,34 @@ def _order_requires_marking(
   refresh_from_wb: bool = False,
 ) -> bool:
   seller = seller or order.seller
+  if refresh_from_wb:
+    try:
+      lookup = lookup_marking_for_barcode(seller, order.barcode)
+    except MarkingLookupError:
+      pass
+    else:
+      if lookup.wb_found:
+        product = order.product or Product.objects.filter(
+          seller=seller,
+          barcode=order.barcode,
+          marketplace=MARKETPLACE_WB,
+        ).first()
+        if product:
+          update_fields = ["updated_at"]
+          if product.requires_marking != lookup.requires_marking:
+            product.requires_marking = lookup.requires_marking
+            update_fields.append("requires_marking")
+          if lookup.title and not (product.name or "").strip():
+            product.name = lookup.title
+            update_fields.append("name")
+          product.save(update_fields=update_fields)
+          if order.product_id is None:
+            order.product = product
+            order.save(update_fields=["product", "updated_at"])
+        return lookup.requires_marking
   if resolve_product_requires_marking(order.product, order.barcode, seller):
     return True
-  if not refresh_from_wb:
-    return False
-  try:
-    lookup = lookup_marking_for_barcode(seller, order.barcode)
-  except MarkingLookupError:
-    return False
-  if not lookup.requires_marking:
-    return False
-  product = order.product or Product.objects.filter(
-    seller=seller,
-    barcode=order.barcode,
-    marketplace=MARKETPLACE_WB,
-  ).first()
-  if product:
-    update_fields = ["updated_at"]
-    if not product.requires_marking:
-      product.requires_marking = True
-      update_fields.append("requires_marking")
-    if lookup.title and not (product.name or "").strip():
-      product.name = lookup.title
-      update_fields.append("name")
-    product.save(update_fields=update_fields)
-    if order.product_id is None:
-      order.product = product
-      order.save(update_fields=["product", "updated_at"])
-  return True
+  return False
 
 
 def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None) -> int:
@@ -412,6 +418,14 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   _assert_scan_in_pick_list(seller, scan_value)
   order = _find_active_order(seller, scan_value)
 
+  if order_sticker_printed_in_crm(order) and not _is_marking_retry_order(order):
+    raise AssemblyError(
+      f"Стикер заказа WB #{order.wb_order_id} уже напечатан — заказ в «Готовые». "
+      "Повторная печать только через подтверждение менеджера.",
+      code="already_printed",
+      order=order,
+    )
+
   if _is_marking_retry_order(order):
     if not _order_requires_marking(order):
       raise AssemblyError(
@@ -495,6 +509,14 @@ def bind_marking_and_print(
     )
   except Order.DoesNotExist as exc:
     raise AssemblyError("Заказ не найден", code="order_not_found") from exc
+
+  if order_sticker_printed_in_crm(order) and not _is_marking_retry_order(order):
+    raise AssemblyError(
+      f"Стикер заказа WB #{order.wb_order_id} уже напечатан — заказ в «Готовые». "
+      "Повторная печать только через подтверждение менеджера.",
+      code="already_printed",
+      order=order,
+    )
 
   if order.status not in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED):
     raise _marking_error(
