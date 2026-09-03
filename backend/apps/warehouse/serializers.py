@@ -88,7 +88,7 @@ class IntakeSerializer(serializers.Serializer):
   barcode = serializers.CharField(max_length=100)
   quantity = serializers.IntegerField(min_value=0, default=0)
   stock_mode = serializers.ChoiceField(
-    choices=["intake", "sync_from_wb"],
+    choices=["intake", "sync_from_wb", "set_actual"],
     default="intake",
   )
   verified_stock_match = serializers.BooleanField(default=False)
@@ -130,6 +130,9 @@ class IntakeSerializer(serializers.Serializer):
             "Подтвердите, что на фулфилменте пересчитали остатки и они совпадают с ЛК WB"
           ),
         })
+    elif stock_mode == "set_actual":
+      if attrs.get("quantity", 0) < 0:
+        raise serializers.ValidationError({"quantity": "Количество не может быть отрицательным"})
     elif attrs.get("quantity", 0) < 1:
       raise serializers.ValidationError({"quantity": "Укажите количество от 1"})
 

@@ -332,6 +332,11 @@ class IntakeView(APIView):
         f"Остаток CRM установлен по ЛК WB: {qty} шт. "
         f"(склад {result.wb_sync.get('warehouse_name') if result.wb_sync else ''})"
       )
+    elif result.stock_mode == "set_actual":
+      message = (
+        f"Фактический остаток {qty} шт. установлен в CRM и ЛК WB "
+        f"(склад {result.wb_sync.get('warehouse_name') if result.wb_sync else ''})"
+      )
     else:
       added = result.wb_sync.get("added") if result.wb_sync else data.get("quantity", 0)
       message = f"Принято {added} шт. на склад CRM и передано в ЛК WB"

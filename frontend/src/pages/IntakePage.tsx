@@ -177,6 +177,10 @@ export function IntakePage() {
       setError('Укажите количество — целое число от 1')
       return
     }
+    if (stockMode === 'set_actual' && (!Number.isFinite(quantity) || quantity < 0)) {
+      setError('Укажите фактический остаток — целое число от 0')
+      return
+    }
 
     setLoading(true)
     try {
@@ -356,6 +360,7 @@ export function IntakePage() {
   }
 
   const isSyncMode = stockMode === 'sync_from_wb'
+  const isSetActualMode = stockMode === 'set_actual'
   const isSyncAuto = isSyncMode && syncVariant === 'auto'
   const isSyncScan = isSyncMode && syncVariant === 'scan'
   const enabledWarehouses = warehouses
@@ -452,6 +457,15 @@ export function IntakePage() {
                   onChange={() => handleStockModeChange('sync_from_wb')}
                 />
                 <strong>Сверка с WB</strong> — установить остаток CRM по ЛК WB
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="stockMode"
+                  checked={stockMode === 'set_actual'}
+                  onChange={() => handleStockModeChange('set_actual')}
+                />
+                <strong>Факт на полке</strong> — установить остаток CRM и ЛК WB по пересчёту
               </label>
             </fieldset>
             )}
@@ -690,6 +704,15 @@ export function IntakePage() {
               </div>
             )}
 
+            {lookup && isSetActualMode && (
+              <div className="intake-info intake-info--new">
+                <p>
+                  Остаток в CRM и ЛК WB будет установлен равным введённому количеству
+                  {lookup.product ? ` (сейчас в CRM: ${lookup.product.quantity} шт.)` : ''}.
+                </p>
+              </div>
+            )}
+
             {lookup && isSyncMode && !isSyncScan && (
               <div className="intake-warning intake-warning--danger">
                 <p>
@@ -712,14 +735,14 @@ export function IntakePage() {
               <>
                 {!isSyncMode && (
                   <label className="intake-field intake-field--quantity">
-                    Количество (факт при приёмке)
+                    {isSetActualMode ? 'Фактический остаток на полке' : 'Количество (факт при приёмке)'}
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={quantityInput}
                       onChange={(e) => setQuantityInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="1"
+                      placeholder={isSetActualMode ? '0' : '1'}
                       required
                     />
                   </label>
@@ -738,7 +761,9 @@ export function IntakePage() {
                         ? 'Сверить остаток, назначить ячейку и отправить этикетку на печать.'
                         : isSyncMode
                           ? 'Установить остаток CRM по данным WB после подтверждения сверки.'
-                          : 'Принять товар на склад CRM и обновить остатки в маркетплейсе.',
+                          : isSetActualMode
+                            ? 'Установить фактический остаток в CRM и ЛК WB.'
+                            : 'Принять товар на склад CRM и обновить остатки в маркетплейсе.',
                     )}
                   >
                     <button
@@ -752,7 +777,9 @@ export function IntakePage() {
                           ? 'Сверить, назначить ячейку и печать'
                           : isSyncMode
                             ? 'Установить остаток из WB'
-                            : 'Принять на склад'}
+                            : isSetActualMode
+                              ? 'Установить фактический остаток'
+                              : 'Принять на склад'}
                     </button>
                   </span>
                   <button type="button" className="btn btn--secondary" onClick={resetForm} {...uiHint('Очистить форму и вернуться к сканированию баркода.')}>

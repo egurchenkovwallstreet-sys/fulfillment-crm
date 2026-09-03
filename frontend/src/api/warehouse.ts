@@ -33,7 +33,7 @@ export type CellDetail = {
   product: Product | null
 }
 
-export type StockMode = 'intake' | 'sync_from_wb'
+export type StockMode = 'intake' | 'sync_from_wb' | 'set_actual'
 export type SyncVariant = 'auto' | 'scan'
 
 export type WbSyncPreviewItem = {
@@ -125,6 +125,7 @@ export type IntakeResponse = {
     previous_wb_amount?: number
     new_wb_amount?: number
     added?: number
+    set_to?: number
     wb_amount?: number
     mode?: string
   } | null

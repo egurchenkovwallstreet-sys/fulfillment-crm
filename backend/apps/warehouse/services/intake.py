@@ -12,10 +12,12 @@ from apps.warehouse.services.cells import create_cell_with_next_number, first_fr
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 from apps.warehouse.services.wb_stocks import (
   STOCK_MODE_INTAKE,
+  STOCK_MODE_SET_ACTUAL,
   STOCK_MODE_SYNC_FROM_WB,
   WBStockError,
   fetch_wb_stock_for_barcode,
   get_seller_warehouse,
+  push_wb_stock_absolute,
   push_wb_stock_increment,
 )
 
@@ -83,8 +85,8 @@ def perform_intake(
   intake_quantity = quantity
 
   if mp == OZON:
-    if stock_mode == STOCK_MODE_SYNC_FROM_WB:
-      raise IntakeError("Сверка с ЛК WB недоступна на вкладке Ozon")
+    if stock_mode in (STOCK_MODE_SYNC_FROM_WB, STOCK_MODE_SET_ACTUAL):
+      raise IntakeError("Режим недоступен на вкладке Ozon")
     if intake_quantity <= 0:
       raise IntakeError("Количество должно быть больше 0")
   else:
@@ -116,6 +118,9 @@ def perform_intake(
         "wb_amount": wb_amount,
         "verified_stock_match": True,
       }
+    elif stock_mode == STOCK_MODE_SET_ACTUAL:
+      if intake_quantity < 0:
+        raise IntakeError("Количество не может быть отрицательным")
     elif intake_quantity <= 0:
       raise IntakeError("Количество должно быть больше 0")
 
@@ -126,7 +131,7 @@ def perform_intake(
     .first()
   )
 
-  if stock_mode == STOCK_MODE_SYNC_FROM_WB:
+  if stock_mode in (STOCK_MODE_SYNC_FROM_WB, STOCK_MODE_SET_ACTUAL):
     if product:
       product.quantity = intake_quantity
       product.save(update_fields=["quantity", "updated_at"])
@@ -177,6 +182,11 @@ def perform_intake(
       f"Сверка с WB, склад {warehouse.name or warehouse.wb_warehouse_id}: "
       f"остаток CRM = {intake_quantity} шт. (подтверждено менеджером)"
     )
+  elif stock_mode == STOCK_MODE_SET_ACTUAL:
+    comment = (
+      f"Фактический остаток при приёмке: {intake_quantity} шт., "
+      f"CRM и WB, склад {warehouse.name or warehouse.wb_warehouse_id}"
+    )
   else:
     comment = f"Приёмка +{intake_quantity} шт., склад WB {warehouse.name or warehouse.wb_warehouse_id}"
 
@@ -185,7 +195,7 @@ def perform_intake(
     operation_type=StockOperation.OperationType.INTAKE
     if stock_mode == STOCK_MODE_INTAKE
     else StockOperation.OperationType.ADJUSTMENT,
-    quantity=intake_quantity if stock_mode == STOCK_MODE_INTAKE else intake_quantity,
+    quantity=intake_quantity,
     performed_by=user,
     comment=comment,
   )
@@ -193,6 +203,11 @@ def perform_intake(
   if stock_mode == STOCK_MODE_INTAKE and mp != OZON and warehouse is not None:
     try:
       wb_sync = push_wb_stock_increment(seller, warehouse, barcode, intake_quantity)
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+  elif stock_mode == STOCK_MODE_SET_ACTUAL and mp != OZON and warehouse is not None:
+    try:
+      wb_sync = push_wb_stock_absolute(seller, warehouse, barcode, intake_quantity)
     except WBStockError as exc:
       raise IntakeError(str(exc)) from exc
 

@@ -11,6 +11,7 @@ class WBStockError(Exception):
 
 STOCK_MODE_INTAKE = "intake"
 STOCK_MODE_SYNC_FROM_WB = "sync_from_wb"
+STOCK_MODE_SET_ACTUAL = "set_actual"
 
 
 def _get_wb_client(seller: Seller) -> WBClient:
@@ -85,6 +86,26 @@ def push_wb_stock_increment(
     "previous_wb_amount": current,
     "new_wb_amount": new_amount,
     "added": add_quantity,
+  }
+
+
+def push_wb_stock_absolute(
+  seller: Seller,
+  warehouse: SellerWarehouse,
+  barcode: str,
+  amount: int,
+) -> dict:
+  """Режим фактического остатка: установить абсолютное значение в ЛК WB."""
+  barcode = barcode.strip()
+  amount = max(0, int(amount))
+  current = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+  new_amount = set_wb_stock_absolute(seller, warehouse, barcode, amount)
+  return {
+    "wb_warehouse_id": warehouse.wb_warehouse_id,
+    "warehouse_name": warehouse.name,
+    "previous_wb_amount": current,
+    "new_wb_amount": new_amount,
+    "set_to": new_amount,
   }
 
 
