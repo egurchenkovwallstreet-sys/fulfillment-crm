@@ -4,6 +4,7 @@ import {
   fetchFreeCells,
   fetchSellers,
   lookupInventoryBarcode,
+  reconcileInventory,
   submitInventory,
   type Cell,
   type CellLabelData,
@@ -21,6 +22,12 @@ import './InventoryPage.css'
 type VerifyModal = {
   kind: 'ok' | 'error'
   result: InventoryResponse
+  reconcileContext: {
+    sellerId: number
+    barcode: string
+    physicalQuantity: number
+    warehouseIds: number[]
+  }
 }
 
 export function InventoryPage() {
@@ -238,6 +245,12 @@ export function InventoryPage() {
       setVerifyModal({
         kind: result.verified ? 'ok' : 'error',
         result,
+        reconcileContext: {
+          sellerId: Number(sellerId),
+          barcode: barcode.trim(),
+          physicalQuantity: quantity,
+          warehouseIds: isOzon ? [] : warehouseIds,
+        },
       })
       if (result.print_cell_label && result.cell_label) {
         setLabelPrompt(result.cell_label)
@@ -250,6 +263,37 @@ export function InventoryPage() {
     }
   }
 
+  const reconcileContext = verifyModal?.reconcileContext
+
+  useEffect(() => {
+    if (!reconcileContext || isOzon) return
+
+    const timer = window.setInterval(() => {
+      void reconcileInventory({
+        seller_id: reconcileContext.sellerId,
+        barcode: reconcileContext.barcode,
+        quantity: reconcileContext.physicalQuantity,
+        warehouse_ids: reconcileContext.warehouseIds,
+        cell_mode: 'auto',
+      })
+        .then((result) => {
+          setVerifyModal((prev) => {
+            if (!prev) return null
+            return {
+              ...prev,
+              kind: result.verified ? 'ok' : 'error',
+              result,
+            }
+          })
+        })
+        .catch(() => {
+          /* фоновая сверка — не блокируем менеджера */
+        })
+    }, 60_000)
+
+    return () => window.clearInterval(timer)
+  }, [reconcileContext, isOzon])
+
   const selectedWarehouses = warehouses.filter((wh) => warehouseIds.includes(wh.id))
 
   return (
@@ -258,7 +302,7 @@ export function InventoryPage() {
         <div>
           <h1>Инвентаризация</h1>
           <p>
-            Фактический пересчёт на фулфилменте → остаток в CRM → выбранные склады FBS в ЛК WB
+            Фактический пересчёт на фулфилменте → минус заказы «Новые» → остаток в CRM и FBS WB
           </p>
         </div>
         <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
@@ -475,7 +519,7 @@ export function InventoryPage() {
                 )}
 
                 <label className="inventory-field">
-                  Фактическое количество на фулфилменте
+                  Фактическое количество на полке (включая товар под заказы «Новые»)
                   <input
                     ref={quantityRef}
                     className="inventory-control inventory-control--quantity"
@@ -515,8 +559,9 @@ export function InventoryPage() {
                 ? 'Сверка успешна'
                 : 'Расхождение с ЛК WB'}
             </h2>
+            <p className="inventory-modal__breakdown">{verifyModal.result.message}</p>
             <p>
-              Баркод <code>{verifyModal.result.product.barcode}</code> · фулфилмент:{' '}
+              Баркод <code>{verifyModal.result.product.barcode}</code> · остаток CRM/WB:{' '}
               <strong>{verifyModal.result.fulfillment_quantity} шт.</strong>
             </p>
 

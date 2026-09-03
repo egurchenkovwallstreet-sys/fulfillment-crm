@@ -263,6 +263,15 @@
   margin: 0 0 0.5rem;
 }
 
+.inventory-modal__breakdown {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .inventory-modal__table {
   width: 100%;
   border-collapse: collapse;

@@ -35,7 +35,11 @@ from .services.cells import cells_queryset_ordered
 from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
 from .services.catalog_fetch_ozon import build_ozon_onboarding_preview
 from .services.intake import IntakeError, perform_intake
-from .services.inventory import perform_inventory
+from .services.inventory import (
+  _inventory_breakdown_message,
+  perform_inventory,
+  reconcile_inventory_stock,
+)
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
   StockFileImportError,
@@ -425,6 +429,39 @@ class IntakeHistoryView(APIView):
     return Response(StockOperationSerializer(ops, many=True).data)
 
 
+def _inventory_response(result) -> dict:
+  return {
+    "success": True,
+    "verified": result.verified,
+    "message": _inventory_breakdown_message(
+      physical_quantity=result.physical_quantity,
+      reserved_new_orders=result.reserved_new_orders,
+      fulfillment_quantity=result.fulfillment_quantity,
+      verified=result.verified,
+    ),
+    "physical_quantity": result.physical_quantity,
+    "reserved_new_orders": result.reserved_new_orders,
+    "fulfillment_quantity": result.fulfillment_quantity,
+    "wb_total_sent": result.wb_total_sent,
+    "wb_total_actual": result.wb_total_actual,
+    "wb_total_difference": result.wb_total_difference,
+    "warehouses": [
+      {
+        "warehouse_id": line.warehouse_id,
+        "warehouse_name": line.warehouse_name,
+        "wb_warehouse_id": line.wb_warehouse_id,
+        "sent_amount": line.sent_amount,
+        "wb_actual": line.wb_actual,
+        "difference": line.difference,
+      }
+      for line in result.warehouses
+    ],
+    "product": ProductSerializer(result.product).data,
+    "print_cell_label": result.print_cell_label,
+    "cell_label": result.cell_label,
+  }
+
+
 class InventoryLookupView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
@@ -498,31 +535,33 @@ class InventoryView(APIView):
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response(
-      {
-        "success": True,
-        "verified": result.verified,
-        "fulfillment_quantity": result.fulfillment_quantity,
-        "wb_total_sent": result.wb_total_sent,
-        "wb_total_actual": result.wb_total_actual,
-        "wb_total_difference": result.wb_total_difference,
-        "warehouses": [
-          {
-            "warehouse_id": line.warehouse_id,
-            "warehouse_name": line.warehouse_name,
-            "wb_warehouse_id": line.wb_warehouse_id,
-            "sent_amount": line.sent_amount,
-            "wb_actual": line.wb_actual,
-            "difference": line.difference,
-          }
-          for line in result.warehouses
-        ],
-        "product": ProductSerializer(result.product).data,
-        "print_cell_label": result.print_cell_label,
-        "cell_label": result.cell_label,
-      },
-      status=status.HTTP_201_CREATED,
-    )
+    return Response(_inventory_response(result), status=status.HTTP_201_CREATED)
+
+
+class InventoryReconcileView(APIView):
+  """Фоновая сверка: пересчёт «Новых» заказов и остатков без повторного скана."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    marketplace = parse_marketplace(request)
+    serializer = InventorySerializer(data=request.data, context={"marketplace": marketplace})
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = _require_seller(request, data["seller_id"])
+
+    try:
+      result = reconcile_inventory_stock(
+        seller=seller,
+        barcode=data["barcode"],
+        physical_quantity=data["quantity"],
+        warehouse_ids=data.get("warehouse_ids") or [],
+        user=request.user,
+        marketplace=marketplace,
+      )
+    except IntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(_inventory_response(result))
 
 
 class OnboardingPreviewView(APIView):

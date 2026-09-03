@@ -268,6 +268,9 @@ export type InventoryPayload = {
 export type InventoryResponse = {
   success: boolean
   verified: boolean
+  message: string
+  physical_quantity: number
+  reserved_new_orders: number
   fulfillment_quantity: number
   wb_total_sent: number
   wb_total_actual: number
@@ -288,6 +291,13 @@ export function lookupInventoryBarcode(sellerId: number, barcode: string) {
 
 export function submitInventory(payload: InventoryPayload) {
   return apiFetch<InventoryResponse>('/api/warehouse/inventory/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function reconcileInventory(payload: InventoryPayload) {
+  return apiFetch<InventoryResponse>('/api/warehouse/inventory/reconcile/', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

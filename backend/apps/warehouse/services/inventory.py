@@ -7,6 +7,7 @@ from django.db import transaction
 
 from apps.integrations.models import AuditLog
 from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+from apps.orders.services.supply_flow import count_new_orders_for_barcode
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
@@ -37,6 +38,8 @@ class InventoryResult:
   product: Product
   print_cell_label: bool
   cell_label: dict[str, str] | None
+  physical_quantity: int
+  reserved_new_orders: int
   fulfillment_quantity: int
   verified: bool
   warehouses: list[InventoryWarehouseLine]
@@ -59,6 +62,43 @@ def _resolve_warehouses(seller: Seller, warehouse_ids: list[int]) -> list[Seller
   if len(warehouses) != len(unique_ids):
     raise IntakeError("Один или несколько складов не найдены")
   return warehouses
+
+
+def _inventory_breakdown_message(
+  *,
+  physical_quantity: int,
+  reserved_new_orders: int,
+  fulfillment_quantity: int,
+  verified: bool,
+) -> str:
+  parts = [
+    f"Насчитано на полке: {physical_quantity} шт.",
+    f"Зарезервировано в «Новые»: {reserved_new_orders} шт.",
+    f"Остаток CRM и WB: {fulfillment_quantity} шт.",
+  ]
+  if not verified:
+    parts.append("Сверка с ЛК WB: расхождение — проверьте склады.")
+  else:
+    parts.append("Сверка с ЛК WB: OK.")
+  return " · ".join(parts)
+
+
+def _compute_inventory_effective_quantity(
+  seller: Seller,
+  barcode: str,
+  physical_quantity: int,
+  *,
+  marketplace: str,
+) -> tuple[int, int]:
+  mp = normalize_marketplace(marketplace)
+  reserved_new = 0 if mp == OZON else count_new_orders_for_barcode(seller, barcode)
+  effective = physical_quantity - reserved_new
+  if effective < 0:
+    raise IntakeError(
+      f"Насчитано {physical_quantity} шт., но {reserved_new} заказ(ов) во вкладке «Новые» "
+      f"на обслуживаемых FBS-складах — свободный остаток не может быть отрицательным."
+    )
+  return reserved_new, effective
 
 
 def _verify_inventory(
@@ -104,8 +144,16 @@ def perform_inventory(
   barcode = barcode.strip()
   if not barcode:
     raise IntakeError("Баркод не может быть пустым")
-  if quantity < 0:
+  physical_quantity = quantity
+  if physical_quantity < 0:
     raise IntakeError("Количество не может быть отрицательным")
+
+  reserved_new_orders, quantity = _compute_inventory_effective_quantity(
+    seller,
+    barcode,
+    physical_quantity,
+    marketplace=mp,
+  )
 
   warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
   targets = (
@@ -130,8 +178,13 @@ def perform_inventory(
     product.save(update_fields=["quantity", "updated_at"])
     is_new = False
   else:
-    if quantity == 0:
+    if quantity == 0 and reserved_new_orders == 0:
       raise IntakeError("Новый баркод нельзя инвентаризировать с нулевым количеством")
+    if quantity == 0 and reserved_new_orders > 0:
+      raise IntakeError(
+        f"Насчитано 0 шт., но {reserved_new_orders} заказ(ов) в «Новые» — "
+        f"пересчитайте или сначала обработайте заказы."
+      )
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
     marking = lookup_marking_for_barcode(seller, barcode) if mp == WB else None
     product = Product.objects.create(
@@ -172,15 +225,23 @@ def perform_inventory(
     f"{wh.name or wh.wb_warehouse_id}={sent_by_warehouse[wh.id]}"
     for wh in warehouses
   )
+  reserve_note = (
+    f", «Новые» −{reserved_new_orders} шт."
+    if reserved_new_orders
+    else ""
+  )
   StockOperation.objects.create(
     product=product,
     operation_type=StockOperation.OperationType.ADJUSTMENT,
     quantity=quantity,
     performed_by=user,
     comment=(
-      f"Инвентаризация Ozon: {quantity} шт."
+      f"Инвентаризация Ozon: насчитано {physical_quantity} шт. → {quantity} шт."
       if mp == OZON
-      else f"Инвентаризация: {quantity} шт. → WB ({warehouse_labels})"
+      else (
+        f"Инвентаризация: насчитано {physical_quantity} шт.{reserve_note} "
+        f"→ {quantity} шт. в CRM/WB ({warehouse_labels})"
+      )
     ),
   )
 
@@ -200,11 +261,14 @@ def perform_inventory(
     seller=seller,
     action_type=AuditLog.ActionType.OTHER,
     message=(
-      f"Инвентаризация баркод {barcode}: {quantity} шт., "
+      f"Инвентаризация баркод {barcode}: насчитано {physical_quantity}, "
+      f"«Новые» {reserved_new_orders}, остаток {quantity} шт., "
       f"{'сверка OK' if verified else 'расхождение с WB'}"
     ),
     details={
       "barcode": barcode,
+      "physical_quantity": physical_quantity,
+      "reserved_new_orders": reserved_new_orders,
       "fulfillment_quantity": quantity,
       "verified": verified,
       "warehouse_ids": warehouse_ids,
@@ -230,6 +294,104 @@ def perform_inventory(
     product=product,
     print_cell_label=is_new,
     cell_label=cell_label,
+    physical_quantity=physical_quantity,
+    reserved_new_orders=reserved_new_orders,
+    fulfillment_quantity=quantity,
+    verified=verified,
+    warehouses=lines,
+    wb_total_sent=wb_total_sent,
+    wb_total_actual=wb_total_actual,
+    wb_total_difference=wb_total_actual - wb_total_sent,
+  )
+
+
+@transaction.atomic
+def reconcile_inventory_stock(
+  *,
+  seller: Seller,
+  barcode: str,
+  physical_quantity: int,
+  warehouse_ids: list[int],
+  user,
+  marketplace: str = WB,
+) -> InventoryResult:
+  """Фоновая сверка: пересчитать «Новые» и обновить CRM/WB без создания товара."""
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    raise IntakeError("Фоновая сверка недоступна на вкладке Ozon")
+
+  barcode = barcode.strip()
+  product = Product.objects.filter(seller=seller, barcode=barcode, marketplace=mp).first()
+  if not product:
+    raise IntakeError("Товар не найден — сначала проведите инвентаризацию")
+
+  reserved_new_orders, quantity = _compute_inventory_effective_quantity(
+    seller,
+    barcode,
+    physical_quantity,
+    marketplace=mp,
+  )
+  warehouses = _resolve_warehouses(seller, warehouse_ids)
+  targets = (
+    even_split_quantity(quantity, len(warehouses))
+    if len(warehouses) > 1
+    else [quantity]
+  )
+  sent_by_warehouse = {
+    warehouse.id: target
+    for warehouse, target in zip(warehouses, targets, strict=True)
+  }
+
+  product = Product.objects.select_for_update().get(pk=product.pk)
+  previous_quantity = product.quantity
+  if product.quantity != quantity:
+    product.quantity = quantity
+    product.save(update_fields=["quantity", "updated_at"])
+
+    for warehouse, target in zip(warehouses, targets, strict=True):
+      try:
+        set_wb_stock_absolute(seller, warehouse, barcode, target)
+      except WBStockError as exc:
+        raise IntakeError(str(exc)) from exc
+
+      ProductWarehouseStock.objects.update_or_create(
+        product=product,
+        seller_warehouse=warehouse,
+        defaults={"quantity": target},
+      )
+
+    selected_ids = {wh.id for wh in warehouses}
+    for warehouse in get_enabled_seller_warehouses(seller):
+      if warehouse.id in selected_ids:
+        continue
+      ProductWarehouseStock.objects.filter(
+        product=product,
+        seller_warehouse=warehouse,
+      ).update(quantity=0)
+
+    reserve_note = f", «Новые» −{reserved_new_orders} шт." if reserved_new_orders else ""
+    StockOperation.objects.create(
+      product=product,
+      operation_type=StockOperation.OperationType.ADJUSTMENT,
+      quantity=quantity,
+      performed_by=user,
+      comment=(
+        f"Инвентаризация (фон): насчитано {physical_quantity} шт.{reserve_note} "
+        f"→ {quantity} шт. (было {previous_quantity})"
+      ),
+    )
+
+  lines = _verify_inventory(seller, warehouses, barcode, sent_by_warehouse)
+  wb_total_sent = sum(line.sent_amount for line in lines)
+  wb_total_actual = sum(line.wb_actual for line in lines)
+  verified = all(line.difference == 0 for line in lines)
+
+  return InventoryResult(
+    product=product,
+    print_cell_label=False,
+    cell_label=None,
+    physical_quantity=physical_quantity,
+    reserved_new_orders=reserved_new_orders,
     fulfillment_quantity=quantity,
     verified=verified,
     warehouses=lines,

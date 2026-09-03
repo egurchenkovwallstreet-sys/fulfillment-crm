@@ -9,6 +9,7 @@ from .views import (
   WbSyncIntakeAutoView,
   WbSyncIntakePreviewView,
   InventoryLookupView,
+  InventoryReconcileView,
   InventoryView,
   OnboardingConfirmView,
   OnboardingExcludeView,
@@ -73,6 +74,7 @@ urlpatterns = [
   path("intake/history/", IntakeHistoryView.as_view(), name="intake_history"),
   path("inventory/lookup/", InventoryLookupView.as_view(), name="inventory_lookup"),
   path("inventory/", InventoryView.as_view(), name="inventory"),
+  path("inventory/reconcile/", InventoryReconcileView.as_view(), name="inventory_reconcile"),
   path(
     "onboarding/<int:seller_id>/preview/",
     OnboardingPreviewView.as_view(),

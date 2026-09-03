@@ -427,6 +427,14 @@ def new_stage_orders_queryset(seller: Seller) -> QuerySet:
   )
 
 
+def count_new_orders_for_barcode(seller: Seller, barcode: str) -> int:
+  """Заказы вкладки «Новые» по баркоду на обслуживаемых FBS-складах."""
+  barcode = (barcode or "").strip()
+  if not barcode:
+    return 0
+  return new_stage_orders_queryset(seller).filter(barcode=barcode).count()
+
+
 def count_orders_ready_for_assembly(seller: Seller) -> int:
   return new_stage_orders_queryset(seller).count()
 
