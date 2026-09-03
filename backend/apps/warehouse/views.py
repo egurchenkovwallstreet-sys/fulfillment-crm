@@ -38,7 +38,6 @@ from .services.intake import IntakeError, perform_intake
 from .services.inventory import (
   _inventory_breakdown_message,
   perform_inventory,
-  reconcile_inventory_stock,
 )
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
@@ -438,10 +437,12 @@ def _inventory_response(result) -> dict:
       reserved_new_orders=result.reserved_new_orders,
       fulfillment_quantity=result.fulfillment_quantity,
       verified=result.verified,
+      restock_required=result.restock_required,
     ),
     "physical_quantity": result.physical_quantity,
     "reserved_new_orders": result.reserved_new_orders,
     "fulfillment_quantity": result.fulfillment_quantity,
+    "restock_required": result.restock_required,
     "wb_total_sent": result.wb_total_sent,
     "wb_total_actual": result.wb_total_actual,
     "wb_total_difference": result.wb_total_difference,
@@ -536,32 +537,6 @@ class InventoryView(APIView):
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(_inventory_response(result), status=status.HTTP_201_CREATED)
-
-
-class InventoryReconcileView(APIView):
-  """Фоновая сверка: пересчёт «Новых» заказов и остатков без повторного скана."""
-  permission_classes = [IsAuthenticated, IsManager]
-
-  def post(self, request):
-    marketplace = parse_marketplace(request)
-    serializer = InventorySerializer(data=request.data, context={"marketplace": marketplace})
-    serializer.is_valid(raise_exception=True)
-    data = serializer.validated_data
-    seller = _require_seller(request, data["seller_id"])
-
-    try:
-      result = reconcile_inventory_stock(
-        seller=seller,
-        barcode=data["barcode"],
-        physical_quantity=data["quantity"],
-        warehouse_ids=data.get("warehouse_ids") or [],
-        user=request.user,
-        marketplace=marketplace,
-      )
-    except IntakeError as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    return Response(_inventory_response(result))
 
 
 class OnboardingPreviewView(APIView):

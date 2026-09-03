@@ -231,6 +231,54 @@
   background: #fff;
 }
 
+.inventory-result {
+  border-width: 2px;
+  border-style: solid;
+}
+
+.inventory-result--ok {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.inventory-result--warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.inventory-result--error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.inventory-result__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.inventory-result__breakdown {
+  margin: 0 0 0.5rem;
+  line-height: 1.45;
+}
+
+.inventory-result__barcode {
+  margin: 0 0 0.75rem;
+  color: #475569;
+}
+
+.inventory-result__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.inventory-result__table th,
+.inventory-result__table td {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.4rem 0.35rem;
+  text-align: left;
+}
+
 .inventory-modal-backdrop {
   position: fixed;
   inset: 0;

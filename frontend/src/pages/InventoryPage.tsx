@@ -4,7 +4,6 @@ import {
   fetchFreeCells,
   fetchSellers,
   lookupInventoryBarcode,
-  reconcileInventory,
   submitInventory,
   type Cell,
   type CellLabelData,
@@ -19,17 +18,6 @@ import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './InventoryPage.css'
 
-type VerifyModal = {
-  kind: 'ok' | 'error'
-  result: InventoryResponse
-  reconcileContext: {
-    sellerId: number
-    barcode: string
-    physicalQuantity: number
-    warehouseIds: number[]
-  }
-}
-
 export function InventoryPage() {
   const { marketplace } = useMarketplace()
   const isOzon = marketplace === 'ozon'
@@ -41,6 +29,8 @@ export function InventoryPage() {
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [warehouseIds, setWarehouseIds] = useState<number[]>([])
   const [sessionActive, setSessionActive] = useState(false)
+  const [completedBarcodes, setCompletedBarcodes] = useState<Set<string>>(new Set())
+  const [lastResult, setLastResult] = useState<InventoryResponse | null>(null)
   const [barcode, setBarcode] = useState('')
   const [quantityInput, setQuantityInput] = useState('')
   const [productName, setProductName] = useState('')
@@ -48,7 +38,6 @@ export function InventoryPage() {
   const [cellId, setCellId] = useState<number | ''>('')
   const [lookup, setLookup] = useState<InventoryLookup | null>(null)
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
-  const [verifyModal, setVerifyModal] = useState<VerifyModal | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionCount, setSessionCount] = useState(0)
@@ -143,13 +132,16 @@ export function InventoryPage() {
     }
     setSessionActive(true)
     setSessionCount(0)
+    setCompletedBarcodes(new Set())
+    setLastResult(null)
     resetBarcodeForm()
   }
 
   function finishSession() {
     setSessionActive(false)
     setWarehouseIds([])
-    setVerifyModal(null)
+    setCompletedBarcodes(new Set())
+    setLastResult(null)
     resetBarcodeForm()
     setError('')
   }
@@ -157,11 +149,6 @@ export function InventoryPage() {
   function handlePrintCellLabel() {
     if (!cellLabelData) return
     printCellLabel(cellLabelData, true)
-  }
-
-  function closeVerifyModal() {
-    setVerifyModal(null)
-    focusBarcode()
   }
 
   async function handleSyncWarehouses() {
@@ -180,13 +167,20 @@ export function InventoryPage() {
 
   async function handleLookup() {
     setError('')
-    if (!sellerId || !barcode.trim()) {
+    const trimmed = barcode.trim()
+    if (!sellerId || !trimmed) {
       setError('Отсканируйте баркод')
+      return
+    }
+    if (completedBarcodes.has(trimmed)) {
+      setError(`Баркод ${trimmed} уже инвентаризирован в этой сессии — сканируйте следующий`)
+      setLookup(null)
+      focusBarcode()
       return
     }
     setLoading(true)
     try {
-      const result = await lookupInventoryBarcode(Number(sellerId), barcode.trim())
+      const result = await lookupInventoryBarcode(Number(sellerId), trimmed)
       setLookup(result)
       if (result.exists && result.product) {
         setQuantityInput(String(result.product.quantity))
@@ -215,8 +209,13 @@ export function InventoryPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
+    const trimmed = barcode.trim()
     if (!lookup) {
       setError('Сначала отсканируйте баркод (Enter)')
+      return
+    }
+    if (completedBarcodes.has(trimmed)) {
+      setError(`Баркод ${trimmed} уже инвентаризирован в этой сессии`)
       return
     }
 
@@ -225,16 +224,12 @@ export function InventoryPage() {
       setError('Укажите фактическое количество — целое число от 0')
       return
     }
-    if (!lookup.exists && quantity === 0) {
-      setError('Для нового баркода количество должно быть больше 0')
-      return
-    }
 
     setLoading(true)
     try {
       const result = await submitInventory({
         seller_id: Number(sellerId),
-        barcode: barcode.trim(),
+        barcode: trimmed,
         quantity,
         warehouse_ids: isOzon ? [] : warehouseIds,
         cell_mode: lookup.exists ? 'auto' : cellMode,
@@ -242,16 +237,8 @@ export function InventoryPage() {
         name: productName,
       })
       setSessionCount((value) => value + 1)
-      setVerifyModal({
-        kind: result.verified ? 'ok' : 'error',
-        result,
-        reconcileContext: {
-          sellerId: Number(sellerId),
-          barcode: barcode.trim(),
-          physicalQuantity: quantity,
-          warehouseIds: isOzon ? [] : warehouseIds,
-        },
-      })
+      setCompletedBarcodes((prev) => new Set(prev).add(trimmed))
+      setLastResult(result)
       if (result.print_cell_label && result.cell_label) {
         setLabelPrompt(result.cell_label)
       }
@@ -263,38 +250,15 @@ export function InventoryPage() {
     }
   }
 
-  const reconcileContext = verifyModal?.reconcileContext
-
-  useEffect(() => {
-    if (!reconcileContext || isOzon) return
-
-    const timer = window.setInterval(() => {
-      void reconcileInventory({
-        seller_id: reconcileContext.sellerId,
-        barcode: reconcileContext.barcode,
-        quantity: reconcileContext.physicalQuantity,
-        warehouse_ids: reconcileContext.warehouseIds,
-        cell_mode: 'auto',
-      })
-        .then((result) => {
-          setVerifyModal((prev) => {
-            if (!prev) return null
-            return {
-              ...prev,
-              kind: result.verified ? 'ok' : 'error',
-              result,
-            }
-          })
-        })
-        .catch(() => {
-          /* фоновая сверка — не блокируем менеджера */
-        })
-    }, 60_000)
-
-    return () => window.clearInterval(timer)
-  }, [reconcileContext, isOzon])
-
   const selectedWarehouses = warehouses.filter((wh) => warehouseIds.includes(wh.id))
+
+  const lastResultClass = lastResult
+    ? lastResult.restock_required
+      ? 'inventory-result--warning'
+      : lastResult.verified
+        ? 'inventory-result--ok'
+        : 'inventory-result--error'
+    : ''
 
   return (
     <div className="page inventory-page">
@@ -302,7 +266,7 @@ export function InventoryPage() {
         <div>
           <h1>Инвентаризация</h1>
           <p>
-            Фактический пересчёт на фулфилменте → минус заказы «Новые» → остаток в CRM и FBS WB
+            Скан баркода → минус заказы «Новые» → сохранение → следующий баркод. Завершение — отдельной кнопкой.
           </p>
         </div>
         <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
@@ -393,18 +357,57 @@ export function InventoryPage() {
                 </span>
               </div>
               <div className="inventory-session__actions">
-                <span className="inventory-session__count">Позиций: {sessionCount}</span>
+                <span className="inventory-session__count">Сохранено: {sessionCount}</span>
                 <button
                   type="button"
                   className="btn btn--danger inventory-btn"
                   onClick={finishSession}
-                  {...uiHint('Завершить сессию инвентаризации и вернуться к выбору селлера.')}
+                  {...uiHint('Завершить сессию инвентаризации.')}
                 >
-                  Завершить инвентаризацию
+                  Закончить инвентаризацию
                 </button>
               </div>
             </div>
           </section>
+
+          {lastResult && (
+            <section className={`panel inventory-result ${lastResultClass}`}>
+              <h2 className="inventory-result__title">
+                {lastResult.restock_required
+                  ? 'Сохранено — нужна догрузка'
+                  : lastResult.verified
+                    ? 'Сохранено — сверка OK'
+                    : 'Сохранено — расхождение с WB'}
+              </h2>
+              <p className="inventory-result__breakdown">{lastResult.message}</p>
+              <p className="inventory-result__barcode">
+                Баркод <code>{lastResult.product.barcode}</code>
+                {lastResult.product.cell_number && (
+                  <> · ячейка №{lastResult.product.cell_number}</>
+                )}
+              </p>
+              {!isOzon && lastResult.warehouses.length > 0 && (
+                <table className="inventory-result__table">
+                  <thead>
+                    <tr>
+                      <th>Склад FBS</th>
+                      <th>Отправили</th>
+                      <th>В ЛК WB</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lastResult.warehouses.map((row) => (
+                      <tr key={row.warehouse_id}>
+                        <td>{row.warehouse_name}</td>
+                        <td>{row.sent_amount}</td>
+                        <td>{row.wb_actual}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
 
           <form className="panel inventory-form" onSubmit={(e) => void handleSubmit(e)}>
             <div className="inventory-scan">
@@ -417,7 +420,7 @@ export function InventoryPage() {
                   value={barcode}
                   onChange={(e) => setBarcode(e.target.value)}
                   onKeyDown={handleBarcodeKeyDown}
-                  placeholder="Наведите сканер и отсканируйте баркод"
+                  placeholder="Сканируйте следующий баркод"
                   autoComplete="off"
                   autoFocus
                   inputMode="numeric"
@@ -495,14 +498,6 @@ export function InventoryPage() {
                           ))}
                         </select>
                       )}
-                      {cellMode === 'manual' && cellId && (
-                        <div className="inventory-cell-badge inventory-cell-badge--inline">
-                          <span className="inventory-cell-badge__label">Выбрана</span>
-                          <span className="inventory-cell-badge__number">
-                            №{cells.find((cell) => cell.id === cellId)?.number}
-                          </span>
-                        </div>
-                      )}
                     </fieldset>
                   </>
                 )}
@@ -512,14 +507,13 @@ export function InventoryPage() {
                     type="button"
                     className="btn btn--secondary inventory-btn inventory-btn--print"
                     onClick={handlePrintCellLabel}
-                    {...uiHint('Напечатать этикетку ячейки для текущего товара.')}
                   >
                     Распечатать этикетку ячейки
                   </button>
                 )}
 
                 <label className="inventory-field">
-                  Фактическое количество на полке (включая товар под заказы «Новые»)
+                  Факт на полке (включая товар под заказы «Новые»)
                   <input
                     ref={quantityRef}
                     className="inventory-control inventory-control--quantity"
@@ -536,110 +530,13 @@ export function InventoryPage() {
                   type="submit"
                   className="btn btn--danger inventory-btn inventory-btn--large"
                   disabled={loading}
-                  {...uiHint('Записать фактическое количество в CRM и обновить остатки на FBS-складах WB.')}
                 >
-                  {loading ? 'Обработка…' : 'Провести инвентаризацию'}
+                  {loading ? 'Сохранение…' : 'Сохранить'}
                 </button>
               </div>
             )}
           </form>
         </>
-      )}
-
-      {verifyModal && (
-        <div className="inventory-modal-backdrop" onClick={closeVerifyModal}>
-          <div
-            className={`inventory-modal inventory-modal--${verifyModal.kind}`}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <h2>
-              {verifyModal.kind === 'ok'
-                ? 'Сверка успешна'
-                : 'Расхождение с ЛК WB'}
-            </h2>
-            <p className="inventory-modal__breakdown">{verifyModal.result.message}</p>
-            <p>
-              Баркод <code>{verifyModal.result.product.barcode}</code> · остаток CRM/WB:{' '}
-              <strong>{verifyModal.result.fulfillment_quantity} шт.</strong>
-            </p>
-
-            {verifyModal.kind === 'ok' ? (
-              <div className="inventory-modal__ok">
-                <p>Остатки в ЛК WB совпадают с отправленными данными.</p>
-                <table className="inventory-modal__table">
-                  <thead>
-                    <tr>
-                      <th>Склад FBS</th>
-                      <th>В ЛК WB</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {verifyModal.result.warehouses.map((row) => (
-                      <tr key={row.warehouse_id}>
-                        <td>{row.warehouse_name}</td>
-                        <td><strong>{row.wb_actual} шт.</strong></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>Итого</td>
-                      <td><strong>{verifyModal.result.wb_total_actual} шт.</strong></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            ) : (
-              <div className="inventory-modal__error">
-                <table className="inventory-modal__table">
-                  <thead>
-                    <tr>
-                      <th>Склад FBS</th>
-                      <th>Отправили</th>
-                      <th>Факт в ЛК WB</th>
-                      <th>Разница</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {verifyModal.result.warehouses.map((row) => (
-                      <tr key={row.warehouse_id}>
-                        <td>{row.warehouse_name}</td>
-                        <td>{row.sent_amount}</td>
-                        <td>{row.wb_actual}</td>
-                        <td className={row.difference !== 0 ? 'inventory-modal__diff' : ''}>
-                          {row.difference > 0 ? `+${row.difference}` : row.difference}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>Итого</td>
-                      <td>{verifyModal.result.wb_total_sent}</td>
-                      <td>{verifyModal.result.wb_total_actual}</td>
-                      <td className="inventory-modal__diff">
-                        {verifyModal.result.wb_total_difference > 0
-                          ? `+${verifyModal.result.wb_total_difference}`
-                          : verifyModal.result.wb_total_difference}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-
-            <button
-              type="button"
-              className="btn btn--primary inventory-btn inventory-btn--large inventory-modal__close"
-              onClick={closeVerifyModal}
-              {...uiHint('Закрыть результат сверки и перейти к следующему баркоду.')}
-            >
-              Продолжить
-            </button>
-          </div>
-        </div>
       )}
 
       {labelPrompt && (
