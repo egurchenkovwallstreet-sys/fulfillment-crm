@@ -22,6 +22,11 @@ from apps.sellers.services.calendar_periods import (
   today_local,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
+from apps.sellers.services.warehouse_filter import (
+  get_enabled_warehouse_match_ids,
+  order_matches_enabled_warehouse,
+  seller_has_warehouse_config,
+)
 from apps.warehouse.models import Product
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
@@ -154,8 +159,17 @@ def _order_eligible_for_billing(
   *,
   match_ids: set[int] | None,
 ) -> bool:
-  del seller, meta, match_ids
-  return True
+  """Только заказы с включённых FBS-складов фулфилмента."""
+  if not seller_has_warehouse_config(seller):
+    return True
+  if meta is None:
+    return False
+  return order_matches_enabled_warehouse(
+    seller,
+    meta.warehouse_id,
+    meta.office_id,
+    match_ids=match_ids,
+  )
 
 
 def _resolve_unit_price(
@@ -244,7 +258,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
   """
   Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
   Источник: GET /api/v3/supplies (done) + order-ids из WB API.
-  Учитываются все заказы в поставках, в т.ч. отгруженные до/вне CRM.
+  Учитываются заказы только с включённых FBS-складов фулфилмента.
   """
   today = today_local()
   current_week_start, current_week_end = calendar_week_bounds(today)
@@ -264,6 +278,11 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
     raise SellerAnalyticsError(str(exc)) from exc
 
   order_index = _build_wb_order_index(seller, client)
+  match_ids = (
+    get_enabled_warehouse_match_ids(seller)
+    if seller_has_warehouse_config(seller)
+    else None
+  )
 
   crm_supplies = {
     supply.wb_supply_id: supply
@@ -302,7 +321,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
       order_index=order_index,
       price_by_barcode=price_by_barcode,
       fallback_tariff=fallback_tariff,
-      match_ids=None,
+      match_ids=match_ids,
     )
     if order_count <= 0:
       continue

@@ -27,7 +27,7 @@ type Props = {
 export function WeeklyShipmentsPanel({
   data,
   title = 'Отгрузки на склад WB',
-  hint = 'Считаются все заказы из поставок WB (done), в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.',
+  hint = 'Заказы из поставок WB (done) только с включённых FBS-складов фулфилмента, в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.',
   weekIndex: controlledWeekIndex,
   onWeekIndexChange,
 }: Props) {
