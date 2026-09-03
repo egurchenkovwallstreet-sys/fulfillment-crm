@@ -50,7 +50,7 @@ def order_matches_enabled_warehouse(
 
 
 def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
-  """Галочка склада на экране «Сборка FBS» — не влияет на дашборд и биллинг."""
+  """Склад включён для обслуживания фулфилментом (импорт заказов, сборка, дашборд)."""
   if not seller_has_warehouse_config(seller):
     return True
   if wb_warehouse_id is None:

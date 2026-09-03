@@ -104,7 +104,7 @@ def _stage_totals_for_sellers(sellers) -> tuple[dict[str, int], object | None]:
   totals = {"new": 0, "in_picking": 0, "in_delivery": 0}
   latest_sync = None
   for seller in sellers:
-    counts = get_seller_wb_tab_counts(seller)
+    counts = get_seller_wb_tab_counts(seller, assembly_only=True)
     totals["new"] += counts["new"]
     totals["in_picking"] += counts["in_picking"]
     totals["in_delivery"] += counts["in_delivery"]
@@ -318,7 +318,7 @@ class OrderSyncView(APIView):
       except SyncError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       dashboard_stats = _dashboard_stats_from_counts(
-        result.get("wb_counts") or result.get("live_counts") or {},
+        get_seller_wb_tab_counts(seller, assembly_only=True),
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
 
@@ -331,7 +331,10 @@ class OrderSyncView(APIView):
     )
     results = payload.get("results") or []
     if results:
-      payload["dashboard_stats"] = _aggregate_sync_dashboard_stats(results)
+      counts, _latest = _stage_totals_for_sellers(
+        filter_sellers_qs(sellers_for_user(user).filter(is_active=True), WB),
+      )
+      payload["dashboard_stats"] = _dashboard_stats_from_counts(counts)
       totals = {
         "statuses_updated": sum(r.get("statuses_updated", 0) for r in results),
         "statuses_fetched": sum(r.get("statuses_fetched", 0) for r in results),

@@ -781,7 +781,8 @@ def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> d
     qs = base_qs
   active = qs.exclude(status=Order.Status.CANCELLED)
 
-  if seller.wb_counts_synced_at:
+  # Кэш WB — по всем складам ЛК; для сборки FBS и дашборда фулфилмента считаем из БД.
+  if seller.wb_counts_synced_at and not assembly_only:
     in_delivery = seller.wb_count_delivery
   else:
     in_delivery = active.filter(wb_in_delivery_q()).count()
