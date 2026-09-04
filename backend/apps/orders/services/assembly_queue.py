@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from apps.orders.models import Order
-from apps.orders.services.marking_verification import VERIFY_ERROR
+from apps.orders.services.order_sticker import order_sticker_printed_in_crm
 from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-from apps.warehouse.services.stock_deduction import order_sticker_printed_in_crm
+
+
+VERIFY_ERROR = "error"
 
 
 def _assembly_confirm_orders_qs(seller: Seller):

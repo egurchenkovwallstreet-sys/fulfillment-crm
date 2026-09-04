@@ -13,6 +13,7 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.orders.models import Order, PickList, PickListItem, Supply
+from apps.orders.services.order_sticker import order_sticker_printed_in_crm
 from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
@@ -24,7 +25,6 @@ from apps.warehouse.services.marking_lookup import (
   lookup_marking_for_barcode,
   resolve_product_requires_marking,
 )
-from apps.warehouse.services.stock_deduction import order_sticker_printed_in_crm
 
 
 class AssemblyError(Exception):

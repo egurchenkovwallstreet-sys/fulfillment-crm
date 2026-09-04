@@ -4,6 +4,7 @@ from __future__ import annotations
 from apps.integrations.models import AuditLog
 from apps.orders.models import Order, PickList, Supply
 from apps.orders.services.marking_verification import order_marking_ready
+from apps.orders.services.order_sticker import order_sticker_printed_in_crm
 from apps.warehouse.models import Product, StockOperation
 from apps.warehouse.services.cells import refresh_cell_occupied
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
@@ -28,16 +29,6 @@ def order_on_active_pick_list(order: Order) -> bool:
   if pick_list is None:
     pick_list = PickList.objects.filter(pk=order.pick_list_id).first()
   return pick_list is not None and not pick_list.is_completed
-
-
-def order_sticker_printed_in_crm(order: Order) -> bool:
-  part_a = (order.sticker_part_a or "").strip()
-  part_b = (order.sticker_part_b or "").strip()
-  if part_a and part_b and order.has_sticker:
-    return True
-  return order.status in (Order.Status.LABEL_PRINTED, Order.Status.MARKED) and bool(
-    part_a and part_b
-  )
 
 
 def assert_order_ready_for_crm_stock_deduction(order: Order) -> None:
