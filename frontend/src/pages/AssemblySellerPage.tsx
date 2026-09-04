@@ -51,6 +51,7 @@ import {
   openPrintHolder,
   printFbsSticker,
   refreshPrintBridgeStatus,
+  setPrintHolderMessage,
   type PrintChannel,
 } from '../utils/printService'
 import { downloadPickListPdf } from '../utils/pickListPrint'
@@ -720,16 +721,6 @@ function WbAssemblySellerPage() {
     }
   }
 
-  async function printSupplyQrFile(base64: string): Promise<PrintChannel> {
-    const printWin = openPrintHolder()
-    try {
-      return await printSticker(base64, printWin)
-    } catch (err) {
-      closePrintHolder(printWin)
-      throw err
-    }
-  }
-
   function handleSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     if (!orderCanDeliver(order)) {
@@ -745,7 +736,17 @@ function WbAssemblySellerPage() {
       title: 'Передача в доставку WB',
       message: buildDeliveryConfirmMessage(order),
       confirmLabel: 'Подтвердить и печать QR',
-      onConfirm: () => void runSendToDelivery(order),
+      onConfirm: () => {
+        const printWin = openPrintHolder()
+        if (!printWin) {
+          setError(
+            'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
+          )
+          return
+        }
+        setPrintHolderMessage(printWin, 'Передача в доставку WB…')
+        void runSendToDelivery(order, printWin)
+      },
     })
   }
 
@@ -776,21 +777,25 @@ function WbAssemblySellerPage() {
     }
     return {
       file: '',
-      error: result.supply_barcode_error || 'WB не вернул ШК поставки — попробуйте ещё раз через минуту',
+      error: result.supply_barcode_error || 'WB не вернул ШК поставки — попробуйте «Печать QR» в списке поставок',
     }
   }
 
   async function printSupplyBarcodeAfterDelivery(
     result: SendToDeliveryResult,
+    printWin: Window | null,
   ): Promise<{ channel?: PrintChannel; error?: string }> {
+    setPrintHolderMessage(printWin, 'Загрузка QR поставки…')
     const { file, error } = await resolveSupplyBarcodeFile(result)
     if (!file) {
+      closePrintHolder(printWin)
       return { error }
     }
     try {
-      const channel = await printSupplyQrFile(file)
+      const channel = await printSticker(file, printWin)
       return { channel }
     } catch (err) {
+      closePrintHolder(printWin)
       return {
         error: err instanceof Error ? err.message : 'Не удалось отправить QR поставки на печать',
       }
@@ -801,20 +806,34 @@ function WbAssemblySellerPage() {
     if (!id) return
     setError('')
     setSuccess('')
+    const printWin = openPrintHolder()
+    if (!printWin) {
+      setError(
+        'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
+      )
+      return
+    }
+    setPrintHolderMessage(printWin, 'Загрузка QR поставки из WB…')
     setLoading(true)
     try {
       const result = await fetchSupplyBarcode(supplyId)
-      const channel = await printSupplyQrFile(result.supply_barcode_file)
+      const file = (result.supply_barcode_file || '').trim()
+      if (!file) {
+        closePrintHolder(printWin)
+        throw new Error('WB не вернул изображение QR поставки')
+      }
+      const channel = await printSticker(file, printWin)
       const via = channel === 'bridge' ? 'Xprinter' : 'Chrome'
       setSuccess(`QR поставки ${wbSupplyId || result.wb_supply_id} → ${via}`)
     } catch (err) {
+      closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Не удалось распечатать QR поставки')
     } finally {
       setLoading(false)
     }
   }
 
-  async function runSendToDelivery(order: AssemblyOrder) {
+  async function runSendToDelivery(order: AssemblyOrder, printWin: Window | null) {
     if (!id) return
     setError('')
     setSuccess('')
@@ -825,11 +844,11 @@ function WbAssemblySellerPage() {
       if (result.stock?.deducted) {
         msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
       }
-      const printResult = await printSupplyBarcodeAfterDelivery(result)
+      const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
       if (printResult.channel) {
         msg += printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
       } else if (printResult.error) {
-        msg += `. ${printResult.error} — распечатайте QR из списка поставок ниже`
+        msg += `. ${printResult.error}`
         setError(printResult.error)
       }
       setSuccess(msg)
@@ -839,6 +858,7 @@ function WbAssemblySellerPage() {
       await load()
       await refreshMarkingStatus()
     } catch (err) {
+      closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
     } finally {
       setLoading(false)
@@ -870,11 +890,21 @@ function WbAssemblySellerPage() {
       title: 'Массовая передача в доставку',
       message: `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
       confirmLabel: 'Передать все',
-      onConfirm: () => void runSendAllReadyToDelivery(ready),
+      onConfirm: () => {
+        const printWin = openPrintHolder()
+        if (!printWin) {
+          setError(
+            'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
+          )
+          return
+        }
+        setPrintHolderMessage(printWin, 'Массовая передача в доставку…')
+        void runSendAllReadyToDelivery(ready, printWin)
+      },
     })
   }
 
-  async function runSendAllReadyToDelivery(ready: AssemblyOrder[]) {
+  async function runSendAllReadyToDelivery(ready: AssemblyOrder[], printWin: Window | null) {
     if (!data) return
     setError('')
     setSuccess('')
@@ -888,7 +918,7 @@ function WbAssemblySellerPage() {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
         if (result.wb_supply_id && !printedSupplyIds.has(result.wb_supply_id)) {
-          const printResult = await printSupplyBarcodeAfterDelivery(result)
+          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
           if (printResult.channel) {
             printedSupplyIds.add(result.wb_supply_id)
           } else if (printResult.error) {
@@ -898,6 +928,10 @@ function WbAssemblySellerPage() {
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
       }
+    }
+
+    if (printedSupplyIds.size === 0) {
+      closePrintHolder(printWin)
     }
 
     if (delivered > 0) {

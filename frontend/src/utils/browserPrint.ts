@@ -73,11 +73,21 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
 export function openPrintHolder(): Window | null {
   const win = window.open('', '_blank', 'width=420,height=640')
   if (!win) return null
-  win.document.write(
-    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title></title></head><body style="font-family:Arial,sans-serif;padding:16px">Печать стикера…</body></html>',
-  )
-  win.document.close()
+  setPrintHolderMessage(win, 'Печать стикера…')
   return win
+}
+
+export function setPrintHolderMessage(win: Window | null, message: string) {
+  if (!win || win.closed) return
+  try {
+    win.document.open()
+    win.document.write(
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title></title></head><body style="font-family:Arial,sans-serif;padding:16px">${message}</body></html>`,
+    )
+    win.document.close()
+  } catch {
+    // ignore
+  }
 }
 
 export function closePrintHolder(win?: Window | null) {

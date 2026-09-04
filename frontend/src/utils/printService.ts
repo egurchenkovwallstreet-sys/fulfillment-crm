@@ -10,10 +10,11 @@ import {
   normalizeImageBase64,
   openPrintHolder,
   closePrintHolder,
+  setPrintHolderMessage,
 } from './browserPrint'
 
 export type PrintChannel = 'bridge' | 'browser'
-export { openPrintHolder, closePrintHolder }
+export { openPrintHolder, closePrintHolder, setPrintHolderMessage }
 
 let cachedHealth: PrintBridgeHealth | null = null
 
