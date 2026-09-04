@@ -742,6 +742,7 @@ function WbAssemblySellerPage() {
     setError('')
     setSuccess('')
     setLoading(true)
+    const printWin = openPrintHolder()
     try {
       const result = await sendOrderToDelivery(id, order.id)
       let msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
@@ -749,8 +750,10 @@ function WbAssemblySellerPage() {
         msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
       }
       if (result.supply_barcode_file) {
-        const channel = await printSupplySticker(result.supply_barcode_file)
+        const channel = await printSupplySticker(result.supply_barcode_file, true, printWin)
         msg += channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
+      } else {
+        closePrintHolder(printWin)
       }
       setSuccess(msg)
       setLastPrinted(null)
@@ -801,17 +804,26 @@ function WbAssemblySellerPage() {
     setLoading(true)
     let delivered = 0
     const errors: string[] = []
+    const printedSupplyIds = new Set<string>()
+    const printWin = openPrintHolder()
 
     for (const order of ready) {
-    try {
+      try {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
-      if (result.supply_barcode_file) {
-          await printSupplySticker(result.supply_barcode_file)
+        if (result.supply_barcode_file && result.wb_supply_id) {
+          if (!printedSupplyIds.has(result.wb_supply_id)) {
+            printedSupplyIds.add(result.wb_supply_id)
+            await printSupplySticker(result.supply_barcode_file, true, printWin)
+          }
         }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
       }
+    }
+
+    if (printedSupplyIds.size === 0) {
+      closePrintHolder(printWin)
     }
 
     if (delivered > 0) {

@@ -59,10 +59,22 @@ export async function printFbsSticker(
   return 'browser'
 }
 
-export async function printSupplySticker(base64: string, autoPrint = true): Promise<PrintChannel> {
-  if (await printViaBridge('supply_sticker', base64)) {
+export async function printSupplySticker(
+  base64: string,
+  autoPrint = true,
+  preopened?: Window | null,
+): Promise<PrintChannel> {
+  const bridgeAttempt = printViaBridge('supply_sticker', base64)
+  const winner = await Promise.race([
+    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+    new Promise<'no'>((resolve) => {
+      window.setTimeout(() => resolve('no'), 400)
+    }),
+  ])
+  if (winner === 'bridge') {
+    closePrintHolder(preopened)
     return 'bridge'
   }
-  browserPrintSupplySticker(base64, autoPrint)
+  browserPrintSupplySticker(base64, autoPrint, preopened)
   return 'browser'
 }

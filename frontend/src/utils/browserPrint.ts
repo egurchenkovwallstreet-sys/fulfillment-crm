@@ -154,8 +154,12 @@ export function printFbsSticker(
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */
-export function printSupplySticker(base64: string, autoPrint = true): boolean {
-  return printFbsSticker(base64, autoPrint)
+export function printSupplySticker(
+  base64: string,
+  autoPrint = true,
+  preopened?: Window | null,
+): boolean {
+  return printFbsSticker(base64, autoPrint, preopened)
 }
 
 export function openPdfBase64(payload: string, filename: string) {

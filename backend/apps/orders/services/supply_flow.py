@@ -265,6 +265,60 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   }
 
 
+def _fetch_supply_barcode_payload(client, wb_supply_id: str) -> tuple[str, str]:
+  supply_barcode_file = ""
+  supply_barcode_value = ""
+  try:
+    barcode_payload = client.fetch_supply_barcode(wb_supply_id)
+    if isinstance(barcode_payload, dict):
+      supply_barcode_file = barcode_payload.get("file") or ""
+      supply_barcode_value = str(barcode_payload.get("barcode") or "")
+  except WBApiError:
+    pass
+  return supply_barcode_file, supply_barcode_value
+
+
+def _complete_order_in_delivery(
+  order: Order,
+  supply: Supply,
+  *,
+  seller: Seller,
+  user=None,
+) -> dict:
+  """Перевести один заказ в «В доставке» и списать остаток."""
+  order.status = Order.Status.IN_DELIVERY
+  order.wb_supplier_status = WB_SUPPLIER_DELIVERY
+  order.wb_status = WB_STATUS_AFTER_DELIVER
+  if order.in_delivery_at is None:
+    order.in_delivery_at = timezone.now()
+  order.save(
+    update_fields=[
+      "status",
+      "wb_supplier_status",
+      "wb_status",
+      "in_delivery_at",
+      "updated_at",
+    ],
+  )
+  stock_info = deduct_stock_for_delivery(
+    order=order,
+    supply=supply,
+    user=user,
+    require_crm_checks=True,
+  )
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.SUPPLY,
+    message=f"В доставку (WB): заказ #{order.wb_order_id}, поставка {supply.wb_supply_id}",
+    details={
+      "order_id": order.id,
+      "wb_supply_id": supply.wb_supply_id,
+    },
+  )
+  return stock_info
+
+
 @transaction.atomic
 def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   """
@@ -296,7 +350,11 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     Supply.objects.filter(
       seller=seller,
       orders=order,
-      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+      status__in=(
+        Supply.Status.FORMING,
+        Supply.Status.READY,
+        Supply.Status.CONFIRMED,
+      ),
     )
     .exclude(wb_supply_id="")
     .order_by("-created_at")
@@ -309,12 +367,40 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
       code="no_supply",
     )
 
+  if order.status == Order.Status.IN_DELIVERY:
+    raise SupplyFlowError(
+      f"Заказ WB #{order.wb_order_id} уже передан в доставку.",
+      code="already_delivered",
+    )
+
   try:
     check_stock_for_delivery(order)
   except StockDeductionError as exc:
     raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
 
   client = _get_client(seller)
+  supply_barcode_file = ""
+  supply_barcode_value = ""
+
+  if supply.status == Supply.Status.CONFIRMED:
+    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+      client,
+      supply.wb_supply_id,
+    )
+    stock_info = _complete_order_in_delivery(
+      order,
+      supply,
+      seller=seller,
+      user=user,
+    )
+    return {
+      "order": order,
+      "wb_supply_id": supply.wb_supply_id,
+      "supply_barcode_file": supply_barcode_file,
+      "supply_barcode": supply_barcode_value,
+      "stock": stock_info,
+    }
+
   try:
     client.deliver_supply(supply.wb_supply_id)
   except WBApiError as exc:
@@ -331,53 +417,21 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     )
     raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
 
-  supply_barcode_file = ""
-  supply_barcode_value = ""
-  try:
-    barcode_payload = client.fetch_supply_barcode(supply.wb_supply_id)
-    if isinstance(barcode_payload, dict):
-      supply_barcode_file = barcode_payload.get("file") or ""
-      supply_barcode_value = str(barcode_payload.get("barcode") or "")
-  except WBApiError:
-    pass
+  supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+    client,
+    supply.wb_supply_id,
+  )
 
-  order.status = Order.Status.IN_DELIVERY
-  order.wb_supplier_status = WB_SUPPLIER_DELIVERY
-  order.wb_status = WB_STATUS_AFTER_DELIVER
-  if order.in_delivery_at is None:
-    order.in_delivery_at = timezone.now()
-  order.save(
-    update_fields=[
-      "status",
-      "wb_supplier_status",
-      "wb_status",
-      "in_delivery_at",
-      "updated_at",
-    ],
+  stock_info = _complete_order_in_delivery(
+    order,
+    supply,
+    seller=seller,
+    user=user,
   )
 
   supply.status = Supply.Status.CONFIRMED
   supply.supply_barcode_printed = bool(supply_barcode_file)
   supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
-
-  stock_info = deduct_stock_for_delivery(
-    order=order,
-    supply=supply,
-    user=user,
-    require_crm_checks=True,
-  )
-
-  AuditLog.objects.create(
-    user=user,
-    seller=seller,
-    action_type=AuditLog.ActionType.SUPPLY,
-    message=f"В доставку (WB): заказ #{order.wb_order_id}, поставка {supply.wb_supply_id}",
-    details={
-      "order_id": order.id,
-      "wb_supply_id": supply.wb_supply_id,
-      "supply_barcode": supply_barcode_value,
-    },
-  )
 
   return {
     "order": order,
@@ -628,8 +682,60 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
     )
 
   last_result: dict = {}
+  client = _get_client(seller)
+  supply_barcode_file = ""
+  supply_barcode_value = ""
+
+  if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
+    try:
+      client.deliver_supply(supply.wb_supply_id)
+    except WBApiError as exc:
+      raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
+    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+      client,
+      supply.wb_supply_id,
+    )
+    supply.status = Supply.Status.CONFIRMED
+    supply.supply_barcode_printed = bool(supply_barcode_file)
+    supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
+  elif supply.status == Supply.Status.CONFIRMED:
+    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+      client,
+      supply.wb_supply_id,
+    )
+
   for order in _supply_orders(supply):
-    last_result = send_order_to_delivery(seller, order.id, user=user)
+    if order.status == Order.Status.IN_DELIVERY:
+      continue
+    if not order_can_send_to_delivery(order):
+      raise SupplyFlowError(
+        f"Заказ WB #{order.wb_order_id} не готов к отправке в доставку.",
+        code="not_ready",
+      )
+    _ensure_marking_verified_for_delivery(seller, order, user=user)
+    try:
+      check_stock_for_delivery(order)
+    except StockDeductionError as exc:
+      raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
+    stock_info = _complete_order_in_delivery(
+      order,
+      supply,
+      seller=seller,
+      user=user,
+    )
+    last_result = {
+      "order": order,
+      "wb_supply_id": supply.wb_supply_id,
+      "supply_barcode_file": supply_barcode_file,
+      "supply_barcode": supply_barcode_value,
+      "stock": stock_info,
+    }
+
+  if not last_result:
+    raise SupplyFlowError(
+      "В поставке нет заказов для передачи в доставку.",
+      code="not_ready",
+    )
   return last_result
 
 
