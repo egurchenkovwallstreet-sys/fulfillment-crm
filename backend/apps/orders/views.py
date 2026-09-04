@@ -79,10 +79,11 @@ from .services.ozon_assembly import OzonAssemblyError
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
 
 
-def _assembly_error_response(exc: AssemblyError, *, status_code=status.HTTP_400_BAD_REQUEST):
-  payload = {"detail": str(exc), "code": exc.code}
-  if exc.order is not None:
-    payload["order"] = OrderPrintSerializer(exc.order).data
+def _assembly_error_response(exc: Exception, *, status_code=status.HTTP_400_BAD_REQUEST):
+  payload = {"detail": str(exc), "code": getattr(exc, "code", "error")}
+  order = getattr(exc, "order", None)
+  if order is not None:
+    payload["order"] = OrderPrintSerializer(order).data
   return Response(payload, status=status_code)
 
 
@@ -1180,7 +1181,7 @@ class SupplyBarcodeView(APIView):
 
     try:
       result = fetch_supply_barcode(supply.seller, supply.id)
-    except SupplyFlowError as exc:
+    except (SupplyFlowError, AssemblyError) as exc:
       return _assembly_error_response(exc)
 
     return Response({"success": True, **result})

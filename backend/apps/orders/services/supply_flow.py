@@ -880,19 +880,16 @@ def fetch_supply_barcode(seller: Seller, supply_id: int) -> dict:
     raise SupplyFlowError("У поставки нет ID WB", code="no_wb_id")
 
   client = _get_client(seller)
-  try:
-    barcode_payload = client.fetch_supply_barcode(supply.wb_supply_id)
-  except WBApiError as exc:
-    raise SupplyFlowError(str(exc), code="wb_barcode_failed") from exc
-
-  supply_barcode_file = ""
-  supply_barcode_value = ""
-  if isinstance(barcode_payload, dict):
-    supply_barcode_file = barcode_payload.get("file") or ""
-    supply_barcode_value = str(barcode_payload.get("barcode") or "")
+  supply_barcode_file, supply_barcode_value, last_error = _fetch_supply_barcode_payload(
+    client,
+    supply.wb_supply_id,
+  )
 
   if not supply_barcode_file:
-    raise SupplyFlowError("WB не вернул изображение ШК поставки", code="empty_barcode")
+    raise SupplyFlowError(
+      last_error or "WB не вернул изображение ШК поставки",
+      code="empty_barcode",
+    )
 
   supply.supply_barcode_printed = True
   supply.save(update_fields=["supply_barcode_printed", "updated_at"])
