@@ -148,6 +148,21 @@ def repair_incoherent_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
   )
 
 
+def repair_incoherent_assembly_orders(seller: Seller) -> int:
+  """WB confirm + CRM «В поставке» → IN_PICKING, иначе заказы не попадают в очередь сборки."""
+  now = timezone.now()
+  return (
+    filter_orders_for_seller(
+      Order.objects.filter(
+        seller=seller,
+        wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+        status=Order.Status.IN_SUPPLY,
+      ),
+      seller,
+    ).update(status=Order.Status.IN_PICKING, updated_at=now)
+  )
+
+
 def _mark_confirmed_new_orders(seller: Seller, new_wb_ids: set[int]) -> int:
   """Заказы из GET /orders/new — supplierStatus new в CRM + сброс устаревшего CRM-статуса."""
   if not new_wb_ids:
@@ -386,6 +401,7 @@ def sync_order_statuses_for_seller(
   }
 
   updated = _apply_statuses_to_orders(seller, status_map)
+  assembly_repaired = repair_incoherent_assembly_orders(seller)
   reconcile = reconcile_wb_orders_for_seller(seller, status_map, user=user)
   reconciled = sum(reconcile.get(k, 0) for k in (
     "cancelled_terminal", "shipped_delivered", "shipped_not_waiting",
@@ -413,6 +429,7 @@ def sync_order_statuses_for_seller(
     "statuses_polled": len(poll_ids),
     "statuses_scoped": len(scoped_ids),
     "statuses_updated": updated,
+    "assembly_repaired": assembly_repaired,
     "reconciled": reconciled,
     "stale_new": stale_new,
     "stale_delivery": stale_delivery,

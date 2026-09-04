@@ -46,9 +46,19 @@ def order_in_assembly(order: Order) -> bool:
     return False
   if order_assembly_ready(order):
     return False
-  if order.status in (Order.Status.CANCELLED, Order.Status.SHIPPED):
+  if order.status in (
+    Order.Status.CANCELLED,
+    Order.Status.SHIPPED,
+    Order.Status.IN_DELIVERY,
+  ):
     return False
-  return order.status in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED)
+  if (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
+    return True
+  return order.status in (
+    Order.Status.IN_PICKING,
+    Order.Status.ASSEMBLED,
+    Order.Status.IN_SUPPLY,
+  )
 
 
 def get_assembly_queue_status(seller: Seller) -> dict:

@@ -142,7 +142,7 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
       changed_fields.add("status")
   elif supplier_status == WB_SUPPLIER_ASSEMBLY:
     if order.status == Order.Status.NEW:
-      order.status = Order.Status.IN_SUPPLY
+      order.status = Order.Status.IN_PICKING
       changed_fields.add("status")
   elif supplier_status == WB_SUPPLIER_NEW:
     if order.status in (
