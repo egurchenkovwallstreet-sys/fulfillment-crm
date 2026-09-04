@@ -398,7 +398,7 @@ function WbAssemblySellerPage() {
   async function printSticker(base64: string, preopened?: Window | null) {
     const payload = (base64 || '').trim()
     if (!payload) {
-      closePrintHolder(preopened)
+      setPrintHolderMessage(preopened ?? null, 'Стикер пустой — нечего печатать')
       throw new Error('Стикер пустой — нечего печатать')
     }
     const channel = await printFbsSticker(payload, true, preopened)
@@ -788,17 +788,16 @@ function WbAssemblySellerPage() {
     setPrintHolderMessage(printWin, 'Загрузка QR поставки…')
     const { file, error } = await resolveSupplyBarcodeFile(result)
     if (!file) {
-      closePrintHolder(printWin)
+      setPrintHolderMessage(printWin, error || 'WB не вернул ШК поставки')
       return { error }
     }
     try {
       const channel = await printSticker(file, printWin)
       return { channel }
     } catch (err) {
-      closePrintHolder(printWin)
-      return {
-        error: err instanceof Error ? err.message : 'Не удалось отправить QR поставки на печать',
-      }
+      const msg = err instanceof Error ? err.message : 'Не удалось отправить QR поставки на печать'
+      setPrintHolderMessage(printWin, msg)
+      return { error: msg }
     }
   }
 
@@ -819,15 +818,18 @@ function WbAssemblySellerPage() {
       const result = await fetchSupplyBarcode(supplyId)
       const file = (result.supply_barcode_file || '').trim()
       if (!file) {
-        closePrintHolder(printWin)
+        setPrintHolderMessage(printWin, 'WB не вернул изображение QR поставки')
         throw new Error('WB не вернул изображение QR поставки')
       }
       const channel = await printSticker(file, printWin)
       const via = channel === 'bridge' ? 'Xprinter' : 'Chrome'
       setSuccess(`QR поставки ${wbSupplyId || result.wb_supply_id} → ${via}`)
     } catch (err) {
-      closePrintHolder(printWin)
-      setError(err instanceof Error ? err.message : 'Не удалось распечатать QR поставки')
+      const msg = err instanceof Error ? err.message : 'Не удалось распечатать QR поставки'
+      if (printWin && !printWin.closed) {
+        setPrintHolderMessage(printWin, msg)
+      }
+      setError(msg)
     } finally {
       setLoading(false)
     }

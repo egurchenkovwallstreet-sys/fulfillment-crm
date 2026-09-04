@@ -22,16 +22,22 @@ export function normalizeImageBase64(value: string): string {
 function autoPrintScript(): string {
   return `(function () {
   var img = document.querySelector('img');
+  var closed = false;
+  function closeOnce() {
+    if (closed) return;
+    closed = true;
+    window.setTimeout(function () { try { window.close(); } catch (e) {} }, 400);
+  }
+  window.onafterprint = closeOnce;
   function doPrint() {
     try { window.focus(); window.print(); } catch (e) {}
-    window.setTimeout(function () { try { window.close(); } catch (e2) {} }, 600);
   }
   if (!img) { doPrint(); return; }
   if (img.complete && img.naturalWidth > 0) doPrint();
   else {
     img.addEventListener('load', doPrint);
     img.addEventListener('error', function () {
-      document.body.textContent = 'Ошибка загрузки изображения для печати';
+      document.body.innerHTML = '<p style="font-family:Arial,sans-serif;padding:16px">Ошибка загрузки изображения для печати</p>';
     });
   }
 })();`
