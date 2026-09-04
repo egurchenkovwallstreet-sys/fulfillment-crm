@@ -33,7 +33,11 @@ def order_assembly_ready(order: Order) -> bool:
   """Баркод отсканирован, стикер привязан и напечатан в CRM (сборка завершена)."""
   if order_has_chz_error(order):
     return False
-  return order_sticker_printed_in_crm(order)
+  if not order_sticker_printed_in_crm(order):
+    return False
+  if resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    return bool((order.marking_code or "").strip())
+  return True
 
 
 def order_in_assembly(order: Order) -> bool:

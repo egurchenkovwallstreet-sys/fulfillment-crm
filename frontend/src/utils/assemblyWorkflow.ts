@@ -34,10 +34,7 @@ export function isWbNew(order: AssemblyOrder): boolean {
 }
 
 export function orderStickerPrinted(order: AssemblyOrder): boolean {
-  if (order.requires_marking) {
-    return order.status === 'label_printed' || order.status === 'marked'
-  }
-  return order.status === 'label_printed' || order.has_sticker
+  return order.status === 'label_printed' || order.status === 'marked'
 }
 
 export function orderCanDeliver(order: AssemblyOrder): boolean {
