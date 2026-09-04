@@ -345,46 +345,6 @@ function WbAssemblySellerPage() {
     return code
   }
 
-  function barcodeMatchesScan(orderBarcode: string, scan: string): boolean {
-    const left = normalizeScanCode(orderBarcode)
-    const right = normalizeScanCode(scan)
-    if (!left || !right) return false
-    if (left === right) return true
-    if (/^\d+$/.test(left) && /^\d+$/.test(right)) {
-      const stripLeadingZeros = (digits: string) => digits.replace(/^0+/, '') || '0'
-      return stripLeadingZeros(left) === stripLeadingZeros(right)
-    }
-    return false
-  }
-
-  function findOrdersForBarcode(barcode: string): AssemblyOrder[] {
-    const trimmed = normalizeScanCode(barcode)
-    if (!trimmed || !data) return []
-    return data.orders.filter((order) => {
-      if (barcodeMatchesScan(order.barcode || '', trimmed)) return true
-      return String(order.wb_order_id) === trimmed
-    })
-  }
-
-  function isScannableAssemblyOrder(order: AssemblyOrder): boolean {
-    if (order.marking_verify_status === 'error') return true
-    if (order.status === 'label_printed' || order.status === 'marked') return false
-    return order.status === 'in_picking' || order.status === 'assembled'
-  }
-
-  function pickOrderForScan(orders: AssemblyOrder[]): AssemblyOrder | undefined {
-    const active = orders.filter(isScannableAssemblyOrder)
-    if (!active.length) return undefined
-    return active.find((order) => orderNeedsMarkingScan(order)) ?? active[0]
-  }
-
-  function barcodeInPickLists(barcode: string): boolean {
-    const lists = [pickListPreview, data?.active_pick_list]
-    return lists.some((list) =>
-      (list?.items ?? []).some((item) => barcodeMatchesScan(item.barcode || '', barcode)),
-    )
-  }
-
   function orderNeedsMarkingScan(order: AssemblyOrder): boolean {
     if (!order.requires_marking) return false
     if (order.marking_verify_status === 'error') return true
