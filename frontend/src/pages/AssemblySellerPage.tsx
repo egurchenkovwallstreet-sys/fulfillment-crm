@@ -12,6 +12,7 @@ import {
   scanOrderBarcode,
   sendOrderToAssembly,
   sendOrderToDelivery,
+  fetchSupplyBarcode,
   setAssemblyWorkflowMode,
   startAssembly,
   verifyMarking,
@@ -21,6 +22,7 @@ import {
   type PickList,
   type PrintOrder,
   type MarkingStatusResult,
+  type SendToDeliveryResult,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders, generatePickList } from '../api/orders'
@@ -50,6 +52,7 @@ import {
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
+  type PrintChannel,
 } from '../utils/printService'
 import { downloadPickListPdf } from '../utils/pickListPrint'
 import { printBatchRibbon } from '../utils/batchRibbonPrint'
@@ -733,27 +736,73 @@ function WbAssemblySellerPage() {
       title: 'Передача в доставку WB',
       message: buildDeliveryConfirmMessage(order),
       confirmLabel: 'Подтвердить и печать QR',
-      onConfirm: () => void runSendToDelivery(order),
+      onConfirm: () => {
+        const printWin = openPrintHolder()
+        void runSendToDelivery(order, printWin)
+      },
     })
   }
 
-  async function runSendToDelivery(order: AssemblyOrder) {
+  async function resolveSupplyBarcodeFile(
+    result: SendToDeliveryResult,
+  ): Promise<{ file: string; error?: string }> {
+    if (result.supply_barcode_file) {
+      return { file: result.supply_barcode_file }
+    }
+    if (!result.supply_id) {
+      return {
+        file: '',
+        error: result.supply_barcode_error || 'WB не вернул ШК поставки',
+      }
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt))
+      }
+      try {
+        const retry = await fetchSupplyBarcode(result.supply_id)
+        if (retry.supply_barcode_file) {
+          return { file: retry.supply_barcode_file }
+        }
+      } catch {
+        // WB иногда отдаёт ШК поставки с задержкой после deliver
+      }
+    }
+    return {
+      file: '',
+      error: result.supply_barcode_error || 'WB не вернул ШК поставки — попробуйте ещё раз через минуту',
+    }
+  }
+
+  async function printSupplyBarcodeAfterDelivery(
+    result: SendToDeliveryResult,
+    printWin: Window | null,
+  ): Promise<{ channel?: PrintChannel; error?: string }> {
+    const { file, error } = await resolveSupplyBarcodeFile(result)
+    if (!file) {
+      closePrintHolder(printWin)
+      return { error }
+    }
+    const channel = await printSupplySticker(file, true, printWin)
+    return { channel }
+  }
+
+  async function runSendToDelivery(order: AssemblyOrder, printWin: Window | null) {
     if (!id) return
     setError('')
     setSuccess('')
     setLoading(true)
-    const printWin = openPrintHolder()
     try {
       const result = await sendOrderToDelivery(id, order.id)
       let msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
       if (result.stock?.deducted) {
         msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
       }
-      if (result.supply_barcode_file) {
-        const channel = await printSupplySticker(result.supply_barcode_file, true, printWin)
-        msg += channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
-      } else {
-        closePrintHolder(printWin)
+      const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+      if (printResult.channel) {
+        msg += printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
+      } else if (printResult.error) {
+        setError(printResult.error)
       }
       setSuccess(msg)
       setLastPrinted(null)
@@ -762,6 +811,7 @@ function WbAssemblySellerPage() {
       await load()
       await refreshMarkingStatus()
     } catch (err) {
+      closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
     } finally {
       setLoading(false)
@@ -793,11 +843,14 @@ function WbAssemblySellerPage() {
       title: 'Массовая передача в доставку',
       message: `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
       confirmLabel: 'Передать все',
-      onConfirm: () => void runSendAllReadyToDelivery(ready),
+      onConfirm: () => {
+        const printWin = openPrintHolder()
+        void runSendAllReadyToDelivery(ready, printWin)
+      },
     })
   }
 
-  async function runSendAllReadyToDelivery(ready: AssemblyOrder[]) {
+  async function runSendAllReadyToDelivery(ready: AssemblyOrder[], printWin: Window | null) {
     if (!data) return
     setError('')
     setSuccess('')
@@ -805,16 +858,17 @@ function WbAssemblySellerPage() {
     let delivered = 0
     const errors: string[] = []
     const printedSupplyIds = new Set<string>()
-    const printWin = openPrintHolder()
 
     for (const order of ready) {
       try {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
-        if (result.supply_barcode_file && result.wb_supply_id) {
-          if (!printedSupplyIds.has(result.wb_supply_id)) {
+        if (result.wb_supply_id && !printedSupplyIds.has(result.wb_supply_id)) {
+          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+          if (printResult.channel) {
             printedSupplyIds.add(result.wb_supply_id)
-            await printSupplySticker(result.supply_barcode_file, true, printWin)
+          } else if (printResult.error) {
+            errors.push(printResult.error)
           }
         }
       } catch (err) {

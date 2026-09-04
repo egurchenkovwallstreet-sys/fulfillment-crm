@@ -1,6 +1,7 @@
 """Поштучная отправка заказов на сборку и в доставку через WB FBS API."""
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 
 from django.db import transaction
@@ -265,17 +266,24 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   }
 
 
-def _fetch_supply_barcode_payload(client, wb_supply_id: str) -> tuple[str, str]:
+def _fetch_supply_barcode_payload(client, wb_supply_id: str) -> tuple[str, str, str]:
+  """ШК поставки WB доступен только после deliver; иногда API отвечает с задержкой."""
   supply_barcode_file = ""
   supply_barcode_value = ""
-  try:
-    barcode_payload = client.fetch_supply_barcode(wb_supply_id)
-    if isinstance(barcode_payload, dict):
-      supply_barcode_file = barcode_payload.get("file") or ""
-      supply_barcode_value = str(barcode_payload.get("barcode") or "")
-  except WBApiError:
-    pass
-  return supply_barcode_file, supply_barcode_value
+  last_error = ""
+  for attempt in range(4):
+    if attempt > 0:
+      time.sleep(0.5 * attempt)
+    try:
+      barcode_payload = client.fetch_supply_barcode(wb_supply_id)
+      if isinstance(barcode_payload, dict):
+        supply_barcode_file = barcode_payload.get("file") or ""
+        supply_barcode_value = str(barcode_payload.get("barcode") or "")
+      if supply_barcode_file:
+        return supply_barcode_file, supply_barcode_value, ""
+    except WBApiError as exc:
+      last_error = str(exc)
+  return supply_barcode_file, supply_barcode_value, last_error
 
 
 def _complete_order_in_delivery(
@@ -317,6 +325,42 @@ def _complete_order_in_delivery(
     },
   )
   return stock_info
+
+
+def _delivery_result(
+  order: Order,
+  supply: Supply,
+  stock_info: dict,
+  supply_barcode_file: str,
+  supply_barcode_value: str,
+  supply_barcode_error: str,
+  *,
+  seller: Seller,
+  user=None,
+) -> dict:
+  if supply_barcode_error and not supply_barcode_file:
+    AuditLog.objects.create(
+      user=user,
+      seller=seller,
+      action_type=AuditLog.ActionType.API_ERROR,
+      message=f"WB не вернул ШК поставки {supply.wb_supply_id}: {supply_barcode_error}",
+      details={
+        "order_id": order.id,
+        "supply_id": supply.id,
+        "wb_supply_id": supply.wb_supply_id,
+      },
+    )
+  result = {
+    "order": order,
+    "supply_id": supply.id,
+    "wb_supply_id": supply.wb_supply_id,
+    "supply_barcode_file": supply_barcode_file,
+    "supply_barcode": supply_barcode_value,
+    "stock": stock_info,
+  }
+  if supply_barcode_error and not supply_barcode_file:
+    result["supply_barcode_error"] = supply_barcode_error
+  return result
 
 
 @transaction.atomic
@@ -381,9 +425,10 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   client = _get_client(seller)
   supply_barcode_file = ""
   supply_barcode_value = ""
+  supply_barcode_error = ""
 
   if supply.status == Supply.Status.CONFIRMED:
-    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+    supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
       client,
       supply.wb_supply_id,
     )
@@ -393,13 +438,16 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
       seller=seller,
       user=user,
     )
-    return {
-      "order": order,
-      "wb_supply_id": supply.wb_supply_id,
-      "supply_barcode_file": supply_barcode_file,
-      "supply_barcode": supply_barcode_value,
-      "stock": stock_info,
-    }
+    return _delivery_result(
+      order,
+      supply,
+      stock_info,
+      supply_barcode_file,
+      supply_barcode_value,
+      supply_barcode_error,
+      user=user,
+      seller=seller,
+    )
 
   try:
     client.deliver_supply(supply.wb_supply_id)
@@ -417,7 +465,7 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     )
     raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
 
-  supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+  supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
     client,
     supply.wb_supply_id,
   )
@@ -433,13 +481,16 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
   supply.supply_barcode_printed = bool(supply_barcode_file)
   supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
 
-  return {
-    "order": order,
-    "wb_supply_id": supply.wb_supply_id,
-    "supply_barcode_file": supply_barcode_file,
-    "supply_barcode": supply_barcode_value,
-    "stock": stock_info,
-  }
+  return _delivery_result(
+    order,
+    supply,
+    stock_info,
+    supply_barcode_file,
+    supply_barcode_value,
+    supply_barcode_error,
+    user=user,
+    seller=seller,
+  )
 
 
 def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
@@ -685,13 +736,14 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
   client = _get_client(seller)
   supply_barcode_file = ""
   supply_barcode_value = ""
+  supply_barcode_error = ""
 
   if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
     try:
       client.deliver_supply(supply.wb_supply_id)
     except WBApiError as exc:
       raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
-    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+    supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
       client,
       supply.wb_supply_id,
     )
@@ -699,7 +751,7 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
     supply.supply_barcode_printed = bool(supply_barcode_file)
     supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
   elif supply.status == Supply.Status.CONFIRMED:
-    supply_barcode_file, supply_barcode_value = _fetch_supply_barcode_payload(
+    supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
       client,
       supply.wb_supply_id,
     )
@@ -723,13 +775,16 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
       seller=seller,
       user=user,
     )
-    last_result = {
-      "order": order,
-      "wb_supply_id": supply.wb_supply_id,
-      "supply_barcode_file": supply_barcode_file,
-      "supply_barcode": supply_barcode_value,
-      "stock": stock_info,
-    }
+    last_result = _delivery_result(
+      order,
+      supply,
+      stock_info,
+      supply_barcode_file,
+      supply_barcode_value,
+      supply_barcode_error,
+      user=user,
+      seller=seller,
+    )
 
   if not last_result:
     raise SupplyFlowError(

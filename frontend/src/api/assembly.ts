@@ -175,8 +175,10 @@ export interface SendToDeliveryResult {
   success: boolean
   order: AssemblyOrder
   wb_supply_id: string
+  supply_id?: number
   supply_barcode_file?: string
   supply_barcode?: string
+  supply_barcode_error?: string
   stock?: {
     deducted: boolean
     already_deducted: boolean
@@ -415,6 +417,15 @@ export function sendOrderToDelivery(sellerId: number, orderId: number) {
       body: JSON.stringify({ order_id: orderId }),
     },
   )
+}
+
+export function fetchSupplyBarcode(supplyId: number) {
+  return apiFetch<{
+    success: boolean
+    wb_supply_id: string
+    supply_barcode_file: string
+    supply_barcode?: string
+  }>(`/api/orders/supplies/${supplyId}/barcode/`)
 }
 
 /** @deprecated use scanOrderBarcode */

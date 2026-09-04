@@ -20,7 +20,21 @@ export function normalizeImageBase64(value: string): string {
 }
 
 function autoPrintScript(): string {
-  return 'window.onload = function () { window.print(); window.close(); };'
+  return `(function () {
+  var img = document.querySelector('img');
+  function doPrint() {
+    try { window.focus(); window.print(); } catch (e) {}
+    window.setTimeout(function () { try { window.close(); } catch (e2) {} }, 600);
+  }
+  if (!img) { doPrint(); return; }
+  if (img.complete && img.naturalWidth > 0) doPrint();
+  else {
+    img.addEventListener('load', doPrint);
+    img.addEventListener('error', function () {
+      document.body.textContent = 'Ошибка загрузки изображения для печати';
+    });
+  }
+})();`
 }
 
 function fbsStickerHtml(base64: string, autoPrint: boolean): string {
@@ -150,7 +164,7 @@ export function printFbsSticker(
     win.document.close()
     return true
   }
-  return printViaIframe(fbsStickerHtml(base64, false))
+  return printViaIframe(html)
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */
