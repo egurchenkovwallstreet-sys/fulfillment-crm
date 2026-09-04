@@ -388,6 +388,21 @@ class SupplySerializer(serializers.ModelSerializer):
     return supply_can_deliver(obj)
 
 
+class DeliverySupplySerializer(serializers.ModelSerializer):
+  orders_count = serializers.IntegerField(read_only=True, required=False, default=0)
+
+  class Meta:
+    model = Supply
+    fields = (
+      "id",
+      "wb_supply_id",
+      "wb_warehouse_id",
+      "orders_count",
+      "supply_barcode_printed",
+      "created_at",
+    )
+
+
 class SupplyBulkDeliverSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField()
   supply_ids = serializers.ListField(

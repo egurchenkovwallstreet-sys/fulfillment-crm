@@ -1,3 +1,4 @@
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -13,6 +14,7 @@ from apps.sellers.serializers import SellerWarehouseSerializer
 from apps.orders.services.assembly import AssemblyError
 from apps.orders.services.supply_flow import (
   delivery_stage_orders_queryset,
+  delivery_stage_supplies_queryset,
   get_assembly_stage_counts,
   new_stage_orders_queryset,
 )
@@ -25,6 +27,7 @@ from .serializers import (
   AssemblyWorkflowModeSerializer,
   BatchBindScanSerializer,
   BindMarkingSerializer,
+  DeliverySupplySerializer,
   OrderActionSerializer,
   OrderAssemblySerializer,
   OrderPrintSerializer,
@@ -508,6 +511,15 @@ class AssemblySellerDetailView(APIView):
 
     warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
 
+    delivery_supplies = []
+    if stage == "complete":
+      delivery_supplies = DeliverySupplySerializer(
+        delivery_stage_supplies_queryset(seller)
+        .annotate(orders_count=Count("orders"))
+        .order_by("-created_at")[:200],
+        many=True,
+      ).data
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
@@ -516,6 +528,7 @@ class AssemblySellerDetailView(APIView):
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
+      "delivery_supplies": delivery_supplies,
       "active_pick_list": (
         PickListSerializer(active_pick_list).data if active_pick_list else None
       ),

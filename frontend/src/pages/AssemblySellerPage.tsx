@@ -50,7 +50,6 @@ import {
   closePrintHolder,
   openPrintHolder,
   printFbsSticker,
-  printSupplySticker,
   refreshPrintBridgeStatus,
   type PrintChannel,
 } from '../utils/printService'
@@ -721,6 +720,16 @@ function WbAssemblySellerPage() {
     }
   }
 
+  async function printSupplyQrFile(base64: string): Promise<PrintChannel> {
+    const printWin = openPrintHolder()
+    try {
+      return await printSticker(base64, printWin)
+    } catch (err) {
+      closePrintHolder(printWin)
+      throw err
+    }
+  }
+
   function handleSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     if (!orderCanDeliver(order)) {
@@ -736,10 +745,7 @@ function WbAssemblySellerPage() {
       title: 'Передача в доставку WB',
       message: buildDeliveryConfirmMessage(order),
       confirmLabel: 'Подтвердить и печать QR',
-      onConfirm: () => {
-        const printWin = openPrintHolder()
-        void runSendToDelivery(order, printWin)
-      },
+      onConfirm: () => void runSendToDelivery(order),
     })
   }
 
@@ -776,18 +782,39 @@ function WbAssemblySellerPage() {
 
   async function printSupplyBarcodeAfterDelivery(
     result: SendToDeliveryResult,
-    printWin: Window | null,
   ): Promise<{ channel?: PrintChannel; error?: string }> {
     const { file, error } = await resolveSupplyBarcodeFile(result)
     if (!file) {
-      closePrintHolder(printWin)
       return { error }
     }
-    const channel = await printSupplySticker(file, true, printWin)
-    return { channel }
+    try {
+      const channel = await printSupplyQrFile(file)
+      return { channel }
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : 'Не удалось отправить QR поставки на печать',
+      }
+    }
   }
 
-  async function runSendToDelivery(order: AssemblyOrder, printWin: Window | null) {
+  async function handlePrintSupplyBarcode(supplyId: number, wbSupplyId: string) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await fetchSupplyBarcode(supplyId)
+      const channel = await printSupplyQrFile(result.supply_barcode_file)
+      const via = channel === 'bridge' ? 'Xprinter' : 'Chrome'
+      setSuccess(`QR поставки ${wbSupplyId || result.wb_supply_id} → ${via}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось распечатать QR поставки')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function runSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     setError('')
     setSuccess('')
@@ -798,10 +825,11 @@ function WbAssemblySellerPage() {
       if (result.stock?.deducted) {
         msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
       }
-      const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+      const printResult = await printSupplyBarcodeAfterDelivery(result)
       if (printResult.channel) {
         msg += printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
       } else if (printResult.error) {
+        msg += `. ${printResult.error} — распечатайте QR из списка поставок ниже`
         setError(printResult.error)
       }
       setSuccess(msg)
@@ -811,7 +839,6 @@ function WbAssemblySellerPage() {
       await load()
       await refreshMarkingStatus()
     } catch (err) {
-      closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
     } finally {
       setLoading(false)
@@ -843,14 +870,11 @@ function WbAssemblySellerPage() {
       title: 'Массовая передача в доставку',
       message: `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
       confirmLabel: 'Передать все',
-      onConfirm: () => {
-        const printWin = openPrintHolder()
-        void runSendAllReadyToDelivery(ready, printWin)
-      },
+      onConfirm: () => void runSendAllReadyToDelivery(ready),
     })
   }
 
-  async function runSendAllReadyToDelivery(ready: AssemblyOrder[], printWin: Window | null) {
+  async function runSendAllReadyToDelivery(ready: AssemblyOrder[]) {
     if (!data) return
     setError('')
     setSuccess('')
@@ -864,7 +888,7 @@ function WbAssemblySellerPage() {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
         if (result.wb_supply_id && !printedSupplyIds.has(result.wb_supply_id)) {
-          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+          const printResult = await printSupplyBarcodeAfterDelivery(result)
           if (printResult.channel) {
             printedSupplyIds.add(result.wb_supply_id)
           } else if (printResult.error) {
@@ -874,10 +898,6 @@ function WbAssemblySellerPage() {
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
       }
-    }
-
-    if (printedSupplyIds.size === 0) {
-      closePrintHolder(printWin)
     }
 
     if (delivered > 0) {
@@ -1110,6 +1130,7 @@ function WbAssemblySellerPage() {
   const bulkAssemblyCount = assemblyEligible ?? 0
   const displayPickList = pickListPreview ?? data?.active_pick_list
   const orders = data?.orders ?? []
+  const deliverySupplies = data?.delivery_supplies ?? []
   const readyOrders = markingStatus.ready
   const readyToDeliverCount = readyOrders.filter((order) => orderCanDeliver(order)).length
   const markingQueueBlocked = stage === 'confirm' && markingStatus.errors_count > 0
@@ -1507,6 +1528,49 @@ function WbAssemblySellerPage() {
         )}
       </section>
 
+      {stage === 'complete' && (
+        <section className="panel assembly-delivery-supplies">
+          <h2 className="section-title">Поставки в доставке ({deliverySupplies.length})</h2>
+          <p className="assembly-scan-hint">
+            QR поставки нужен для приёмки на складе WB. Если при передаче в доставку окно печати
+            закрылось без стикера — нажмите «Печать QR» для нужной поставки.
+          </p>
+          {deliverySupplies.length === 0 ? (
+            <p className="assembly-warehouses__empty">Нет поставок, ожидающих сканирования на складе WB</p>
+          ) : (
+            <table className="assembly-table">
+              <thead>
+                <tr>
+                  <th>ID поставки WB</th>
+                  <th>Заказов</th>
+                  <th>Создана</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deliverySupplies.map((supply) => (
+                  <tr key={supply.id}>
+                    <td><code>{supply.wb_supply_id}</code></td>
+                    <td>{supply.orders_count}</td>
+                    <td>{new Date(supply.created_at).toLocaleString('ru-RU')}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => void handlePrintSupplyBarcode(supply.id, supply.wb_supply_id)}
+                        disabled={loading}
+                      >
+                        Печать QR
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       <div className={`assembly-grid${stage === 'confirm' ? ' assembly-grid--scan' : ''}`}>
         <section className={`panel assembly-orders-panel${ordersBusy ? ' assembly-orders-panel--busy' : ''}`}>
           <h2 className="section-title">
@@ -1644,11 +1708,11 @@ function WbAssemblySellerPage() {
         {stage !== 'confirm' && stage !== 'new' && (
         <div className="assembly-side">
           {stage === 'complete' && (
-            <section className="panel assembly-scan-panel assembly-scan-panel--disabled">
-              <h2 className="section-title">Заказы в доставке</h2>
+            <section className="panel assembly-scan-panel">
+              <h2 className="section-title">Подсказка</h2>
               <p className="assembly-scan-hint">
-                Заказы в поставках, ожидающих приёмки на складе WB. Список обновляется каждые 5 минут —
-                после сканирования поставки на складе заказы исчезнут отсюда.
+                После сканирования QR поставки на складе WB заказы исчезнут из списка.
+                Список обновляется при открытии вкладки и каждые 5 минут.
               </p>
             </section>
           )}

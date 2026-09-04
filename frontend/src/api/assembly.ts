@@ -55,6 +55,15 @@ export interface AssemblyOrder {
   created_at: string
 }
 
+export interface DeliverySupply {
+  id: number
+  wb_supply_id: string
+  wb_warehouse_id: number | null
+  orders_count: number
+  supply_barcode_printed: boolean
+  created_at: string
+}
+
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   assembly_workflow_mode?: 'scan' | 'batch'
@@ -63,6 +72,7 @@ export interface AssemblySellerDetail {
   supplies_forming: number
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
+  delivery_supplies?: DeliverySupply[]
   active_pick_list?: PickList | null
   pick_list?: PickList | null
   marketplace?: string

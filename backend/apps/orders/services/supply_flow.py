@@ -21,7 +21,11 @@ from apps.orders.services.wb_status import (
   wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
+from apps.sellers.services.warehouse_filter import (
+  filter_orders_for_assembly,
+  get_enabled_wb_warehouse_ids,
+  seller_has_warehouse_config,
+)
 from apps.orders.services.marking_verification import (
   VERIFY_ERROR,
   VERIFY_PENDING,
@@ -512,6 +516,21 @@ def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
 
 def count_delivery_stage_orders(seller: Seller) -> int:
   return delivery_stage_orders_queryset(seller).count()
+
+
+def delivery_stage_supplies_queryset(seller: Seller) -> QuerySet:
+  """Поставки на вкладке «В доставке»: переданы в WB, ШК ещё не отсканирован на складе."""
+  qs = Supply.objects.filter(
+    seller=seller,
+    status=Supply.Status.CONFIRMED,
+    wb_scanned_at__isnull=True,
+  ).exclude(wb_supply_id="")
+  if seller_has_warehouse_config(seller):
+    enabled = get_enabled_wb_warehouse_ids(seller)
+    if not enabled:
+      return qs.none()
+    qs = qs.filter(wb_warehouse_id__in=enabled)
+  return qs
 
 
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
