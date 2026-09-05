@@ -24,6 +24,7 @@ import {
   type MarkingStatusResult,
   type SendToDeliveryResult,
   type StockDeductionInfo,
+  type DeliveryShippingParams,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders, generatePickList } from '../api/orders'
@@ -39,6 +40,7 @@ import {
   type StageKey,
 } from '../utils/assemblyWorkflow'
 import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } from '../components/AssemblyModal'
+import { DeliveryDestinationModal } from '../components/DeliveryDestinationModal'
 import { BatchBindPanel } from '../components/BatchBindPanel'
 import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import {
@@ -51,6 +53,7 @@ import {
   closePrintHolder,
   openPrintHolder,
   printFbsSticker,
+  printSupplySticker,
   refreshPrintBridgeStatus,
   setPrintHolderMessage,
   type PrintChannel,
@@ -160,6 +163,13 @@ function WbAssemblySellerPage() {
   const [scanBusy, setScanBusy] = useState(false)
   const verifyInFlightRef = useRef(false)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
+  const [deliveryModal, setDeliveryModal] = useState<{
+    title: string
+    message: string
+    wbSupplyId?: string
+    printWin: Window | null
+    onConfirm: (shipping: DeliveryShippingParams, printWin: Window | null) => void
+  } | null>(null)
   const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
@@ -727,6 +737,33 @@ function WbAssemblySellerPage() {
     }
   }
 
+  function openDeliveryModal(
+    title: string,
+    message: string,
+    onRun: (shipping: DeliveryShippingParams, printWin: Window | null) => void,
+    wbSupplyId?: string,
+  ) {
+    const printWin = openPrintHolder()
+    if (!printWin) {
+      setError(
+        'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
+      )
+      return
+    }
+    setPrintHolderMessage(printWin, 'Выберите пункт отгрузки…')
+    setDeliveryModal({
+      title,
+      message,
+      wbSupplyId,
+      printWin,
+      onConfirm: (shipping) => {
+        setDeliveryModal(null)
+        setPrintHolderMessage(printWin, 'Передача в доставку WB…')
+        onRun(shipping, printWin)
+      },
+    })
+  }
+
   function handleSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     if (!orderCanDeliver(order)) {
@@ -737,23 +774,11 @@ function WbAssemblySellerPage() {
       })
       return
     }
-    setModal({
-      kind: 'confirm',
-      title: 'Передача в доставку WB',
-      message: buildDeliveryConfirmMessage(order),
-      confirmLabel: 'Подтвердить и печать QR',
-      onConfirm: () => {
-        const printWin = openPrintHolder()
-        if (!printWin) {
-          setError(
-            'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
-          )
-          return
-        }
-        setPrintHolderMessage(printWin, 'Передача в доставку WB…')
-        void runSendToDelivery(order, printWin)
-      },
-    })
+    openDeliveryModal(
+      'Передача в доставку WB',
+      buildDeliveryConfirmMessage(order),
+      (shipping, printWin) => void runSendToDelivery(order, shipping, printWin),
+    )
   }
 
   async function resolveSupplyBarcodeFile(
@@ -798,7 +823,10 @@ function WbAssemblySellerPage() {
       return { error }
     }
     try {
-      const channel = await printSticker(file, printWin)
+      const channel = await printSupplySticker(file, true, printWin)
+      if (channel === 'bridge') {
+        setBridgeOk(true)
+      }
       return { channel }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Не удалось отправить QR поставки на печать'
@@ -827,7 +855,10 @@ function WbAssemblySellerPage() {
         setPrintHolderMessage(printWin, 'WB не вернул изображение QR поставки')
         throw new Error('WB не вернул изображение QR поставки')
       }
-      const channel = await printSticker(file, printWin)
+      const channel = await printSupplySticker(file, true, printWin)
+      if (channel === 'bridge') {
+        setBridgeOk(true)
+      }
       const via = channel === 'bridge' ? 'Xprinter' : 'Chrome'
       setSuccess(`QR поставки ${wbSupplyId || result.wb_supply_id} → ${via}`)
     } catch (err) {
@@ -841,42 +872,36 @@ function WbAssemblySellerPage() {
     }
   }
 
-  async function runSendToDelivery(order: AssemblyOrder, printWin: Window | null) {
+  async function runSendToDelivery(
+    order: AssemblyOrder,
+    shipping: DeliveryShippingParams,
+    printWin: Window | null,
+  ) {
     if (!id) return
     setError('')
     setSuccess('')
     setLoading(true)
     try {
-      const result = await sendOrderToDelivery(id, order.id)
+      const result = await sendOrderToDelivery(id, order.id, shipping)
       const msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
       setSuccess(msg)
       setLastPrinted(null)
       setStickerPreview(null)
       setStage('complete')
-      void load()
+      await load({ stageKey: 'complete', silent: false })
       void refreshMarkingStatus()
 
-      void (async () => {
-        try {
-          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
-          if (printResult.channel) {
-            const via = printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
-            setSuccess((prev) => (prev ? prev + via : msg + via))
-          } else if (printResult.error) {
-            closePrintHolder(printWin)
-            setError(
-              `Заказ передан в доставку. QR поставки не напечатан: ${printResult.error}`,
-            )
-          } else {
-            closePrintHolder(printWin)
-          }
-        } catch {
-          closePrintHolder(printWin)
-          setError(
-            'Заказ передан в доставку. QR поставки не напечатан — нажмите «Печать QR» в списке поставок.',
-          )
-        }
-      })()
+      const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+      if (printResult.channel) {
+        const via = printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
+        setSuccess((prev) => (prev ? prev + via : msg + via))
+        closePrintHolder(printWin)
+      } else if (printResult.error) {
+        closePrintHolder(printWin)
+        setError(`Заказ передан в доставку. QR поставки не напечатан: ${printResult.error}`)
+      } else {
+        closePrintHolder(printWin)
+      }
     } catch (err) {
       closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
@@ -908,23 +933,26 @@ function WbAssemblySellerPage() {
     setModal({
       kind: 'confirm',
       title: 'Массовая передача в доставку',
-      message: `Передать в доставку ${ready.length} готовых заказов?\n\nДля каждого будет напечатан QR поставки.`,
-      confirmLabel: 'Передать все',
+      message:
+        `Передать в доставку ${ready.length} готовых заказов?\n\n` +
+        'Далее выберите пункт отгрузки (СЦ/ПВЗ) и дату — они применятся ко всем заказам.',
+      confirmLabel: 'Далее',
       onConfirm: () => {
-        const printWin = openPrintHolder()
-        if (!printWin) {
-          setError(
-            'Не удалось открыть окно печати. Разрешите всплывающие окна для CRM в настройках Chrome.',
-          )
-          return
-        }
-        setPrintHolderMessage(printWin, 'Массовая передача в доставку…')
-        void runSendAllReadyToDelivery(ready, printWin)
+        setModal(null)
+        openDeliveryModal(
+          'Параметры отгрузки WB',
+          `Пункт отгрузки и дата будут применены ко всем ${ready.length} заказам.`,
+          (shipping, printWin) => void runSendAllReadyToDelivery(ready, shipping, printWin),
+        )
       },
     })
   }
 
-  async function runSendAllReadyToDelivery(ready: AssemblyOrder[], printWin: Window | null) {
+  async function runSendAllReadyToDelivery(
+    ready: AssemblyOrder[],
+    shipping: DeliveryShippingParams,
+    printWin: Window | null,
+  ) {
     if (!data) return
     setError('')
     setSuccess('')
@@ -936,20 +964,15 @@ function WbAssemblySellerPage() {
 
     for (const order of ready) {
       try {
-        const result = await sendOrderToDelivery(id, order.id)
+        const result = await sendOrderToDelivery(id, order.id, shipping)
         delivered += 1
         if (result.wb_supply_id && !printedSupplyIds.has(result.wb_supply_id)) {
-          void printSupplyBarcodeAfterDelivery(result, printWin)
-            .then((printResult) => {
-              if (printResult.channel) {
-                printedSupplyIds.add(result.wb_supply_id)
-              } else if (printResult.error) {
-                qrErrors.push(printResult.error)
-              }
-            })
-            .catch(() => {
-              qrErrors.push(`QR поставки ${result.wb_supply_id}`)
-            })
+          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+          if (printResult.channel) {
+            printedSupplyIds.add(result.wb_supply_id)
+          } else if (printResult.error) {
+            qrErrors.push(printResult.error)
+          }
         }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
@@ -959,7 +982,7 @@ function WbAssemblySellerPage() {
     if (delivered > 0) {
       setSuccess(`Шаг 4: передано в доставку ${delivered} из ${ready.length}`)
       setStage('complete')
-      void load()
+      await load({ stageKey: 'complete', silent: false })
       void refreshMarkingStatus()
     }
     if (errors.length > 0) {
@@ -969,9 +992,7 @@ function WbAssemblySellerPage() {
         `Заказы переданы в доставку. QR не напечатан для ${qrErrors.length} поставок — «Печать QR» в списке поставок.`,
       )
     }
-    if (printedSupplyIds.size === 0) {
-      closePrintHolder(printWin)
-    }
+    closePrintHolder(printWin)
     setLoading(false)
   }
 
@@ -1793,6 +1814,21 @@ function WbAssemblySellerPage() {
 
       {modal && (
         <AssemblyModal modal={modal} onClose={() => setModal(null)} loading={loading} />
+      )}
+
+      {deliveryModal && (
+        <DeliveryDestinationModal
+          sellerId={id}
+          title={deliveryModal.title}
+          message={deliveryModal.message}
+          wbSupplyId={deliveryModal.wbSupplyId}
+          loading={loading}
+          onClose={() => {
+            closePrintHolder(deliveryModal.printWin)
+            setDeliveryModal(null)
+          }}
+          onConfirm={(shipping) => deliveryModal.onConfirm(shipping, deliveryModal.printWin)}
+        />
       )}
 
       {markingListKind && (

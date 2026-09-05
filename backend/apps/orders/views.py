@@ -40,7 +40,9 @@ from .serializers import (
   ReprintStickerSerializer,
   ScanPrintSerializer,
   SellerAssemblyCountersSerializer,
+  SendToDeliverySerializer,
   SupplyBulkDeliverSerializer,
+  SupplyDeliverSerializer,
   SupplySerializer,
   VerifyMarkingSerializer,
 )
@@ -59,6 +61,7 @@ from .services.assembly_queue import get_assembly_queue_status, order_in_assembl
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
+  fetch_seller_shipping_points,
   fetch_supply_barcode,
   refresh_supply_readiness,
   send_order_to_assembly,
@@ -984,6 +987,38 @@ class AssemblySendToAssemblyView(APIView):
     return Response(payload)
 
 
+class AssemblyShippingPointsView(APIView):
+  """Пункты отгрузки WB (СЦ/ПВЗ) для модалки передачи в доставку."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    city = (request.query_params.get("city") or "").strip()
+    cargo_type_raw = request.query_params.get("cargo_type")
+    wb_supply_id = (request.query_params.get("wb_supply_id") or "").strip() or None
+    cargo_type = int(cargo_type_raw) if cargo_type_raw else None
+
+    try:
+      points, resolved_cargo = fetch_seller_shipping_points(
+        seller,
+        city=city,
+        cargo_type=cargo_type,
+        wb_supply_id=wb_supply_id,
+      )
+    except SupplyFlowError as exc:
+      return _assembly_error_response(exc)
+
+    return Response({
+      "success": True,
+      "city": city,
+      "cargo_type": resolved_cargo,
+      "shipping_points": points,
+    })
+
+
 class AssemblySendToDeliveryView(APIView):
   """Отправить один заказ в доставку в WB (confirm → complete+waiting)."""
   permission_classes = [IsAuthenticated, IsManager]
@@ -993,14 +1028,18 @@ class AssemblySendToDeliveryView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
-    serializer = OrderActionSerializer(data=request.data)
+    serializer = SendToDeliverySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
 
     try:
       result = send_order_to_delivery(
         seller,
-        serializer.validated_data["order_id"],
+        data["order_id"],
         user=request.user,
+        shipping_point_id=data["shipping_point_id"],
+        shipping_date=data["shipping_date"],
+        shipping_type=data.get("shipping_type") or "selfShipping",
       )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
@@ -1129,9 +1168,19 @@ class SupplyDeliverView(APIView):
 
   def post(self, request, supply_id):
     supply = get_supply_for_user(request.user, supply_id)
+    serializer = SupplyDeliverSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
 
     try:
-      result = send_supply_to_delivery(supply.seller, supply.id, user=request.user)
+      result = send_supply_to_delivery(
+        supply.seller,
+        supply.id,
+        user=request.user,
+        shipping_point_id=data["shipping_point_id"],
+        shipping_date=data["shipping_date"],
+        shipping_type=data.get("shipping_type") or "selfShipping",
+      )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
 
@@ -1165,6 +1214,9 @@ class SupplyBulkDeliverView(APIView):
         seller,
         supply_ids=supply_ids,
         user=request.user,
+        shipping_point_id=data["shipping_point_id"],
+        shipping_date=data["shipping_date"],
+        shipping_type=data.get("shipping_type") or "selfShipping",
       )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)

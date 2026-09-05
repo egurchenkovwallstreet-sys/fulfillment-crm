@@ -301,6 +301,27 @@ class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 
 
+class SendToDeliverySerializer(serializers.Serializer):
+  order_id = serializers.IntegerField()
+  shipping_point_id = serializers.IntegerField()
+  shipping_date = serializers.DateField()
+  shipping_type = serializers.ChoiceField(
+    choices=("selfShipping", "transportCompany"),
+    default="selfShipping",
+    required=False,
+  )
+
+
+class SupplyDeliverSerializer(serializers.Serializer):
+  shipping_point_id = serializers.IntegerField()
+  shipping_date = serializers.DateField()
+  shipping_type = serializers.ChoiceField(
+    choices=("selfShipping", "transportCompany"),
+    default="selfShipping",
+    required=False,
+  )
+
+
 class ReprintStickerSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
   confirmed = serializers.BooleanField()
@@ -409,6 +430,13 @@ class SupplyBulkDeliverSerializer(serializers.Serializer):
     child=serializers.IntegerField(),
     required=False,
     allow_empty=True,
+  )
+  shipping_point_id = serializers.IntegerField()
+  shipping_date = serializers.DateField()
+  shipping_type = serializers.ChoiceField(
+    choices=("selfShipping", "transportCompany"),
+    default="selfShipping",
+    required=False,
   )
 
   def validate_seller_id(self, value):

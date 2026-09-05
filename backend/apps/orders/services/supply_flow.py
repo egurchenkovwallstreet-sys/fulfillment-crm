@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from datetime import date
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
@@ -90,6 +91,11 @@ def order_can_send_to_delivery(order: Order) -> bool:
 def _parse_deliver_error(exc: WBApiError) -> str:
   text = str(exc).lower()
   if exc.status_code == 409:
+    if "shipping" in text or "supplyshipping" in text:
+      return (
+        "WB требует указать пункт отгрузки (СЦ/ПВЗ) и дату перед передачей в доставку. "
+        "Выберите их в окне подтверждения и повторите."
+      )
     if "sgtin" in text or "marking" in text or "meta" in text:
       return (
         "WB отклонил передачу в доставку: ошибка маркировки ЧЗ в поставке. "
@@ -97,6 +103,76 @@ def _parse_deliver_error(exc: WBApiError) -> str:
       )
     return f"WB отклонил передачу в доставку: {exc}"
   return str(exc)
+
+
+def _resolve_supply_cargo_type(client, supply: Supply) -> int:
+  if not supply.wb_supply_id:
+    return 1
+  try:
+    details = client.fetch_supply(supply.wb_supply_id)
+    cargo = int(details.get("cargoType") or 1)
+    return cargo if cargo in (1, 2, 3) else 1
+  except WBApiError:
+    return 1
+
+
+def fetch_seller_shipping_points(
+  seller: Seller,
+  *,
+  city: str,
+  cargo_type: int | None = None,
+  wb_supply_id: str | None = None,
+) -> tuple[list[dict], int]:
+  """Пункты отгрузки WB для модалки «В доставку»."""
+  city = (city or "").strip()
+  if not city:
+    raise SupplyFlowError("Укажите город для поиска пунктов отгрузки", code="invalid_city")
+
+  client = _get_client(seller)
+  resolved_cargo = cargo_type
+  if resolved_cargo is None and wb_supply_id:
+    try:
+      details = client.fetch_supply(wb_supply_id)
+      resolved_cargo = int(details.get("cargoType") or 1)
+    except WBApiError:
+      resolved_cargo = 1
+  if not resolved_cargo or resolved_cargo == 0:
+    resolved_cargo = 1
+
+  try:
+    points = client.fetch_shipping_points(city, resolved_cargo)
+  except WBApiError as exc:
+    raise SupplyFlowError(
+      f"Не удалось загрузить пункты отгрузки WB: {exc}",
+      code="wb_shipping_points_failed",
+    ) from exc
+  return points, resolved_cargo
+
+
+def _apply_shipping_method(
+  client,
+  supply: Supply,
+  *,
+  shipping_point_id: int,
+  shipping_date: date,
+  shipping_type: str = "selfShipping",
+) -> None:
+  if supply.status == Supply.Status.CONFIRMED:
+    return
+  if not supply.wb_supply_id:
+    raise SupplyFlowError("У поставки нет ID WB", code="no_supply")
+  try:
+    client.set_supplies_shipping_method([{
+      "supplyId": supply.wb_supply_id,
+      "shippingPointId": shipping_point_id,
+      "shippingDt": shipping_date.isoformat(),
+      "shippingType": shipping_type,
+    }])
+  except WBApiError as exc:
+    raise SupplyFlowError(
+      f"Не удалось установить параметры отгрузки WB: {exc}",
+      code="wb_shipping_method_failed",
+    ) from exc
 
 
 def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=None) -> None:
@@ -363,7 +439,15 @@ def _delivery_result(
 
 
 @transaction.atomic
-def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
+def send_order_to_delivery(
+  seller: Seller,
+  order_id: int,
+  *,
+  user=None,
+  shipping_point_id: int | None = None,
+  shipping_date: date | None = None,
+  shipping_type: str = "selfShipping",
+) -> dict:
   """
   Один заказ → deliver поставки WB → complete+waiting («В доставке»).
   """
@@ -450,6 +534,19 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     )
 
   try:
+    if supply.status != Supply.Status.CONFIRMED:
+      if not shipping_point_id or not shipping_date:
+        raise SupplyFlowError(
+          "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
+          code="shipping_required",
+        )
+      _apply_shipping_method(
+        client,
+        supply,
+        shipping_point_id=shipping_point_id,
+        shipping_date=shipping_date,
+        shipping_type=shipping_type,
+      )
     client.deliver_supply(supply.wb_supply_id)
   except WBApiError as exc:
     AuditLog.objects.create(
@@ -726,7 +823,15 @@ def supply_can_deliver(supply: Supply) -> bool:
 
 
 @transaction.atomic
-def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dict:
+def send_supply_to_delivery(
+  seller: Seller,
+  supply_id: int,
+  *,
+  user=None,
+  shipping_point_id: int | None = None,
+  shipping_date: date | None = None,
+  shipping_type: str = "selfShipping",
+) -> dict:
   supply = (
     Supply.objects.filter(pk=supply_id, seller=seller)
     .prefetch_related("orders__product", "orders__seller")
@@ -755,6 +860,18 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
 
   if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
     try:
+      if not shipping_point_id or not shipping_date:
+        raise SupplyFlowError(
+          "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
+          code="shipping_required",
+        )
+      _apply_shipping_method(
+        client,
+        supply,
+        shipping_point_id=shipping_point_id,
+        shipping_date=shipping_date,
+        shipping_type=shipping_type,
+      )
       client.deliver_supply(supply.wb_supply_id)
     except WBApiError as exc:
       raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
@@ -814,6 +931,9 @@ def send_supplies_to_delivery_bulk(
   *,
   supply_ids: list[int] | None = None,
   user=None,
+  shipping_point_id: int | None = None,
+  shipping_date: date | None = None,
+  shipping_type: str = "selfShipping",
 ) -> dict:
   qs = Supply.objects.filter(
     seller=seller,
@@ -831,7 +951,14 @@ def send_supplies_to_delivery_bulk(
     if not supply_can_deliver(supply):
       continue
     try:
-      result = send_supply_to_delivery(seller, supply.id, user=user)
+      result = send_supply_to_delivery(
+        seller,
+        supply.id,
+        user=user,
+        shipping_point_id=shipping_point_id,
+        shipping_date=shipping_date,
+        shipping_type=shipping_type,
+      )
       delivered += 1
       if result.get("supply_barcode_file"):
         barcode_files.append(result["supply_barcode_file"])

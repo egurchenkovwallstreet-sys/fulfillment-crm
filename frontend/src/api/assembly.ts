@@ -202,6 +202,30 @@ export interface SendToDeliveryResult {
   stock?: StockDeductionInfo
 }
 
+export type ShippingPointOfficeType = 'sc' | 'sw' | 'pp'
+
+export interface ShippingPoint {
+  id: number
+  name: string
+  address: string
+  city: string
+  officeType: ShippingPointOfficeType
+  cargoTypes?: number[]
+}
+
+export interface DeliveryShippingParams {
+  shipping_point_id: number
+  shipping_date: string
+  shipping_type?: 'selfShipping' | 'transportCompany'
+}
+
+export interface ShippingPointsResult {
+  success: boolean
+  city: string
+  cargo_type: number
+  shipping_points: ShippingPoint[]
+}
+
 export function fetchAssemblySellers() {
   return apiFetch<SellerAssemblyCounters[]>('/api/orders/assembly/sellers/')
 }
@@ -423,12 +447,33 @@ export function sendAllOrdersToAssembly(sellerId: number) {
   )
 }
 
-export function sendOrderToDelivery(sellerId: number, orderId: number) {
+export function fetchShippingPoints(
+  sellerId: number,
+  params: { city: string; cargo_type?: number; wb_supply_id?: string },
+) {
+  const qs = new URLSearchParams({ city: params.city })
+  if (params.cargo_type != null) qs.set('cargo_type', String(params.cargo_type))
+  if (params.wb_supply_id) qs.set('wb_supply_id', params.wb_supply_id)
+  return apiFetch<ShippingPointsResult>(
+    `/api/orders/assembly/sellers/${sellerId}/shipping-points/?${qs.toString()}`,
+  )
+}
+
+export function sendOrderToDelivery(
+  sellerId: number,
+  orderId: number,
+  shipping: DeliveryShippingParams,
+) {
   return apiFetch<SendToDeliveryResult>(
     `/api/orders/assembly/sellers/${sellerId}/send-to-delivery/`,
     {
       method: 'POST',
-      body: JSON.stringify({ order_id: orderId }),
+      body: JSON.stringify({
+        order_id: orderId,
+        shipping_point_id: shipping.shipping_point_id,
+        shipping_date: shipping.shipping_date,
+        shipping_type: shipping.shipping_type ?? 'selfShipping',
+      }),
     },
   )
 }

@@ -380,6 +380,43 @@ class WBClient:
       if offset + SUPPLY_ORDERS_BATCH_SIZE < len(order_ids):
         time.sleep(REQUEST_INTERVAL_SEC)
 
+  def fetch_supply(self, supply_id: str) -> dict:
+    """GET /api/v3/supplies/{supplyId} — детали поставки."""
+    payload = self._request("GET", f"/api/v3/supplies/{supply_id}")
+    return payload if isinstance(payload, dict) else {}
+
+  def fetch_shipping_points(self, city: str, cargo_type: int) -> list[dict]:
+    """GET /api/marketplace/v3/fbs/shipping-points — пункты отгрузки FBS."""
+    payload = self._request(
+      "GET",
+      "/api/marketplace/v3/fbs/shipping-points",
+      params={"city": city, "cargoType": cargo_type},
+    )
+    if isinstance(payload, dict):
+      return payload.get("shippingPoints") or []
+    return []
+
+  def set_supplies_shipping_method(self, items: list[dict]) -> None:
+    """PATCH /api/marketplace/v3/fbs/supplies/shipping-method — дата и пункт отгрузки."""
+    if not items:
+      return
+    payload = self._request(
+      "PATCH",
+      "/api/marketplace/v3/fbs/supplies/shipping-method",
+      json={"data": items},
+    )
+    if not isinstance(payload, dict):
+      return
+    for result in payload.get("results") or []:
+      if result.get("error"):
+        err = result["error"]
+        detail = err.get("detail") or err.get("code") or "unknown"
+        supply_id = result.get("supplyId", "")
+        raise WBApiError(
+          f"Не удалось установить параметры отгрузки {supply_id}: {detail}",
+          status_code=409,
+        )
+
   def deliver_supply(self, supply_id: str) -> None:
     """PATCH /api/v3/supplies/{supplyId}/deliver — передать поставку в доставку."""
     self._request("PATCH", f"/api/v3/supplies/{supply_id}/deliver")

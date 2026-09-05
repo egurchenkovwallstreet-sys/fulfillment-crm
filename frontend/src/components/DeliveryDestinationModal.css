@@ -1,0 +1,70 @@
+.delivery-destination-modal {
+  max-width: 640px;
+}
+
+.delivery-destination-modal__message {
+  white-space: pre-line;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #334155;
+}
+
+.delivery-destination-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.delivery-destination-modal__field > span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.delivery-destination-modal__city-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.delivery-destination-modal__city-row input,
+.delivery-destination-modal__field select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+}
+
+.delivery-destination-modal__dates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.delivery-destination-modal__date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-height: 3.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.delivery-destination-modal__date small {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.delivery-destination-modal__date--active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.delivery-destination-modal__error {
+  margin: 0 0 1rem;
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
