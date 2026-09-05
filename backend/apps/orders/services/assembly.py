@@ -26,10 +26,6 @@ from apps.warehouse.services.marking_lookup import (
   lookup_marking_for_barcode,
   resolve_product_requires_marking,
 )
-from apps.warehouse.services.stock_deduction import (
-  StockDeductionError,
-  deduct_stock_for_sticker_print,
-)
 
 
 class AssemblyError(Exception):
@@ -470,6 +466,11 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       )
 
   if not requires_marking:
+    from apps.warehouse.services.stock_deduction import (
+      StockDeductionError,
+      deduct_stock_for_sticker_print,
+    )
+
     with transaction.atomic():
       order.status = Order.Status.LABEL_PRINTED
       order.save(update_fields=["status", "updated_at"])
@@ -592,6 +593,11 @@ def bind_marking_and_print(
       details={"order_id": order.id, "status_code": exc.status_code},
     )
     raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
+
+  from apps.warehouse.services.stock_deduction import (
+    StockDeductionError,
+    deduct_stock_for_sticker_print,
+  )
 
   with transaction.atomic():
     order.marking_code = normalized
