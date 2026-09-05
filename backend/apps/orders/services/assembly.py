@@ -1,5 +1,6 @@
 import re
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -24,6 +25,10 @@ from apps.warehouse.services.marking_lookup import (
   MarkingLookupError,
   lookup_marking_for_barcode,
   resolve_product_requires_marking,
+)
+from apps.warehouse.services.stock_deduction import (
+  StockDeductionError,
+  deduct_stock_for_sticker_print,
 )
 
 
@@ -465,8 +470,13 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       )
 
   if not requires_marking:
-    order.status = Order.Status.LABEL_PRINTED
-    order.save(update_fields=["status", "updated_at"])
+    with transaction.atomic():
+      order.status = Order.Status.LABEL_PRINTED
+      order.save(update_fields=["status", "updated_at"])
+      try:
+        stock_info = deduct_stock_for_sticker_print(order=order, user=user)
+      except StockDeductionError as exc:
+        raise AssemblyError(str(exc), code="insufficient_stock", order=order) from exc
     AuditLog.objects.create(
       user=user,
       seller=seller,
@@ -478,6 +488,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       "action": "print",
       "requires_marking": False,
       "order": order,
+      "stock": stock_info,
     }
 
   order.status = Order.Status.ASSEMBLED
@@ -582,21 +593,26 @@ def bind_marking_and_print(
     )
     raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
 
-  order.marking_code = normalized
-  order.marking_bound = False
-  order.marking_verify_status = "pending"
-  order.marking_verify_error = ""
-  order.status = Order.Status.LABEL_PRINTED
-  order.save(
-    update_fields=[
-      "marking_code",
-      "marking_bound",
-      "marking_verify_status",
-      "marking_verify_error",
-      "status",
-      "updated_at",
-    ]
-  )
+  with transaction.atomic():
+    order.marking_code = normalized
+    order.marking_bound = False
+    order.marking_verify_status = "pending"
+    order.marking_verify_error = ""
+    order.status = Order.Status.LABEL_PRINTED
+    order.save(
+      update_fields=[
+        "marking_code",
+        "marking_bound",
+        "marking_verify_status",
+        "marking_verify_error",
+        "status",
+        "updated_at",
+      ]
+    )
+    try:
+      stock_info = deduct_stock_for_sticker_print(order=order, user=user)
+    except StockDeductionError as exc:
+      raise _marking_error(str(exc), order, code="insufficient_stock") from exc
 
   AuditLog.objects.create(
     user=user,
@@ -616,6 +632,7 @@ def bind_marking_and_print(
   return {
     "action": "print",
     "order": order,
+    "stock": stock_info,
     "message": (
       f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
       "Стикер печатается сразу; проверка в «Честном знаке» займёт несколько минут."

@@ -662,6 +662,8 @@ class AssemblyScanPrintView(APIView):
     }
     if result.get("message"):
       payload["message"] = result["message"]
+    if result.get("stock"):
+      payload["stock"] = result["stock"]
     return Response(payload)
 
 
@@ -695,6 +697,8 @@ class AssemblyBindMarkingView(APIView):
     }
     if result.get("message"):
       payload["message"] = result["message"]
+    if result.get("stock"):
+      payload["stock"] = result["stock"]
     return Response(payload)
 
 

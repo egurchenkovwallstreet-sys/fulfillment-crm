@@ -30,6 +30,10 @@ from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.warehouse.models import Product
+from apps.warehouse.services.stock_deduction import (
+  StockDeductionError,
+  deduct_stock_for_sticker_print,
+)
 
 
 def _compact(value: str) -> str:
@@ -545,21 +549,26 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
   except WBApiError as exc:
     raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
 
-  order.marking_code = normalized
-  order.marking_bound = False
-  order.marking_verify_status = "pending"
-  order.marking_verify_error = ""
-  order.status = Order.Status.LABEL_PRINTED
-  order.save(
-    update_fields=[
-      "marking_code",
-      "marking_bound",
-      "marking_verify_status",
-      "marking_verify_error",
-      "status",
-      "updated_at",
-    ]
-  )
+  with transaction.atomic():
+    order.marking_code = normalized
+    order.marking_bound = False
+    order.marking_verify_status = "pending"
+    order.marking_verify_error = ""
+    order.status = Order.Status.LABEL_PRINTED
+    order.save(
+      update_fields=[
+        "marking_code",
+        "marking_bound",
+        "marking_verify_status",
+        "marking_verify_error",
+        "status",
+        "updated_at",
+      ]
+    )
+    try:
+      deduct_stock_for_sticker_print(order=order, user=user)
+    except StockDeductionError as exc:
+      raise _marking_error(str(exc), order, code="insufficient_stock") from exc
 
   AuditLog.objects.create(
     user=user,
@@ -650,8 +659,13 @@ def bind_wb_batch_scan(
       "ЧЗ отправлен в WB на проверку."
     )
   else:
-    order.status = Order.Status.LABEL_PRINTED
-    order.save(update_fields=["status", "updated_at"])
+    with transaction.atomic():
+      order.status = Order.Status.LABEL_PRINTED
+      order.save(update_fields=["status", "updated_at"])
+      try:
+        stock_info = deduct_stock_for_sticker_print(order=order, user=user)
+      except StockDeductionError as exc:
+        raise AssemblyError(str(exc), code="insufficient_stock", order=order) from exc
     AuditLog.objects.create(
       user=user,
       seller=seller,
@@ -660,6 +674,11 @@ def bind_wb_batch_scan(
       details={"order_id": order.id, "barcode": order.barcode},
     )
     message = f"Связка завершена: заказ WB #{order.wb_order_id}."
+    if stock_info.get("deducted"):
+      message += (
+        f" Списано 1 шт., остаток CRM: {stock_info['quantity']} "
+        f"(яч. №{stock_info['cell_number']})"
+      )
 
   return {
     "complete": True,

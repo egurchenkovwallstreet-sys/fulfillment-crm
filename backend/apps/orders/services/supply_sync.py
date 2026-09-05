@@ -86,6 +86,7 @@ def _sync_crm_orders_delivery_status(
       update_fields.append("updated_at")
       order.save(update_fields=update_fields)
       updated += 1
+
   return updated
 
 
@@ -171,8 +172,8 @@ def sync_supplies_from_wb(
   Подтянуть поставки из WB в CRM.
 
   Поставки с done=true (переданы в доставку, в т.ч. из ЛК WB) обрабатываются:
-  заказы привязываются к Supply, статусы обновляются. Списание остатков — только
-  через кнопку «Передать в доставку» в CRM или вручную из панели off-CRM.
+  заказы привязываются к Supply, статусы обновляются. Списание CRM-остатков — только
+  при печати FBS-стикера; заказы «в доставке» остаток не меняют.
   """
   client = _get_client(seller)
   try:

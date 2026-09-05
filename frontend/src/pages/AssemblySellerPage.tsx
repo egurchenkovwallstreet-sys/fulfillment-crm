@@ -23,6 +23,7 @@ import {
   type PrintOrder,
   type MarkingStatusResult,
   type SendToDeliveryResult,
+  type StockDeductionInfo,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders, generatePickList } from '../api/orders'
@@ -76,6 +77,11 @@ const EMPTY_MARKING_STATUS: MarkingStatusResult = {
   in_assembly: [],
   ready: [],
   errors: [],
+}
+
+function formatStockDeductionMessage(stock?: StockDeductionInfo): string {
+  if (!stock?.deducted) return ''
+  return `. Списано 1 шт., остаток CRM: ${stock.quantity} (яч. №${stock.cell_number})`
 }
 
 const STAGES = [
@@ -842,23 +848,35 @@ function WbAssemblySellerPage() {
     setLoading(true)
     try {
       const result = await sendOrderToDelivery(id, order.id)
-      let msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
-      if (result.stock?.deducted) {
-        msg += `. Списано 1 шт., остаток CRM: ${result.stock.quantity} (яч. №${result.stock.cell_number})`
-      }
-      const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
-      if (printResult.channel) {
-        msg += printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
-      } else if (printResult.error) {
-        msg += `. ${printResult.error}`
-        setError(printResult.error)
-      }
+      const msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
       setSuccess(msg)
       setLastPrinted(null)
       setStickerPreview(null)
       setStage('complete')
-      await load()
-      await refreshMarkingStatus()
+      void load()
+      void refreshMarkingStatus()
+
+      void (async () => {
+        try {
+          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
+          if (printResult.channel) {
+            const via = printResult.channel === 'bridge' ? ', QR → Xprinter' : ', QR → Chrome'
+            setSuccess((prev) => (prev ? prev + via : msg + via))
+          } else if (printResult.error) {
+            closePrintHolder(printWin)
+            setError(
+              `Заказ передан в доставку. QR поставки не напечатан: ${printResult.error}`,
+            )
+          } else {
+            closePrintHolder(printWin)
+          }
+        } catch {
+          closePrintHolder(printWin)
+          setError(
+            'Заказ передан в доставку. QR поставки не напечатан — нажмите «Печать QR» в списке поставок.',
+          )
+        }
+      })()
     } catch (err) {
       closePrintHolder(printWin)
       setError(err instanceof Error ? err.message : 'Ошибка отправки в доставку')
@@ -914,36 +932,45 @@ function WbAssemblySellerPage() {
     let delivered = 0
     const errors: string[] = []
     const printedSupplyIds = new Set<string>()
+    const qrErrors: string[] = []
 
     for (const order of ready) {
       try {
         const result = await sendOrderToDelivery(id, order.id)
         delivered += 1
         if (result.wb_supply_id && !printedSupplyIds.has(result.wb_supply_id)) {
-          const printResult = await printSupplyBarcodeAfterDelivery(result, printWin)
-          if (printResult.channel) {
-            printedSupplyIds.add(result.wb_supply_id)
-          } else if (printResult.error) {
-            errors.push(printResult.error)
-          }
+          void printSupplyBarcodeAfterDelivery(result, printWin)
+            .then((printResult) => {
+              if (printResult.channel) {
+                printedSupplyIds.add(result.wb_supply_id)
+              } else if (printResult.error) {
+                qrErrors.push(printResult.error)
+              }
+            })
+            .catch(() => {
+              qrErrors.push(`QR поставки ${result.wb_supply_id}`)
+            })
         }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : `WB #${order.wb_order_id}`)
       }
     }
 
-    if (printedSupplyIds.size === 0) {
-      closePrintHolder(printWin)
-    }
-
     if (delivered > 0) {
       setSuccess(`Шаг 4: передано в доставку ${delivered} из ${ready.length}`)
       setStage('complete')
-      await load()
-      await refreshMarkingStatus()
+      void load()
+      void refreshMarkingStatus()
     }
     if (errors.length > 0) {
       setError(errors[0])
+    } else if (qrErrors.length > 0) {
+      setError(
+        `Заказы переданы в доставку. QR не напечатан для ${qrErrors.length} поставок — «Печать QR» в списке поставок.`,
+      )
+    }
+    if (printedSupplyIds.size === 0) {
+      closePrintHolder(printWin)
     }
     setLoading(false)
   }
@@ -986,6 +1013,10 @@ function WbAssemblySellerPage() {
       const printWin = openPrintHolder()
       try {
         await finishPrint(result.order, printWin)
+        const stockMsg = formatStockDeductionMessage(result.stock)
+        if (stockMsg) {
+          setSuccess(`Стикер WB #${result.order.wb_order_id}${stockMsg}`)
+        }
       } catch (printErr) {
         closePrintHolder(printWin)
         throw printErr
@@ -1070,6 +1101,10 @@ function WbAssemblySellerPage() {
       }
       const result = await bindMarking(id, pendingOrder.id, code)
       await finishPrint(result.order, printWin)
+      const stockMsg = formatStockDeductionMessage(result.stock)
+      if (stockMsg) {
+        setSuccess(`Стикер WB #${result.order.wb_order_id}${stockMsg}`)
+      }
       window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
       void refreshMarkingStatus()
       void load({ silent: true })

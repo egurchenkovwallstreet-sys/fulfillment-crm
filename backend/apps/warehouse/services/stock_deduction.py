@@ -1,4 +1,4 @@
-"""Списание остатков при передаче заказа в доставку (ТЗ §10)."""
+"""Списание остатков при печати FBS-стикера и передаче в доставку (ТЗ §10)."""
 from __future__ import annotations
 
 from apps.integrations.models import AuditLog
@@ -49,11 +49,129 @@ def assert_order_ready_for_crm_stock_deduction(order: Order) -> None:
 
 
 def order_has_crm_shipment_deduction(order: Order) -> bool:
+  """Любое списание по заказу (стикер FBS или legacy «в доставку»)."""
   needle = f"заказ #{order.wb_order_id}"
   return StockOperation.objects.filter(
     operation_type=StockOperation.OperationType.SHIPMENT,
     comment__contains=needle,
   ).exists()
+
+
+def _sticker_shipment_comment(order: Order) -> str:
+  sticker_key = normalize_sticker_key(order.sticker_part_a, order.sticker_part_b)
+  sticker_label = sticker_key or "—"
+  return (
+    f"Списание: стикер FBS {sticker_label}, баркод {order.barcode}, "
+    f"заказ #{order.wb_order_id}"
+  )
+
+
+def sticker_stock_already_deducted(order: Order) -> bool:
+  """Идемпотентность: один стикер (partA|partB) — одно списание."""
+  sticker_key = normalize_sticker_key(order.sticker_part_a, order.sticker_part_b)
+  if sticker_key:
+    return StockOperation.objects.filter(
+      operation_type=StockOperation.OperationType.SHIPMENT,
+      comment__contains=f"стикер FBS {sticker_key}",
+    ).exists()
+  return order_has_crm_shipment_deduction(order)
+
+
+def deduct_stock_for_sticker_print(*, order: Order, user=None) -> dict:
+  """
+  Списать 1 шт. при первой печати FBS-стикера в CRM.
+  Повторная печать того же стикера (reprint) не вызывает эту функцию.
+  """
+  if not order_on_active_pick_list(order):
+    raise StockDeductionError(
+      "Заказ не в активном листе подбора — списание только после сборки в CRM",
+    )
+
+  if sticker_stock_already_deducted(order):
+    product = resolve_order_product(order)
+    return {
+      "deducted": False,
+      "already_deducted": True,
+      "quantity": product.quantity if product else 0,
+      "cell_number": product.cell.number if product and product.cell_id else "",
+      "barcode": product.barcode if product else order.barcode,
+    }
+
+  product = check_stock_for_delivery(order)
+
+  product.quantity -= 1
+  product.save(update_fields=["quantity", "updated_at"])
+  refresh_cell_occupied(product.cell)
+
+  if not order.product_id:
+    order.product = product
+    order.save(update_fields=["product", "updated_at"])
+
+  comment = _sticker_shipment_comment(order)
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.SHIPMENT,
+    quantity=1,
+    performed_by=user,
+    comment=comment,
+  )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=order.seller,
+    action_type=AuditLog.ActionType.LABEL_PRINT,
+    message=(
+      f"Списание при печати стикера: 1 шт., баркод {product.barcode}, "
+      f"заказ WB #{order.wb_order_id}, ячейка №{product.cell.number}, "
+      f"остаток {product.quantity} шт."
+    ),
+    details={
+      "order_id": order.id,
+      "wb_order_id": order.wb_order_id,
+      "product_id": product.id,
+      "cell": product.cell.number,
+      "quantity_after": product.quantity,
+      "sticker_key": normalize_sticker_key(order.sticker_part_a, order.sticker_part_b),
+    },
+  )
+
+  return {
+    "deducted": True,
+    "already_deducted": False,
+    "quantity": product.quantity,
+    "cell_number": product.cell.number,
+    "barcode": product.barcode,
+  }
+
+
+def stock_deduction_info(order: Order) -> dict:
+  """Только чтение: был ли списан остаток при печати стикера."""
+  product = resolve_order_product(order)
+  already = order_has_crm_shipment_deduction(order)
+  return {
+    "deducted": False,
+    "already_deducted": already,
+    "quantity": product.quantity if product else 0,
+    "cell_number": product.cell.number if product and product.cell_id else "",
+    "barcode": product.barcode if product else order.barcode,
+  }
+
+
+def assert_order_stock_deducted_at_print(order: Order) -> None:
+  """
+  Перед «в доставку»: стикер напечатан, остаток списан при печати.
+  Заказы уже «в доставке» остаток не трогаем (актуальные остатки — из WB).
+  """
+  if order.status == Order.Status.IN_DELIVERY:
+    return
+  if not order_sticker_printed_in_crm(order):
+    raise StockDeductionError(
+      "Стикер FBS не распечатан через CRM — сначала завершите сборку",
+    )
+  if not order_has_crm_shipment_deduction(order):
+    raise StockDeductionError(
+      "Остаток не списан при печати стикера — распечатайте стикер FBS через сборку",
+    )
 
 
 def resolve_order_product(order: Order) -> Product | None:
@@ -99,7 +217,7 @@ def _refresh_supply_stock_flag(supply: Supply) -> None:
   if not orders:
     return
   all_deducted = all(
-    order_stock_already_deducted(order, supply) for order in orders
+    order_has_crm_shipment_deduction(order) for order in orders
   )
   if supply.stock_deducted != all_deducted:
     supply.stock_deducted = all_deducted
@@ -177,58 +295,15 @@ def deduct_stock_for_delivery(
 
 def deduct_pending_delivery_stock(seller, *, user=None) -> dict:
   """
-  Списать остатки по заказам «в доставке» (complete+waiting), если поставка уже в CRM,
-  но списание ещё не прошло (например, заказ ушёл в доставку из ЛК WB).
+  Отключено: заказы «в доставке» не списывают CRM-остаток.
+  Актуальные остатки подтягиваются из ЛК WB селлера.
   """
-  from apps.orders.services.wb_status import wb_in_delivery_q
-  from apps.sellers.services.warehouse_filter import filter_orders_for_seller
-
-  orders = list(
-    filter_orders_for_seller(
-      Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
-      seller,
-    ).prefetch_related("supplies")
-  )
-
-  deducted = 0
-  already = 0
-  no_supply = 0
-  errors: list[dict] = []
-
-  for order in orders:
-    supply = (
-      order.supplies.filter(status=Supply.Status.CONFIRMED)
-      .exclude(wb_supply_id="")
-      .order_by("-created_at")
-      .first()
-    )
-    if not supply:
-      supply = (
-        order.supplies.exclude(wb_supply_id="")
-        .order_by("-created_at")
-        .first()
-      )
-    if not supply:
-      no_supply += 1
-      continue
-    try:
-      result = deduct_stock_for_delivery(order=order, supply=supply, user=user)
-      if result["deducted"]:
-        deducted += 1
-      elif result["already_deducted"]:
-        already += 1
-    except StockDeductionError as exc:
-      errors.append({
-        "order_id": order.id,
-        "wb_order_id": order.wb_order_id,
-        "error": str(exc),
-      })
-
   return {
-    "deducted": deducted,
-    "already_deducted": already,
-    "no_supply": no_supply,
-    "errors": errors,
+    "deducted": 0,
+    "already_deducted": 0,
+    "no_supply": 0,
+    "errors": [],
+    "skipped_in_delivery": True,
   }
 
 
@@ -237,26 +312,12 @@ def deduct_stock_for_confirmed_supply(
   *,
   user=None,
 ) -> dict:
-  """Списать остатки по всем заказам поставки после подтверждения WB (ТЗ §10)."""
-  deducted = 0
+  """Списание только при печати FBS-стикера; поставка в доставке — без досписания."""
   already = 0
-  errors: list[dict] = []
-
-  for order in supply.orders.select_related("product", "seller", "product__cell"):
-    try:
-      result = deduct_stock_for_delivery(order=order, supply=supply, user=user)
-      if result["deducted"]:
-        deducted += 1
-      elif result["already_deducted"]:
-        already += 1
-    except StockDeductionError as exc:
-      errors.append({
-        "order_id": order.id,
-        "wb_order_id": order.wb_order_id,
-        "error": str(exc),
-      })
-
-  return {"deducted": deducted, "already_deducted": already, "errors": errors}
+  for order in supply.orders.all():
+    if order_has_crm_shipment_deduction(order):
+      already += 1
+  return {"deducted": 0, "already_deducted": already, "errors": []}
 
 
 def _off_crm_shipment_comment(*, wb_order_id: int, sticker_number: str) -> str:

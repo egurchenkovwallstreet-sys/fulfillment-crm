@@ -35,10 +35,10 @@ from apps.orders.services.marking_verification import (
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 from apps.warehouse.services.stock_deduction import (
   StockDeductionError,
-  check_stock_for_delivery,
-  deduct_stock_for_delivery,
+  assert_order_stock_deducted_at_print,
   order_on_active_pick_list,
   order_sticker_printed_in_crm,
+  stock_deduction_info,
 )
 
 
@@ -297,7 +297,7 @@ def _complete_order_in_delivery(
   seller: Seller,
   user=None,
 ) -> dict:
-  """Перевести один заказ в «В доставке» и списать остаток."""
+  """Перевести один заказ в «В доставке». Остаток списан при печати стикера."""
   order.status = Order.Status.IN_DELIVERY
   order.wb_supplier_status = WB_SUPPLIER_DELIVERY
   order.wb_status = WB_STATUS_AFTER_DELIVER
@@ -312,12 +312,7 @@ def _complete_order_in_delivery(
       "updated_at",
     ],
   )
-  stock_info = deduct_stock_for_delivery(
-    order=order,
-    supply=supply,
-    user=user,
-    require_crm_checks=True,
-  )
+  stock_info = stock_deduction_info(order)
   AuditLog.objects.create(
     user=user,
     seller=seller,
@@ -415,6 +410,8 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
       code="no_supply",
     )
 
+  client = _get_client(seller)
+
   if order.status == Order.Status.IN_DELIVERY:
     raise SupplyFlowError(
       f"Заказ WB #{order.wb_order_id} уже передан в доставку.",
@@ -422,11 +419,10 @@ def send_order_to_delivery(seller: Seller, order_id: int, *, user=None) -> dict:
     )
 
   try:
-    check_stock_for_delivery(order)
+    assert_order_stock_deducted_at_print(order)
   except StockDeductionError as exc:
     raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
 
-  client = _get_client(seller)
   supply_barcode_file = ""
   supply_barcode_value = ""
   supply_barcode_error = ""
@@ -785,7 +781,7 @@ def send_supply_to_delivery(seller: Seller, supply_id: int, *, user=None) -> dic
       )
     _ensure_marking_verified_for_delivery(seller, order, user=user)
     try:
-      check_stock_for_delivery(order)
+      assert_order_stock_deducted_at_print(order)
     except StockDeductionError as exc:
       raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
     stock_info = _complete_order_in_delivery(

@@ -129,12 +129,21 @@ export interface PrintOrder {
   can_send_to_delivery: boolean
 }
 
+export interface StockDeductionInfo {
+  deducted: boolean
+  already_deducted: boolean
+  quantity: number
+  cell_number: string
+  barcode: string
+}
+
 export interface ScanBarcodeResult {
   success: boolean
   action: 'print' | 'await_marking'
   requires_marking: boolean
   message?: string
   order: PrintOrder
+  stock?: StockDeductionInfo
 }
 
 export interface BindMarkingResult {
@@ -142,6 +151,7 @@ export interface BindMarkingResult {
   action: 'await_verification' | 'print'
   message?: string
   order: PrintOrder
+  stock?: StockDeductionInfo
 }
 
 export interface MarkingVerifyItem {
@@ -189,13 +199,7 @@ export interface SendToDeliveryResult {
   supply_barcode_file?: string
   supply_barcode?: string
   supply_barcode_error?: string
-  stock?: {
-    deducted: boolean
-    already_deducted: boolean
-    quantity: number
-    cell_number: string
-    barcode: string
-  }
+  stock?: StockDeductionInfo
 }
 
 export function fetchAssemblySellers() {
