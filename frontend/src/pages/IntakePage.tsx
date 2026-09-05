@@ -6,11 +6,13 @@ import {
   fetchSellers,
   lookupBarcode,
   previewWbSyncIntake,
+  retryIntake,
   submitIntake,
   type Cell,
   type CellLabelData,
   type IntakeHistoryItem,
   type IntakeLookup,
+  type IntakeResponse,
   type Seller,
   type StockMode,
   type SyncVariant,
@@ -19,6 +21,7 @@ import {
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { printCellLabels } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
@@ -50,6 +53,12 @@ export function IntakePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resultModal, setResultModal] = useState<StockBalanceModalData | null>(null)
+  const [pendingRetry, setPendingRetry] = useState<{
+    barcode: string
+    crmQuantity: number
+    stockMode: 'intake' | 'set_actual'
+  } | null>(null)
 
   const loadWarehouses = useCallback(async (id: number) => {
     try {
@@ -151,6 +160,102 @@ export function IntakePage() {
     }
   }
 
+  function intakeToModal(result: IntakeResponse): StockBalanceModalData | null {
+    if (result.verified == null || result.crm_quantity_after == null) return null
+    return {
+      barcode: result.product.barcode,
+      cellNumber: result.product.cell_number,
+      verified: result.verified,
+      restockRequired: Boolean(result.restock_required),
+      message: result.balance_message || result.message,
+      crmQuantityBefore: result.crm_quantity_before ?? 0,
+      crmQuantityAfter: result.crm_quantity_after,
+      reservedNewOrders: result.reserved_new_orders ?? 0,
+      wbQuantityBefore: result.wb_quantity_before,
+      wbQuantityTarget: result.wb_quantity_target ?? 0,
+      wbQuantityActual: result.wb_quantity_actual,
+      intakeQuantity: result.intake_quantity,
+      physicalQuantity: result.physical_quantity ?? undefined,
+      warehouseName: result.warehouse_name,
+    }
+  }
+
+  function resetAfterIntake() {
+    setBarcode('')
+    setLookup(null)
+    setQuantityInput('1')
+    setProductName('')
+    setCellId('')
+    setVerifiedStockMatch(false)
+    barcodeRef.current?.focus()
+  }
+
+  async function handleResultConfirm() {
+    if (!resultModal) return
+
+    if (resultModal.verified) {
+      setResultModal(null)
+      setPendingRetry(null)
+      resetAfterIntake()
+      if (sellerId) {
+        const [cellsData, historyData] = await Promise.all([
+          fetchFreeCells(Number(sellerId)),
+          fetchIntakeHistory(),
+        ])
+        setCells(cellsData)
+        setHistory(historyData)
+      }
+      return
+    }
+
+    if (!pendingRetry || !sellerId || !warehouseId) {
+      setResultModal(null)
+      resetAfterIntake()
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const retried = await retryIntake({
+        seller_id: Number(sellerId),
+        barcode: pendingRetry.barcode,
+        crm_quantity: pendingRetry.crmQuantity,
+        wb_warehouse_id: Number(warehouseId),
+        stock_mode: pendingRetry.stockMode,
+      })
+      const modal = intakeToModal(retried)
+      if (!modal) {
+        setResultModal(null)
+        setPendingRetry(null)
+        resetAfterIntake()
+        return
+      }
+      if (retried.verified) {
+        setResultModal(null)
+        setPendingRetry(null)
+        resetAfterIntake()
+        const [cellsData, historyData] = await Promise.all([
+          fetchFreeCells(Number(sellerId)),
+          fetchIntakeHistory(),
+        ])
+        setCells(cellsData)
+        setHistory(historyData)
+      } else {
+        setResultModal(modal)
+        setPendingRetry({
+          barcode: pendingRetry.barcode,
+          crmQuantity: retried.crm_quantity_after ?? pendingRetry.crmQuantity,
+          stockMode: pendingRetry.stockMode,
+        })
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
@@ -198,27 +303,43 @@ export function IntakePage() {
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
         name: productName,
       })
-      setSuccess(
-        `${result.message} Ячейка №${result.product.cell_number}, остаток CRM: ${result.product.quantity} шт.${
-          result.product.requires_marking ? ' · Товар с Честным знаком' : ''
-        }`,
-      )
-      if (result.print_cell_label && result.cell_label) {
-        setLabelPrompt(result.cell_label)
+
+      const showBalanceModal = !isOzon && (stockMode === 'intake' || stockMode === 'set_actual')
+      const modal = showBalanceModal ? intakeToModal(result) : null
+
+      if (modal) {
+        setPendingRetry({
+          barcode: barcode.trim(),
+          crmQuantity: result.crm_quantity_after ?? result.product.quantity,
+          stockMode: stockMode as 'intake' | 'set_actual',
+        })
+        setResultModal(modal)
+        if (result.print_cell_label && result.cell_label) {
+          setLabelPrompt(result.cell_label)
+        }
+        setBarcode('')
+        setLookup(null)
+        setQuantityInput('1')
+        setProductName('')
+        setCellId('')
+        setVerifiedStockMatch(false)
+      } else {
+        setSuccess(
+          `${result.message} Ячейка №${result.product.cell_number}, остаток CRM: ${result.product.quantity} шт.${
+            result.product.requires_marking ? ' · Товар с Честным знаком' : ''
+          }`,
+        )
+        if (result.print_cell_label && result.cell_label) {
+          setLabelPrompt(result.cell_label)
+        }
+        resetAfterIntake()
+        const [cellsData, historyData] = await Promise.all([
+          fetchFreeCells(Number(sellerId)),
+          fetchIntakeHistory(),
+        ])
+        setCells(cellsData)
+        setHistory(historyData)
       }
-      setBarcode('')
-      setLookup(null)
-      setQuantityInput('1')
-      setProductName('')
-      setCellId('')
-      setVerifiedStockMatch(false)
-      const [cellsData, historyData] = await Promise.all([
-        fetchFreeCells(Number(sellerId)),
-        fetchIntakeHistory(),
-      ])
-      setCells(cellsData)
-      setHistory(historyData)
-      barcodeRef.current?.focus()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка приёмки')
     } finally {
@@ -447,7 +568,7 @@ export function IntakePage() {
                   checked={stockMode === 'intake'}
                   onChange={() => handleStockModeChange('intake')}
                 />
-                <strong>Приёмка</strong> — принять на склад CRM и добавить в ЛК WB
+                <strong>Приёмка</strong> — CRM: было + принято; ЛК WB: CRM − «Новые»
               </label>
               <label>
                 <input
@@ -465,7 +586,7 @@ export function IntakePage() {
                   checked={stockMode === 'set_actual'}
                   onChange={() => handleStockModeChange('set_actual')}
                 />
-                <strong>Факт на полке</strong> — установить остаток CRM и ЛК WB по пересчёту
+                <strong>Факт на полке</strong> — CRM = пересчёт; ЛК WB = CRM − «Новые»
               </label>
             </fieldset>
             )}
@@ -707,7 +828,7 @@ export function IntakePage() {
             {lookup && isSetActualMode && (
               <div className="intake-info intake-info--new">
                 <p>
-                  Остаток в CRM и ЛК WB будет установлен равным введённому количеству
+                  CRM получит введённый факт на полке; в ЛК WB — этот факт минус заказы «Новые»
                   {lookup.product ? ` (сейчас в CRM: ${lookup.product.quantity} шт.)` : ''}.
                 </p>
               </div>
@@ -818,6 +939,14 @@ export function IntakePage() {
 
       {labelPrompt && (
         <CellLabelPrompt label={labelPrompt} onClose={() => setLabelPrompt(null)} />
+      )}
+
+      {resultModal && (
+        <StockBalanceModal
+          data={resultModal}
+          loading={loading}
+          onConfirm={() => void handleResultConfirm()}
+        />
       )}
     </>
   )

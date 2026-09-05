@@ -34,11 +34,13 @@ from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
 from .services.catalog_fetch import CatalogError, apply_exclusions_and_renumber, build_onboarding_preview
 from .services.catalog_fetch_ozon import build_ozon_onboarding_preview
-from .services.intake import IntakeError, perform_intake
+from .services.intake import IntakeError, force_rewrite_intake, perform_intake
 from .services.inventory import (
   _inventory_breakdown_message,
+  force_rewrite_inventory,
   perform_inventory,
 )
+from .services.stock_balance_messages import stock_balance_breakdown_message
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
   StockFileImportError,
@@ -335,27 +337,31 @@ class IntakeView(APIView):
         f"Остаток CRM установлен по ЛК WB: {qty} шт. "
         f"(склад {result.wb_sync.get('warehouse_name') if result.wb_sync else ''})"
       )
-    elif result.stock_mode == "set_actual":
-      message = (
-        f"Фактический остаток {qty} шт. установлен в CRM и ЛК WB "
-        f"(склад {result.wb_sync.get('warehouse_name') if result.wb_sync else ''})"
+    elif result.stock_mode in ("intake", "set_actual"):
+      message = stock_balance_breakdown_message(
+        crm_quantity_before=result.crm_quantity_before,
+        crm_quantity_after=result.crm_quantity_after,
+        reserved_new_orders=result.reserved_new_orders,
+        wb_target_quantity=result.wb_quantity_target,
+        verified=result.verified,
+        restock_required=result.restock_required,
+        physical_quantity=result.physical_quantity,
+        intake_quantity=result.intake_quantity if result.stock_mode == "intake" else None,
       )
-    else:
-      added = result.wb_sync.get("added") if result.wb_sync else data.get("quantity", 0)
-      message = f"Принято {added} шт. на склад CRM и передано в ЛК WB"
 
-    return Response(
-      {
-        "success": True,
-        "message": message,
-        "product": ProductSerializer(result.product).data,
-        "print_cell_label": result.print_cell_label,
-        "cell_label": result.cell_label,
-        "stock_mode": result.stock_mode,
-        "wb_sync": result.wb_sync,
-      },
-      status=status.HTTP_201_CREATED,
-    )
+    response_payload = {
+      "success": True,
+      "message": message,
+      "product": ProductSerializer(result.product).data,
+      "print_cell_label": result.print_cell_label,
+      "cell_label": result.cell_label,
+      "stock_mode": result.stock_mode,
+      "wb_sync": result.wb_sync,
+    }
+    if result.stock_mode in ("intake", "set_actual") and marketplace != "ozon":
+      response_payload.update(_intake_balance_response(result))
+
+    return Response(response_payload, status=status.HTTP_201_CREATED)
 
 
 class WbSyncIntakePreviewView(APIView):
@@ -428,6 +434,32 @@ class IntakeHistoryView(APIView):
     return Response(StockOperationSerializer(ops, many=True).data)
 
 
+def _intake_balance_response(result) -> dict:
+  return {
+    "verified": result.verified,
+    "restock_required": result.restock_required,
+    "crm_quantity_before": result.crm_quantity_before,
+    "crm_quantity_after": result.crm_quantity_after,
+    "wb_quantity_before": result.wb_quantity_before,
+    "wb_quantity_target": result.wb_quantity_target,
+    "wb_quantity_actual": result.wb_quantity_actual,
+    "reserved_new_orders": result.reserved_new_orders,
+    "intake_quantity": result.intake_quantity,
+    "physical_quantity": result.physical_quantity,
+    "warehouse_name": result.warehouse_name,
+    "balance_message": stock_balance_breakdown_message(
+      crm_quantity_before=result.crm_quantity_before,
+      crm_quantity_after=result.crm_quantity_after,
+      reserved_new_orders=result.reserved_new_orders,
+      wb_target_quantity=result.wb_quantity_target,
+      verified=result.verified,
+      restock_required=result.restock_required,
+      physical_quantity=result.physical_quantity,
+      intake_quantity=result.intake_quantity if result.stock_mode == "intake" else None,
+    ),
+  }
+
+
 def _inventory_response(result) -> dict:
   return {
     "success": True,
@@ -435,12 +467,17 @@ def _inventory_response(result) -> dict:
     "message": _inventory_breakdown_message(
       physical_quantity=result.physical_quantity,
       reserved_new_orders=result.reserved_new_orders,
-      fulfillment_quantity=result.fulfillment_quantity,
+      crm_quantity_before=result.crm_quantity_before,
+      crm_quantity_after=result.crm_quantity_after,
+      wb_target_quantity=result.wb_target_quantity,
       verified=result.verified,
       restock_required=result.restock_required,
     ),
     "physical_quantity": result.physical_quantity,
     "reserved_new_orders": result.reserved_new_orders,
+    "crm_quantity_before": result.crm_quantity_before,
+    "crm_quantity_after": result.crm_quantity_after,
+    "wb_target_quantity": result.wb_target_quantity,
     "fulfillment_quantity": result.fulfillment_quantity,
     "restock_required": result.restock_required,
     "wb_total_sent": result.wb_total_sent,
@@ -537,6 +574,71 @@ class InventoryView(APIView):
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(_inventory_response(result), status=status.HTTP_201_CREATED)
+
+
+class InventoryRetryView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    from .serializers import InventoryRetrySerializer
+
+    marketplace = parse_marketplace(request)
+    serializer = InventoryRetrySerializer(data=request.data, context={"marketplace": marketplace})
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = _require_seller(request, data["seller_id"])
+
+    try:
+      result = force_rewrite_inventory(
+        seller=seller,
+        barcode=data["barcode"],
+        crm_quantity=data["crm_quantity"],
+        warehouse_ids=data["warehouse_ids"],
+        user=request.user,
+        marketplace=marketplace,
+      )
+    except IntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(_inventory_response(result), status=status.HTTP_201_CREATED)
+
+
+class IntakeRetryView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request):
+    from .serializers import IntakeRetrySerializer
+
+    marketplace = parse_marketplace(request)
+    serializer = IntakeRetrySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    seller = _require_seller(request, data["seller_id"])
+
+    try:
+      result = force_rewrite_intake(
+        seller=seller,
+        barcode=data["barcode"],
+        crm_quantity=data["crm_quantity"],
+        wb_warehouse_id=data["wb_warehouse_id"],
+        stock_mode=data["stock_mode"],
+        user=request.user,
+        marketplace=marketplace,
+      )
+    except IntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+      {
+        "success": True,
+        "message": "Остатки перезаписаны",
+        "product": ProductSerializer(result.product).data,
+        "stock_mode": result.stock_mode,
+        "wb_sync": result.wb_sync,
+        **_intake_balance_response(result),
+      },
+      status=status.HTTP_201_CREATED,
+    )
 
 
 class OnboardingPreviewView(APIView):

@@ -119,6 +119,18 @@ export type IntakeResponse = {
   print_cell_label?: boolean
   cell_label?: CellLabelData | null
   stock_mode?: StockMode
+  verified?: boolean
+  restock_required?: boolean
+  crm_quantity_before?: number
+  crm_quantity_after?: number
+  wb_quantity_before?: number | null
+  wb_quantity_target?: number
+  wb_quantity_actual?: number | null
+  reserved_new_orders?: number
+  intake_quantity?: number
+  physical_quantity?: number | null
+  warehouse_name?: string
+  balance_message?: string
   wb_sync?: {
     wb_warehouse_id?: number
     warehouse_name?: string
@@ -271,6 +283,9 @@ export type InventoryResponse = {
   message: string
   physical_quantity: number
   reserved_new_orders: number
+  crm_quantity_before: number
+  crm_quantity_after: number
+  wb_target_quantity: number
   fulfillment_quantity: number
   restock_required: boolean
   wb_total_sent: number
@@ -280,6 +295,21 @@ export type InventoryResponse = {
   product: Product
   print_cell_label?: boolean
   cell_label?: CellLabelData | null
+}
+
+export type InventoryRetryPayload = {
+  seller_id: number
+  barcode: string
+  crm_quantity: number
+  warehouse_ids: number[]
+}
+
+export type IntakeRetryPayload = {
+  seller_id: number
+  barcode: string
+  crm_quantity: number
+  wb_warehouse_id: number
+  stock_mode: 'intake' | 'set_actual'
 }
 
 export function lookupInventoryBarcode(sellerId: number, barcode: string) {
@@ -292,6 +322,20 @@ export function lookupInventoryBarcode(sellerId: number, barcode: string) {
 
 export function submitInventory(payload: InventoryPayload) {
   return apiFetch<InventoryResponse>('/api/warehouse/inventory/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function retryInventory(payload: InventoryRetryPayload) {
+  return apiFetch<InventoryResponse>('/api/warehouse/inventory/retry/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function retryIntake(payload: IntakeRetryPayload) {
+  return apiFetch<IntakeResponse>('/api/warehouse/intake/retry/', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

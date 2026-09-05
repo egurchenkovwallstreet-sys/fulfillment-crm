@@ -7,13 +7,17 @@ from django.db import transaction
 
 from apps.integrations.models import AuditLog
 from apps.integrations.marketplace import OZON, WB, normalize_marketplace
-from apps.orders.services.supply_flow import count_new_orders_for_barcode
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import refresh_cell_occupied
 from apps.warehouse.services.intake import IntakeError, _assign_cell
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
+from apps.warehouse.services.stock_balance import (
+  compute_wb_amount_from_crm,
+  count_reserved_new_orders,
+)
+from apps.warehouse.services.stock_balance_messages import stock_balance_breakdown_message
 from apps.warehouse.services.stock_transfer import even_split_quantity
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
@@ -40,6 +44,9 @@ class InventoryResult:
   cell_label: dict[str, str] | None
   physical_quantity: int
   reserved_new_orders: int
+  crm_quantity_before: int
+  crm_quantity_after: int
+  wb_target_quantity: int
   fulfillment_quantity: int
   verified: bool
   warehouses: list[InventoryWarehouseLine]
@@ -69,40 +76,21 @@ def _inventory_breakdown_message(
   *,
   physical_quantity: int,
   reserved_new_orders: int,
-  fulfillment_quantity: int,
+  crm_quantity_before: int,
+  crm_quantity_after: int,
+  wb_target_quantity: int,
   verified: bool,
   restock_required: bool = False,
 ) -> str:
-  parts = [
-    f"Насчитано на полке: {physical_quantity} шт.",
-    f"Зарезервировано в «Новые»: {reserved_new_orders} шт.",
-    f"Остаток CRM и WB: {fulfillment_quantity} шт.",
-  ]
-  if restock_required:
-    parts.append(
-      "Недостаточно товара — необходимо догрузить. "
-      "Остаток установлен в 0."
-    )
-  if not verified:
-    parts.append("Сверка с ЛК WB: расхождение — проверьте склады.")
-  elif not restock_required:
-    parts.append("Сверка с ЛК WB: OK.")
-  return " · ".join(parts)
-
-
-def _compute_inventory_effective_quantity(
-  seller: Seller,
-  barcode: str,
-  physical_quantity: int,
-  *,
-  marketplace: str,
-) -> tuple[int, int, bool]:
-  """reserved_new, effective_quantity, restock_required."""
-  mp = normalize_marketplace(marketplace)
-  reserved_new = 0 if mp == OZON else count_new_orders_for_barcode(seller, barcode)
-  if reserved_new > physical_quantity:
-    return reserved_new, 0, True
-  return reserved_new, physical_quantity - reserved_new, False
+  return stock_balance_breakdown_message(
+    physical_quantity=physical_quantity,
+    crm_quantity_before=crm_quantity_before,
+    crm_quantity_after=crm_quantity_after,
+    reserved_new_orders=reserved_new_orders,
+    wb_target_quantity=wb_target_quantity,
+    verified=verified,
+    restock_required=restock_required,
+  )
 
 
 def _verify_inventory(
@@ -131,6 +119,93 @@ def _verify_inventory(
   return lines
 
 
+def _apply_inventory_stock_writes(
+  *,
+  seller: Seller,
+  product: Product,
+  barcode: str,
+  crm_quantity: int,
+  warehouses: list[SellerWarehouse],
+  wb_target_quantity: int,
+  user,
+  mp: str,
+) -> tuple[list[InventoryWarehouseLine], int, int, bool]:
+  if mp == OZON:
+    return [], crm_quantity, crm_quantity, True
+
+  targets = (
+    even_split_quantity(wb_target_quantity, len(warehouses))
+    if len(warehouses) > 1
+    else ([wb_target_quantity] if warehouses else [])
+  )
+  sent_by_warehouse = {
+    warehouse.id: target
+    for warehouse, target in zip(warehouses, targets, strict=True)
+  }
+
+  for warehouse, target in zip(warehouses, targets, strict=True):
+    try:
+      set_wb_stock_absolute(seller, warehouse, barcode, target)
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+
+    ProductWarehouseStock.objects.update_or_create(
+      product=product,
+      seller_warehouse=warehouse,
+      defaults={"quantity": target},
+    )
+
+  selected_ids = {wh.id for wh in warehouses}
+  for warehouse in get_enabled_seller_warehouses(seller):
+    if warehouse.id in selected_ids:
+      continue
+    ProductWarehouseStock.objects.filter(
+      product=product,
+      seller_warehouse=warehouse,
+    ).update(quantity=0)
+
+  lines = _verify_inventory(seller, warehouses, barcode, sent_by_warehouse)
+  wb_total_sent = sum(line.sent_amount for line in lines)
+  wb_total_actual = sum(line.wb_actual for line in lines)
+  verified = all(line.difference == 0 for line in lines)
+  return lines, wb_total_sent, wb_total_actual, verified
+
+
+def _build_inventory_result(
+  *,
+  product: Product,
+  print_cell_label: bool,
+  cell_label: dict[str, str] | None,
+  physical_quantity: int,
+  reserved_new_orders: int,
+  crm_quantity_before: int,
+  crm_quantity_after: int,
+  wb_target_quantity: int,
+  restock_required: bool,
+  verified: bool,
+  lines: list[InventoryWarehouseLine],
+  wb_total_sent: int,
+  wb_total_actual: int,
+) -> InventoryResult:
+  return InventoryResult(
+    product=product,
+    print_cell_label=print_cell_label,
+    cell_label=cell_label,
+    physical_quantity=physical_quantity,
+    reserved_new_orders=reserved_new_orders,
+    crm_quantity_before=crm_quantity_before,
+    crm_quantity_after=crm_quantity_after,
+    wb_target_quantity=wb_target_quantity,
+    fulfillment_quantity=wb_target_quantity,
+    verified=verified,
+    warehouses=lines,
+    wb_total_sent=wb_total_sent,
+    wb_total_actual=wb_total_actual,
+    wb_total_difference=wb_total_actual - wb_total_sent,
+    restock_required=restock_required,
+  )
+
+
 @transaction.atomic
 def perform_inventory(
   *,
@@ -152,23 +227,14 @@ def perform_inventory(
   if physical_quantity < 0:
     raise IntakeError("Количество не может быть отрицательным")
 
-  reserved_new_orders, quantity, restock_required = _compute_inventory_effective_quantity(
-    seller,
-    barcode,
-    physical_quantity,
-    marketplace=mp,
+  reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+  crm_quantity_after = physical_quantity
+  wb_target_quantity, restock_required = compute_wb_amount_from_crm(
+    crm_quantity_after,
+    reserved_new_orders,
   )
 
   warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
-  targets = (
-    even_split_quantity(quantity, len(warehouses))
-    if len(warehouses) > 1
-    else ([quantity] if warehouses else [])
-  )
-  sent_by_warehouse = {
-    warehouse.id: target
-    for warehouse, target in zip(warehouses, targets, strict=True)
-  }
 
   product = (
     Product.objects.select_for_update()
@@ -176,13 +242,14 @@ def perform_inventory(
     .select_related("cell", "seller")
     .first()
   )
+  crm_quantity_before = product.quantity if product else 0
 
   if product:
-    product.quantity = quantity
+    product.quantity = crm_quantity_after
     product.save(update_fields=["quantity", "updated_at"])
     is_new = False
   else:
-    if quantity == 0 and not restock_required:
+    if physical_quantity == 0 and not restock_required:
       raise IntakeError("Новый баркод нельзя инвентаризировать с нулевым количеством")
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
     marking = lookup_marking_for_barcode(seller, barcode) if mp == WB else None
@@ -191,37 +258,15 @@ def perform_inventory(
       barcode=barcode,
       name=name.strip() or (marking.title if marking else ""),
       cell=cell,
-      quantity=quantity,
+      quantity=crm_quantity_after,
       marketplace=mp,
       requires_marking=(marking.requires_marking if marking and marking.wb_found else False),
     )
     refresh_cell_occupied(cell)
     is_new = True
 
-  if mp != OZON:
-    for warehouse, target in zip(warehouses, targets, strict=True):
-      try:
-        set_wb_stock_absolute(seller, warehouse, barcode, target)
-      except WBStockError as exc:
-        raise IntakeError(str(exc)) from exc
-
-      ProductWarehouseStock.objects.update_or_create(
-        product=product,
-        seller_warehouse=warehouse,
-        defaults={"quantity": target},
-      )
-
-    selected_ids = {wh.id for wh in warehouses}
-    for warehouse in get_enabled_seller_warehouses(seller):
-      if warehouse.id in selected_ids:
-        continue
-      ProductWarehouseStock.objects.filter(
-        product=product,
-        seller_warehouse=warehouse,
-      ).update(quantity=0)
-
   warehouse_labels = ", ".join(
-    f"{wh.name or wh.wb_warehouse_id}={sent_by_warehouse[wh.id]}"
+    f"{wh.name or wh.wb_warehouse_id}"
     for wh in warehouses
   )
   if restock_required:
@@ -233,47 +278,48 @@ def perform_inventory(
   StockOperation.objects.create(
     product=product,
     operation_type=StockOperation.OperationType.ADJUSTMENT,
-    quantity=quantity,
+    quantity=crm_quantity_after,
     performed_by=user,
     comment=(
-      f"Инвентаризация Ozon: насчитано {physical_quantity} шт. → {quantity} шт."
+      f"Инвентаризация Ozon: насчитано {physical_quantity} шт. → CRM {crm_quantity_after} шт."
       if mp == OZON
       else (
         f"Инвентаризация: насчитано {physical_quantity} шт.{reserve_note} "
-        f"→ {quantity} шт. в CRM/WB ({warehouse_labels})"
+        f"→ CRM {crm_quantity_after}, WB {wb_target_quantity} ({warehouse_labels})"
       )
     ),
   )
 
-  if mp == OZON:
-    lines = []
-    wb_total_sent = quantity
-    wb_total_actual = quantity
-    verified = True
-  else:
-    lines = _verify_inventory(seller, warehouses, barcode, sent_by_warehouse)
-    wb_total_sent = sum(line.sent_amount for line in lines)
-    wb_total_actual = sum(line.wb_actual for line in lines)
-    verified = all(line.difference == 0 for line in lines)
+  lines, wb_total_sent, wb_total_actual, verified = _apply_inventory_stock_writes(
+    seller=seller,
+    product=product,
+    barcode=barcode,
+    crm_quantity=crm_quantity_after,
+    warehouses=warehouses,
+    wb_target_quantity=wb_target_quantity,
+    user=user,
+    mp=mp,
+  )
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.OTHER,
     message=(
-      f"Инвентаризация баркод {barcode}: насчитано {physical_quantity}, "
-      f"«Новые» {reserved_new_orders}, остаток {quantity} шт., "
+      f"Инвентаризация баркод {barcode}: CRM {crm_quantity_before}→{crm_quantity_after}, "
+      f"WB {wb_target_quantity}, «Новые» {reserved_new_orders}, "
       f"{'сверка OK' if verified else 'расхождение с WB'}"
     ),
     details={
       "barcode": barcode,
       "physical_quantity": physical_quantity,
       "reserved_new_orders": reserved_new_orders,
-      "fulfillment_quantity": quantity,
+      "crm_quantity_before": crm_quantity_before,
+      "crm_quantity_after": crm_quantity_after,
+      "wb_target_quantity": wb_target_quantity,
       "restock_required": restock_required,
       "verified": verified,
       "warehouse_ids": warehouse_ids,
-      "sent_by_warehouse": sent_by_warehouse,
       "verification": [
         {
           "warehouse_id": line.warehouse_id,
@@ -291,17 +337,111 @@ def perform_inventory(
   )
 
   cell_label = build_cell_label_data(product) if is_new else None
-  return InventoryResult(
+  return _build_inventory_result(
     product=product,
     print_cell_label=is_new,
     cell_label=cell_label,
     physical_quantity=physical_quantity,
     reserved_new_orders=reserved_new_orders,
-    fulfillment_quantity=quantity,
+    crm_quantity_before=crm_quantity_before,
+    crm_quantity_after=crm_quantity_after,
+    wb_target_quantity=wb_target_quantity,
+    restock_required=restock_required,
     verified=verified,
-    warehouses=lines,
+    lines=lines,
     wb_total_sent=wb_total_sent,
     wb_total_actual=wb_total_actual,
-    wb_total_difference=wb_total_actual - wb_total_sent,
+  )
+
+
+@transaction.atomic
+def force_rewrite_inventory(
+  *,
+  seller: Seller,
+  barcode: str,
+  crm_quantity: int,
+  warehouse_ids: list[int],
+  user,
+  marketplace: str = WB,
+) -> InventoryResult:
+  """Повторная запись CRM и WB после расхождения сверки."""
+  mp = normalize_marketplace(marketplace)
+  barcode = barcode.strip()
+  if not barcode:
+    raise IntakeError("Баркод не может быть пустым")
+  if crm_quantity < 0:
+    raise IntakeError("Количество CRM не может быть отрицательным")
+
+  product = (
+    Product.objects.select_for_update()
+    .filter(seller=seller, barcode=barcode, marketplace=mp)
+    .select_related("cell", "seller")
+    .first()
+  )
+  if not product:
+    raise IntakeError("Товар не найден — сначала выполните инвентаризацию")
+
+  crm_quantity_before = product.quantity
+  reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+  wb_target_quantity, restock_required = compute_wb_amount_from_crm(
+    crm_quantity,
+    reserved_new_orders,
+  )
+  warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
+
+  product.quantity = crm_quantity
+  product.save(update_fields=["quantity", "updated_at"])
+
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.ADJUSTMENT,
+    quantity=crm_quantity,
+    performed_by=user,
+    comment=(
+      f"Инвентаризация (повтор): CRM {crm_quantity}, WB {wb_target_quantity}"
+    ),
+  )
+
+  lines, wb_total_sent, wb_total_actual, verified = _apply_inventory_stock_writes(
+    seller=seller,
+    product=product,
+    barcode=barcode,
+    crm_quantity=crm_quantity,
+    warehouses=warehouses,
+    wb_target_quantity=wb_target_quantity,
+    user=user,
+    mp=mp,
+  )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.OTHER,
+    message=(
+      f"Инвентаризация (повтор) баркод {barcode}: CRM→{crm_quantity}, WB→{wb_target_quantity}, "
+      f"{'сверка OK' if verified else 'расхождение с WB'}"
+    ),
+    details={
+      "barcode": barcode,
+      "crm_quantity": crm_quantity,
+      "wb_target_quantity": wb_target_quantity,
+      "verified": verified,
+      "retry": True,
+    },
+  )
+
+  return _build_inventory_result(
+    product=product,
+    print_cell_label=False,
+    cell_label=None,
+    physical_quantity=crm_quantity,
+    reserved_new_orders=reserved_new_orders,
+    crm_quantity_before=crm_quantity_before,
+    crm_quantity_after=crm_quantity,
+    wb_target_quantity=wb_target_quantity,
     restock_required=restock_required,
+    verified=verified,
+    lines=lines,
+    wb_total_sent=wb_total_sent,
+    wb_total_actual=wb_total_actual,
   )

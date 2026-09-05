@@ -307,3 +307,34 @@ class InventorySerializer(serializers.Serializer):
         "warehouse_ids": "Один или несколько складов не найдены",
       })
     return attrs
+
+
+class InventoryRetrySerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  barcode = serializers.CharField(max_length=100)
+  crm_quantity = serializers.IntegerField(min_value=0)
+  warehouse_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    allow_empty=False,
+  )
+
+  def validate_seller_id(self, value):
+    if not Seller.objects.filter(pk=value, is_active=True).exists():
+      raise serializers.ValidationError("Селлер не найден или неактивен")
+    return value
+
+
+class IntakeRetrySerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  barcode = serializers.CharField(max_length=100)
+  crm_quantity = serializers.IntegerField(min_value=0)
+  wb_warehouse_id = serializers.IntegerField()
+  stock_mode = serializers.ChoiceField(
+    choices=["intake", "set_actual"],
+    default="intake",
+  )
+
+  def validate_seller_id(self, value):
+    if not Seller.objects.filter(pk=value, is_active=True).exists():
+      raise serializers.ValidationError("Селлер не найден или неактивен")
+    return value

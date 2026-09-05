@@ -4,6 +4,7 @@ import {
   fetchFreeCells,
   fetchSellers,
   lookupInventoryBarcode,
+  retryInventory,
   submitInventory,
   type Cell,
   type CellLabelData,
@@ -13,6 +14,7 @@ import {
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
+import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
@@ -30,7 +32,11 @@ export function InventoryPage() {
   const [warehouseIds, setWarehouseIds] = useState<number[]>([])
   const [sessionActive, setSessionActive] = useState(false)
   const [completedBarcodes, setCompletedBarcodes] = useState<Set<string>>(new Set())
-  const [lastResult, setLastResult] = useState<InventoryResponse | null>(null)
+  const [resultModal, setResultModal] = useState<StockBalanceModalData | null>(null)
+  const [pendingRetry, setPendingRetry] = useState<{
+    barcode: string
+    crmQuantity: number
+  } | null>(null)
   const [barcode, setBarcode] = useState('')
   const [quantityInput, setQuantityInput] = useState('')
   const [productName, setProductName] = useState('')
@@ -133,7 +139,8 @@ export function InventoryPage() {
     setSessionActive(true)
     setSessionCount(0)
     setCompletedBarcodes(new Set())
-    setLastResult(null)
+    setResultModal(null)
+    setPendingRetry(null)
     resetBarcodeForm()
   }
 
@@ -141,7 +148,8 @@ export function InventoryPage() {
     setSessionActive(false)
     setWarehouseIds([])
     setCompletedBarcodes(new Set())
-    setLastResult(null)
+    setResultModal(null)
+    setPendingRetry(null)
     resetBarcodeForm()
     setError('')
   }
@@ -206,6 +214,66 @@ export function InventoryPage() {
     }
   }
 
+  function inventoryToModal(result: InventoryResponse): StockBalanceModalData {
+    return {
+      barcode: result.product.barcode,
+      cellNumber: result.product.cell_number,
+      verified: result.verified,
+      restockRequired: result.restock_required,
+      message: result.message,
+      crmQuantityBefore: result.crm_quantity_before,
+      crmQuantityAfter: result.crm_quantity_after,
+      reservedNewOrders: result.reserved_new_orders,
+      wbQuantityTarget: result.wb_target_quantity,
+      wbQuantityActual: result.wb_total_actual,
+      physicalQuantity: result.physical_quantity,
+      warehouses: result.warehouses,
+    }
+  }
+
+  async function handleResultConfirm() {
+    if (!resultModal) return
+
+    if (resultModal.verified) {
+      setResultModal(null)
+      setPendingRetry(null)
+      resetBarcodeForm()
+      return
+    }
+
+    if (!pendingRetry || !sellerId) {
+      setResultModal(null)
+      resetBarcodeForm()
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const retried = await retryInventory({
+        seller_id: Number(sellerId),
+        barcode: pendingRetry.barcode,
+        crm_quantity: pendingRetry.crmQuantity,
+        warehouse_ids: warehouseIds,
+      })
+      if (retried.verified) {
+        setResultModal(null)
+        setPendingRetry(null)
+        resetBarcodeForm()
+      } else {
+        setResultModal(inventoryToModal(retried))
+        setPendingRetry({
+          barcode: pendingRetry.barcode,
+          crmQuantity: retried.crm_quantity_after,
+        })
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
@@ -238,11 +306,20 @@ export function InventoryPage() {
       })
       setSessionCount((value) => value + 1)
       setCompletedBarcodes((prev) => new Set(prev).add(trimmed))
-      setLastResult(result)
+      setPendingRetry({
+        barcode: trimmed,
+        crmQuantity: result.crm_quantity_after,
+      })
+      setResultModal(inventoryToModal(result))
       if (result.print_cell_label && result.cell_label) {
         setLabelPrompt(result.cell_label)
       }
-      resetBarcodeForm()
+      setBarcode('')
+      setQuantityInput('')
+      setProductName('')
+      setLookup(null)
+      setCellMode('auto')
+      setCellId('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка инвентаризации')
     } finally {
@@ -252,21 +329,13 @@ export function InventoryPage() {
 
   const selectedWarehouses = warehouses.filter((wh) => warehouseIds.includes(wh.id))
 
-  const lastResultClass = lastResult
-    ? lastResult.restock_required
-      ? 'inventory-result--warning'
-      : lastResult.verified
-        ? 'inventory-result--ok'
-        : 'inventory-result--error'
-    : ''
-
   return (
     <div className="page inventory-page">
       <header className="page__header inventory-page__header">
         <div>
           <h1>Инвентаризация</h1>
           <p>
-            Скан баркода → минус заказы «Новые» → сохранение → следующий баркод. Завершение — отдельной кнопкой.
+            Скан баркода → факт на полке в CRM → в ЛК WB минус «Новые». Завершение — отдельной кнопкой.
           </p>
         </div>
         <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
@@ -369,45 +438,6 @@ export function InventoryPage() {
               </div>
             </div>
           </section>
-
-          {lastResult && (
-            <section className={`panel inventory-result ${lastResultClass}`}>
-              <h2 className="inventory-result__title">
-                {lastResult.restock_required
-                  ? 'Сохранено — нужна догрузка'
-                  : lastResult.verified
-                    ? 'Сохранено — сверка OK'
-                    : 'Сохранено — расхождение с WB'}
-              </h2>
-              <p className="inventory-result__breakdown">{lastResult.message}</p>
-              <p className="inventory-result__barcode">
-                Баркод <code>{lastResult.product.barcode}</code>
-                {lastResult.product.cell_number && (
-                  <> · ячейка №{lastResult.product.cell_number}</>
-                )}
-              </p>
-              {!isOzon && lastResult.warehouses.length > 0 && (
-                <table className="inventory-result__table">
-                  <thead>
-                    <tr>
-                      <th>Склад FBS</th>
-                      <th>Отправили</th>
-                      <th>В ЛК WB</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lastResult.warehouses.map((row) => (
-                      <tr key={row.warehouse_id}>
-                        <td>{row.warehouse_name}</td>
-                        <td>{row.sent_amount}</td>
-                        <td>{row.wb_actual}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
-          )}
 
           <form className="panel inventory-form" onSubmit={(e) => void handleSubmit(e)}>
             <div className="inventory-scan">
@@ -546,6 +576,14 @@ export function InventoryPage() {
             setLabelPrompt(null)
             focusBarcode()
           }}
+        />
+      )}
+
+      {resultModal && (
+        <StockBalanceModal
+          data={resultModal}
+          loading={loading}
+          onConfirm={handleResultConfirm}
         />
       )}
     </div>
