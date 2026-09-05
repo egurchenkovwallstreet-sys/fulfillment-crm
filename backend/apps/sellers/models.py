@@ -1,9 +1,14 @@
 import uuid
+from decimal import Decimal
 
 from django.db import models
 
 
 class Seller(models.Model):
+  class PricingMode(models.TextChoices):
+    PER_UNIT = "per_unit", "По штукам"
+    PER_LITER = "per_liter", "По литражу"
+
   fulfillment = models.ForeignKey(
     "accounts.Fulfillment",
     on_delete=models.CASCADE,
@@ -38,6 +43,36 @@ class Seller(models.Model):
       ("batch", "Лента стикеров"),
     ),
     default="scan",
+  )
+  pricing_mode = models.CharField(
+    "Режим тарификации",
+    max_length=12,
+    choices=PricingMode.choices,
+    default=PricingMode.PER_UNIT,
+  )
+  first_liter_shipment_price = models.DecimalField(
+    "Отгрузка: 1-й литр, ₽",
+    max_digits=10,
+    decimal_places=2,
+    default=Decimal("10.00"),
+  )
+  next_liter_shipment_price = models.DecimalField(
+    "Отгрузка: каждый след. литр, ₽",
+    max_digits=10,
+    decimal_places=2,
+    default=Decimal("6.00"),
+  )
+  marking_surcharge_per_unit = models.DecimalField(
+    "Надбавка за ЧЗ, ₽/шт",
+    max_digits=10,
+    decimal_places=2,
+    default=Decimal("5.00"),
+  )
+  storage_tariff_per_liter_month = models.DecimalField(
+    "Хранение, ₽/л/мес",
+    max_digits=10,
+    decimal_places=2,
+    default=Decimal("1.00"),
   )
   created_at = models.DateTimeField(auto_now_add=True)
   updated_at = models.DateTimeField(auto_now=True)
@@ -167,3 +202,82 @@ class SellerInvite(models.Model):
 
   def __str__(self):
     return f"Invite {self.seller.company_name}"
+
+
+class DailyStorageCharge(models.Model):
+  """Ежедневное начисление хранения (система 2)."""
+
+  seller = models.ForeignKey(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="daily_storage_charges",
+  )
+  product = models.ForeignKey(
+    "warehouse.Product",
+    on_delete=models.CASCADE,
+    related_name="daily_storage_charges",
+  )
+  charge_date = models.DateField("Дата")
+  quantity = models.PositiveIntegerField("Шт на складе")
+  volume_liters = models.DecimalField("Литры на шт", max_digits=10, decimal_places=2)
+  amount = models.DecimalField("Сумма, ₽", max_digits=12, decimal_places=2)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    verbose_name = "Начисление хранения"
+    verbose_name_plural = "Начисления хранения"
+    unique_together = [("seller", "product", "charge_date")]
+    indexes = [
+      models.Index(fields=["seller", "charge_date"]),
+    ]
+
+  def __str__(self):
+    return f"{self.charge_date} {self.product.barcode} {self.amount}₽"
+
+
+class ShipmentLiterCharge(models.Model):
+  """Начисление отгрузки по литражу (система 2)."""
+
+  seller = models.ForeignKey(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="shipment_liter_charges",
+  )
+  product = models.ForeignKey(
+    "warehouse.Product",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="shipment_liter_charges",
+  )
+  barcode = models.CharField("Баркод", max_length=100, db_index=True)
+  marketplace = models.CharField("Маркетплейс", max_length=8, default="wb")
+  order = models.ForeignKey(
+    "orders.Order",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="liter_shipment_charges",
+  )
+  ozon_posting = models.ForeignKey(
+    "orders.OzonPosting",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="liter_shipment_charges",
+  )
+  charge_date = models.DateField("Дата")
+  volume_liters = models.DecimalField("Литры", max_digits=10, decimal_places=2)
+  has_marking = models.BooleanField("ЧЗ", default=False)
+  amount = models.DecimalField("Сумма, ₽", max_digits=12, decimal_places=2)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    verbose_name = "Отгрузка по литражу"
+    verbose_name_plural = "Отгрузки по литражу"
+    indexes = [
+      models.Index(fields=["seller", "charge_date"]),
+    ]
+
+  def __str__(self):
+    return f"{self.charge_date} {self.barcode} {self.amount}₽"

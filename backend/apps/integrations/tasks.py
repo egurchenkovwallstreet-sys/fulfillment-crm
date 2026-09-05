@@ -84,3 +84,13 @@ def clear_expired_marking_codes():
   if result["wb_cleared"] or result["ozon_cleared"]:
     logger.info("Expired marking codes cleared: %s", result)
   return result
+
+
+@shared_task
+def accrue_daily_storage_charges():
+  """Ежедневное начисление хранения по литражу (система 2)."""
+  from apps.sellers.services.liter_billing import accrue_daily_storage_all_sellers
+
+  result = accrue_daily_storage_all_sellers()
+  logger.info("Daily liter storage accrual: %s", result)
+  return result

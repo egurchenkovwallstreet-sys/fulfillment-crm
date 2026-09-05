@@ -9,6 +9,7 @@ import {
 import { useMarketplace } from '../context/MarketplaceContext'
 import { StatCard } from '../components/StatCard'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
+import { WeeklyShipmentsPanel } from '../components/WeeklyShipmentsPanel'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './SellerCabinetPage.css'
 
@@ -51,6 +52,10 @@ export function SellerCabinetPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [shipmentWeekIndex, setShipmentWeekIndex] = useState(0)
+  const [storageWeekIndex, setStorageWeekIndex] = useState(0)
+  const [literShipmentWeekIndex, setLiterShipmentWeekIndex] = useState(0)
+
+  const isLiterPricing = data?.liter_tariffs?.pricing_mode === 'per_liter'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -137,7 +142,7 @@ export function SellerCabinetPage() {
             </section>
           )}
 
-          {selectedShipmentWeek && shipmentWeeks.length > 0 && (
+          {selectedShipmentWeek && shipmentWeeks.length > 0 && !isLiterPricing && (
             <section className="panel seller-weekly-shipments">
               <div className="seller-weekly-shipments__head">
                 <div>
@@ -221,6 +226,57 @@ export function SellerCabinetPage() {
                 })}
               </div>
             </section>
+          )}
+
+          {isLiterPricing && data.liter_storage_chart && (
+            <>
+              <WeeklyShipmentsPanel
+                data={data.liter_storage_chart}
+                title="Хранение"
+                hint={`Ежедневное начисление по остатку в ячейке × литры × (${data.liter_tariffs?.storage_tariff_per_liter_month ?? '1'} ₽/л/мес ÷ дней в месяце).`}
+                weekIndex={storageWeekIndex}
+                onWeekIndexChange={setStorageWeekIndex}
+              />
+              {data.storage_by_barcode && data.storage_by_barcode.length > 0 && (
+                <section className="panel seller-liter-storage-table">
+                  <h2 className="section-title">Хранение по товарам (30 дней)</h2>
+                  <div className="seller-cabinet-table-scroll">
+                    <table className="seller-cabinet-table">
+                      <thead>
+                        <tr>
+                          <th>Товар</th>
+                          <th>Баркод</th>
+                          <th>Остаток</th>
+                          <th>Литры/шт</th>
+                          <th>Начислено</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.storage_by_barcode.slice(0, 10).map((row) => (
+                          <tr key={row.barcode}>
+                            <td>{row.name || row.barcode}</td>
+                            <td className="mono">{row.barcode}</td>
+                            <td>{row.quantity}</td>
+                            <td>{row.volume_liters}</td>
+                            <td>{formatMoney(row.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {isLiterPricing && data.liter_shipments_chart && (
+            <WeeklyShipmentsPanel
+              data={data.liter_shipments_chart}
+              title={isOzon ? 'Отгрузки Ozon (по литражу)' : 'Отгрузки WB (по литражу)'}
+              hint={`1-й литр ${data.liter_tariffs?.first_liter_shipment_price ?? '10'} ₽, доп. ${data.liter_tariffs?.next_liter_shipment_price ?? '6'} ₽/л, +${data.liter_tariffs?.marking_surcharge_per_unit ?? '5'} ₽ за ЧЗ.`}
+              weekIndex={literShipmentWeekIndex}
+              onWeekIndexChange={setLiterShipmentWeekIndex}
+            />
           )}
         </>
       )}

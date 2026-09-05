@@ -59,6 +59,22 @@ export type SellerBarcodeItem = {
   stock_level: StockLevel
 }
 
+export type SellerLiterTariffs = {
+  pricing_mode: 'per_unit' | 'per_liter'
+  first_liter_shipment_price: string
+  next_liter_shipment_price: string
+  marking_surcharge_per_unit: string
+  storage_tariff_per_liter_month: string
+}
+
+export type StorageByBarcodeRow = {
+  barcode: string
+  name: string
+  quantity: number
+  volume_liters: string
+  amount: string
+}
+
 export type SellerCabinetResponse = {
   seller: { id: number; company_name: string }
   marketplace?: string
@@ -66,6 +82,10 @@ export type SellerCabinetResponse = {
   stages?: SellerWbStageCounts
   wb_stages: SellerWbStageCounts
   weekly_shipments: SellerWeeklyShipments
+  liter_tariffs?: SellerLiterTariffs
+  liter_storage_chart?: SellerWeeklyShipments
+  liter_shipments_chart?: SellerWeeklyShipments
+  storage_by_barcode?: StorageByBarcodeRow[]
   items: SellerBarcodeItem[]
   meta?: {
     enabled_warehouses: Array<Record<string, string | number>>

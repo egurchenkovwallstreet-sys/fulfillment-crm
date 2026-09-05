@@ -10,9 +10,11 @@ from apps.accounts.tenant import fulfillment_for_staff_user, get_seller_for_user
 from apps.warehouse.models import PriceGroup
 from apps.warehouse.services.seller_pricing import (
   SellerPricingError,
+  apply_seller_liter_tariff,
   apply_seller_tariff,
   get_seller_pricing_summary,
 )
+from apps.sellers.services.liter_billing import liter_tariff_payload
 
 
 class PriceGroupSerializer(serializers.ModelSerializer):
@@ -50,6 +52,22 @@ class SellerTariffApplySerializer(serializers.Serializer):
     if attrs["scope"] == "group" and not attrs.get("price_group_id"):
       raise serializers.ValidationError({"price_group_id": "Укажите ценовую группу"})
     return attrs
+
+
+class SellerLiterTariffApplySerializer(serializers.Serializer):
+  pricing_mode = serializers.ChoiceField(choices=["per_unit", "per_liter"])
+  first_liter_shipment_price = serializers.DecimalField(
+    max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False,
+  )
+  next_liter_shipment_price = serializers.DecimalField(
+    max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False,
+  )
+  marking_surcharge_per_unit = serializers.DecimalField(
+    max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False,
+  )
+  storage_tariff_per_liter_month = serializers.DecimalField(
+    max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False,
+  )
 
 
 class PriceGroupListView(APIView):
@@ -96,12 +114,38 @@ class SellerPricingView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     summary = get_seller_pricing_summary(seller)
-    return Response(SellerPricingSummarySerializer(summary).data)
+    return Response({
+      **SellerPricingSummarySerializer(summary).data,
+      "liter": liter_tariff_payload(seller),
+    })
 
   def post(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
+
+    if "pricing_mode" in request.data:
+      serializer = SellerLiterTariffApplySerializer(data=request.data)
+      serializer.is_valid(raise_exception=True)
+      data = serializer.validated_data
+      try:
+        result = apply_seller_liter_tariff(
+          seller,
+          pricing_mode=data["pricing_mode"],
+          first_liter_shipment_price=data.get("first_liter_shipment_price"),
+          next_liter_shipment_price=data.get("next_liter_shipment_price"),
+          marking_surcharge_per_unit=data.get("marking_surcharge_per_unit"),
+          storage_tariff_per_liter_month=data.get("storage_tariff_per_liter_month"),
+        )
+      except SellerPricingError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+      summary = get_seller_pricing_summary(seller)
+      return Response({
+        "result": result,
+        "summary": SellerPricingSummarySerializer(summary).data,
+        "liter": liter_tariff_payload(seller),
+      })
+
     serializer = SellerTariffApplySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
@@ -120,4 +164,5 @@ class SellerPricingView(APIView):
     return Response({
       "result": result,
       "summary": SellerPricingSummarySerializer(summary).data,
+      "liter": liter_tariff_payload(seller),
     })

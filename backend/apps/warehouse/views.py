@@ -325,6 +325,9 @@ class IntakeView(APIView):
         name=data.get("name", ""),
         marketplace=marketplace,
         sync_variant=data.get("sync_variant"),
+        length_cm=data.get("length_cm"),
+        width_cm=data.get("width_cm"),
+        height_cm=data.get("height_cm"),
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

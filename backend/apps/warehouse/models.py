@@ -103,6 +103,10 @@ class Product(models.Model):
     db_index=True,
   )
   quantity = models.PositiveIntegerField("Остаток", default=0)
+  length_cm = models.DecimalField("Длина, см", max_digits=8, decimal_places=2, null=True, blank=True)
+  width_cm = models.DecimalField("Ширина, см", max_digits=8, decimal_places=2, null=True, blank=True)
+  height_cm = models.DecimalField("Высота, см", max_digits=8, decimal_places=2, null=True, blank=True)
+  volume_liters = models.DecimalField("Объём, л", max_digits=10, decimal_places=2, null=True, blank=True)
   marketplace = models.CharField(
     "Маркетплейс",
     max_length=8,

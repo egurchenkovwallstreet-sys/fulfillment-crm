@@ -38,6 +38,13 @@ from apps.sellers.services.seller_manage import (
   clear_wb_token,
   delete_seller,
 )
+from apps.sellers.services.liter_billing import (
+  liter_tariff_payload,
+  load_storage_by_barcode,
+  load_weekly_liter_shipment_charges,
+  load_weekly_storage_charges,
+)
+from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
 from apps.sellers.services.seller_billing_stats import load_admin_billing_dashboard
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
@@ -248,7 +255,7 @@ class SellerCabinetView(APIView):
       summary_data = SellerCabinetSummarySerializer(summary).data
       stages_data = SellerWbStageCountsSerializer(stages).data
       weekly_data = SellerWeeklyShipmentsSerializer(weekly_shipments).data
-      return Response({
+      payload = {
         "seller": {"id": seller.id, "company_name": seller.company_name},
         "marketplace": marketplace,
         "summary": summary_data,
@@ -257,7 +264,17 @@ class SellerCabinetView(APIView):
         "weekly_shipments": weekly_data,
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
         "meta": meta,
-      })
+      }
+      if seller_uses_liter_pricing(seller):
+        payload["liter_tariffs"] = liter_tariff_payload(seller)
+        payload["liter_storage_chart"] = SellerWeeklyShipmentsSerializer(
+          load_weekly_storage_charges(seller, marketplace=marketplace),
+        ).data
+        payload["liter_shipments_chart"] = SellerWeeklyShipmentsSerializer(
+          load_weekly_liter_shipment_charges(seller, marketplace=marketplace),
+        ).data
+        payload["storage_by_barcode"] = load_storage_by_barcode(seller, marketplace=marketplace)
+      return Response(payload)
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as exc:

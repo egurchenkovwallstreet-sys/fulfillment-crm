@@ -37,4 +37,8 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.clear_expired_marking_codes",
         "schedule": crontab(minute="*/15"),
     },
+    "accrue-daily-liter-storage": {
+        "task": "apps.integrations.tasks.accrue_daily_storage_charges",
+        "schedule": crontab(hour=0, minute=5),
+    },
 }

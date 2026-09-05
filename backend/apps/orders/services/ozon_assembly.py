@@ -346,6 +346,13 @@ def ship_ozon_posting(seller, posting_id: int, *, user=None) -> dict:
     stock = last_stock or {"deducted": True, "quantity": deducted_total}
 
   posting.save(update_fields=update_fields)
+  try:
+    from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_ozon_posting
+
+    record_shipment_liter_charge_for_ozon_posting(posting, seller=seller)
+  except Exception:
+    import logging
+    logging.getLogger(__name__).exception("liter shipment charge failed for ozon posting %s", posting.id)
   counts = _save_seller_counts(seller)
   return {
     "success": True,

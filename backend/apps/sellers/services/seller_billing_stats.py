@@ -408,7 +408,12 @@ def merge_weekly_shipments_payloads(
 def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -> dict:
   """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
   from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+  from apps.sellers.services.liter_billing import (
+    load_weekly_liter_shipment_charges,
+    load_weekly_storage_charges,
+  )
   from apps.sellers.services.ozon_billing_stats import load_weekly_ozon_shipped_orders
+  from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
 
   mp = normalize_marketplace(marketplace)
   is_ozon = mp == OZON
@@ -424,6 +429,13 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
   seller_rows: list[dict] = []
   successful_payloads: list[dict] = []
 
+  def _liter_billing_fields(seller: Seller) -> dict:
+    fields = {"pricing_mode": seller.pricing_mode}
+    if seller_uses_liter_pricing(seller):
+      fields["liter_storage_chart"] = load_weekly_storage_charges(seller, marketplace=mp)
+      fields["liter_shipments_chart"] = load_weekly_liter_shipment_charges(seller, marketplace=mp)
+    return fields
+
   for seller in sellers:
     if is_ozon:
       if not (seller.ozon_client_id and seller.ozon_api_key_encrypted):
@@ -432,6 +444,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
           "company_name": seller.company_name,
           "weekly_shipments": None,
           "error": "Ключи Ozon не настроены",
+          **_liter_billing_fields(seller),
         })
         continue
       try:
@@ -442,6 +455,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
           "company_name": seller.company_name,
           "weekly_shipments": shipments,
           "error": None,
+          **_liter_billing_fields(seller),
         })
       except SellerAnalyticsError as exc:
         seller_rows.append({
@@ -449,6 +463,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
           "company_name": seller.company_name,
           "weekly_shipments": None,
           "error": str(exc),
+          **_liter_billing_fields(seller),
         })
       continue
 
@@ -458,6 +473,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
         "company_name": seller.company_name,
         "weekly_shipments": None,
         "error": "Токен WB не настроен",
+        **_liter_billing_fields(seller),
       })
       continue
     try:
@@ -468,6 +484,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
         "company_name": seller.company_name,
         "weekly_shipments": shipments,
         "error": None,
+        **_liter_billing_fields(seller),
       })
     except SellerAnalyticsError as exc:
       seller_rows.append({
@@ -475,6 +492,7 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
         "company_name": seller.company_name,
         "weekly_shipments": None,
         "error": str(exc),
+        **_liter_billing_fields(seller),
       })
 
   combined = merge_weekly_shipments_payloads(successful_payloads)

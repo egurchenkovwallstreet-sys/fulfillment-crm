@@ -46,6 +46,9 @@ export function IntakePage() {
   const [barcode, setBarcode] = useState('')
   const [quantityInput, setQuantityInput] = useState('1')
   const [productName, setProductName] = useState('')
+  const [lengthCm, setLengthCm] = useState('')
+  const [widthCm, setWidthCm] = useState('')
+  const [heightCm, setHeightCm] = useState('')
   const [cellMode, setCellMode] = useState<'auto' | 'manual'>('auto')
   const [cellId, setCellId] = useState<number | ''>('')
   const [lookup, setLookup] = useState<IntakeLookup | null>(null)
@@ -138,6 +141,15 @@ export function IntakePage() {
         isOzon ? undefined : Number(warehouseId),
       )
       setLookup(result)
+      if (result.exists && result.product) {
+        setLengthCm(result.product.length_cm ?? '')
+        setWidthCm(result.product.width_cm ?? '')
+        setHeightCm(result.product.height_cm ?? '')
+      } else {
+        setLengthCm('')
+        setWidthCm('')
+        setHeightCm('')
+      }
       if (!result.exists) {
         setCellMode('auto')
         setCellId('')
@@ -289,6 +301,10 @@ export function IntakePage() {
 
     setLoading(true)
     try {
+      const dimension = (value: string) => {
+        const trimmed = value.replace(',', '.').trim()
+        return trimmed ? trimmed : undefined
+      }
       const result = await submitIntake({
         seller_id: Number(sellerId),
         wb_warehouse_id: isOzon ? undefined : Number(warehouseId),
@@ -302,6 +318,9 @@ export function IntakePage() {
         cell_mode: lookup.exists || isSyncScan ? 'auto' : cellMode,
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
         name: productName,
+        length_cm: dimension(lengthCm),
+        width_cm: dimension(widthCm),
+        height_cm: dimension(heightCm),
       })
 
       const showBalanceModal = !isOzon && (stockMode === 'intake' || stockMode === 'set_actual')
@@ -321,6 +340,9 @@ export function IntakePage() {
         setLookup(null)
         setQuantityInput('1')
         setProductName('')
+        setLengthCm('')
+        setWidthCm('')
+        setHeightCm('')
         setCellId('')
         setVerifiedStockMatch(false)
       } else {
@@ -867,6 +889,48 @@ export function IntakePage() {
                       required
                     />
                   </label>
+                )}
+
+                {!isSyncMode && (
+                  <fieldset className="intake-dimensions">
+                    <legend>Габариты упаковки, см (для тарификации по литражу)</legend>
+                    <p className="intake-hint">Проверьте и при необходимости измените — объём считается один раз на баркод.</p>
+                    <div className="intake-dimensions__grid">
+                      <label className="intake-field">
+                        Длина
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={lengthCm}
+                          onChange={(e) => setLengthCm(e.target.value)}
+                          placeholder="см"
+                        />
+                      </label>
+                      <label className="intake-field">
+                        Ширина
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={widthCm}
+                          onChange={(e) => setWidthCm(e.target.value)}
+                          placeholder="см"
+                        />
+                      </label>
+                      <label className="intake-field">
+                        Высота
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={heightCm}
+                          onChange={(e) => setHeightCm(e.target.value)}
+                          placeholder="см"
+                        />
+                      </label>
+                    </div>
+                    {lookup.product?.volume_liters && (
+                      <p className="intake-hint">Текущий объём: {lookup.product.volume_liters} л</p>
+                    )}
+                  </fieldset>
                 )}
 
                 {isSyncMode && lookup.wb_stock != null && (

@@ -55,6 +55,10 @@ class ProductSerializer(serializers.ModelSerializer):
       "wb_size",
       "photo_url",
       "marketplace",
+      "length_cm",
+      "width_cm",
+      "height_cm",
+      "volume_liters",
     )
 
 
@@ -100,6 +104,9 @@ class IntakeSerializer(serializers.Serializer):
   cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
   cell_id = serializers.IntegerField(required=False, allow_null=True)
   name = serializers.CharField(required=False, allow_blank=True, max_length=500)
+  length_cm = serializers.DecimalField(max_digits=8, decimal_places=1, required=False, allow_null=True)
+  width_cm = serializers.DecimalField(max_digits=8, decimal_places=1, required=False, allow_null=True)
+  height_cm = serializers.DecimalField(max_digits=8, decimal_places=1, required=False, allow_null=True)
 
   def validate_seller_id(self, value):
     if not Seller.objects.filter(pk=value, is_active=True).exists():

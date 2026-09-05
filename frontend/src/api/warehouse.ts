@@ -26,6 +26,10 @@ export type Product = {
   wb_size?: string
   vendor_code?: string
   wb_nm_id?: number | null
+  length_cm?: string | null
+  width_cm?: string | null
+  height_cm?: string | null
+  volume_liters?: string | null
 }
 
 export type CellDetail = {
@@ -101,6 +105,9 @@ export type IntakePayload = {
   cell_mode: 'auto' | 'manual'
   cell_id?: number | null
   name?: string
+  length_cm?: string | null
+  width_cm?: string | null
+  height_cm?: string | null
 }
 
 export type CellLabelData = {

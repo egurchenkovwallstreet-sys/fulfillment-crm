@@ -113,3 +113,44 @@ def apply_seller_tariff(
     "price_group_id": group.id,
     "price_group_name": group.name,
   }
+
+
+@transaction.atomic
+def apply_seller_liter_tariff(
+  seller: Seller,
+  *,
+  pricing_mode: str,
+  first_liter_shipment_price: Decimal | None = None,
+  next_liter_shipment_price: Decimal | None = None,
+  marking_surcharge_per_unit: Decimal | None = None,
+  storage_tariff_per_liter_month: Decimal | None = None,
+) -> dict:
+  if pricing_mode not in (Seller.PricingMode.PER_UNIT, Seller.PricingMode.PER_LITER):
+    raise SellerPricingError("Неизвестный режим тарификации")
+
+  seller.pricing_mode = pricing_mode
+  update_fields = ["pricing_mode", "updated_at"]
+
+  if first_liter_shipment_price is not None:
+    if first_liter_shipment_price < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    seller.first_liter_shipment_price = first_liter_shipment_price
+    update_fields.append("first_liter_shipment_price")
+  if next_liter_shipment_price is not None:
+    if next_liter_shipment_price < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    seller.next_liter_shipment_price = next_liter_shipment_price
+    update_fields.append("next_liter_shipment_price")
+  if marking_surcharge_per_unit is not None:
+    if marking_surcharge_per_unit < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    seller.marking_surcharge_per_unit = marking_surcharge_per_unit
+    update_fields.append("marking_surcharge_per_unit")
+  if storage_tariff_per_liter_month is not None:
+    if storage_tariff_per_liter_month < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    seller.storage_tariff_per_liter_month = storage_tariff_per_liter_month
+    update_fields.append("storage_tariff_per_liter_month")
+
+  seller.save(update_fields=update_fields)
+  return {"pricing_mode": seller.pricing_mode}

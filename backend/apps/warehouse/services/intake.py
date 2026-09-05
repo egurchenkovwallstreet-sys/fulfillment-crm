@@ -9,6 +9,7 @@ from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, first_free_cell, refresh_cell_occupied
+from apps.warehouse.services.liter_pricing import apply_product_dimensions
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
@@ -118,6 +119,9 @@ def perform_intake(
   name: str = "",
   marketplace: str = WB,
   sync_variant: str | None = None,
+  length_cm=None,
+  width_cm=None,
+  height_cm=None,
 ) -> IntakeResult:
   mp = normalize_marketplace(marketplace)
   barcode = barcode.strip()
@@ -279,6 +283,14 @@ def perform_intake(
       wb_sync["mode"] = stock_mode
     except WBStockError as exc:
       raise IntakeError(str(exc)) from exc
+
+  if any(value is not None for value in (length_cm, width_cm, height_cm)):
+    apply_product_dimensions(
+      product,
+      length_cm=length_cm,
+      width_cm=width_cm,
+      height_cm=height_cm,
+    )
 
   warehouse_label = ""
   if warehouse is not None:

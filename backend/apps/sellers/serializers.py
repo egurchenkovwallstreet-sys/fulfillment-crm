@@ -239,6 +239,9 @@ class AdminBillingSellerSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField()
   company_name = serializers.CharField()
   weekly_shipments = SellerWeeklyShipmentsSerializer(allow_null=True)
+  liter_storage_chart = SellerWeeklyShipmentsSerializer(required=False, allow_null=True)
+  liter_shipments_chart = SellerWeeklyShipmentsSerializer(required=False, allow_null=True)
+  pricing_mode = serializers.CharField(required=False)
   error = serializers.CharField(allow_null=True)
 
 

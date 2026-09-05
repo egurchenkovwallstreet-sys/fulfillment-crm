@@ -203,6 +203,23 @@ export type SellerPricingSummary = {
   common_tariff: string | null
   mixed_common_tariff: boolean
   groups: SellerPricingGroup[]
+  liter?: SellerLiterTariffs
+}
+
+export type SellerLiterTariffs = {
+  pricing_mode: 'per_unit' | 'per_liter'
+  first_liter_shipment_price: string
+  next_liter_shipment_price: string
+  marking_surcharge_per_unit: string
+  storage_tariff_per_liter_month: string
+}
+
+export type SellerLiterTariffApplyPayload = {
+  pricing_mode: 'per_unit' | 'per_liter'
+  first_liter_shipment_price?: string
+  next_liter_shipment_price?: string
+  marking_surcharge_per_unit?: string
+  storage_tariff_per_liter_month?: string
 }
 
 export type SellerTariffApplyPayload = {
@@ -220,6 +237,16 @@ export async function fetchSellerPricing(sellerId: number): Promise<SellerPricin
   return apiFetch<SellerPricingSummary>(`/api/warehouse/sellers/${sellerId}/pricing/`)
 }
 
+export async function applySellerLiterTariff(
+  sellerId: number,
+  payload: SellerLiterTariffApplyPayload,
+): Promise<{ result: { pricing_mode: string }; summary: SellerPricingSummary; liter: SellerLiterTariffs }> {
+  return apiFetch(`/api/warehouse/sellers/${sellerId}/pricing/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function applySellerTariff(
   sellerId: number,
   payload: SellerTariffApplyPayload,
@@ -234,6 +261,9 @@ export type AdminBillingSellerRow = {
   seller_id: number
   company_name: string
   weekly_shipments: SellerWeeklyShipments | null
+  liter_storage_chart?: SellerWeeklyShipments | null
+  liter_shipments_chart?: SellerWeeklyShipments | null
+  pricing_mode?: 'per_unit' | 'per_liter'
   error: string | null
 }
 

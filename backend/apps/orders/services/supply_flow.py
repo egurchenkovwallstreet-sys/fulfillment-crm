@@ -1,6 +1,7 @@
 """Поштучная отправка заказов на сборку и в доставку через WB FBS API."""
 from __future__ import annotations
 
+import logging
 import time
 from collections import defaultdict
 from datetime import date
@@ -41,6 +42,8 @@ from apps.warehouse.services.stock_deduction import (
   order_sticker_printed_in_crm,
   stock_deduction_info,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SupplyFlowError(Exception):
@@ -389,6 +392,12 @@ def _complete_order_in_delivery(
     ],
   )
   stock_info = stock_deduction_info(order)
+  try:
+    from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_order
+
+    record_shipment_liter_charge_for_order(order, seller=seller)
+  except Exception:
+    logger.exception("liter shipment charge failed for order %s", order.id)
   AuditLog.objects.create(
     user=user,
     seller=seller,
