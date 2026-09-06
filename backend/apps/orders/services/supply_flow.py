@@ -6,6 +6,7 @@ import time
 from collections import defaultdict
 from datetime import date
 
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from django.utils import timezone
@@ -14,6 +15,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
+from apps.orders.services.assembly_queue import order_in_assembly
 from apps.orders.services.wb_status import (
   WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
@@ -132,15 +134,11 @@ def fetch_seller_shipping_points(
     raise SupplyFlowError("Укажите город для поиска пунктов отгрузки", code="invalid_city")
 
   client = _get_client(seller)
-  resolved_cargo = cargo_type
-  if resolved_cargo is None and wb_supply_id:
-    try:
-      details = client.fetch_supply(wb_supply_id)
-      resolved_cargo = int(details.get("cargoType") or 1)
-    except WBApiError:
-      resolved_cargo = 1
-  if not resolved_cargo or resolved_cargo == 0:
-    resolved_cargo = 1
+  resolved_cargo = _resolve_shipping_cargo_type(
+    client,
+    cargo_type=cargo_type,
+    wb_supply_id=wb_supply_id,
+  )
 
   try:
     points = client.fetch_shipping_points(city, resolved_cargo)
@@ -150,6 +148,134 @@ def fetch_seller_shipping_points(
       code="wb_shipping_points_failed",
     ) from exc
   points = _merge_pinned_shipping_points(client, resolved_cargo, points)
+  return points, resolved_cargo
+
+
+RUSSIA_SHIPPING_CITIES: tuple[str, ...] = (
+  "Москва",
+  "Московская область",
+  "Санкт-Петербург",
+  "Ленинградская область",
+  "Новосибирск",
+  "Екатеринбург",
+  "Казань",
+  "Нижний Новгород",
+  "Челябинск",
+  "Самара",
+  "Омск",
+  "Ростов-на-Дону",
+  "Уфа",
+  "Красноярск",
+  "Воронеж",
+  "Пермь",
+  "Волгоград",
+  "Краснодар",
+  "Саратов",
+  "Тюмень",
+  "Ижевск",
+  "Барнаул",
+  "Ульяновск",
+  "Иркутск",
+  "Хабаровск",
+  "Ярославль",
+  "Владивосток",
+  "Томск",
+  "Оренбург",
+  "Кемерово",
+  "Рязань",
+  "Астрахань",
+  "Пенза",
+  "Липецк",
+  "Тула",
+  "Калининград",
+  "Сочи",
+  "Ставрополь",
+  "Мытищи",
+  "Пушкино",
+  "Подольск",
+  "Балашиха",
+  "Химки",
+  "Люберцы",
+  "Калуга",
+  "Тверь",
+  "Брянск",
+  "Курск",
+  "Белгород",
+  "Сургут",
+  "Мурманск",
+  "Архангельск",
+)
+
+ALL_SC_SHIPPING_CACHE_TTL = 3600
+
+
+def _resolve_shipping_cargo_type(
+  client,
+  *,
+  cargo_type: int | None,
+  wb_supply_id: str | None,
+) -> int:
+  resolved_cargo = cargo_type
+  if resolved_cargo is None and wb_supply_id:
+    try:
+      details = client.fetch_supply(wb_supply_id)
+      resolved_cargo = int(details.get("cargoType") or 1)
+    except WBApiError:
+      resolved_cargo = 1
+  if not resolved_cargo or resolved_cargo == 0:
+    resolved_cargo = 1
+  return resolved_cargo
+
+
+def _is_sc_office_type(point: dict) -> bool:
+  return _normalize_text(point.get("officeType")) in ("sc", "sw")
+
+
+def fetch_all_russia_sc_shipping_points(
+  seller: Seller,
+  *,
+  cargo_type: int | None = None,
+  wb_supply_id: str | None = None,
+) -> tuple[list[dict], int]:
+  """Все СЦ по России для модалки отгрузки (с кешем на 1 час)."""
+  client = _get_client(seller)
+  resolved_cargo = _resolve_shipping_cargo_type(
+    client,
+    cargo_type=cargo_type,
+    wb_supply_id=wb_supply_id,
+  )
+  cache_key = f"wb_sc_points:v1:{seller.id}:{resolved_cargo}"
+  cached = cache.get(cache_key)
+  if isinstance(cached, list) and cached:
+    return cached, resolved_cargo
+
+  merged: dict[int, dict] = {}
+  for fetch_city in RUSSIA_SHIPPING_CITIES:
+    try:
+      batch = client.fetch_shipping_points(fetch_city, resolved_cargo)
+    except WBApiError:
+      continue
+    for point in batch:
+      if not isinstance(point, dict) or point.get("id") is None:
+        continue
+      if not _is_sc_office_type(point):
+        continue
+      if not _point_supports_cargo(point, resolved_cargo):
+        continue
+      merged[int(point["id"])] = point
+    time.sleep(0.21)
+
+  points = _merge_pinned_shipping_points(client, resolved_cargo, list(merged.values()))
+  points = [
+    point for point in points
+    if isinstance(point, dict) and _is_sc_office_type(point)
+  ]
+  points.sort(key=lambda point: (
+    _normalize_text(point.get("city")),
+    _normalize_text(point.get("name")),
+  ))
+  if points:
+    cache.set(cache_key, points, ALL_SC_SHIPPING_CACHE_TTL)
   return points, resolved_cargo
 
 
@@ -165,7 +291,7 @@ def _point_supports_cargo(point: dict, cargo_type: int) -> bool:
 
 
 def _matches_veshki_lipkinskoe(point: dict) -> bool:
-  if _normalize_text(point.get("officeType")) != "sc":
+  if not _is_sc_office_type(point):
     return False
   haystack = " ".join(
     _normalize_text(point.get(key))
@@ -175,7 +301,7 @@ def _matches_veshki_lipkinskoe(point: dict) -> bool:
 
 
 def _matches_pushkino_sc(point: dict) -> bool:
-  if _normalize_text(point.get("officeType")) != "sc":
+  if not _is_sc_office_type(point):
     return False
   haystack = " ".join(
     _normalize_text(point.get(key))
@@ -233,7 +359,7 @@ def _merge_pinned_shipping_points(
     for point in pool:
       if not isinstance(point, dict) or point.get("id") is None:
         continue
-      if not matcher(point) or not _point_supports_cargo(point, cargo_type):
+      if not matcher(point):
         continue
       point_id = int(point["id"])
       if point_id in known_ids:
@@ -334,6 +460,123 @@ def _get_or_create_forming_supply(
     wb_warehouse_id=wb_warehouse_id,
     status=Supply.Status.FORMING,
   )
+
+
+def _create_new_forming_supply(
+  seller: Seller,
+  wb_warehouse_id: int,
+  client,
+) -> Supply:
+  """Новая пустая поставка WB на склад (перенос неотсканированных заказов)."""
+  supply_name = f"CRM-S{seller.id}-W{wb_warehouse_id}-{timezone.now():%Y%m%d%H%M%S}"
+  wb_supply_id = client.create_supply(supply_name)
+  return Supply.objects.create(
+    seller=seller,
+    wb_supply_id=wb_supply_id,
+    wb_warehouse_id=wb_warehouse_id,
+    status=Supply.Status.FORMING,
+  )
+
+
+def order_can_move_to_new_supply(order: Order) -> bool:
+  if order.wb_warehouse_id is None:
+    return False
+  if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
+    return False
+  return order_in_assembly(order)
+
+
+@transaction.atomic
+def move_orders_to_new_supply(
+  seller: Seller,
+  order_ids: list[int],
+  *,
+  user=None,
+) -> dict:
+  if not order_ids:
+    raise SupplyFlowError("Не выбраны заказы для переноса", code="empty")
+
+  orders = list(
+    Order.objects.filter(seller=seller, pk__in=order_ids).select_related("product", "seller")
+  )
+  if len(orders) != len(set(order_ids)):
+    raise SupplyFlowError("Некоторые заказы не найдены", code="not_found")
+
+  movable: list[Order] = []
+  skipped: list[dict] = []
+  for order in orders:
+    if order_can_move_to_new_supply(order):
+      movable.append(order)
+    else:
+      skipped.append({
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "error": "Заказ уже отсканирован или не на сборке",
+      })
+
+  if not movable:
+    raise SupplyFlowError(
+      "Нет заказов для переноса — можно переносить только неотсканированные на сборке",
+      code="nothing_to_move",
+    )
+
+  by_warehouse: dict[int, list[Order]] = defaultdict(list)
+  for order in movable:
+    by_warehouse[int(order.wb_warehouse_id)].append(order)
+
+  client = _get_client(seller)
+  created_supplies: list[dict] = []
+
+  for wb_warehouse_id, wh_orders in by_warehouse.items():
+    new_supply = _create_new_forming_supply(seller, wb_warehouse_id, client)
+    wb_order_ids = [int(order.wb_order_id) for order in wh_orders]
+    try:
+      client.add_orders_to_supply(new_supply.wb_supply_id, wb_order_ids)
+    except WBApiError as exc:
+      new_supply.delete()
+      raise SupplyFlowError(
+        f"WB не принял перенос заказов в новую поставку: {exc}",
+        code="wb_move_failed",
+      ) from exc
+
+    old_supply_ids: set[int] = set()
+    for order in wh_orders:
+      for old_supply in order.supplies.filter(
+        status__in=(Supply.Status.FORMING, Supply.Status.READY),
+      ):
+        old_supply.orders.remove(order)
+        old_supply_ids.add(old_supply.id)
+      new_supply.orders.add(order)
+
+    for old_supply_id in old_supply_ids:
+      old_supply = Supply.objects.filter(pk=old_supply_id).first()
+      if old_supply:
+        refresh_supply_readiness(old_supply)
+
+    created_supplies.append({
+      "supply_id": new_supply.id,
+      "wb_supply_id": new_supply.wb_supply_id,
+      "wb_warehouse_id": wb_warehouse_id,
+      "orders_moved": len(wh_orders),
+    })
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.SUPPLY,
+    message=f"Перенос {len(movable)} заказов в {len(created_supplies)} новых поставок",
+    details={
+      "order_ids": [order.id for order in movable],
+      "supplies": created_supplies,
+      "skipped": skipped,
+    },
+  )
+
+  return {
+    "moved_count": len(movable),
+    "supplies": created_supplies,
+    "skipped": skipped,
+  }
 
 
 def _append_orders_to_forming_supply(

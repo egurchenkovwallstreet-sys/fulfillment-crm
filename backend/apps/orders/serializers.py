@@ -34,6 +34,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   requires_marking = serializers.SerializerMethodField()
   can_send_to_assembly = serializers.SerializerMethodField()
   can_send_to_delivery = serializers.SerializerMethodField()
+  can_move_to_new_supply = serializers.SerializerMethodField()
 
   warehouse_quantity = serializers.SerializerMethodField()
   photo_url = serializers.SerializerMethodField()
@@ -63,6 +64,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "requires_marking",
       "can_send_to_assembly",
       "can_send_to_delivery",
+      "can_move_to_new_supply",
       "warehouse_quantity",
       "created_at",
     )
@@ -82,6 +84,10 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   def get_can_send_to_delivery(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_delivery
     return order_can_send_to_delivery(obj)
+
+  def get_can_move_to_new_supply(self, obj):
+    from apps.orders.services.supply_flow import order_can_move_to_new_supply
+    return order_can_move_to_new_supply(obj)
 
   def get_warehouse_quantity(self, obj):
     from apps.warehouse.services.stock_deduction import resolve_order_product
@@ -314,6 +320,14 @@ class SendToDeliverySerializer(serializers.Serializer):
   )
 
 
+class MoveOrdersToNewSupplySerializer(serializers.Serializer):
+  order_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    min_length=1,
+    max_length=100,
+  )
+
+
 class SupplyDeliverSerializer(serializers.Serializer):
   shipping_point_id = serializers.IntegerField()
   shipping_date = serializers.DateField()
@@ -381,6 +395,7 @@ class SupplyOrderSerializer(serializers.ModelSerializer):
 class SupplySerializer(serializers.ModelSerializer):
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
   status_display = serializers.CharField(source="get_status_display", read_only=True)
+  warehouse_name = serializers.SerializerMethodField()
   orders = SupplyOrderSerializer(many=True, read_only=True)
   orders_count = serializers.SerializerMethodField()
   can_deliver = serializers.SerializerMethodField()
@@ -392,6 +407,8 @@ class SupplySerializer(serializers.ModelSerializer):
       "seller",
       "seller_name",
       "wb_supply_id",
+      "wb_warehouse_id",
+      "warehouse_name",
       "status",
       "status_display",
       "orders_count",
@@ -402,6 +419,18 @@ class SupplySerializer(serializers.ModelSerializer):
       "created_at",
       "updated_at",
     )
+
+  def get_warehouse_name(self, obj):
+    if obj.wb_warehouse_id is None:
+      return ""
+    from apps.sellers.models import SellerWarehouse
+    warehouse = SellerWarehouse.objects.filter(
+      seller=obj.seller,
+      wb_warehouse_id=obj.wb_warehouse_id,
+    ).first()
+    if warehouse and warehouse.name:
+      return warehouse.name
+    return f"Склад #{obj.wb_warehouse_id}"
 
   def get_orders_count(self, obj):
     return obj.orders.count()

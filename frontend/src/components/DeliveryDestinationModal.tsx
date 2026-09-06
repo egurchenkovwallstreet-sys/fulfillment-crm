@@ -29,11 +29,12 @@ type Props = {
   loading?: boolean
 }
 
-const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v1-${sellerId}`
+const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v2-${sellerId}`
 
 export const SHIPPING_CITY_OPTIONS = [
   { value: 'Москва', label: 'Москва' },
   { value: 'Московская область', label: 'Московская область' },
+  { value: 'Санкт-Петербург', label: 'Санкт-Петербург' },
 ] as const
 
 const DEFAULT_PREFS: DeliveryDestinationPrefs = {
@@ -92,11 +93,15 @@ function matchesOfficeKind(
   officeType: ShippingPointOfficeType,
   kind: ShippingOfficeKind,
 ): boolean {
-  return officeType === kind
+  if (kind === 'sc') {
+    return officeType === 'sc' || officeType === 'sw'
+  }
+  return officeType === 'pp'
 }
 
 function formatPointLabel(point: ShippingPoint): string {
-  return `${point.name} — ${point.address}`
+  const city = point.city ? `${point.city}, ` : ''
+  return `${city}${point.name} — ${point.address}`
 }
 
 function pickPointId(
@@ -111,6 +116,10 @@ function pickPointId(
     return preferredId
   }
   return points[0].id
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase().replace(/ё/g, 'е')
 }
 
 export function DeliveryDestinationModal({
@@ -136,31 +145,57 @@ export function DeliveryDestinationModal({
   const [points, setPoints] = useState<ShippingPoint[]>([])
   const [pointsLoading, setPointsLoading] = useState(false)
   const [pointsError, setPointsError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const filteredPoints = useMemo(
     () => points.filter((point) => matchesOfficeKind(point.officeType, officeKind)),
     [points, officeKind],
   )
 
+  const visiblePoints = useMemo(() => {
+    const query = normalizeSearch(searchQuery)
+    if (!query) return filteredPoints
+    return filteredPoints.filter((point) => {
+      const haystack = normalizeSearch(
+        `${point.city} ${point.name} ${point.address}`,
+      )
+      return haystack.includes(query)
+    })
+  }, [filteredPoints, searchQuery])
+
   const loadPoints = useCallback(
-    async (nextCity: string, kind: ShippingOfficeKind, preferredPointId?: number | null) => {
-      const trimmed = normalizeCity(nextCity)
+    async (
+      nextKind: ShippingOfficeKind,
+      nextCity: string,
+      preferredPointId?: number | null,
+    ) => {
       setPointsLoading(true)
       setPointsError('')
       try {
-        const result = await fetchShippingPoints(sellerId, {
-          city: trimmed,
-          wb_supply_id: wbSupplyId,
-        })
-        setCity(trimmed)
+        const result =
+          nextKind === 'sc'
+            ? await fetchShippingPoints(sellerId, {
+                scope: 'all_sc',
+                wb_supply_id: wbSupplyId,
+              })
+            : await fetchShippingPoints(sellerId, {
+                city: normalizeCity(nextCity),
+                wb_supply_id: wbSupplyId,
+              })
+
+        if (nextKind === 'pp') {
+          setCity(normalizeCity(nextCity))
+        } else {
+          setCity(result.city || 'Россия (все СЦ)')
+        }
         setPoints(result.shipping_points)
 
         const visible = result.shipping_points.filter((point) =>
-          matchesOfficeKind(point.officeType, kind),
+          matchesOfficeKind(point.officeType, nextKind),
         )
         if (visible.length === 0) {
-          const kindLabel = kind === 'sc' ? 'СЦ' : 'ПВЗ'
-          setPointsError(`WB не вернул пункты типа «${kindLabel}» для «${trimmed}»`)
+          const kindLabel = nextKind === 'sc' ? 'СЦ' : 'ПВЗ'
+          setPointsError(`WB не вернул пункты типа «${kindLabel}»`)
           setSelectedPointId('')
         } else {
           setSelectedPointId(pickPointId(visible, preferredPointId ?? saved.shippingPointId))
@@ -178,28 +213,20 @@ export function DeliveryDestinationModal({
   )
 
   useEffect(() => {
-    void loadPoints(saved.city, saved.officeKind, saved.shippingPointId)
+    void loadPoints(saved.officeKind, saved.city, saved.shippingPointId)
   }, [loadPoints, saved.city, saved.officeKind, saved.shippingPointId])
 
   function handleCityChange(nextCity: string) {
     const normalized = normalizeCity(nextCity)
     setCity(normalized)
-    void loadPoints(normalized, officeKind, null)
+    setSearchQuery('')
+    void loadPoints('pp', normalized, null)
   }
 
   function handleOfficeKindChange(nextKind: ShippingOfficeKind) {
     setOfficeKind(nextKind)
-    const visible = points.filter((point) => matchesOfficeKind(point.officeType, nextKind))
-    if (visible.length === 0) {
-      setSelectedPointId('')
-      if (points.length > 0) {
-        const kindLabel = nextKind === 'sc' ? 'СЦ' : 'ПВЗ'
-        setPointsError(`Нет пунктов типа «${kindLabel}» для «${city}» — смените регион или тип`)
-      }
-      return
-    }
-    setSelectedPointId(pickPointId(visible, selectedPointId === '' ? null : selectedPointId))
-    setPointsError('')
+    setSearchQuery('')
+    void loadPoints(nextKind, city, null)
   }
 
   function handleConfirm() {
@@ -243,20 +270,26 @@ export function DeliveryDestinationModal({
         <h2 id="delivery-destination-title">{title}</h2>
         <p className="assembly-modal__message delivery-destination-modal__message">{message}</p>
 
-        <label className="delivery-destination-modal__field">
-          <span>Регион отгрузки</span>
-          <select
-            value={city}
-            disabled={loading || pointsLoading}
-            onChange={(e) => handleCityChange(e.target.value)}
-          >
-            {SHIPPING_CITY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {officeKind === 'pp' ? (
+          <label className="delivery-destination-modal__field">
+            <span>Город для ПВЗ</span>
+            <select
+              value={city}
+              disabled={loading || pointsLoading}
+              onChange={(e) => handleCityChange(e.target.value)}
+            >
+              {SHIPPING_CITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="delivery-destination-modal__hint">
+            Сортировочные центры по всей России ({filteredPoints.length})
+          </p>
+        )}
 
         <div className="delivery-destination-modal__field">
           <span>Тип пункта</span>
@@ -278,23 +311,55 @@ export function DeliveryDestinationModal({
         </div>
 
         <label className="delivery-destination-modal__field">
-          <span>Пункт отгрузки ({officeKind === 'sc' ? 'СЦ' : 'ПВЗ'})</span>
-          <select
-            value={selectedPointId}
-            disabled={loading || pointsLoading || filteredPoints.length === 0}
-            onChange={(e) => setSelectedPointId(Number(e.target.value))}
+          <span>Поиск пункта отгрузки</span>
+          <input
+            type="search"
+            value={searchQuery}
+            disabled={loading || pointsLoading}
+            placeholder="Город, название или адрес…"
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </label>
+
+        <div className="delivery-destination-modal__field">
+          <span>
+            Пункт отгрузки ({officeKind === 'sc' ? 'СЦ' : 'ПВЗ'})
+            {visiblePoints.length !== filteredPoints.length
+              ? ` — найдено ${visiblePoints.length} из ${filteredPoints.length}`
+              : filteredPoints.length > 0
+                ? ` — ${filteredPoints.length}`
+                : ''}
+          </span>
+          <div
+            className="delivery-destination-modal__points"
+            role="listbox"
+            aria-label="Пункты отгрузки"
           >
-            {filteredPoints.length === 0 ? (
-              <option value="">— нет пунктов —</option>
+            {pointsLoading ? (
+              <p className="delivery-destination-modal__points-empty">Загрузка пунктов…</p>
+            ) : visiblePoints.length === 0 ? (
+              <p className="delivery-destination-modal__points-empty">— нет пунктов —</p>
             ) : (
-              filteredPoints.map((point) => (
-                <option key={point.id} value={point.id}>
+              visiblePoints.map((point) => (
+                <button
+                  key={point.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedPointId === point.id}
+                  className={`delivery-destination-modal__point${
+                    selectedPointId === point.id
+                      ? ' delivery-destination-modal__point--active'
+                      : ''
+                  }`}
+                  disabled={loading}
+                  onClick={() => setSelectedPointId(point.id)}
+                >
                   {formatPointLabel(point)}
-                </option>
+                </button>
               ))
             )}
-          </select>
-        </label>
+          </div>
+        </div>
 
         <div className="delivery-destination-modal__field">
           <span>Дата отгрузки</span>

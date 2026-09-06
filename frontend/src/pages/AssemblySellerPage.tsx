@@ -4,9 +4,11 @@ import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
   deleteAssemblyOrder,
+  deliverSupply,
   fetchAssemblySeller,
   fetchBatchRibbon,
   fetchMarkingStatus,
+  moveOrdersToNewSupply,
   replaceOrderItem,
   reprintOrderSticker,
   scanOrderBarcode,
@@ -17,6 +19,7 @@ import {
   startAssembly,
   verifyMarking,
   type AssemblyOrder,
+  type AssemblySupply,
   type AssemblySellerDetail,
   type AssemblyWorkflowMode,
   type PickList,
@@ -174,6 +177,7 @@ function WbAssemblySellerPage() {
   const [pickListPreviews, setPickListPreviews] = useState<PickList[]>([])
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
+  const [selectedMoveIds, setSelectedMoveIds] = useState<Set<number>>(new Set())
   const bgSyncSellerRef = useRef<number | null>(null)
 
   const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
@@ -1023,6 +1027,133 @@ function WbAssemblySellerPage() {
     setLoading(false)
   }
 
+  async function runDeliverSupply(
+    supply: AssemblySupply,
+    shipping: DeliveryShippingParams,
+    printWin: Window | null,
+  ) {
+    if (!id) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await deliverSupply(supply.id, shipping)
+      if (result.supply_barcode_file) {
+        setPrintHolderMessage(printWin, 'Загрузка QR поставки…')
+        const channel = await printSupplySticker(result.supply_barcode_file, true, printWin)
+        if (channel === 'bridge') {
+          setBridgeOk(true)
+        }
+      } else {
+        closePrintHolder(printWin)
+      }
+      setSuccess(
+        `Поставка WB ${supply.wb_supply_id} (${supply.warehouse_name}) передана в доставку`,
+      )
+      setSelectedMoveIds(new Set())
+      await load({ stageKey: 'confirm', silent: false })
+      void refreshMarkingStatus()
+    } catch (err) {
+      closePrintHolder(printWin)
+      setError(err instanceof Error ? err.message : 'Ошибка передачи поставки в доставку')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleDeliverSupply(supply: AssemblySupply) {
+    if (!supply.can_deliver) {
+      setModal({
+        kind: 'block',
+        title: 'Поставка не готова',
+        message: 'В поставке есть неотсканированные заказы или ошибки ЧЗ.',
+      })
+      return
+    }
+    if (markingQueueBlocked) {
+      setModal({
+        kind: 'block',
+        title: 'Сначала закройте ошибки ЧЗ',
+        message: 'Есть заказы с отклонённым Честным знаком.',
+      })
+      return
+    }
+    openDeliveryModal(
+      'Передача поставки в доставку',
+      `Поставка WB ${supply.wb_supply_id}\nСклад: ${supply.warehouse_name}\nЗаказов: ${supply.orders_count}`,
+      (shipping, printWin) => void runDeliverSupply(supply, shipping, printWin),
+      supply.wb_supply_id,
+    )
+  }
+
+  function toggleMoveOrder(orderId: number) {
+    setSelectedMoveIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(orderId)) next.delete(orderId)
+      else next.add(orderId)
+      return next
+    })
+  }
+
+  function handleMoveSingleOrder(order: AssemblyOrder) {
+    if (!order.can_move_to_new_supply) {
+      setModal({
+        kind: 'block',
+        title: 'Нельзя перенести',
+        message: 'Перенос доступен только для неотсканированных заказов на сборке.',
+      })
+      return
+    }
+    setModal({
+      kind: 'confirm',
+      title: 'Перенос в новую поставку',
+      message:
+        `Перенести заказ WB #${order.wb_order_id} в новую поставку WB?\n\n` +
+        'Склад заказа не изменится. Позже можно распечатать QR новой поставки и передать её в доставку отдельно.',
+      confirmLabel: 'Перенести',
+      onConfirm: () => {
+        setModal(null)
+        void runMoveOrders([order.id])
+      },
+    })
+  }
+
+  async function runMoveOrders(orderIds: number[]) {
+    if (!id || orderIds.length === 0) return
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const result = await moveOrdersToNewSupply(id, orderIds)
+      setSelectedMoveIds(new Set())
+      const supplyIds = result.supplies.map((item) => item.wb_supply_id).join(', ')
+      setSuccess(`${result.message}. Новые поставки WB: ${supplyIds}`)
+      await load({ stageKey: 'confirm', silent: false })
+      void refreshMarkingStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка переноса в новую поставку')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleMoveSelectedOrders() {
+    const ids = Array.from(selectedMoveIds)
+    if (ids.length === 0) return
+    setModal({
+      kind: 'confirm',
+      title: 'Перенос в новые поставки',
+      message:
+        `Перенести ${ids.length} неотсканированных заказов в новые поставки WB?\n\n` +
+        'Заказы будут сгруппированы по складам — отдельная поставка на каждый склад.',
+      confirmLabel: 'Перенести',
+      onConfirm: () => {
+        setModal(null)
+        void runMoveOrders(ids)
+      },
+    })
+  }
+
   async function handleBarcodeSubmit(e?: FormEvent, rawBarcode?: string) {
     e?.preventDefault()
     const barcode = normalizeScanCode(rawBarcode ?? scanRef.current?.value ?? scanValue)
@@ -1261,6 +1392,8 @@ function WbAssemblySellerPage() {
   const hasPickLists = displayPickLists.some((list) => list.items?.length)
   const orders = data?.orders ?? []
   const deliverySupplies = data?.delivery_supplies ?? []
+  const activeSupplies = data?.active_supplies ?? []
+  const movableOrdersCount = orders.filter((order) => order.can_move_to_new_supply).length
   const readyOrders = markingStatus.ready
   const readyToDeliverCount = readyOrders.filter((order) => orderCanDeliver(order)).length
   const markingQueueBlocked = stage === 'confirm' && markingStatus.errors_count > 0
@@ -1387,6 +1520,17 @@ function WbAssemblySellerPage() {
               {ribbonPrinting ? 'Печать…' : 'Печать ленты стикеров'}
             </button>
           )}
+          {stage === 'confirm' && selectedMoveIds.size > 0 && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={handleMoveSelectedOrders}
+              disabled={loading}
+              {...uiHint('Создать новые поставки WB для выбранных неотсканированных заказов')}
+            >
+              В новую поставку ({selectedMoveIds.size})
+            </button>
+          )}
           {stage === 'confirm' && readyToDeliverCount > 0 && (
             <span
               {...hintWrapProps(
@@ -1447,6 +1591,58 @@ function WbAssemblySellerPage() {
           errorsCount={markingStatus.errors_count}
           onOpenList={setMarkingListKind}
         />
+      )}
+
+      {stage === 'confirm' && activeSupplies.length > 0 && (
+        <section className="panel assembly-active-supplies">
+          <h2 className="section-title">Поставки на сборке ({activeSupplies.length})</h2>
+          <p className="assembly-scan-hint">
+            Готовую поставку можно передать в доставку отдельно — не дожидаясь сборки на других
+            складах. Неотсканированные заказы переносите в новую поставку (кнопка у заказа или
+            галочки).
+          </p>
+          <table className="assembly-table">
+            <thead>
+              <tr>
+                <th>ID WB</th>
+                <th>Склад</th>
+                <th>Заказов</th>
+                <th>Статус</th>
+                <th>Действие</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeSupplies.map((supply) => (
+                <tr key={supply.id}>
+                  <td><code>{supply.wb_supply_id}</code></td>
+                  <td>{supply.warehouse_name || `Склад #${supply.wb_warehouse_id ?? '—'}`}</td>
+                  <td>{supply.orders_count}</td>
+                  <td>
+                    {supply.can_deliver ? (
+                      <span className="assembly-supply-status assembly-supply-status--ready">Готова</span>
+                    ) : (
+                      <span className="assembly-supply-status">На сборке</span>
+                    )}
+                  </td>
+                  <td>
+                    {supply.can_deliver ? (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => handleDeliverSupply(supply)}
+                        disabled={loading || markingQueueBlocked}
+                      >
+                        В доставку
+                      </button>
+                    ) : (
+                      <span className="assembly-muted">Ждёт сборки</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       )}
 
       <section className="assembly-pipeline">
@@ -1735,11 +1931,17 @@ function WbAssemblySellerPage() {
         <section className={`panel assembly-orders-panel${ordersBusy ? ' assembly-orders-panel--busy' : ''}`}>
           <h2 className="section-title">
             Заказы ({stageCount(stage)})
+            {stage === 'confirm' && movableOrdersCount > 0 && (
+              <span className="assembly-orders-panel__hint">
+                {' '}· можно перенести: {movableOrdersCount}
+              </span>
+            )}
             {ordersBusy && <span className="assembly-orders-panel__status">обновление…</span>}
           </h2>
           <table className="assembly-table">
             <thead>
               <tr>
+                {stage === 'confirm' && <th aria-label="Выбор для переноса" />}
                 <th>WB ID</th>
                 <th>Баркод</th>
                 <th>Фото</th>
@@ -1755,7 +1957,7 @@ function WbAssemblySellerPage() {
             <tbody>
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="assembly-table__empty">
+                  <td colSpan={stage === 'confirm' ? 11 : 10} className="assembly-table__empty">
                     {refreshing || syncing
                       ? 'Загрузка заказов…'
                       : stage === 'confirm'
@@ -1767,6 +1969,19 @@ function WbAssemblySellerPage() {
                 const blockReason = orderBlockReason(order)
                 return (
                 <tr key={order.id}>
+                  {stage === 'confirm' && (
+                    <td>
+                      {order.can_move_to_new_supply ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedMoveIds.has(order.id)}
+                          onChange={() => toggleMoveOrder(order.id)}
+                          disabled={loading}
+                          aria-label={`Выбрать заказ WB #${order.wb_order_id} для переноса`}
+                        />
+                      ) : null}
+                    </td>
+                  )}
                   <td>{order.wb_order_id}</td>
                   <td><code>{order.barcode}</code></td>
                     <td>
@@ -1848,6 +2063,17 @@ function WbAssemblySellerPage() {
                         </button>
                       </span>
                     )}
+                      {order.can_move_to_new_supply && stage === 'confirm' && (
+                        <button
+                          type="button"
+                          className="btn btn--small btn--ghost"
+                          onClick={() => handleMoveSingleOrder(order)}
+                          disabled={loading}
+                          {...uiHint('Создать новую поставку WB и перенести неотсканированный заказ')}
+                        >
+                          Новая поставка
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn--small btn--ghost assembly-order-delete"

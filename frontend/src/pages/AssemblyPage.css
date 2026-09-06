@@ -415,6 +415,32 @@
   color: #64748b;
 }
 
+.assembly-orders-panel__hint {
+  margin-left: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.assembly-active-supplies {
+  margin-bottom: 1rem;
+}
+
+.assembly-supply-status {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.assembly-supply-status--ready {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.assembly-muted {
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
 .marking-badge {
   display: inline-block;
   font-size: 0.75rem;

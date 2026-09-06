@@ -14,6 +14,7 @@ from .views import (
   AssemblySendAllToAssemblyView,
   AssemblySendToAssemblyView,
   AssemblySendToDeliveryView,
+  AssemblyMoveOrdersToNewSupplyView,
   AssemblyShippingPointsView,
   AssemblySellerDetailView,
   AssemblySellerListView,
@@ -145,6 +146,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/shipping-points/",
       AssemblyShippingPointsView.as_view(),
       name="assembly-shipping-points",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/move-orders-to-new-supply/",
+      AssemblyMoveOrdersToNewSupplyView.as_view(),
+      name="assembly-move-orders-to-new-supply",
     ),
     path(
       "assembly/sellers/<int:seller_id>/send-to-delivery/",

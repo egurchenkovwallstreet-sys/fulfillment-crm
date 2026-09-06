@@ -28,6 +28,7 @@ from .serializers import (
   BatchBindScanSerializer,
   BindMarkingSerializer,
   DeliverySupplySerializer,
+  MoveOrdersToNewSupplySerializer,
   OrderActionSerializer,
   OrderAssemblySerializer,
   OrderPrintSerializer,
@@ -61,8 +62,10 @@ from .services.assembly_queue import get_assembly_queue_status, order_in_assembl
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
+  fetch_all_russia_sc_shipping_points,
   fetch_seller_shipping_points,
   fetch_supply_barcode,
+  move_orders_to_new_supply,
   refresh_supply_readiness,
   send_order_to_assembly,
   send_order_to_delivery,
@@ -536,6 +539,21 @@ class AssemblySellerDetailView(APIView):
         many=True,
       ).data
 
+    active_supplies = []
+    if stage == "confirm":
+      supplies_qs = (
+        Supply.objects.filter(
+          seller=seller,
+          status__in=(Supply.Status.FORMING, Supply.Status.READY),
+        )
+        .prefetch_related("orders__product", "orders__seller")
+        .annotate(orders_count=Count("orders"))
+        .order_by("wb_warehouse_id", "-created_at")[:100]
+      )
+      for supply in supplies_qs:
+        refresh_supply_readiness(supply)
+      active_supplies = SupplySerializer(supplies_qs, many=True).data
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
@@ -545,6 +563,7 @@ class AssemblySellerDetailView(APIView):
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
       "delivery_supplies": delivery_supplies,
+      "active_supplies": active_supplies,
       "active_pick_list": (
         PickListSerializer(active_pick_list).data if active_pick_list else None
       ),
@@ -1014,25 +1033,60 @@ class AssemblyShippingPointsView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     city = (request.query_params.get("city") or "").strip()
+    scope = (request.query_params.get("scope") or "city").strip().lower()
     cargo_type_raw = request.query_params.get("cargo_type")
     wb_supply_id = (request.query_params.get("wb_supply_id") or "").strip() or None
     cargo_type = int(cargo_type_raw) if cargo_type_raw else None
 
     try:
-      points, resolved_cargo = fetch_seller_shipping_points(
-        seller,
-        city=city,
-        cargo_type=cargo_type,
-        wb_supply_id=wb_supply_id,
-      )
+      if scope == "all_sc":
+        points, resolved_cargo = fetch_all_russia_sc_shipping_points(
+          seller,
+          cargo_type=cargo_type,
+          wb_supply_id=wb_supply_id,
+        )
+        city = "Россия (все СЦ)"
+      else:
+        points, resolved_cargo = fetch_seller_shipping_points(
+          seller,
+          city=city,
+          cargo_type=cargo_type,
+          wb_supply_id=wb_supply_id,
+        )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
 
     return Response({
       "success": True,
       "city": city,
+      "scope": scope,
       "cargo_type": resolved_cargo,
       "shipping_points": points,
+    })
+
+
+class AssemblyMoveOrdersToNewSupplyView(APIView):
+  """Перенести неотсканированные заказы в новую поставку WB (тот же склад)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = MoveOrdersToNewSupplySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    order_ids = serializer.validated_data["order_ids"]
+
+    try:
+      result = move_orders_to_new_supply(seller, order_ids, user=request.user)
+    except SupplyFlowError as exc:
+      return _assembly_error_response(exc)
+
+    return Response({
+      "success": True,
+      "message": f"Перенесено заказов: {result['moved_count']}",
+      **result,
     })
 
 

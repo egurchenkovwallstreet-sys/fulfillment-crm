@@ -87,3 +87,56 @@
   color: #b91c1c;
   font-size: 0.9rem;
 }
+
+.delivery-destination-modal__hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.delivery-destination-modal__field input[type='search'] {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+}
+
+.delivery-destination-modal__points {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.35rem;
+  background: #fff;
+}
+
+.delivery-destination-modal__point {
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  background: #f8fafc;
+  font: inherit;
+  cursor: pointer;
+}
+
+.delivery-destination-modal__point:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+.delivery-destination-modal__point--active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.delivery-destination-modal__points-empty {
+  margin: 0.5rem;
+  color: #64748b;
+  font-size: 0.9rem;
+}

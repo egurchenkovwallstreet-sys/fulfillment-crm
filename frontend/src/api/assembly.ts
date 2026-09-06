@@ -47,6 +47,7 @@ export interface AssemblyOrder {
   requires_marking: boolean
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
+  can_move_to_new_supply?: boolean
   can_print_label?: boolean
   delivery_method_id?: number | null
   carriage_id?: number | null
@@ -64,6 +65,19 @@ export interface DeliverySupply {
   created_at: string
 }
 
+export interface AssemblySupply {
+  id: number
+  wb_supply_id: string
+  wb_warehouse_id: number | null
+  warehouse_name: string
+  status: string
+  status_display: string
+  orders_count: number
+  can_deliver: boolean
+  supply_barcode_printed: boolean
+  created_at: string
+}
+
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   assembly_workflow_mode?: 'scan' | 'batch'
@@ -73,6 +87,7 @@ export interface AssemblySellerDetail {
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
   delivery_supplies?: DeliverySupply[]
+  active_supplies?: AssemblySupply[]
   active_pick_list?: PickList | null
   active_pick_lists?: PickList[]
   pick_list?: PickList | null
@@ -223,6 +238,7 @@ export interface DeliveryShippingParams {
 export interface ShippingPointsResult {
   success: boolean
   city: string
+  scope?: string
   cargo_type: number
   shipping_points: ShippingPoint[]
 }
@@ -450,14 +466,69 @@ export function sendAllOrdersToAssembly(sellerId: number) {
 
 export function fetchShippingPoints(
   sellerId: number,
-  params: { city: string; cargo_type?: number; wb_supply_id?: string },
+  params: {
+    city?: string
+    scope?: 'all_sc' | 'city'
+    cargo_type?: number
+    wb_supply_id?: string
+  },
 ) {
-  const qs = new URLSearchParams({ city: params.city })
+  const qs = new URLSearchParams()
+  if (params.scope === 'all_sc') {
+    qs.set('scope', 'all_sc')
+  } else if (params.city) {
+    qs.set('city', params.city)
+  }
   if (params.cargo_type != null) qs.set('cargo_type', String(params.cargo_type))
   if (params.wb_supply_id) qs.set('wb_supply_id', params.wb_supply_id)
   return apiFetch<ShippingPointsResult>(
     `/api/orders/assembly/sellers/${sellerId}/shipping-points/?${qs.toString()}`,
   )
+}
+
+export interface MoveOrdersToNewSupplyResult {
+  success: boolean
+  message: string
+  moved_count: number
+  supplies: Array<{
+    supply_id: number
+    wb_supply_id: string
+    wb_warehouse_id: number
+    orders_moved: number
+  }>
+  skipped: Array<{ order_id: number; wb_order_id: number; error: string }>
+}
+
+export function moveOrdersToNewSupply(sellerId: number, orderIds: number[]) {
+  return apiFetch<MoveOrdersToNewSupplyResult>(
+    `/api/orders/assembly/sellers/${sellerId}/move-orders-to-new-supply/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_ids: orderIds }),
+    },
+  )
+}
+
+export interface DeliverSupplyResult {
+  success: boolean
+  message: string
+  wb_supply_id: string
+  supply_barcode_file?: string
+  supply_barcode?: string
+}
+
+export function deliverSupply(
+  supplyId: number,
+  shipping: DeliveryShippingParams,
+) {
+  return apiFetch<DeliverSupplyResult>(`/api/orders/supplies/${supplyId}/deliver/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      shipping_point_id: shipping.shipping_point_id,
+      shipping_date: shipping.shipping_date,
+      shipping_type: shipping.shipping_type ?? 'selfShipping',
+    }),
+  })
 }
 
 export function sendOrderToDelivery(
