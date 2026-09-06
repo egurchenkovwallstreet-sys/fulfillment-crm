@@ -210,12 +210,26 @@ def _reset_marking_for_retry(order: Order, seller: Seller, *, user=None) -> None
   )
 
 
-def _get_active_pick_list(seller: Seller) -> PickList | None:
-  return (
-    PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
-    .order_by("-created_at")
-    .first()
-  )
+def _get_active_pick_lists(seller: Seller) -> list[PickList]:
+  from apps.orders.services.pick_list import active_wb_pick_lists
+
+  return active_wb_pick_lists(seller)
+
+
+def _get_active_pick_list(seller: Seller, wb_warehouse_id: int | None = None) -> PickList | None:
+  if wb_warehouse_id is not None:
+    from apps.orders.services.pick_list import _active_wb_pick_list_for_warehouse
+
+    return _active_wb_pick_list_for_warehouse(seller, wb_warehouse_id)
+  lists = _get_active_pick_lists(seller)
+  return lists[0] if lists else None
+
+
+def _find_pick_list_for_scan(seller: Seller, scan_value: str) -> PickList | None:
+  for pick_list in _get_active_pick_lists(seller):
+    if pick_list.items.exists() and _scan_allowed_in_pick_list(pick_list, scan_value):
+      return pick_list
+  return None
 
 
 def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
@@ -249,18 +263,24 @@ def _assembly_orders_qs(seller: Seller):
 
 
 def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
-  pick_list = _get_active_pick_list(seller)
-  if pick_list and pick_list.items.exists() and _scan_allowed_in_pick_list(pick_list, scan_value):
+  pick_list = _find_pick_list_for_scan(seller, scan_value)
+  if pick_list:
     return
+
+  active_lists = _get_active_pick_lists(seller)
+  if active_lists:
+    active_qs = _assembly_orders_qs(seller).filter(
+      status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
+    )
+    if _match_order_by_scan(active_qs, scan_value):
+      return
+    raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
   active_qs = _assembly_orders_qs(seller).filter(
     status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
   )
   if _match_order_by_scan(active_qs, scan_value):
     return
-
-  if pick_list and pick_list.items.exists():
-    raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
 
 def _find_active_order(seller: Seller, scan_value: str) -> Order:

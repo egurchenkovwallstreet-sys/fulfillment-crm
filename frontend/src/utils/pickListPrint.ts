@@ -59,6 +59,7 @@ function tableHtml(items: PickList['items']): string {
 
 function sheetHtml(pickList: PickList, pageItems: PickList['items'], pageIndex: number, totalPages: number): string {
   const seller = escapeHtml(pickList.seller_name || '—')
+  const warehouse = escapeHtml(pickList.warehouse_name || pickList.warehouse_label || '')
   const date = escapeHtml(formatDate(pickList.created_at))
   const orders = escapeHtml(String(pickList.total_quantity))
   const listId = escapeHtml(String(pickList.id || 'черновик'))
@@ -67,6 +68,7 @@ function sheetHtml(pickList: PickList, pageItems: PickList['items'], pageIndex: 
     ? `
       <header class="sheet-header">
         <div class="seller-name">${seller}</div>
+        ${warehouse ? `<div class="warehouse-name">Склад: <strong>${warehouse}</strong></div>` : ''}
         <div class="sheet-meta">
           <span>Лист подбора № <strong>${listId}</strong></span>
           <span>Дата: <strong>${date}</strong></span>

@@ -105,9 +105,15 @@ export function OrdersPage() {
     setSuccess('')
     setLoading(true)
     try {
-      const pickList = await generatePickList(sellerId)
+      const result = await generatePickList(sellerId)
+      const pickList = result.pick_list ?? result.pick_lists[0] ?? null
       setActivePickList(pickList)
-      setSuccess(`Лист подбора #${pickList.id} сформирован (${pickList.total_quantity} шт.)`)
+      if (pickList) {
+        const extra = result.pick_lists.length > 1
+          ? ` (+${result.pick_lists.length - 1} складов)`
+          : ''
+        setSuccess(`Лист подбора #${pickList.id} сформирован (${pickList.total_quantity} шт.)${extra}`)
+      }
       await loadData(sellerId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка формирования')

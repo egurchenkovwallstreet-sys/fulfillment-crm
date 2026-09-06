@@ -74,6 +74,7 @@ export interface AssemblySellerDetail {
   orders: AssemblyOrder[]
   delivery_supplies?: DeliverySupply[]
   active_pick_list?: PickList | null
+  active_pick_lists?: PickList[]
   pick_list?: PickList | null
   marketplace?: string
   ozon_assembly_ready?: boolean

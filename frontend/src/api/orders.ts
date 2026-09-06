@@ -48,6 +48,9 @@ export interface PickList {
   id: number
   seller: number
   seller_name: string
+  wb_warehouse_id?: number | null
+  warehouse_name?: string
+  warehouse_label?: string
   is_completed: boolean
   created_at: string
   items: PickListItem[]
@@ -125,11 +128,17 @@ export function fetchPickList(id: number) {
   return apiFetch<PickList>(`/api/orders/pick-lists/${id}/`)
 }
 
+export type GeneratePickListResult = {
+  success: boolean
+  pick_lists: PickList[]
+  pick_list: PickList | null
+}
+
 export function generatePickList(
   sellerId: number,
   options?: { force?: boolean; stage?: 'new' | 'confirm' },
 ) {
-  return apiFetch<PickList>('/api/orders/pick-lists/generate/', {
+  return apiFetch<GeneratePickListResult>('/api/orders/pick-lists/generate/', {
     method: 'POST',
     body: JSON.stringify({
       seller_id: sellerId,

@@ -577,25 +577,33 @@ def send_order_to_delivery(
       code="not_ready",
     )
 
-  supply = (
-    Supply.objects.filter(
-      seller=seller,
-      orders=order,
-      status__in=(
-        Supply.Status.FORMING,
-        Supply.Status.READY,
-        Supply.Status.CONFIRMED,
-      ),
-    )
-    .exclude(wb_supply_id="")
-    .order_by("-created_at")
-    .first()
-  )
+  supply_qs = Supply.objects.filter(
+    seller=seller,
+    orders=order,
+    status__in=(
+      Supply.Status.FORMING,
+      Supply.Status.READY,
+      Supply.Status.CONFIRMED,
+    ),
+  ).exclude(wb_supply_id="")
+  if order.wb_warehouse_id is not None:
+    supply_qs = supply_qs.filter(wb_warehouse_id=order.wb_warehouse_id)
+  supply = supply_qs.order_by("-created_at").first()
   if not supply:
     raise SupplyFlowError(
-      f"Не найдена поставка WB для заказа #{order.wb_order_id}. "
+      f"Не найдена поставка WB для заказа #{order.wb_order_id} "
+      f"на складе {order.wb_warehouse_id or '—'}. "
       "Отправьте заказ на сборку заново.",
       code="no_supply",
+    )
+  if (
+    order.wb_warehouse_id is not None
+    and supply.wb_warehouse_id is not None
+    and supply.wb_warehouse_id != order.wb_warehouse_id
+  ):
+    raise SupplyFlowError(
+      f"Поставка WB не соответствует складу заказа #{order.wb_order_id}.",
+      code="warehouse_mismatch",
     )
 
   client = _get_client(seller)

@@ -70,7 +70,14 @@ from .services.supply_flow import (
   send_supplies_to_delivery_bulk,
   send_supply_to_delivery,
 )
-from .services.pick_list import PickListError, delete_active_pick_list, generate_pick_list, preview_pick_list
+from .services.pick_list import (
+  PickListError,
+  active_wb_pick_lists,
+  delete_active_pick_list,
+  generate_pick_lists,
+  preview_pick_list,
+  preview_pick_lists,
+)
 from .services.batch_assembly import (
   bind_ozon_batch_scan,
   bind_wb_batch_scan,
@@ -391,7 +398,7 @@ class PickListGenerateView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     try:
-      pick_list = generate_pick_list(
+      pick_lists = generate_pick_lists(
         seller,
         user=request.user,
         force=bool(serializer.validated_data.get("force")),
@@ -400,9 +407,18 @@ class PickListGenerateView(APIView):
     except PickListError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    pick_list = _pick_lists_queryset_for_user(request.user).get(pk=pick_list.pk)
+    serialized = PickListSerializer(
+      _pick_lists_queryset_for_user(request.user).filter(
+        pk__in=[item.pk for item in pick_lists],
+      ),
+      many=True,
+    ).data
     return Response(
-      PickListSerializer(pick_list).data,
+      {
+        "success": True,
+        "pick_lists": serialized,
+        "pick_list": serialized[0] if serialized else None,
+      },
       status=status.HTTP_201_CREATED,
     )
 
@@ -501,12 +517,8 @@ class AssemblySellerDetailView(APIView):
     if stage == "confirm":
       orders = [order for order in orders if order_in_assembly(order)]
 
-    active_pick_list = (
-      PickList.objects.filter(seller=seller, is_completed=False, marketplace=WB)
-      .prefetch_related("items__cell", "items__product")
-      .order_by("-created_at")
-      .first()
-    )
+    active_pick_lists = active_wb_pick_lists(seller)
+    active_pick_list = active_pick_lists[0] if active_pick_lists else None
 
     supplies_forming = Supply.objects.filter(
       seller=seller,
@@ -536,6 +548,7 @@ class AssemblySellerDetailView(APIView):
       "active_pick_list": (
         PickListSerializer(active_pick_list).data if active_pick_list else None
       ),
+      "active_pick_lists": PickListSerializer(active_pick_lists, many=True).data,
     })
 
 
@@ -576,11 +589,15 @@ class AssemblyPickListPreviewView(APIView):
       return Response({"detail": "stage должен быть new или confirm"}, status=400)
 
     try:
-      pick_list = preview_pick_list(seller, stage=stage, user=request.user)
+      previews = preview_pick_lists(seller, stage=stage, user=request.user)
     except PickListError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({"success": True, "pick_list": pick_list})
+    return Response({
+      "success": True,
+      "pick_lists": previews,
+      "pick_list": previews[0] if len(previews) == 1 else preview_pick_list(seller, stage=stage, user=request.user),
+    })
 
 
 class AssemblyDeletePickListView(APIView):

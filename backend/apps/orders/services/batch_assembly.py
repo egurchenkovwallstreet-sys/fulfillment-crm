@@ -12,7 +12,9 @@ from apps.orders.models import Order, OzonPosting, PickList, PickListItem
 from apps.orders.services.assembly import (
   AssemblyError,
   _barcodes_match,
+  _find_pick_list_for_scan,
   _get_active_pick_list,
+  _get_active_pick_lists,
   _get_client,
   _is_marking_retry_order,
   _marking_error,
@@ -213,6 +215,28 @@ def _raise_sticker_barcode_mismatch(
   )
 
 
+def _pick_list_orders_all(seller: Seller) -> list[Order]:
+  seen: set[int] = set()
+  orders: list[Order] = []
+  for pick_list in _get_active_pick_lists(seller):
+    for order in _pick_list_orders_wb(pick_list, seller):
+      if order.id in seen:
+        continue
+      seen.add(order.id)
+      orders.append(order)
+  return orders
+
+
+def _find_pick_list_for_barcode(seller: Seller, barcode: str) -> PickList | None:
+  barcode = _normalize_scan_value(barcode)
+  if not barcode:
+    return None
+  for pick_list in _get_active_pick_lists(seller):
+    if _scan_matches_pick_list_barcode(pick_list, barcode):
+      return pick_list
+  return None
+
+
 def _info_label_payload(*, cell_number: str, tech_size: str, barcode: str, article: str, quantity: int) -> dict:
   return {
     "type": "info",
@@ -225,21 +249,20 @@ def _info_label_payload(*, cell_number: str, tech_size: str, barcode: str, artic
 
 
 def get_wb_batch_ribbon(seller: Seller) -> dict:
-  pick_list = _get_active_pick_list(seller)
-  if not pick_list or not pick_list.items.exists():
+  pick_lists = _get_active_pick_lists(seller)
+  if not pick_lists or not any(pl.items.exists() for pl in pick_lists):
     raise AssemblyError("Сначала сформируйте лист подбора", code="no_pick_list")
 
-  orders = list(_pick_list_orders_wb(pick_list, seller))
-  pending = [
-    order
-    for order in orders
-    if order.status in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED)
-    or (
-      order.status == Order.Status.LABEL_PRINTED
-      and _order_requires_marking(order)
-      and (order.marking_verify_status or "").strip() == "error"
-    )
-  ]
+  pending: list[Order] = []
+  for pick_list in pick_lists:
+    orders = list(_pick_list_orders_wb(pick_list, seller))
+    for order in orders:
+      if order.status in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED) or (
+        order.status == Order.Status.LABEL_PRINTED
+        and _order_requires_marking(order)
+        and (order.marking_verify_status or "").strip() == "error"
+      ):
+        pending.append(order)
   if not pending:
     raise AssemblyError(
       "Нет стикеров для печати по выбранному складу. "
@@ -337,7 +360,8 @@ def get_wb_batch_ribbon(seller: Seller) -> dict:
       })
 
   return {
-    "pick_list_id": pick_list.id,
+    "pick_list_id": pick_lists[0].id if pick_lists else None,
+    "pick_list_ids": [item.id for item in pick_lists],
     "marketplace": WB,
     "items": items,
     "groups_count": len(grouped),
@@ -591,9 +615,10 @@ def bind_wb_batch_scan(
   marking_code: str = "",
   user=None,
 ) -> dict:
-  pick_list = _get_active_pick_list(seller)
-  if not pick_list:
+  pick_lists = _get_active_pick_lists(seller)
+  if not pick_lists:
     raise AssemblyError("Активный лист подбора не найден", code="no_pick_list")
+  pick_list = pick_lists[0]
 
   state = {
     "barcode": _normalize_scan_value(barcode),
@@ -630,6 +655,7 @@ def bind_wb_batch_scan(
 
   requires_marking = False
   if state["barcode"] and state["sticker_scan"]:
+    pick_list = _find_pick_list_for_barcode(seller, state["barcode"]) or pick_list
     order = _resolve_wb_order_for_bind(
       seller,
       pick_list,
@@ -705,17 +731,21 @@ def _same_sticker_scan(previous: str, new_value: str, seller: Seller, pick_list:
   return _compact(previous) == _compact(new_value)
 
 
-def _marking_required_for_batch_state(seller: Seller, pick_list: PickList, state: dict) -> bool:
+def _marking_required_for_batch_state(seller: Seller, pick_list: PickList | None, state: dict) -> bool:
   if state.get("marking_code"):
     return True
   barcode = _normalize_scan_value(state.get("barcode") or "")
   if not barcode:
     return False
-  for order in _pick_list_orders_wb(pick_list):
-    if _barcodes_match(order.barcode or "", barcode):
-      return _order_requires_marking(order)
-    if barcode.isdigit() and order.wb_order_id == int(barcode):
-      return _order_requires_marking(order)
+  target_lists = [pick_list] if pick_list else _get_active_pick_lists(seller)
+  for current in target_lists:
+    if not current:
+      continue
+    for order in _pick_list_orders_wb(current):
+      if _barcodes_match(order.barcode or "", barcode):
+        return _order_requires_marking(order)
+      if barcode.isdigit() and order.wb_order_id == int(barcode):
+        return _order_requires_marking(order)
   return False
 
 
@@ -724,17 +754,19 @@ def classify_wb_batch_scan(seller: Seller, scan: str, *, partial: dict | None = 
   if not scan_value:
     raise AssemblyError("Пустой скан", code="empty_scan")
 
-  pick_list = _get_active_pick_list(seller)
-  if not pick_list:
+  pick_lists = _get_active_pick_lists(seller)
+  if not pick_lists:
     raise AssemblyError("Активный лист подбора не найден", code="no_pick_list")
 
   partial = partial or {}
-  orders = list(_pick_list_orders_wb(pick_list))
+  orders = _pick_list_orders_all(seller)
   if orders and not any((order.sticker_scan_code or "").strip() for order in orders):
     fetch_stickers_for_orders(seller, orders)
     orders = list(_pick_list_orders_wb(pick_list))
   sticker_matches = [order for order in orders if _order_matches_sticker_wb(order, scan_value)]
-  barcode_matches = _scan_matches_pick_list_barcode(pick_list, scan_value)
+  barcode_matches = any(
+    _scan_matches_pick_list_barcode(current, scan_value) for current in pick_lists
+  )
 
   partial_barcode = _normalize_scan_value(partial.get("barcode") or "")
   if partial_barcode and not partial.get("sticker_scan"):

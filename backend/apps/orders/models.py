@@ -119,6 +119,13 @@ class PickList(models.Model):
   )
   created_at = models.DateTimeField(auto_now_add=True)
   is_completed = models.BooleanField(default=False)
+  wb_warehouse_id = models.BigIntegerField(
+    "ID склада WB",
+    null=True,
+    blank=True,
+    db_index=True,
+  )
+  warehouse_name = models.CharField("Название склада", max_length=200, blank=True)
 
   class Meta:
     verbose_name = "Лист подбора"

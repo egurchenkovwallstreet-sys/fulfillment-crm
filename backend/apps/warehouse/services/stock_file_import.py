@@ -246,7 +246,7 @@ def build_stock_import_preview(
       wb_before=wb_before,
     )
     if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
-      crm_before = crm_wh_before
+      crm_before = product.quantity if product else 0
 
     preview_rows.append(
       StockImportPreviewRow(
@@ -397,7 +397,7 @@ def apply_stock_import(
       crm_expected = add_qty
       wb_expected, _restock = compute_wb_amount_from_crm(add_qty, reserved_new)
       crm_wh_expected = add_qty
-      crm_total_expected = (crm_before - crm_wh_before) + add_qty
+      crm_total_expected = add_qty
     else:
       crm_expected = crm_before + add_qty
       wb_expected = wb_before + add_qty

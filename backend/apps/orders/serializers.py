@@ -203,6 +203,8 @@ class PickListSerializer(serializers.ModelSerializer):
       "id",
       "seller",
       "seller_name",
+      "wb_warehouse_id",
+      "warehouse_name",
       "is_completed",
       "created_at",
       "items",

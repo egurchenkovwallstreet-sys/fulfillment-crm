@@ -171,7 +171,7 @@ function WbAssemblySellerPage() {
     printWin: Window | null
     onConfirm: (shipping: DeliveryShippingParams, printWin: Window | null) => void
   } | null>(null)
-  const [pickListPreview, setPickListPreview] = useState<PickList | null>(null)
+  const [pickListPreviews, setPickListPreviews] = useState<PickList[]>([])
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const bgSyncSellerRef = useRef<number | null>(null)
@@ -190,8 +190,10 @@ function WbAssemblySellerPage() {
       setData(fresh)
       writeAssemblySellerCache(id, pickStage, fresh)
       if (pickStage === 'new' || pickStage === 'confirm') {
-        if (fresh.active_pick_list?.items?.length) {
-          setPickListPreview(fresh.active_pick_list)
+        if (fresh.active_pick_lists?.length) {
+          setPickListPreviews(fresh.active_pick_lists)
+        } else if (fresh.active_pick_list?.items?.length) {
+          setPickListPreviews([fresh.active_pick_list])
         }
       }
     } catch (err) {
@@ -221,11 +223,15 @@ function WbAssemblySellerPage() {
   }, [id, load])
 
   const applySavedPickList = useCallback((fresh: AssemblySellerDetail | null) => {
-    if (fresh?.active_pick_list?.items?.length) {
-      setPickListPreview(fresh.active_pick_list)
+    if (fresh?.active_pick_lists?.length) {
+      setPickListPreviews(fresh.active_pick_lists)
       return
     }
-    setPickListPreview(null)
+    if (fresh?.active_pick_list?.items?.length) {
+      setPickListPreviews([fresh.active_pick_list])
+      return
+    }
+    setPickListPreviews([])
   }, [])
 
   useEffect(() => {
@@ -611,11 +617,19 @@ function WbAssemblySellerPage() {
     setPickListRefreshing(true)
     try {
       const pickStage = stage === 'confirm' ? 'confirm' : 'new'
-      const pickList = await generatePickList(id, { force: true, stage: pickStage })
-      setPickListPreview(pickList)
+      const result = await generatePickList(id, { force: true, stage: pickStage })
+      const lists = result.pick_lists?.length
+        ? result.pick_lists
+        : result.pick_list
+          ? [result.pick_list]
+          : []
+      setPickListPreviews(lists)
       setData(await fetchAssemblySeller(id, stage || undefined))
+      const totalOrders = lists.reduce((sum, list) => sum + (list.total_quantity || 0), 0)
       setSuccess(
-        `Лист подбора №${pickList.id}: ${pickList.total_quantity} зак. по выбранным складам. Нажмите «Скачать PDF».`,
+        lists.length > 1
+          ? `Сформировано ${lists.length} листов подбора (${totalOrders} зак.) — по одному на каждый склад.`
+          : `Лист подбора №${lists[0]?.id ?? '—'}: ${totalOrders} зак.`,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
@@ -624,14 +638,26 @@ function WbAssemblySellerPage() {
     }
   }
 
-  function handleDownloadPickListPdf() {
-    const pickList = pickListPreview ?? data?.active_pick_list
-    if (!pickList?.items?.length) {
-      setError('Сначала нажмите «Сформировать лист подбора» по выбранному складу.')
+  function handleDownloadPickListPdf(target?: PickList) {
+    const lists = target
+      ? [target]
+      : pickListPreviews.length > 0
+        ? pickListPreviews
+        : data?.active_pick_lists?.length
+          ? data.active_pick_lists
+          : data?.active_pick_list
+            ? [data.active_pick_list]
+            : []
+    if (!lists.length || !lists.some((list) => list.items?.length)) {
+      setError('Сначала нажмите «Сформировать лист подбора».')
       return
     }
-    if (!downloadPickListPdf(pickList)) {
-      setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
+    for (const pickList of lists) {
+      if (!pickList.items?.length) continue
+      if (!downloadPickListPdf(pickList)) {
+        setError('Не удалось открыть PDF — разрешите всплывающие окна в браузере')
+        return
+      }
     }
   }
 
@@ -1221,7 +1247,18 @@ function WbAssemblySellerPage() {
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
   const bulkAssemblyCount = assemblyEligible ?? 0
-  const displayPickList = pickListPreview ?? data?.active_pick_list
+  const displayPickLists = pickListPreviews.length > 0
+    ? pickListPreviews
+    : data?.active_pick_lists?.length
+      ? data.active_pick_lists
+      : data?.active_pick_list
+        ? [data.active_pick_list]
+        : []
+  const displayPickListTotal = displayPickLists.reduce(
+    (sum, list) => sum + (list.total_quantity || 0),
+    0,
+  )
+  const hasPickLists = displayPickLists.some((list) => list.items?.length)
   const orders = data?.orders ?? []
   const deliverySupplies = data?.delivery_supplies ?? []
   const readyOrders = markingStatus.ready
@@ -1315,15 +1352,17 @@ function WbAssemblySellerPage() {
               {pickListRefreshing ? 'Формируем…' : 'Сформировать лист подбора'}
             </button>
           )}
-          {(stage === 'new' || stage === 'confirm') && displayPickList?.items?.length ? (
+          {(stage === 'new' || stage === 'confirm') && hasPickLists ? (
             <button
               type="button"
               className="btn btn--secondary"
-              onClick={handleDownloadPickListPdf}
+              onClick={() => handleDownloadPickListPdf()}
               disabled={loading || pickListRefreshing}
-              {...uiHint('Скачать лист подбора формата A4 для печати')}
+              {...uiHint('Скачать листы подбора формата A4 — отдельный PDF на каждый склад')}
             >
-              Скачать PDF (A4) · {displayPickList.total_quantity} зак.
+              Скачать PDF (A4) · {displayPickLists.length > 1
+                ? `${displayPickLists.length} складов, ${displayPickListTotal} зак.`
+                : `${displayPickListTotal} зак.`}
             </button>
           ) : null}
           {stage === 'new' && bulkAssemblyCount > 0 && (
@@ -1332,12 +1371,12 @@ function WbAssemblySellerPage() {
               className="btn btn--primary"
               onClick={handleTransferToAssembly}
               disabled={loading}
-              {...uiHint('Отправить выбранные новые заказы в статус «На сборке» в WB')}
+              {...uiHint('Отправить выбранные новые заказы в статус «На сборке» в WB — отдельная поставка на каждый склад')}
             >
               Передать на сборку ({bulkAssemblyCount})
             </button>
           )}
-          {stage === 'confirm' && isBatchMode && (displayPickList || data?.active_pick_list) && (
+          {stage === 'confirm' && isBatchMode && hasPickLists && (
             <button
               type="button"
               className="btn btn--primary"
@@ -1433,16 +1472,39 @@ function WbAssemblySellerPage() {
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
-            Выберите склады FBS и нажмите «Сформировать лист подбора», затем «Скачать PDF».
-            «Передать на сборку» отдельно отправляет заказы в Wildberries.
+            Листы подбора формируются <strong>отдельно на каждый включённый склад</strong>.
+            «Передать на сборку» создаёт в WB отдельную поставку на каждый склад.
           </p>
+          {hasPickLists && displayPickLists.length > 0 && (
+            <ul className="assembly-picklists">
+              {displayPickLists.map((list) => (
+                <li key={list.id}>
+                  <strong>{list.warehouse_name || `Склад #${list.wb_warehouse_id ?? list.id}`}</strong>
+                  {' — '}
+                  {list.total_quantity} зак.
+                  {list.items?.length ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--small"
+                        onClick={() => handleDownloadPickListPdf(list)}
+                      >
+                        PDF
+                      </button>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       {stage === 'confirm' && isBatchMode && (
         <BatchBindPanel
           sellerId={id}
-          disabled={!data?.active_pick_list}
+          disabled={!hasPickLists}
           onBound={async () => {
             window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
             await refreshMarkingStatus()

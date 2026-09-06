@@ -5,8 +5,8 @@ from django.utils import timezone
 
 from apps.orders.models import Order, PickList, PickListItem
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW
-from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
+from apps.sellers.models import Seller, SellerWarehouse
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, get_enabled_wb_warehouse_ids
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 
@@ -35,6 +35,57 @@ def _cell_sort_key(cell_number: str) -> tuple[int, int, str]:
   if cell_number.isdigit():
     return (0, int(cell_number), "")
   return (0, 999998, cell_number)
+
+
+def _warehouse_label(seller: Seller, wb_warehouse_id: int) -> str:
+  wh = SellerWarehouse.objects.filter(
+    seller=seller,
+    wb_warehouse_id=wb_warehouse_id,
+  ).first()
+  if wh and wh.name:
+    return wh.name
+  return f"Склад #{wb_warehouse_id}"
+
+
+def _group_orders_by_warehouse(
+  seller: Seller,
+  orders: list[Order],
+) -> dict[int, list[Order]]:
+  enabled = get_enabled_wb_warehouse_ids(seller)
+  grouped: dict[int, list[Order]] = defaultdict(list)
+  for order in orders:
+    wh_id = order.wb_warehouse_id
+    if wh_id is None:
+      continue
+    if enabled and wh_id not in enabled:
+      continue
+    grouped[int(wh_id)].append(order)
+  return grouped
+
+
+def active_wb_pick_lists(seller: Seller) -> list[PickList]:
+  return list(
+    PickList.objects.filter(seller=seller, is_completed=False, marketplace=MARKETPLACE_WB)
+    .prefetch_related("items__cell", "items__product")
+    .order_by("warehouse_name", "-created_at")
+  )
+
+
+def _active_wb_pick_list_for_warehouse(
+  seller: Seller,
+  wb_warehouse_id: int,
+) -> PickList | None:
+  return (
+    PickList.objects.filter(
+      seller=seller,
+      is_completed=False,
+      marketplace=MARKETPLACE_WB,
+      wb_warehouse_id=wb_warehouse_id,
+    )
+    .prefetch_related("items__cell", "items__product")
+    .order_by("-created_at")
+    .first()
+  )
 
 
 def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
@@ -163,18 +214,24 @@ def _group_orders_for_pick_list(
   return preview_items, orders_without_product
 
 
-def _pick_list_meta(seller: Seller, *, stage: str, items: list[dict], orders_without_product: int) -> dict:
+def _pick_list_meta(
+  seller: Seller,
+  *,
+  stage: str,
+  items: list[dict],
+  orders_without_product: int,
+  warehouse_name: str,
+  wb_warehouse_id: int | None = None,
+) -> dict:
   total_quantity = sum(item["quantity"] for item in items)
-  enabled_names = list(
-    seller.wb_warehouses.filter(is_enabled=True).values_list("name", flat=True)
-  )
-  warehouse_label = ", ".join(name for name in enabled_names if name) or "включённые склады"
   stage_title = "На сборке" if stage == "confirm" else "Новые"
 
   return {
     "items_count": len(items),
     "total_quantity": total_quantity,
-    "warehouse_label": warehouse_label,
+    "warehouse_label": warehouse_name,
+    "warehouse_name": warehouse_name,
+    "wb_warehouse_id": wb_warehouse_id,
     "stage_label": stage_title,
     "orders_in_list": total_quantity,
     "orders_skipped": orders_without_product,
@@ -182,20 +239,73 @@ def _pick_list_meta(seller: Seller, *, stage: str, items: list[dict], orders_wit
   }
 
 
-def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
-  """Лист подбора для PDF — без привязки заказов и без отправки в WB."""
+def _build_pick_list_preview_payload(
+  seller: Seller,
+  *,
+  stage: str,
+  wb_warehouse_id: int,
+  warehouse_name: str,
+  items: list[dict],
+  orders_without_product: int,
+  pick_list_id: int = 0,
+) -> dict:
+  meta = _pick_list_meta(
+    seller,
+    stage=stage,
+    items=items,
+    orders_without_product=orders_without_product,
+    warehouse_name=warehouse_name,
+    wb_warehouse_id=wb_warehouse_id,
+  )
+  public_items = [
+    {k: v for k, v in item.items() if k not in ("order_ids", "product", "cell")}
+    for item in items
+  ]
+  return {
+    "id": pick_list_id,
+    "preview": pick_list_id == 0,
+    "stage": stage,
+    "seller": seller.id,
+    "seller_name": seller.company_name,
+    "is_completed": False,
+    "created_at": timezone.now().isoformat(),
+    "items": public_items,
+    **meta,
+  }
+
+
+def preview_pick_lists(seller: Seller, *, stage: str = "new", user=None) -> list[dict]:
+  """Листы подбора по складам для PDF — без привязки заказов."""
   orders = _orders_for_pick_list(seller, stage=stage)
-  if not orders:
+  by_warehouse = _group_orders_by_warehouse(seller, orders)
+  if not by_warehouse:
     stage_label = "на сборке" if stage == "confirm" else "новых"
     raise PickListError(
-      f"Нет {stage_label} заказов для листа подбора. Выберите склад и обновите заказы из WB.",
+      f"Нет {stage_label} заказов для листа подбора. Включите склад и обновите заказы из WB.",
     )
 
-  items, orders_without_product = _group_orders_for_pick_list(seller, orders)
-  meta = _pick_list_meta(seller, stage=stage, items=items, orders_without_product=orders_without_product)
+  previews: list[dict] = []
+  for wb_warehouse_id in sorted(by_warehouse.keys()):
+    wh_orders = by_warehouse[wb_warehouse_id]
+    items, orders_without_product = _group_orders_for_pick_list(seller, wh_orders)
+    previews.append(
+      _build_pick_list_preview_payload(
+        seller,
+        stage=stage,
+        wb_warehouse_id=wb_warehouse_id,
+        warehouse_name=_warehouse_label(seller, wb_warehouse_id),
+        items=items,
+        orders_without_product=orders_without_product,
+      ),
+    )
+  return previews
 
-  public_items = [{k: v for k, v in item.items() if k not in ("order_ids", "product", "cell")} for item in items]
 
+def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
+  previews = preview_pick_lists(seller, stage=stage, user=user)
+  if len(previews) == 1:
+    return previews[0]
+  total_quantity = sum(item["total_quantity"] for item in previews)
   return {
     "id": 0,
     "preview": True,
@@ -204,8 +314,12 @@ def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
     "seller_name": seller.company_name,
     "is_completed": False,
     "created_at": timezone.now().isoformat(),
-    "items": public_items,
-    **meta,
+    "items": [],
+    "pick_lists": previews,
+    "items_count": sum(item["items_count"] for item in previews),
+    "total_quantity": total_quantity,
+    "warehouse_label": ", ".join(item["warehouse_name"] for item in previews),
+    "orders_in_list": total_quantity,
   }
 
 
@@ -242,34 +356,33 @@ def _fill_pick_list_items(pick_list: PickList, items: list[dict]) -> list[int]:
   return order_ids
 
 
-@transaction.atomic
-def generate_pick_list(
+def _create_or_refresh_warehouse_pick_list(
   seller: Seller,
   *,
+  wb_warehouse_id: int,
+  wh_orders: list[Order],
+  stage: str,
+  force: bool,
   user=None,
-  force: bool = False,
-  stage: str = "new",
 ) -> PickList:
-  """Сохранить лист подбора по включённым складам FBS для вкладки Новые или На сборке."""
-  if stage not in ("new", "confirm"):
-    stage = "new"
+  warehouse_name = _warehouse_label(seller, wb_warehouse_id)
+  existing = _active_wb_pick_list_for_warehouse(seller, wb_warehouse_id)
 
-  existing = _active_wb_pick_list(seller)
   if existing and existing.items.exists() and not force:
     return existing
 
-  orders = list(_orders_for_pick_list(seller, stage=stage))
   if stage == "new" and not force:
-    orders = [order for order in orders if order.pick_list_id is None]
+    wh_orders = [order for order in wh_orders if order.pick_list_id is None]
 
-  if not orders:
-    stage_label = "на сборке" if stage == "confirm" else "новых"
+  if not wh_orders:
+    if existing and force and not _pick_list_has_scanned_orders(existing):
+      delete_active_pick_list(seller, pick_list_id=existing.id, user=user)
     raise PickListError(
-      f"Нет {stage_label} заказов для листа подбора. "
-      "Включите склад FBS и обновите заказы.",
+      f"Нет заказов для склада «{warehouse_name}» на вкладке "
+      f"{'«На сборке»' if stage == 'confirm' else '«Новые»'}.",
     )
 
-  items, _orders_without_product = _group_orders_for_pick_list(seller, orders)
+  items, _orders_without_product = _group_orders_for_pick_list(seller, wh_orders)
 
   pick_list = existing
   if pick_list and force:
@@ -282,7 +395,16 @@ def generate_pick_list(
       pick_list = None
 
   if pick_list is None:
-    pick_list = PickList.objects.create(seller=seller, marketplace="wb")
+    pick_list = PickList.objects.create(
+      seller=seller,
+      marketplace=MARKETPLACE_WB,
+      wb_warehouse_id=wb_warehouse_id,
+      warehouse_name=warehouse_name,
+    )
+  else:
+    pick_list.warehouse_name = warehouse_name
+    pick_list.wb_warehouse_id = wb_warehouse_id
+    pick_list.save(update_fields=["warehouse_name", "wb_warehouse_id"])
 
   order_ids = _fill_pick_list_items(pick_list, items)
   qs = Order.objects.filter(id__in=order_ids)
@@ -292,6 +414,74 @@ def generate_pick_list(
     qs.update(pick_list=pick_list)
 
   return pick_list
+
+
+@transaction.atomic
+def generate_pick_lists(
+  seller: Seller,
+  *,
+  user=None,
+  force: bool = False,
+  stage: str = "new",
+) -> list[PickList]:
+  """Отдельный лист подбора на каждый включённый FBS-склад с заказами."""
+  if stage not in ("new", "confirm"):
+    stage = "new"
+
+  orders = list(_orders_for_pick_list(seller, stage=stage))
+  by_warehouse = _group_orders_by_warehouse(seller, orders)
+  if not by_warehouse:
+    stage_label = "на сборке" if stage == "confirm" else "новых"
+    raise PickListError(
+      f"Нет {stage_label} заказов для листа подбора. "
+      "Включите склад FBS и обновите заказы.",
+    )
+
+  if force:
+    for stale in active_wb_pick_lists(seller):
+      if _pick_list_has_scanned_orders(stale):
+        continue
+      delete_active_pick_list(seller, pick_list_id=stale.id, user=user)
+
+  pick_lists: list[PickList] = []
+  errors: list[str] = []
+  for wb_warehouse_id in sorted(by_warehouse.keys()):
+    try:
+      pick_lists.append(
+        _create_or_refresh_warehouse_pick_list(
+          seller,
+          wb_warehouse_id=wb_warehouse_id,
+          wh_orders=by_warehouse[wb_warehouse_id],
+          stage=stage,
+          force=force,
+          user=user,
+        ),
+      )
+    except PickListError as exc:
+      errors.append(str(exc))
+
+  if not pick_lists:
+    raise PickListError(errors[0] if errors else "Не удалось сформировать листы подбора")
+
+  return pick_lists
+
+
+@transaction.atomic
+def generate_pick_list(
+  seller: Seller,
+  *,
+  user=None,
+  force: bool = False,
+  stage: str = "new",
+) -> PickList:
+  """Сохранить листы подбора по складам; вернуть первый для обратной совместимости."""
+  pick_lists = generate_pick_lists(
+    seller,
+    user=user,
+    force=force,
+    stage=stage,
+  )
+  return pick_lists[0]
 
 
 @transaction.atomic
