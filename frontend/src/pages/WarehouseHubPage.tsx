@@ -17,6 +17,7 @@ import {
   type OnboardingPreview,
   type StockImportPreview,
   type StockImportResult,
+  type StockImportMode,
   type StockOverview,
   type StockOverviewProduct,
 } from '../api/warehouseHub'
@@ -60,8 +61,18 @@ function mapOzonWarehouses(rows: SellerOzonWarehouse[]): HubWarehouse[] {
   }))
 }
 
+function wbQtyOnWarehouse(product: StockOverviewProduct, warehouseId: number): number {
+  const row = product.by_warehouse.find((item) => item.warehouse_id === warehouseId)
+  return row?.wb_quantity ?? row?.quantity ?? 0
+}
+
+function crmQtyOnWarehouse(product: StockOverviewProduct, warehouseId: number): number {
+  const row = product.by_warehouse.find((item) => item.warehouse_id === warehouseId)
+  return row?.crm_quantity ?? 0
+}
+
 function qtyOnWarehouse(product: StockOverviewProduct, warehouseId: number): number {
-  return product.by_warehouse.find((row) => row.warehouse_id === warehouseId)?.quantity ?? 0
+  return wbQtyOnWarehouse(product, warehouseId)
 }
 
 export function WarehouseHubPage() {
@@ -107,10 +118,12 @@ export function WarehouseHubPage() {
 
   const canDistributeEvenly = (stockOverview?.warehouses.length ?? 0) >= 2
 
-  const distributableProducts = useMemo(
-    () => stockOverview?.products.filter((product) => product.wb_total > 0) ?? [],
-    [stockOverview],
-  )
+  const distributableProducts = useMemo(() => {
+    if (!stockOverview || !fromWh) return []
+    return stockOverview.products.filter(
+      (product) => crmQtyOnWarehouse(product, Number(fromWh)) > 0,
+    )
+  }, [stockOverview, fromWh])
 
   const allDistributableSelected = useMemo(() => {
     if (distributableProducts.length === 0) return false
@@ -120,6 +133,7 @@ export function WarehouseHubPage() {
   const [importWarehouseId, setImportWarehouseId] = useState<number | ''>('')
   const [pushWarehouseId, setPushWarehouseId] = useState<number | ''>('')
   const [importFile, setImportFile] = useState<File | null>(null)
+  const [importMode, setImportMode] = useState<StockImportMode>('increment')
   const [stockImportPreview, setStockImportPreview] = useState<StockImportPreview | null>(null)
   const [stockImportResult, setStockImportResult] = useState<StockImportResult | null>(null)
 
@@ -238,20 +252,28 @@ export function WarehouseHubPage() {
     })
   }
 
-  async function handleStockImportPreview() {
+  async function handleStockImportPreview(mode: StockImportMode) {
     if (!sellerId || !importFile || !importWarehouseId) return
+    setImportMode(mode)
     setLoading(true)
     setError('')
     setSuccess('')
     setStockImportResult(null)
     setStockImportPreview(null)
     try {
-      const data = await previewStockImport(Number(sellerId), Number(importWarehouseId), importFile)
+      const data = await previewStockImport(
+        Number(sellerId),
+        Number(importWarehouseId),
+        importFile,
+        mode,
+      )
       setStockImportPreview(data)
       const totals = data.totals
       let msg = `В файле: ${totals.file_barcodes} баркодов, ${totals.file_units} шт.`
       if (totals.to_apply > 0) {
-        msg += `. К загрузке: ${totals.to_apply} баркодов (+${totals.add_units} шт.)`
+        msg += mode === 'increment'
+          ? `. К загрузке: ${totals.to_apply} баркодов (+${totals.add_units} шт.)`
+          : `. К установке: ${totals.to_apply} баркодов (${totals.add_units} шт. из файла)`
       }
       if (totals.skipped_unknown > 0) {
         msg += `. Не в каталоге WB: ${totals.skipped_unknown} баркодов (${totals.skipped_units} шт.)`
@@ -294,6 +316,7 @@ export function WarehouseHubPage() {
         Number(sellerId),
         Number(importWarehouseId),
         stockImportPreview.rows,
+        importMode,
       )
       setStockImportResult(result)
       const message = buildImportResultMessage(result)
@@ -399,12 +422,15 @@ export function WarehouseHubPage() {
   }
 
   async function runDistributeEvenly(productIds?: number[]) {
-    if (!sellerId || !canDistributeEvenly) return
+    if (!sellerId || !canDistributeEvenly || !fromWh) {
+      setError('Выберите склад «откуда» для распределения')
+      return
+    }
     setLoading(true)
     setError('')
     setSuccess('')
     try {
-      const result = await distributeStockEvenly(Number(sellerId), productIds)
+      const result = await distributeStockEvenly(Number(sellerId), Number(fromWh), productIds)
       let msg = `Распределено: ${result.distributed}`
       if (result.skipped > 0) msg += `, пропущено: ${result.skipped}`
       if (result.errors.length > 0) msg += `, ошибок: ${result.errors.length}`
@@ -419,30 +445,47 @@ export function WarehouseHubPage() {
   }
 
   function handleDistributeProduct(product: StockOverviewProduct) {
-    if (!canDistributeEvenly || product.wb_total <= 0) return
+    if (!canDistributeEvenly || !fromWh) {
+      setError('Выберите склад «откуда» для распределения')
+      return
+    }
+    if (crmQtyOnWarehouse(product, Number(fromWh)) <= 0) return
     if (!window.confirm(
-      `Равномерно распределить ${product.wb_total} шт. баркода ${product.barcode} по всем складам?`,
+      `Равномерно распределить остаток CRM(«${fromWarehouseName}») − «Новые» `
+      + `для баркода ${product.barcode} по всем складам?`,
     )) return
     void runDistributeEvenly([product.product_id])
   }
 
   function handleDistributeSelected() {
     const ids = [...selectedDistributeIds]
+    if (!fromWh) {
+      setError('Выберите склад «откуда» для распределения')
+      return
+    }
     if (ids.length === 0) {
       setError('Отметьте товары галочкой')
       return
     }
-    if (!window.confirm(`Равномерно распределить ${ids.length} выбранных товаров?`)) return
+    if (!window.confirm(
+      `Равномерно распределить ${ids.length} выбранных товаров `
+      + `с «${fromWarehouseName}» (CRM − «Новые»)?`,
+    )) return
     void runDistributeEvenly(ids)
   }
 
   function handleDistributeAll() {
+    if (!fromWh) {
+      setError('Выберите склад «откуда» для распределения')
+      return
+    }
     if (!distributableProducts.length) {
-      setError('Нет товаров с остатком для распределения')
+      setError('Нет товаров с остатком на складе-источнике')
       return
     }
     if (!window.confirm(
-      `Равномерно распределить все ${distributableProducts.length} товаров с остатком?`,
+      `Равномерно распределить ${distributableProducts.length} товаров `
+      + `с «${fromWarehouseName}» (CRM − «Новые») по всем складам?`,
     )) return
     void runDistributeEvenly()
   }
@@ -831,8 +874,9 @@ export function WarehouseHubPage() {
       {tab === 'import' && !isOzon && (
         <section className="panel">
           <p className="whub-hint">
-            Excel в формате WB (баркод + количество). Остатки <strong>прибавляются</strong> к CRM и
-            выбранному FBS-складу в WB. Баркоды, которых нет в каталоге WB селлера, пропускаются.
+            Excel в формате WB (баркод + количество). Два режима: <strong>прибавить</strong> к текущим
+            остаткам WB или <strong>установить</strong> из файла как при обычной приёмке
+            (WB = из файла − заказы «Новые»). Баркоды вне каталога WB пропускаются.
           </p>
           <div className="whub-import-form">
             <label>
@@ -861,14 +905,24 @@ export function WarehouseHubPage() {
                 }}
               />
             </label>
-            <span {...hintWrapProps('Проверить Excel-файл перед применением — увидеть изменения CRM и WB.')}>
+            <span {...hintWrapProps('Предпросмотр: прибавить количество из файла к текущим остаткам CRM и WB.')}>
               <button
                 type="button"
                 className="btn btn--primary"
                 disabled={!sellerId || !importFile || !importWarehouseId || loading}
-                onClick={() => void handleStockImportPreview()}
+                onClick={() => void handleStockImportPreview('increment')}
               >
-                Предпросмотр
+                Предпросмотр: прибавить
+              </button>
+            </span>
+            <span {...hintWrapProps('Предпросмотр: установить остаток из файла, на WB минус заказы «Новые».')}>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={!sellerId || !importFile || !importWarehouseId || loading}
+                onClick={() => void handleStockImportPreview('set_minus_new')}
+              >
+                Предпросмотр: установить
               </button>
             </span>
           </div>
@@ -884,9 +938,16 @@ export function WarehouseHubPage() {
               </div>
 
               <div className="whub-stats">
+                <span>
+                  Режим: {stockImportPreview.mode === 'increment' ? 'прибавить' : 'установить − «Новые»'}
+                </span>
                 <span>Склад: {stockImportPreview.warehouse.name}</span>
                 <span>К применению: {stockImportPreview.totals.to_apply}</span>
-                <span>+{stockImportPreview.totals.add_units} шт.</span>
+                <span>
+                  {stockImportPreview.mode === 'increment'
+                    ? `+${stockImportPreview.totals.add_units} шт.`
+                    : `${stockImportPreview.totals.add_units} шт. из файла`}
+                </span>
                 <span>Новых товаров: {stockImportPreview.totals.new_products}</span>
                 {stockImportPreview.totals.skipped_unknown > 0 && (
                   <span className="whub-stat--warn">
@@ -916,7 +977,8 @@ export function WarehouseHubPage() {
                   <tr>
                     <th>Баркод</th>
                     <th>Товар</th>
-                    <th>+</th>
+                    <th>{stockImportPreview.mode === 'increment' ? '+' : 'из файла'}</th>
+                    <th>«Новые»</th>
                     <th>CRM</th>
                     <th>WB</th>
                     <th>Действие</th>
@@ -927,24 +989,35 @@ export function WarehouseHubPage() {
                     <tr key={row.barcode}>
                       <td><code>{row.barcode}</code></td>
                       <td>{row.title || '—'}</td>
-                      <td>+{row.add_quantity}</td>
+                      <td>
+                        {stockImportPreview.mode === 'increment' ? '+' : ''}
+                        {row.add_quantity}
+                      </td>
+                      <td>{row.reserved_new > 0 ? row.reserved_new : '—'}</td>
                       <td>{row.crm_before} → {row.crm_after}</td>
                       <td>{row.wb_before} → {row.wb_after}</td>
-                      <td>{row.will_create ? 'новая ячейка' : `яч. ${row.cell_number}`}</td>
+                      <td>
+                        {row.message || (row.will_create ? 'новая ячейка' : `яч. ${row.cell_number}`)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
               <div className="whub-actions">
-                <span {...hintWrapProps('Применить импорт — прибавить остатки к CRM и выбранному FBS-складу WB.')}>
+                <span {...hintWrapProps(
+                  stockImportPreview.mode === 'increment'
+                    ? 'Применить: прибавить остатки к CRM и выбранному FBS-складу WB.'
+                    : 'Применить: установить остаток из файла, на WB минус заказы «Новые».',
+                )}>
                   <button
                     type="button"
                     className="btn btn--primary"
                     disabled={loading || stockImportPreview.rows.length === 0}
                     onClick={() => void handleStockImportApply()}
                   >
-                    Применить ({stockImportPreview.rows.length})
+                    {stockImportPreview.mode === 'increment' ? 'Прибавить' : 'Установить'} (
+                    {stockImportPreview.rows.length})
                   </button>
                 </span>
               </div>
@@ -1008,8 +1081,8 @@ export function WarehouseHubPage() {
       {tab === 'transfer' && !isOzon && (
         <section className="panel">
           <p className="whub-hint">
-            Перенос остатков между FBS-складами WB. На складе «куда» количество суммируется.
-            Общий остаток баркода в CRM не меняется.
+            Перенос остатков между FBS-складами WB или равномерное распределение со склада «откуда»:
+            CRM(склад) − заказы «Новые»(склад), с предварительной сверкой CRM = WB + «Новые».
           </p>
 
           {stockOverview && canTransfer && (
@@ -1067,14 +1140,22 @@ export function WarehouseHubPage() {
             <span
               {...hintWrapProps(
                 !canDistributeEvenly
-                  ? 'Равномерно распределить остатки всех товаров. Нужно минимум 2 включённых FBS-склада.'
-                  : 'Равномерно распределить остатки всех товаров с остатком по всем FBS-складам.',
+                  ? 'Равномерно распределить остатки. Нужно минимум 2 FBS-склада.'
+                  : !fromWh
+                    ? 'Сначала выберите склад «откуда» для распределения.'
+                    : 'Распределить CRM(склад) − «Новые» по всем FBS-складам.',
               )}
             >
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={!sellerId || loading || !canDistributeEvenly || distributableProducts.length === 0}
+                disabled={
+                  !sellerId
+                  || loading
+                  || !canDistributeEvenly
+                  || !fromWh
+                  || distributableProducts.length === 0
+                }
                 onClick={handleDistributeAll}
               >
                 Распределить все
@@ -1084,13 +1165,21 @@ export function WarehouseHubPage() {
               {...hintWrapProps(
                 !canDistributeEvenly
                   ? 'Распределить остатки отмеченных товаров. Нужно минимум 2 FBS-склада.'
-                  : 'Равномерно распределить остатки отмеченных галочкой товаров.',
+                  : !fromWh
+                    ? 'Сначала выберите склад «откуда».'
+                    : 'Распределить CRM(склад) − «Новые» для отмеченных товаров.',
               )}
             >
               <button
                 type="button"
                 className="btn btn--secondary"
-                disabled={!sellerId || loading || !canDistributeEvenly || selectedDistributeIds.size === 0}
+                disabled={
+                  !sellerId
+                  || loading
+                  || !canDistributeEvenly
+                  || !fromWh
+                  || selectedDistributeIds.size === 0
+                }
                 onClick={handleDistributeSelected}
               >
                 Распределить выбранные ({selectedDistributeIds.size})
@@ -1173,13 +1262,15 @@ export function WarehouseHubPage() {
                 </tr>
               </thead>
               <tbody>
-                {stockOverview.products.map((product) => (
+                {stockOverview.products.map((product) => {
+                  const sourceQty = fromWh ? crmQtyOnWarehouse(product, Number(fromWh)) : 0
+                  return (
                   <tr key={product.product_id}>
                     <td className="whub-table__check">
                       <input
                         type="checkbox"
                         checked={selectedDistributeIds.has(product.product_id)}
-                        disabled={!canDistributeEvenly || product.wb_total <= 0}
+                        disabled={!canDistributeEvenly || !fromWh || sourceQty <= 0}
                         onChange={(e) => toggleDistributeSelection(product.product_id, e.target.checked)}
                         aria-label={`Выбрать ${product.barcode}`}
                       />
@@ -1202,15 +1293,17 @@ export function WarehouseHubPage() {
                         {...hintWrapProps(
                           !canDistributeEvenly
                             ? 'Распределить остаток поровну. Нужно минимум 2 FBS-склада.'
-                            : product.wb_total <= 0
-                              ? 'У товара нулевой остаток — распределить нечего.'
-                              : `Равномерно распределить ${product.wb_total} шт. по всем FBS-складам.`,
+                            : !fromWh
+                              ? 'Сначала выберите склад «откуда».'
+                              : sourceQty <= 0
+                                ? 'На складе-источнике нет остатка.'
+                                : `Распределить CRM(«${fromWarehouseName}») − «Новые» по всем складам.`,
                         )}
                       >
                         <button
                           type="button"
                           className="btn btn--small btn--secondary"
-                          disabled={!canDistributeEvenly || product.wb_total <= 0 || loading}
+                          disabled={!canDistributeEvenly || !fromWh || sourceQty <= 0 || loading}
                           onClick={() => handleDistributeProduct(product)}
                         >
                           Поровну
@@ -1231,7 +1324,8 @@ export function WarehouseHubPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           )}

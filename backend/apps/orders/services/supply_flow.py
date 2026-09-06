@@ -149,7 +149,102 @@ def fetch_seller_shipping_points(
       f"Не удалось загрузить пункты отгрузки WB: {exc}",
       code="wb_shipping_points_failed",
     ) from exc
+  points = _merge_pinned_shipping_points(client, resolved_cargo, points)
   return points, resolved_cargo
+
+
+def _normalize_text(value: object) -> str:
+  return str(value or "").strip().lower().replace("ё", "е")
+
+
+def _point_supports_cargo(point: dict, cargo_type: int) -> bool:
+  cargo_types = point.get("cargoTypes") or []
+  if not cargo_types:
+    return True
+  return int(cargo_type) in {int(item) for item in cargo_types}
+
+
+def _matches_veshki_lipkinskoe(point: dict) -> bool:
+  if _normalize_text(point.get("officeType")) != "sc":
+    return False
+  haystack = " ".join(
+    _normalize_text(point.get(key))
+    for key in ("name", "address", "city")
+  )
+  return "липкин" in haystack and "вешки" in haystack
+
+
+def _matches_pushkino_sc(point: dict) -> bool:
+  if _normalize_text(point.get("officeType")) != "sc":
+    return False
+  haystack = " ".join(
+    _normalize_text(point.get(key))
+    for key in ("name", "address", "city")
+  )
+  return "пушкино" in haystack
+
+
+PINNED_SHIPPING_POINT_MATCHERS = (
+  ("veshki_lipkinskoe", _matches_veshki_lipkinskoe),
+  ("pushkino_sc", _matches_pushkino_sc),
+)
+
+PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = (
+  "Москва",
+  "Московская область",
+  "Мытищи",
+  "Пушкино",
+)
+
+
+def _merge_pinned_shipping_points(
+  client,
+  cargo_type: int,
+  points: list[dict],
+) -> list[dict]:
+  """Всегда добавить в список СЦ Вешки (Липкинское) и СЦ Пушкино."""
+  merged = list(points or [])
+  known_ids = {
+    int(point["id"])
+    for point in merged
+    if isinstance(point, dict) and point.get("id") is not None
+  }
+  found_keys: set[str] = set()
+  for point in merged:
+    if not isinstance(point, dict):
+      continue
+    for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
+      if key not in found_keys and matcher(point):
+        found_keys.add(key)
+
+  if len(found_keys) == len(PINNED_SHIPPING_POINT_MATCHERS):
+    return merged
+
+  pool: list[dict] = []
+  for fetch_city in PINNED_SHIPPING_POINT_FETCH_CITIES:
+    try:
+      pool.extend(client.fetch_shipping_points(fetch_city, cargo_type))
+    except WBApiError:
+      continue
+
+  for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
+    if key in found_keys:
+      continue
+    for point in pool:
+      if not isinstance(point, dict) or point.get("id") is None:
+        continue
+      if not matcher(point) or not _point_supports_cargo(point, cargo_type):
+        continue
+      point_id = int(point["id"])
+      if point_id in known_ids:
+        found_keys.add(key)
+        break
+      merged.append(point)
+      known_ids.add(point_id)
+      found_keys.add(key)
+      break
+
+  return merged
 
 
 def _apply_shipping_method(
@@ -659,6 +754,21 @@ def count_new_orders_for_barcode(seller: Seller, barcode: str) -> int:
   if not barcode:
     return 0
   return new_stage_orders_queryset(seller).filter(barcode=barcode).count()
+
+
+def count_new_orders_for_barcode_on_warehouse(
+  seller: Seller,
+  barcode: str,
+  wb_warehouse_id: int | None,
+) -> int:
+  """Заказы «Новые» по баркоду на конкретном FBS-складе WB."""
+  barcode = (barcode or "").strip()
+  if not barcode or not wb_warehouse_id:
+    return 0
+  return new_stage_orders_queryset(seller).filter(
+    barcode=barcode,
+    wb_warehouse_id=wb_warehouse_id,
+  ).count()
 
 
 def count_orders_ready_for_assembly(seller: Seller) -> int:

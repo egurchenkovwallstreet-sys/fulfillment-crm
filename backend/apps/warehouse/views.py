@@ -779,6 +779,7 @@ class StockDistributeView(APIView):
     try:
       result = distribute_stocks_evenly_bulk(
         seller,
+        from_warehouse_id=serializer.validated_data["from_warehouse_id"],
         product_ids=product_ids,
         user=request.user,
       )
@@ -795,6 +796,7 @@ class StockFilePreviewView(APIView):
     seller = _require_seller(request, seller_id)
     upload = request.FILES.get("file")
     warehouse_id = request.data.get("warehouse_id")
+    mode = request.data.get("mode") or "increment"
     if not upload:
       return Response({"detail": "Загрузите файл Excel"}, status=status.HTTP_400_BAD_REQUEST)
     if not warehouse_id:
@@ -809,6 +811,7 @@ class StockFilePreviewView(APIView):
         seller,
         warehouse_id=warehouse_id,
         file_bytes=upload.read(),
+        mode=mode,
       )
     except StockFileImportError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -832,6 +835,7 @@ class StockFileApplyView(APIView):
         seller,
         warehouse_id=data["warehouse_id"],
         rows=data["rows"],
+        mode=data.get("mode") or "increment",
         user=request.user,
       )
     except StockFileImportError as exc:

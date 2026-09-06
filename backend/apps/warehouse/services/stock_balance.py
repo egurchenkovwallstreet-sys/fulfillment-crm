@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from apps.integrations.marketplace import OZON, WB, normalize_marketplace
-from apps.orders.services.supply_flow import count_new_orders_for_barcode
-from apps.sellers.models import Seller
+from apps.orders.services.supply_flow import (
+  count_new_orders_for_barcode,
+  count_new_orders_for_barcode_on_warehouse,
+)
+from apps.sellers.models import Seller, SellerWarehouse
 
 
 def count_reserved_new_orders(
@@ -16,6 +19,23 @@ def count_reserved_new_orders(
   if mp == OZON:
     return 0
   return count_new_orders_for_barcode(seller, barcode.strip())
+
+
+def count_reserved_new_orders_on_warehouse(
+  seller: Seller,
+  barcode: str,
+  warehouse: SellerWarehouse,
+  *,
+  marketplace: str = WB,
+) -> int:
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    return 0
+  return count_new_orders_for_barcode_on_warehouse(
+    seller,
+    barcode.strip(),
+    warehouse.wb_warehouse_id,
+  )
 
 
 def compute_wb_amount_from_crm(crm_quantity: int, reserved_new: int) -> tuple[int, bool]:

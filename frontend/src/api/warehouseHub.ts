@@ -51,6 +51,8 @@ export type OnboardingPreview = {
   items: OnboardingItem[]
 }
 
+export type StockImportMode = 'increment' | 'set_minus_new'
+
 export type StockImportPreviewRow = {
   barcode: string
   add_quantity: number
@@ -60,6 +62,7 @@ export type StockImportPreviewRow = {
   crm_after: number
   wb_before: number
   wb_after: number
+  reserved_new: number
   will_create: boolean
   cell_number: string
   message: string
@@ -67,6 +70,7 @@ export type StockImportPreviewRow = {
 
 export type StockImportPreview = {
   success: boolean
+  mode: StockImportMode
   warehouse: { id: number; wb_warehouse_id: number; name: string }
   rows: StockImportPreviewRow[]
   skipped_unknown: string[]
@@ -113,6 +117,7 @@ export type StockImportSummary = {
 export type StockImportResult = {
   success: boolean
   ok: boolean
+  mode?: StockImportMode
   applied: number
   created_products: number
   verified: number
@@ -132,6 +137,8 @@ export type StockWarehouseMeta = {
 export type StockWarehouseQty = {
   warehouse_id: number
   quantity: number
+  wb_quantity?: number
+  crm_quantity?: number
 }
 
 export type StockOverviewProduct = {
@@ -319,14 +326,19 @@ export type StockDistributeResult = {
   errors: Array<{ product_id: number; barcode: string; error: string }>
 }
 
-export function distributeStockEvenly(sellerId: number, productIds?: number[]) {
+export function distributeStockEvenly(
+  sellerId: number,
+  fromWarehouseId: number,
+  productIds?: number[],
+) {
   return apiFetch<StockDistributeResult>(
     `/api/warehouse/sellers/${sellerId}/stock-distribute/`,
     {
       method: 'POST',
-      body: JSON.stringify(
-        productIds && productIds.length > 0 ? { product_ids: productIds } : {},
-      ),
+      body: JSON.stringify({
+        from_warehouse_id: fromWarehouseId,
+        ...(productIds && productIds.length > 0 ? { product_ids: productIds } : {}),
+      }),
     },
   )
 }
@@ -335,10 +347,12 @@ export async function previewStockImport(
   sellerId: number,
   warehouseId: number,
   file: File,
+  mode: StockImportMode = 'increment',
 ): Promise<StockImportPreview> {
   const form = new FormData()
   form.append('file', file)
   form.append('warehouse_id', String(warehouseId))
+  form.append('mode', mode)
 
   const headers = new Headers()
   const token = (await import('./tokens')).getAccessToken()
@@ -366,10 +380,11 @@ export function applyStockImport(
   sellerId: number,
   warehouseId: number,
   rows: StockImportPreviewRow[],
+  mode: StockImportMode = 'increment',
 ) {
   return apiFetch<StockImportResult>(`/api/warehouse/stock-import/${sellerId}/apply/`, {
     method: 'POST',
-    body: JSON.stringify({ warehouse_id: warehouseId, rows }),
+    body: JSON.stringify({ warehouse_id: warehouseId, rows, mode }),
   })
 }
 

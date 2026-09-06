@@ -1,4 +1,4 @@
-"""Импорт остатков из Excel (формат WB): баркод + количество, прибавление к CRM и WB."""
+"""Импорт остатков из Excel (формат WB): баркод + количество."""
 from __future__ import annotations
 
 import re
@@ -12,12 +12,17 @@ from apps.sellers.models import Seller
 from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
 from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
+from apps.warehouse.services.stock_balance import (
+  compute_wb_amount_from_crm,
+  count_reserved_new_orders,
+)
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
   fetch_wb_stock_for_barcode,
   fetch_wb_stocks_for_warehouses,
   get_seller_warehouse,
   increment_product_warehouse_stock,
+  push_wb_stock_absolute,
   push_wb_stock_increment,
 )
 
@@ -29,6 +34,11 @@ except ImportError:  # pragma: no cover
 
 class StockFileImportError(Exception):
   pass
+
+
+STOCK_IMPORT_MODE_INCREMENT = "increment"
+STOCK_IMPORT_MODE_SET_MINUS_NEW = "set_minus_new"
+STOCK_IMPORT_MODES = {STOCK_IMPORT_MODE_INCREMENT, STOCK_IMPORT_MODE_SET_MINUS_NEW}
 
 
 BARCODE_HEADERS = {
@@ -55,6 +65,7 @@ class StockImportPreviewRow:
   crm_after: int
   wb_before: int
   wb_after: int
+  reserved_new: int
   will_create: bool
   cell_number: str
   message: str
@@ -144,12 +155,52 @@ def _get_crm_warehouse_qty(product: Product | None, warehouse) -> int:
   return int(pws.quantity) if pws else 0
 
 
+def _normalize_import_mode(mode: str | None) -> str:
+  normalized = (mode or STOCK_IMPORT_MODE_INCREMENT).strip()
+  if normalized not in STOCK_IMPORT_MODES:
+    raise StockFileImportError(
+      f"Неизвестный режим импорта: {normalized}. "
+      f"Доступны: {STOCK_IMPORT_MODE_INCREMENT}, {STOCK_IMPORT_MODE_SET_MINUS_NEW}",
+    )
+  return normalized
+
+
+def _preview_row_values(
+  *,
+  mode: str,
+  seller: Seller,
+  row: ParsedStockRow,
+  product: Product | None,
+  crm_wh_before: int,
+  wb_before: int,
+) -> tuple[int, int, int, str]:
+  reserved_new = 0
+  if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+    reserved_new = count_reserved_new_orders(seller, row.barcode)
+    crm_after = row.add_quantity
+    wb_after, restock = compute_wb_amount_from_crm(row.add_quantity, reserved_new)
+    message = ""
+    if restock:
+      message = f"«Новых» ({reserved_new}) больше остатка из файла — на WB будет 0"
+    return crm_after, wb_after, reserved_new, message
+
+  crm_before = product.quantity if product else 0
+  return (
+    crm_before + row.add_quantity,
+    wb_before + row.add_quantity,
+    reserved_new,
+    "",
+  )
+
+
 def build_stock_import_preview(
   seller: Seller,
   *,
   warehouse_id: int,
   file_bytes: bytes,
+  mode: str = STOCK_IMPORT_MODE_INCREMENT,
 ) -> dict:
+  mode = _normalize_import_mode(mode)
   warehouse = get_seller_warehouse(seller, warehouse_id)
   parsed_rows = parse_stock_excel(file_bytes)
   file_units = sum(row.add_quantity for row in parsed_rows)
@@ -184,7 +235,18 @@ def build_stock_import_preview(
 
     product = crm_products.get(row.barcode)
     crm_before = product.quantity if product else 0
+    crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
     wb_before = int((wb_stock_map.get(row.barcode) or {}).get("total") or 0)
+    crm_after, wb_after, reserved_new, message = _preview_row_values(
+      mode=mode,
+      seller=seller,
+      row=row,
+      product=product,
+      crm_wh_before=crm_wh_before,
+      wb_before=wb_before,
+    )
+    if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+      crm_before = crm_wh_before
 
     preview_rows.append(
       StockImportPreviewRow(
@@ -193,16 +255,18 @@ def build_stock_import_preview(
         status="ok",
         title=catalog_item.title,
         crm_before=crm_before,
-        crm_after=crm_before + row.add_quantity,
+        crm_after=crm_after,
         wb_before=wb_before,
-        wb_after=wb_before + row.add_quantity,
+        wb_after=wb_after,
+        reserved_new=reserved_new,
         will_create=product is None,
         cell_number=product.cell.number if product else "",
-        message="",
+        message=message,
       ),
     )
 
   return {
+    "mode": mode,
     "warehouse": {
       "id": warehouse.id,
       "wb_warehouse_id": warehouse.wb_warehouse_id,
@@ -233,6 +297,7 @@ def _serialize_preview_row(row: StockImportPreviewRow) -> dict:
     "crm_after": row.crm_after,
     "wb_before": row.wb_before,
     "wb_after": row.wb_after,
+    "reserved_new": row.reserved_new,
     "will_create": row.will_create,
     "cell_number": row.cell_number,
     "message": row.message,
@@ -260,8 +325,10 @@ def apply_stock_import(
   *,
   warehouse_id: int,
   rows: list[dict],
+  mode: str = STOCK_IMPORT_MODE_INCREMENT,
   user=None,
 ) -> dict:
+  mode = _normalize_import_mode(mode)
   warehouse = get_seller_warehouse(seller, warehouse_id)
   if not rows:
     raise StockFileImportError("Нет строк для применения")
@@ -324,9 +391,18 @@ def apply_stock_import(
     crm_before = product.quantity if product else 0
     wb_before = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
     crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
-    crm_expected = crm_before + add_qty
-    wb_expected = wb_before + add_qty
-    crm_wh_expected = crm_wh_before + add_qty
+    reserved_new = count_reserved_new_orders(seller, barcode) if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else 0
+
+    if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+      crm_expected = add_qty
+      wb_expected, _restock = compute_wb_amount_from_crm(add_qty, reserved_new)
+      crm_wh_expected = add_qty
+      crm_total_expected = (crm_before - crm_wh_before) + add_qty
+    else:
+      crm_expected = crm_before + add_qty
+      wb_expected = wb_before + add_qty
+      crm_wh_expected = crm_wh_before + add_qty
+      crm_total_expected = crm_expected
 
     was_crm_units += crm_before
     was_wb_units += wb_before
@@ -334,47 +410,84 @@ def apply_stock_import(
     savepoint = transaction.savepoint()
     created_here = False
     try:
-      if product:
-        product.quantity += add_qty
-        product.save(update_fields=["quantity", "updated_at"])
-        increment_product_warehouse_stock(product, warehouse, add_qty)
+      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+        if product:
+          product.quantity = crm_total_expected
+          product.save(update_fields=["quantity", "updated_at"])
+          ProductWarehouseStock.objects.update_or_create(
+            product=product,
+            seller_warehouse=warehouse,
+            defaults={"quantity": add_qty},
+          )
+        else:
+          cell = create_cell_with_next_number(seller)
+          product = Product.objects.create(
+            seller=seller,
+            barcode=barcode,
+            name=catalog_item.title,
+            cell=cell,
+            quantity=add_qty,
+            requires_marking=catalog_item.requires_marking,
+            wb_nm_id=catalog_item.wb_nm_id,
+            vendor_code=catalog_item.vendor_code,
+            tech_size=catalog_item.tech_size,
+            wb_size=catalog_item.wb_size,
+            photo_url=catalog_item.photo_url,
+          )
+          refresh_cell_occupied(cell)
+          ProductWarehouseStock.objects.update_or_create(
+            product=product,
+            seller_warehouse=warehouse,
+            defaults={"quantity": add_qty},
+          )
+          created_here = True
+        push_wb_stock_absolute(seller, warehouse, barcode, wb_expected)
       else:
-        cell = create_cell_with_next_number(seller)
-        product = Product.objects.create(
-          seller=seller,
-          barcode=barcode,
-          name=catalog_item.title,
-          cell=cell,
-          quantity=add_qty,
-          requires_marking=catalog_item.requires_marking,
-          wb_nm_id=catalog_item.wb_nm_id,
-          vendor_code=catalog_item.vendor_code,
-          tech_size=catalog_item.tech_size,
-          wb_size=catalog_item.wb_size,
-          photo_url=catalog_item.photo_url,
-        )
-        refresh_cell_occupied(cell)
-        increment_product_warehouse_stock(product, warehouse, add_qty)
-        created_here = True
-
-      push_wb_stock_increment(seller, warehouse, barcode, add_qty)
+        if product:
+          product.quantity += add_qty
+          product.save(update_fields=["quantity", "updated_at"])
+          increment_product_warehouse_stock(product, warehouse, add_qty)
+        else:
+          cell = create_cell_with_next_number(seller)
+          product = Product.objects.create(
+            seller=seller,
+            barcode=barcode,
+            name=catalog_item.title,
+            cell=cell,
+            quantity=add_qty,
+            requires_marking=catalog_item.requires_marking,
+            wb_nm_id=catalog_item.wb_nm_id,
+            vendor_code=catalog_item.vendor_code,
+            tech_size=catalog_item.tech_size,
+            wb_size=catalog_item.wb_size,
+            photo_url=catalog_item.photo_url,
+          )
+          refresh_cell_occupied(cell)
+          increment_product_warehouse_stock(product, warehouse, add_qty)
+          created_here = True
+        push_wb_stock_increment(seller, warehouse, barcode, add_qty)
 
       product.refresh_from_db()
       crm_actual = product.quantity
       crm_wh_actual = _get_crm_warehouse_qty(product, warehouse)
       wb_actual = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
 
-      crm_ok = crm_actual == crm_expected and crm_wh_actual == crm_wh_expected
+      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+        crm_ok = crm_actual == crm_total_expected and crm_wh_actual == crm_wh_expected
+      else:
+        crm_ok = crm_actual == crm_expected and crm_wh_actual == crm_wh_expected
       wb_ok = wb_actual == wb_expected
 
       if not crm_ok and not wb_ok:
         raise StockFileImportError(
-          f"CRM: ожидалось {crm_expected}, получилось {crm_actual}; "
+          f"CRM: ожидалось {crm_total_expected if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else crm_expected}, "
+          f"получилось {crm_actual}; "
           f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
         )
       if not crm_ok:
         raise StockFileImportError(
-          f"CRM: ожидалось {crm_expected} (склад {crm_wh_expected}), "
+          f"CRM: ожидалось {crm_total_expected if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else crm_expected} "
+          f"(склад {crm_wh_expected}), "
           f"получилось {crm_actual} (склад {crm_wh_actual})",
         )
       if not wb_ok:
@@ -382,14 +495,24 @@ def apply_stock_import(
           f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
         )
 
+      mode_label = (
+        "установка из Excel"
+        if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
+        else f"Импорт Excel +{add_qty} шт."
+      )
       StockOperation.objects.create(
         product=product,
         operation_type=StockOperation.OperationType.INTAKE,
         quantity=add_qty,
         performed_by=user,
         comment=(
-          f"Импорт Excel +{add_qty} шт., склад WB "
+          f"{mode_label}, склад WB "
           f"{warehouse.name or warehouse.wb_warehouse_id}"
+          + (
+            f", «Новые» −{reserved_new}, WB={wb_expected}"
+            if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
+            else ""
+          )
         ),
       )
       transaction.savepoint_commit(savepoint)
@@ -451,10 +574,11 @@ def apply_stock_import(
     seller=seller,
     action_type=AuditLog.ActionType.INTAKE,
     message=(
-      f"Импорт остатков Excel: {applied}/{file_barcodes} баркодов, "
+      f"Импорт остатков Excel ({mode}): {applied}/{file_barcodes} баркодов, "
       f"+{added_units} шт., сверка {'OK' if all_ok else 'ОШИБКИ'}"
     ),
     details={
+      "mode": mode,
       "warehouse_id": warehouse.id,
       "summary": summary,
       "applied": applied,
@@ -472,6 +596,7 @@ def apply_stock_import(
 
   return {
     "ok": all_ok,
+    "mode": mode,
     "applied": applied,
     "created_products": created_products,
     "verified": verified,

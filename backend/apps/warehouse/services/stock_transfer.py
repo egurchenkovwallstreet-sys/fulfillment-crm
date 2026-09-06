@@ -6,10 +6,12 @@ from django.db import transaction
 from apps.integrations.models import AuditLog
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
+from apps.warehouse.services.stock_balance import count_reserved_new_orders_on_warehouse
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
   fetch_summed_wb_stocks,
   get_enabled_seller_warehouses,
+  get_seller_warehouse,
   set_wb_stock_absolute,
   transfer_wb_stock_between_warehouses,
 )
@@ -43,22 +45,28 @@ def build_stock_overview(seller: Seller) -> dict:
   ]
 
   rows = []
+  pws_map: dict[tuple[int, int], int] = {}
+  for pws in ProductWarehouseStock.objects.filter(
+    product__in=products,
+    seller_warehouse__in=warehouses,
+  ):
+    pws_map[(pws.product_id, pws.seller_warehouse_id)] = int(pws.quantity)
+
   for product in products:
     stock = stock_map.get(product.barcode, {"total": 0, "by_warehouse": {}})
     by_wh = []
     for wh in warehouses:
-      qty = int((stock.get("by_warehouse") or {}).get(wh.id, 0))
-      by_wh.append({"warehouse_id": wh.id, "quantity": qty})
-      ProductWarehouseStock.objects.update_or_create(
-        product=product,
-        seller_warehouse=wh,
-        defaults={"quantity": qty},
-      )
+      wb_qty = int((stock.get("by_warehouse") or {}).get(wh.id, 0))
+      crm_qty = pws_map.get((product.id, wh.id), 0)
+      by_wh.append({
+        "warehouse_id": wh.id,
+        "quantity": wb_qty,
+        "wb_quantity": wb_qty,
+        "crm_quantity": crm_qty,
+      })
 
-    total = int(stock.get("total") or 0)
-    if product.quantity != total:
-      product.quantity = total
-      product.save(update_fields=["quantity", "updated_at"])
+    wb_total = int(stock.get("total") or 0)
+    crm_total = int(product.quantity)
 
     rows.append({
       "product_id": product.id,
@@ -68,8 +76,8 @@ def build_stock_overview(seller: Seller) -> dict:
       "photo_url": product.photo_url,
       "wb_size": product.wb_size,
       "tech_size": product.tech_size,
-      "crm_quantity": total,
-      "wb_total": total,
+      "crm_quantity": crm_total,
+      "wb_total": wb_total,
       "by_warehouse": by_wh,
     })
 
@@ -86,39 +94,102 @@ def even_split_quantity(total: int, parts: int) -> list[int]:
   return [base + (1 if index < remainder else 0) for index in range(parts)]
 
 
+def _get_crm_warehouse_qty(product: Product, warehouse_id: int) -> int:
+  pws = ProductWarehouseStock.objects.filter(
+    product=product,
+    seller_warehouse_id=warehouse_id,
+  ).first()
+  return int(pws.quantity) if pws else 0
+
+
+def verify_source_warehouse_balance(
+  seller: Seller,
+  product: Product,
+  *,
+  from_warehouse_id: int,
+  stock_map: dict | None = None,
+) -> dict:
+  """Сверка: CRM(склад) == WB(склад) + заказы «Новые» на этом складе."""
+  from_wh = get_seller_warehouse(seller, from_warehouse_id)
+  if stock_map is None:
+    stock_map = fetch_summed_wb_stocks(seller, [product.barcode])
+  data = stock_map.get(product.barcode, {"by_warehouse": {}})
+  wb_qty = int((data.get("by_warehouse") or {}).get(from_wh.id, 0))
+  crm_qty = _get_crm_warehouse_qty(product, from_wh.id)
+  reserved_new = count_reserved_new_orders_on_warehouse(
+    seller,
+    product.barcode,
+    from_wh,
+  )
+  crm_expected = wb_qty + reserved_new
+  ok = crm_qty == crm_expected
+  return {
+    "ok": ok,
+    "warehouse_id": from_wh.id,
+    "warehouse_name": from_wh.name,
+    "crm_qty": crm_qty,
+    "wb_qty": wb_qty,
+    "reserved_new": reserved_new,
+    "crm_expected": crm_expected,
+    "distributable_qty": max(0, crm_qty - reserved_new),
+  }
+
+
 def distribute_product_stock_evenly(
   seller: Seller,
   product: Product,
   *,
+  from_warehouse_id: int,
   warehouses: list | None = None,
   user=None,
+  stock_map: dict | None = None,
 ) -> dict:
-  """Равномерно распределить остаток баркода по включённым FBS-складам WB."""
+  """Равномерно распределить остаток CRM(склад) − «Новые»(склад) по FBS-складам."""
   warehouses = warehouses or get_enabled_seller_warehouses(seller)
   if len(warehouses) < 2:
     raise StockTransferError("Нужно минимум 2 включённых FBS-склада для распределения")
 
-  stock_map = fetch_summed_wb_stocks(seller, [product.barcode])
-  data = stock_map.get(product.barcode, {"total": 0, "by_warehouse": {}})
-  total = int(data.get("total") or 0)
-  if total <= 0:
+  from_wh = get_seller_warehouse(seller, from_warehouse_id)
+  if from_wh.id not in {wh.id for wh in warehouses}:
+    raise StockTransferError("Склад-источник не входит в список включённых FBS-складов")
+
+  balance = verify_source_warehouse_balance(
+    seller,
+    product,
+    from_warehouse_id=from_warehouse_id,
+    stock_map=stock_map,
+  )
+  if not balance["ok"]:
+    raise StockTransferError(
+      f"Баркод {product.barcode}: CRM на «{balance['warehouse_name']}» = "
+      f"{balance['crm_qty']}, ожидалось WB({balance['wb_qty']}) + "
+      f"«Новые»({balance['reserved_new']}) = {balance['crm_expected']}",
+    )
+
+  distributable = int(balance["distributable_qty"])
+  if distributable <= 0:
     return {
       "skipped": True,
-      "reason": "zero_total",
+      "reason": "zero_distributable",
       "product_id": product.id,
       "barcode": product.barcode,
       "total": 0,
+      "balance": balance,
     }
 
+  if stock_map is None:
+    stock_map = fetch_summed_wb_stocks(seller, [product.barcode])
+  data = stock_map.get(product.barcode, {"by_warehouse": {}})
   by_wh = {int(key): int(value) for key, value in (data.get("by_warehouse") or {}).items()}
-  targets = even_split_quantity(total, len(warehouses))
+  targets = even_split_quantity(distributable, len(warehouses))
   if all(by_wh.get(wh.id, 0) == target for wh, target in zip(warehouses, targets, strict=True)):
     return {
       "skipped": True,
       "reason": "already_even",
       "product_id": product.id,
       "barcode": product.barcode,
-      "total": total,
+      "total": distributable,
+      "balance": balance,
       "by_warehouse": [
         {"warehouse_id": wh.id, "quantity": by_wh.get(wh.id, 0)}
         for wh in warehouses
@@ -133,7 +204,7 @@ def distribute_product_stock_evenly(
         set_wb_stock_absolute(seller, wh, product.barcode, target)
       except WBStockError as exc:
         raise StockTransferError(str(exc)) from exc
-    pws, _ = ProductWarehouseStock.objects.update_or_create(
+    ProductWarehouseStock.objects.update_or_create(
       product=product,
       seller_warehouse=wh,
       defaults={"quantity": target},
@@ -145,7 +216,7 @@ def distribute_product_stock_evenly(
       "new": target,
     })
 
-  product.quantity = total
+  product.quantity = distributable
   product.save(update_fields=["quantity", "updated_at"])
 
   StockOperation.objects.create(
@@ -154,7 +225,8 @@ def distribute_product_stock_evenly(
     quantity=0,
     performed_by=user,
     comment=(
-      f"Равномерное распределение WB: {total} шт. на {len(warehouses)} складов "
+      f"Равномерное распределение с «{from_wh.name}»: {distributable} шт. "
+      f"(CRM − «Новые» {balance['reserved_new']}) на {len(warehouses)} складов "
       f"({', '.join(str(row['new']) for row in warehouse_results)})"
     ),
   )
@@ -163,15 +235,19 @@ def distribute_product_stock_evenly(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.INTAKE,
-    message=f"Равномерное распределение {product.barcode}: {total} шт.",
-    details={"total": total, "warehouses": warehouse_results},
+    message=(
+      f"Равномерное распределение {product.barcode}: {distributable} шт. "
+      f"со склада «{from_wh.name}»"
+    ),
+    details={"total": distributable, "balance": balance, "warehouses": warehouse_results},
   )
 
   return {
     "skipped": False,
     "product_id": product.id,
     "barcode": product.barcode,
-    "total": total,
+    "total": distributable,
+    "balance": balance,
     "by_warehouse": warehouse_results,
   }
 
@@ -180,6 +256,7 @@ def distribute_product_stock_evenly(
 def distribute_stocks_evenly_bulk(
   seller: Seller,
   *,
+  from_warehouse_id: int,
   product_ids: list[int] | None = None,
   user=None,
 ) -> dict:
@@ -187,24 +264,31 @@ def distribute_stocks_evenly_bulk(
   if len(warehouses) < 2:
     raise StockTransferError("Нужно минимум 2 включённых FBS-склада для распределения")
 
+  get_seller_warehouse(seller, from_warehouse_id)
+
   qs = Product.objects.filter(seller=seller).select_related("cell").order_by("cell__number")
   if product_ids is not None:
     qs = qs.filter(pk__in=product_ids)
     if not qs.exists():
       raise StockTransferError("Не найдены товары для распределения")
 
+  products = list(qs)
+  stock_map = fetch_summed_wb_stocks(seller, [product.barcode for product in products]) if products else {}
+
   distributed = 0
   skipped = 0
   results: list[dict] = []
   errors: list[dict] = []
 
-  for product in qs:
+  for product in products:
     try:
       result = distribute_product_stock_evenly(
         seller,
         product,
+        from_warehouse_id=from_warehouse_id,
         warehouses=warehouses,
         user=user,
+        stock_map=stock_map,
       )
       results.append(result)
       if result.get("skipped"):

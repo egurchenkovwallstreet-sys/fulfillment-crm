@@ -234,6 +234,7 @@ class StockTransferSerializer(serializers.Serializer):
 
 
 class StockDistributeSerializer(serializers.Serializer):
+  from_warehouse_id = serializers.IntegerField()
   product_ids = serializers.ListField(
     child=serializers.IntegerField(min_value=1),
     required=False,
@@ -258,6 +259,11 @@ class StockTransferBulkSerializer(serializers.Serializer):
 
 class StockFileApplySerializer(serializers.Serializer):
   warehouse_id = serializers.IntegerField()
+  mode = serializers.ChoiceField(
+    choices=["increment", "set_minus_new"],
+    default="increment",
+    required=False,
+  )
   rows = serializers.ListField(child=serializers.DictField(), min_length=1)
 
   def validate(self, attrs):
