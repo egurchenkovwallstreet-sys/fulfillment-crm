@@ -1,10 +1,40 @@
 import { Link } from 'react-router-dom'
-import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL, KIOSK_CHROME_INSTALLER_URL, KIOSK_CHROME_VBS_URL, buildCrmKioskPrintUrl } from '../constants/printAgent'
+import {
+  PRINT_AGENT_DOWNLOAD_URL,
+  PRINT_AGENT_INSTALLER_URL,
+  KIOSK_CHROME_INSTALLER_URL,
+  KIOSK_CHROME_VBS_URL,
+  KIOSK_CHROME_MANUAL_URL,
+  buildCrmKioskPrintUrl,
+  buildChromeKioskShortcutTarget,
+  buildChromeKioskShortcutSuffix,
+} from '../constants/printAgent'
 import { refreshPrintBridgeStatus } from '../utils/printService'
 import { isKioskPrintMode } from '../utils/printMode'
+import { copyToClipboard } from '../utils/copyToClipboard'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import { useEffect, useState } from 'react'
 import './PrintAgentPage.css'
+
+function CopyLine({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    await copyToClipboard(value)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="print-agent__copy-block">
+      <p className="print-agent__copy-label">{label}</p>
+      <pre className="print-agent__code">{value}</pre>
+      <button type="button" className="btn btn--secondary btn--sm" onClick={() => void handleCopy()}>
+        {copied ? 'Скопировано' : 'Копировать'}
+      </button>
+    </div>
+  )
+}
 
 export function PrintAgentPage() {
   const [bridgeOk, setBridgeOk] = useState<boolean | null>(null)
@@ -13,6 +43,8 @@ export function PrintAgentPage() {
   const [checking, setChecking] = useState(false)
   const kioskMode = isKioskPrintMode()
   const kioskUrl = buildCrmKioskPrintUrl()
+  const shortcutTarget = buildChromeKioskShortcutTarget()
+  const shortcutSuffix = buildChromeKioskShortcutSuffix()
 
   async function runHealthCheck() {
     setChecking(true)
@@ -54,11 +86,8 @@ export function PrintAgentPage() {
           <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Скачать bat-установщик — рекомендуемый способ установки агента.')}>
             Установщик (.bat)
           </a>
-          <a className="btn btn--secondary" href={KIOSK_CHROME_INSTALLER_URL} download {...uiHint('Bat-установщик — запускает vbs из той же папки.')}>
-            Chrome автопечать (.bat)
-          </a>
-          <a className="btn btn--secondary" href={KIOSK_CHROME_VBS_URL} download {...uiHint('VBS-установщик — можно запустить двойным щелчком без bat.')}>
-            Chrome автопечать (.vbs)
+          <a className="btn btn--secondary" href={KIOSK_CHROME_MANUAL_URL} download {...uiHint('Инструкция текстом — антивирус не блокирует.')}>
+            Chrome автопечать (инструкция)
           </a>
         </div>
       </header>
@@ -79,8 +108,7 @@ export function PrintAgentPage() {
               <strong>Агент не найден.</strong> Без агента или ярлыка Chrome после скана будет диалог печати и Enter.
             </p>
             <p className="print-agent__hint">
-              <a href={KIOSK_CHROME_INSTALLER_URL} download>Скачайте install-kiosk-chrome.bat</a>
-              {' '}— создаст ярлык <strong>Fulfillment CRM (autoprint)</strong> без установки .exe.
+              Создайте ярлык вручную ниже — <strong>без скачивания файлов</strong>, антивирус не мешает.
             </p>
           </section>
         )}
@@ -102,22 +130,23 @@ export function PrintAgentPage() {
         </section>
 
         <section className="card print-agent__card print-agent__card--kiosk">
-          <h2>Автопечать без агента — Chrome <code>--kiosk-printing</code></h2>
+          <h2>Автопечать без агента — ярлык Chrome (рекомендуется)</h2>
           <p>
-            Если агент .exe не ставится: один раз настроить ярлык Chrome — стикеры FBS после скана и ЧЗ
-            уходят на принтер <strong>без Enter</strong>.
+            Антивирус часто блокирует <code>.bat</code> и <code>.vbs</code> — это ложное срабатывание.
+            Надёжнее создать ярлык <strong>вручную</strong> (скрипты не нужны).
           </p>
           <ol className="print-agent__steps">
             <li>
-              Сделайте <strong>Xprinter принтером по умолчанию</strong> в Windows (58×40 мм, без лишних полей)
+              Сделайте <strong>Xprinter принтером по умолчанию</strong> в Windows (58×40 мм)
             </li>
             <li>
-              Скачайте <strong>install-kiosk-chrome.bat</strong> и <strong>install-kiosk-chrome.vbs</strong> в одну папку
-              (или только .vbs — запустите двойным щелчком)
+              ПКМ на рабочем столе → <strong>Создать → Ярлык</strong>
             </li>
             <li>
-              Запустите bat или vbs — появится ярлык <strong>Fulfillment CRM (autoprint)</strong> на рабочем столе,
-              в меню Пуск и в папке загрузки
+              В поле «Расположение объекта» нажмите «Копировать» и вставьте строку ниже
+            </li>
+            <li>
+              Имя ярлыка: <strong>Fulfillment CRM (autoprint)</strong>
             </li>
             <li>
               Открывайте CRM <strong>только через этот ярлык</strong>, не через обычный Chrome
@@ -126,10 +155,30 @@ export function PrintAgentPage() {
               В сборке FBS в шапке: «Печать: Chrome (автопечать)»
             </li>
           </ol>
+
+          <CopyLine label="Строка для нового ярлыка (скопируйте целиком):" value={shortcutTarget} />
+
           <p className="print-agent__hint">
-            Ярлык: <strong>Fulfillment CRM (autoprint)</strong> на рабочем столе и в меню Пуск.
-            URL: <code>{kioskUrl}</code>. Другой сервер — откройте bat в блокноте, строка <code>CRM_URL=</code>.
+            Если Chrome не в <code>Program Files</code>, найдите <code>chrome.exe</code> (Пуск → Chrome → ПКМ →
+            «Расположение файла») и замените путь в строке. Или откройте свойства существующего ярлыка Chrome
+            и в конец поля «Объект» добавьте:
           </p>
+          <CopyLine label="Дополнение к полю «Объект» существующего ярлыка Chrome:" value={shortcutSuffix} />
+
+          <details className="print-agent__details">
+            <summary>Если антивирус всё же пропускает — скачать установщики</summary>
+            <p className="print-agent__hint">
+              <a href={KIOSK_CHROME_MANUAL_URL} download>Скачать инструкцию (.txt)</a>
+              {' · '}
+              <a href={KIOSK_CHROME_INSTALLER_URL} download>install-kiosk-chrome.bat</a>
+              {' · '}
+              <a href={KIOSK_CHROME_VBS_URL} download>install-kiosk-chrome.vbs</a>
+            </p>
+            <p className="print-agent__hint">
+              При блокировке: Защитник Windows → «Разрешить на устройстве» или добавьте папку «Загрузки» в исключения
+              на время установки. URL CRM: <code>{kioskUrl}</code>
+            </p>
+          </details>
         </section>
 
         <section className="card print-agent__card">

@@ -67,3 +67,29 @@
   border: 1px solid #93c5fd;
   background: linear-gradient(180deg, #eff6ff 0%, #fff 45%);
 }
+
+.print-agent__copy-block {
+  margin-top: 0.75rem;
+}
+
+.print-agent__copy-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.print-agent__copy-block .btn {
+  margin-top: 0.5rem;
+}
+
+.print-agent__details {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.print-agent__details summary {
+  cursor: pointer;
+  color: #2563eb;
+  font-weight: 500;
+}

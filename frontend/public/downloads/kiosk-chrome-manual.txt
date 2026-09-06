@@ -1,0 +1,28 @@
+Fulfillment CRM — Chrome autoprint (без скачивания скриптов)
+============================================================
+
+Если антивирус блокирует .bat / .vbs — настройте ярлык вручную (2 минуты).
+
+1. Xprinter — принтер по умолчанию в Windows (58x40 мм).
+
+2. ПКМ на рабочем столе → Создать → Ярлык.
+
+3. В поле «Расположение» вставьте (одной строкой):
+
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+
+   Если Chrome не в Program Files, укажите свой путь к chrome.exe
+   (часто: C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
+   или %LocalAppData%\Google\Chrome\Application\chrome.exe).
+
+4. Имя ярлыка: Fulfillment CRM (autoprint)
+
+5. Открывайте CRM ТОЛЬКО через этот ярлык, не через обычный Chrome.
+
+6. В сборке FBS в шапке должно быть: «Печать: Chrome (автопечать)».
+
+---
+Альтернатива: свойства ярлыка Chrome → в «Объект» после chrome.exe добавить:
+ --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+
+Актуальный URL для вашего сервера — на странице CRM «Агент печати».
