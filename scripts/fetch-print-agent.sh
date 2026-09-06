@@ -13,6 +13,13 @@ EXE_DEST="${BASE}/${EXE_NAME}"
 
 mkdir -p "$BASE"
 
+if [[ -f "$ZIP_DEST" ]] && unzip -t "$ZIP_DEST" >/dev/null 2>&1; then
+  echo "=== print agent ==="
+  echo "OK: zip уже на сервере — скачивание с GitHub не нужно"
+  ls -lh "$ZIP_DEST"
+  exit 0
+fi
+
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -200,9 +207,11 @@ if [[ "$zip_ok" -ne 1 ]]; then
   echo "  GITHUB_TOKEN=ghp_xxxxxxxx"
   echo "Токен: GitHub → Settings → Developer settings → PAT → scope repo (read)."
   echo
-  echo "Или вручную положите zip:"
+  echo "Или один раз положите zip вручную (без токена):"
   echo "  $ZIP_DEST"
-  echo "и снова: bash scripts/deploy.sh"
+  echo "  Скачать: https://github.com/${REPO}/releases/tag/${TAG}"
+  echo "  Файл: $ZIP_NAME"
+  echo "  Потом снова: bash scripts/deploy.sh"
   exit 1
 fi
 
