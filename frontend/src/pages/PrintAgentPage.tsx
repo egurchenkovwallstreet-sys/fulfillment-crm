@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL, KIOSK_CHROME_INSTALLER_URL, buildCrmKioskPrintUrl } from '../constants/printAgent'
+import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL, KIOSK_CHROME_INSTALLER_URL, KIOSK_CHROME_VBS_URL, buildCrmKioskPrintUrl } from '../constants/printAgent'
 import { refreshPrintBridgeStatus } from '../utils/printService'
 import { isKioskPrintMode } from '../utils/printMode'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
@@ -54,8 +54,11 @@ export function PrintAgentPage() {
           <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Скачать bat-установщик — рекомендуемый способ установки агента.')}>
             Установщик (.bat)
           </a>
-          <a className="btn btn--secondary" href={KIOSK_CHROME_INSTALLER_URL} download {...uiHint('Ярлык Chrome с автопечатью — если агент не ставится.')}>
+          <a className="btn btn--secondary" href={KIOSK_CHROME_INSTALLER_URL} download {...uiHint('Bat-установщик — запускает vbs из той же папки.')}>
             Chrome автопечать (.bat)
+          </a>
+          <a className="btn btn--secondary" href={KIOSK_CHROME_VBS_URL} download {...uiHint('VBS-установщик — можно запустить двойным щелчком без bat.')}>
+            Chrome автопечать (.vbs)
           </a>
         </div>
       </header>
@@ -77,7 +80,7 @@ export function PrintAgentPage() {
             </p>
             <p className="print-agent__hint">
               <a href={KIOSK_CHROME_INSTALLER_URL} download>Скачайте install-kiosk-chrome.bat</a>
-              {' '}— создаст ярлык «Fulfillment CRM (автопечать)» без установки .exe.
+              {' '}— создаст ярлык <strong>Fulfillment CRM (autoprint)</strong> без установки .exe.
             </p>
           </section>
         )}
@@ -109,9 +112,12 @@ export function PrintAgentPage() {
               Сделайте <strong>Xprinter принтером по умолчанию</strong> в Windows (58×40 мм, без лишних полей)
             </li>
             <li>
-              Скачайте и запустите{' '}
-              <a href={KIOSK_CHROME_INSTALLER_URL} download><strong>install-kiosk-chrome.bat</strong></a>
-              {' '}— появится ярлык на рабочем столе
+              Скачайте <strong>install-kiosk-chrome.bat</strong> и <strong>install-kiosk-chrome.vbs</strong> в одну папку
+              (или только .vbs — запустите двойным щелчком)
+            </li>
+            <li>
+              Запустите bat или vbs — появится ярлык <strong>Fulfillment CRM (autoprint)</strong> на рабочем столе,
+              в меню Пуск и в папке загрузки
             </li>
             <li>
               Открывайте CRM <strong>только через этот ярлык</strong>, не через обычный Chrome
@@ -121,7 +127,8 @@ export function PrintAgentPage() {
             </li>
           </ol>
           <p className="print-agent__hint">
-            URL в ярлыке: <code>{kioskUrl}</code>. Если CRM на другом адресе — откройте bat в блокноте и измените строку <code>CRM_URL=</code>.
+            Ярлык: <strong>Fulfillment CRM (autoprint)</strong> на рабочем столе и в меню Пуск.
+            URL: <code>{kioskUrl}</code>. Другой сервер — откройте bat в блокноте, строка <code>CRM_URL=</code>.
           </p>
         </section>
 

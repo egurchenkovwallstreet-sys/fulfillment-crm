@@ -53,9 +53,9 @@ CRM (браузер)  --HTTP POST-->  localhost:9123  --GDI-->  Xprinter USB
 
 Если `.exe` не ставится на ПК сборки:
 
-1. Скачать в CRM: **Агент печати → Chrome автопечать (.bat)** (`install-kiosk-chrome.bat`)
+1. Скачать в CRM: **Агент печати → Chrome автопечать** — `install-kiosk-chrome.bat` **и** `install-kiosk-chrome.vbs` в одну папку (или только `.vbs`)
 2. Xprinter — **принтер по умолчанию** в Windows (58×40)
-3. Запустить bat → ярлык **«Fulfillment CRM (автопечать)»** на рабочем столе
+3. Запустить bat или vbs → ярлык **Fulfillment CRM (autoprint)** на рабочем столе, в Пуск и в папке загрузки
 4. Открывать CRM **только через этот ярлык** (не обычный Chrome)
 
 Chrome с флагом `--kiosk-printing` печатает на default printer **без диалога Enter**.

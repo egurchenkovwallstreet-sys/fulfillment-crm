@@ -1,68 +1,48 @@
-@echo off
-setlocal EnableExtensions
-chcp 65001 >nul 2>&1
-
-rem URL CRM с флагом режима автопечати (можно изменить под ваш сервер)
-set "CRM_URL=http://5.129.243.246:8080/?print_mode=kiosk"
-
-echo ============================================
-echo  Fulfillment CRM — Chrome автопечать FBS
-echo  (флаг --kiosk-printing, без Enter)
-echo ============================================
-echo.
-
-set "CHROME="
-if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "CHROME=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
-if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set "CHROME=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
-if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME=%LocalAppData%\Google\Chrome\Application\chrome.exe"
-
-if "%CHROME%"=="" (
-  echo [ОШИБКА] Google Chrome не найден. Установите Chrome и запустите снова.
-  pause
-  exit /b 1
-)
-
-echo Chrome: %CHROME%
-echo CRM:    %CRM_URL%
-echo.
-
-set "SHORTCUT_NAME=Fulfillment CRM (автопечать).lnk"
-set "DESKTOP=%USERPROFILE%\Desktop\%SHORTCUT_NAME%"
-set "STARTMENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs\%SHORTCUT_NAME%"
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$chrome = '%CHROME%';" ^
-  "$url = '%CRM_URL%';" ^
-  "$args = '--kiosk-printing \"' + $url + '\"';" ^
-  "$shell = New-Object -ComObject WScript.Shell;" ^
-  "foreach ($path in @('%DESKTOP%', '%STARTMENU%')) {" ^
-  "  $sc = $shell.CreateShortcut($path);" ^
-  "  $sc.TargetPath = $chrome;" ^
-  "  $sc.Arguments = $args;" ^
-  "  $sc.WorkingDirectory = $env:USERPROFILE;" ^
-  "  $sc.Description = 'Fulfillment CRM — стикеры FBS без диалога печати';" ^
-  "  $sc.Save();" ^
-  "  Write-Host ('Ярлык: ' + $path);" ^
-  "}"
-
-if errorlevel 1 (
-  echo [ОШИБКА] Не удалось создать ярлык.
-  pause
-  exit /b 1
-)
-
-echo.
-echo [УСПЕХ] Ярлыки созданы на рабочем столе и в меню Пуск.
-echo.
-echo Перед сборкой FBS:
-echo  1. В Windows выберите Xprinter ПРИНТЕРОМ ПО УМОЛЧАНИЮ
-echo  2. Размер этикетки 58x40 мм, поля минимальные
-echo  3. Открывайте CRM ТОЛЬКО через ярлык «Fulfillment CRM (автопечать)»
-echo     — в обычном Chrome диалог печати останется
-echo.
-echo Запуск CRM сейчас...
-start "" "%CHROME%" --kiosk-printing "%CRM_URL%"
-
-echo.
-pause
-endlocal
+@echo off
+setlocal EnableExtensions
+chcp 65001 >nul 2>&1
+cd /d "%~dp0"
+
+echo ============================================
+echo  Fulfillment CRM - Chrome autoprint FBS
+echo ============================================
+echo.
+
+set "VBS=%~dp0install-kiosk-chrome.vbs"
+set "PS1=%~dp0install-kiosk-chrome.ps1"
+
+if exist "%VBS%" (
+  echo Running installer: install-kiosk-chrome.vbs
+  echo.
+  cscript //nologo "%VBS%"
+  set "RC=%ERRORLEVEL%"
+  goto :finish
+)
+
+if exist "%PS1%" (
+  echo Running installer: install-kiosk-chrome.ps1
+  echo.
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
+  set "RC=%ERRORLEVEL%"
+  goto :finish
+)
+
+echo [ERROR] install-kiosk-chrome.vbs not found in this folder.
+echo.
+echo Download BOTH files from CRM into one folder:
+echo   - install-kiosk-chrome.bat
+echo   - install-kiosk-chrome.vbs
+echo.
+echo Or double-click install-kiosk-chrome.vbs directly.
+echo.
+set "RC=1"
+
+:finish
+echo.
+if not "%RC%"=="0" (
+  echo If Windows blocked the file: More info - Run anyway.
+  echo Desktop may be synced to OneDrive - check Downloads folder too.
+)
+pause
+exit /b %RC%
+endlocal
