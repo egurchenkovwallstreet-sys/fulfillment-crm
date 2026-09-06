@@ -1,6 +1,5 @@
 const AGENT_PORTABLE_ZIP = 'FulfillmentCRM-PrintAgent-portable.zip'
 const AGENT_ONEFILE = 'FulfillmentCRM-PrintAgent-onefile.exe'
-const AGENT_FILENAME = 'FulfillmentCRM-PrintAgent-onefile.exe'
 const INSTALLER_FILENAME = 'install-agent.bat'
 const KIOSK_CHROME_FILENAME = 'install-kiosk-chrome.bat'
 const KIOSK_CHROME_VBS_FILENAME = 'install-kiosk-chrome.vbs'
