@@ -55,3 +55,15 @@
   margin-top: 0.75rem;
   font-size: 0.9rem;
 }
+
+.print-agent__card code {
+  font-size: 0.85em;
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.print-agent__card--kiosk {
+  border: 1px solid #93c5fd;
+  background: linear-gradient(180deg, #eff6ff 0%, #fff 45%);
+}

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL } from '../constants/printAgent'
+import { PRINT_AGENT_DOWNLOAD_URL, PRINT_AGENT_INSTALLER_URL, KIOSK_CHROME_INSTALLER_URL, buildCrmKioskPrintUrl } from '../constants/printAgent'
 import { refreshPrintBridgeStatus } from '../utils/printService'
+import { isKioskPrintMode } from '../utils/printMode'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import { useEffect, useState } from 'react'
 import './PrintAgentPage.css'
@@ -10,6 +11,8 @@ export function PrintAgentPage() {
   const [printer, setPrinter] = useState('')
   const [bridgeDetail, setBridgeDetail] = useState('')
   const [checking, setChecking] = useState(false)
+  const kioskMode = isKioskPrintMode()
+  const kioskUrl = buildCrmKioskPrintUrl()
 
   async function runHealthCheck() {
     setChecking(true)
@@ -51,10 +54,34 @@ export function PrintAgentPage() {
           <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Скачать bat-установщик — рекомендуемый способ установки агента.')}>
             Установщик (.bat)
           </a>
+          <a className="btn btn--secondary" href={KIOSK_CHROME_INSTALLER_URL} download {...uiHint('Ярлык Chrome с автопечатью — если агент не ставится.')}>
+            Chrome автопечать (.bat)
+          </a>
         </div>
       </header>
 
       <div className="print-agent">
+        {kioskMode && (
+          <section className="print-agent__status print-agent__status--ok">
+            <p>
+              <strong>Режим Chrome автопечати активен</strong> — стикеры FBS должны печататься без Enter
+              (открыто через ярлык с <code>--kiosk-printing</code>).
+            </p>
+          </section>
+        )}
+
+        {!kioskMode && bridgeOk === false && (
+          <section className="print-agent__status print-agent__status--off">
+            <p>
+              <strong>Агент не найден.</strong> Без агента или ярлыка Chrome после скана будет диалог печати и Enter.
+            </p>
+            <p className="print-agent__hint">
+              <a href={KIOSK_CHROME_INSTALLER_URL} download>Скачайте install-kiosk-chrome.bat</a>
+              {' '}— создаст ярлык «Fulfillment CRM (автопечать)» без установки .exe.
+            </p>
+          </section>
+        )}
+
         <section className={`print-agent__status print-agent__status--${bridgeOk ? 'ok' : bridgeOk === false ? 'off' : 'unknown'}`}>
           {bridgeOk === null && <p>Проверка агента…</p>}
           {bridgeOk === true && (
@@ -71,8 +98,35 @@ export function PrintAgentPage() {
           )}
         </section>
 
+        <section className="card print-agent__card print-agent__card--kiosk">
+          <h2>Автопечать без агента — Chrome <code>--kiosk-printing</code></h2>
+          <p>
+            Если агент .exe не ставится: один раз настроить ярлык Chrome — стикеры FBS после скана и ЧЗ
+            уходят на принтер <strong>без Enter</strong>.
+          </p>
+          <ol className="print-agent__steps">
+            <li>
+              Сделайте <strong>Xprinter принтером по умолчанию</strong> в Windows (58×40 мм, без лишних полей)
+            </li>
+            <li>
+              Скачайте и запустите{' '}
+              <a href={KIOSK_CHROME_INSTALLER_URL} download><strong>install-kiosk-chrome.bat</strong></a>
+              {' '}— появится ярлык на рабочем столе
+            </li>
+            <li>
+              Открывайте CRM <strong>только через этот ярлык</strong>, не через обычный Chrome
+            </li>
+            <li>
+              В сборке FBS в шапке: «Печать: Chrome (автопечать)»
+            </li>
+          </ol>
+          <p className="print-agent__hint">
+            URL в ярлыке: <code>{kioskUrl}</code>. Если CRM на другом адресе — откройте bat в блокноте и измените строку <code>CRM_URL=</code>.
+          </p>
+        </section>
+
         <section className="card print-agent__card">
-          <h2>Установка — рекомендуемый способ</h2>
+          <h2>Установка агента — рекомендуемый способ</h2>
           <ol className="print-agent__steps">
             <li>
               Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a> и{' '}

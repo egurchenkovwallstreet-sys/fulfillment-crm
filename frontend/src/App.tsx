@@ -24,6 +24,9 @@ import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
 import { XlIntakePage } from './pages/XlIntakePage'
 import { ArticleIntakePage } from './pages/ArticleIntakePage'
+import { initKioskPrintMode } from './utils/printMode'
+
+initKioskPrintMode()
 
 function HomeRedirect() {
   const { isSeller } = useAuth()

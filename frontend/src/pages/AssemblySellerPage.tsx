@@ -65,6 +65,7 @@ import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { uiHint, hintWrapProps } from '../utils/uiHint'
 import { readAssemblySellerCache, writeAssemblySellerCache } from '../utils/assemblyCache'
+import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
@@ -1261,11 +1262,16 @@ function WbAssemblySellerPage() {
                 {' '}· Печать: {bridgePrinter || 'Xprinter'}
               </span>
             )}
-            {bridgeOk === false && (
+            {bridgeOk === false && isKioskPrintMode() && (
+              <span className="assembly-bridge assembly-bridge--ok">
+                {' '}· Печать: Chrome (автопечать)
+              </span>
+            )}
+            {bridgeOk === false && !isKioskPrintMode() && (
               <span className="assembly-bridge assembly-bridge--off">
                 {' '}
-                · Печать: Chrome (
-                <Link to="/print-agent">установите агент</Link>)
+                · Печать: Chrome — нужен Enter (
+                <Link to="/print-agent">агент или ярлык kiosk</Link>)
               </span>
             )}
           </p>
