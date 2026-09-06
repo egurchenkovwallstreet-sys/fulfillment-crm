@@ -8,7 +8,15 @@ git reset --hard origin/main
 git log -1 --oneline
 
 echo "=== print agent download ==="
-bash scripts/fetch-print-agent.sh || echo "WARN: print agent exe not updated — deploy continues"
+bash scripts/fetch-print-agent.sh
+
+echo "=== print agent files check ==="
+ZIP="frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip"
+if [[ ! -f "$ZIP" ]] || ! unzip -t "$ZIP" >/dev/null 2>&1; then
+  echo "ERROR: $ZIP missing or corrupt — fix fetch-print-agent.sh or upload manually"
+  exit 1
+fi
+ls -lh frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip frontend/public/downloads/FulfillmentCRM-PrintAgent-onefile.exe 2>/dev/null || true
 
 echo "=== build ==="
 # Без --no-cache: базовые образы (node/python) берутся из кэша и не упираются в лимит Docker Hub (429).
@@ -60,8 +68,9 @@ echo "=== backend version ==="
 curl -fsS http://127.0.0.1:8001/api/health/
 echo
 
-echo "=== frontend ==="
-curl -fsS -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8080/ || true
+echo "=== frontend downloads ==="
+curl -fsS -o /dev/null -w "zip HTTP %{http_code} size %{size_download}\n" http://127.0.0.1:8080/downloads/FulfillmentCRM-PrintAgent-portable.zip || true
+curl -fsS -o /dev/null -w "bat HTTP %{http_code}\n" http://127.0.0.1:8080/downloads/install-agent.bat || true
 
 echo "=== done ==="
 docker compose ps

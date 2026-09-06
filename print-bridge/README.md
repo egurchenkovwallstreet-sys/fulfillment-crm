@@ -20,14 +20,10 @@
 
 1. Откройте репозиторий на GitHub → вкладка **Actions**.
 2. Запустите workflow **Build Print Agent** (кнопка **Run workflow**) или дождитесь запуска после push в `print-bridge/`.
-3. Откройте успешный run → внизу **Artifacts** → скачайте `FulfillmentCRM-PrintAgent.zip`.
-4. Распакуйте `FulfillmentCRM-PrintAgent.exe` на сервер CRM:
-
-```bash
-# на сервере, после scp или загрузки файла
-cp FulfillmentCRM-PrintAgent.exe /opt/fulfillment-crm/frontend/public/downloads/
-cd /opt/fulfillment-crm && bash scripts/deploy.sh
-```
+3. Откройте успешный run → **Artifacts** или Release **print-agent**:
+   - `FulfillmentCRM-PrintAgent-portable.zip`
+   - `FulfillmentCRM-PrintAgent-onefile.exe`
+4. При деплое `bash scripts/deploy.sh` сам скачает их с GitHub Release в `frontend/public/downloads/`
 
 После деплоя ссылка «Скачать агент» в CRM заработает.
 
