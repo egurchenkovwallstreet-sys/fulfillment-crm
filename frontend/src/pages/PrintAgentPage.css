@@ -88,8 +88,7 @@
   color: #475569;
 }
 
-.print-agent__details summary {
-  cursor: pointer;
-  color: #2563eb;
-  font-weight: 500;
+.print-agent__card--secondary {
+  border-color: #e2e8f0;
+  background: #fff;
 }

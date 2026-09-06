@@ -26,6 +26,11 @@ except ImportError:
 
 from paths import get_config_path, get_example_config_path
 
+try:
+  import compat
+except ImportError:
+  compat = None  # type: ignore[assignment]
+
 CONFIG_PATH = get_config_path()
 EXAMPLE_CONFIG = get_example_config_path()
 
@@ -192,6 +197,9 @@ def health():
     "printer": printer,
     "print_mode": print_mode(),
     "port": cfg.get("port", 9123),
+    "agent_version": getattr(compat, "AGENT_VERSION", "dev"),
+    "vc_runtime": compat.has_vc_runtime() if compat else True,
+    "windows": compat.windows_version_label() if compat else "",
   })
 
 

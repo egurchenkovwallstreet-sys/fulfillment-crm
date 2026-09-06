@@ -1,9 +1,13 @@
-const AGENT_FILENAME = 'FulfillmentCRM-PrintAgent.exe'
+const AGENT_PORTABLE_ZIP = 'FulfillmentCRM-PrintAgent-portable.zip'
+const AGENT_ONEFILE = 'FulfillmentCRM-PrintAgent-onefile.exe'
+const AGENT_FILENAME = 'FulfillmentCRM-PrintAgent-onefile.exe'
 const INSTALLER_FILENAME = 'install-agent.bat'
 const KIOSK_CHROME_FILENAME = 'install-kiosk-chrome.bat'
 const KIOSK_CHROME_VBS_FILENAME = 'install-kiosk-chrome.vbs'
 const KIOSK_CHROME_MANUAL_FILENAME = 'kiosk-chrome-manual.txt'
-export const PRINT_AGENT_DOWNLOAD_URL = `/downloads/${AGENT_FILENAME}`
+export const PRINT_AGENT_DOWNLOAD_URL = `/downloads/${AGENT_PORTABLE_ZIP}`
+export const PRINT_AGENT_PORTABLE_ZIP_URL = `/downloads/${AGENT_PORTABLE_ZIP}`
+export const PRINT_AGENT_ONEFILE_URL = `/downloads/${AGENT_ONEFILE}`
 export const PRINT_AGENT_INSTALLER_URL = `/downloads/${INSTALLER_FILENAME}`
 export const KIOSK_CHROME_INSTALLER_URL = `/downloads/${KIOSK_CHROME_FILENAME}`
 export const KIOSK_CHROME_VBS_URL = `/downloads/${KIOSK_CHROME_VBS_FILENAME}`

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import {
-  PRINT_AGENT_DOWNLOAD_URL,
+  PRINT_AGENT_PORTABLE_ZIP_URL,
+  PRINT_AGENT_ONEFILE_URL,
   PRINT_AGENT_INSTALLER_URL,
   KIOSK_CHROME_INSTALLER_URL,
   KIOSK_CHROME_VBS_URL,
@@ -80,10 +81,13 @@ export function PrintAgentPage() {
               {checking ? 'Проверка…' : 'Проверить снова'}
             </button>
           </span>
-          <a className="btn btn--primary" href={PRINT_AGENT_DOWNLOAD_URL} download {...uiHint('Скачать программу агента печати для Windows.')}>
-            Скачать агент (.exe)
+          <a className="btn btn--primary" href={PRINT_AGENT_PORTABLE_ZIP_URL} download {...uiHint('Рекомендуется: быстрый запуск на старых ПК.')}>
+            Скачать агент (.zip)
           </a>
-          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Скачать bat-установщик — рекомендуемый способ установки агента.')}>
+          <a className="btn btn--secondary" href={PRINT_AGENT_ONEFILE_URL} download {...uiHint('Один exe — первый запуск на старых ПК может занять до минуты.')}>
+            Агент (.exe)
+          </a>
+          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Установщик: распакует zip, скопирует агент, проверит порт 9123.')}>
             Установщик (.bat)
           </a>
           <a className="btn btn--secondary" href={KIOSK_CHROME_MANUAL_URL} download {...uiHint('Инструкция текстом — антивирус не блокирует.')}>
@@ -108,7 +112,8 @@ export function PrintAgentPage() {
               <strong>Агент не найден.</strong> Без агента или ярлыка Chrome после скана будет диалог печати и Enter.
             </p>
             <p className="print-agent__hint">
-              Создайте ярлык вручную ниже — <strong>без скачивания файлов</strong>, антивирус не мешает.
+              Скачайте <a href={PRINT_AGENT_PORTABLE_ZIP_URL} download>portable.zip</a>
+              {' '}и <a href={PRINT_AGENT_INSTALLER_URL} download>install-agent.bat</a> — запустите bat.
             </p>
           </section>
         )}
@@ -129,8 +134,30 @@ export function PrintAgentPage() {
           )}
         </section>
 
-        <section className="card print-agent__card print-agent__card--kiosk">
-          <h2>Автопечать без агента — ярлык Chrome (рекомендуется)</h2>
+        <section className="card print-agent__card">
+          <h2>Установка агента — 3 шага</h2>
+          <ol className="print-agent__steps">
+            <li>
+              Скачайте <a href={PRINT_AGENT_PORTABLE_ZIP_URL} download><strong>FulfillmentCRM-PrintAgent-portable.zip</strong></a>{' '}
+              и <a href={PRINT_AGENT_INSTALLER_URL} download><strong>install-agent.bat</strong></a> в одну папку
+              (например, «Загрузки»). Zip — <strong>рекомендуется для старых ПК</strong> (быстрый запуск).
+            </li>
+            <li>Подключите Xprinter по USB, сделайте его <strong>принтером по умолчанию</strong> в Windows</li>
+            <li>
+              Запустите <strong>install-agent.bat</strong> — подождите до 90 сек (на старых ПК дольше).
+              Должно появиться «УСПЕХ» и иконка <strong>FF</strong> в трее
+            </li>
+          </ol>
+          <p className="print-agent__hint">
+            Если zip блокирует антивирус — скачайте{' '}
+            <a href={PRINT_AGENT_ONEFILE_URL} download>один .exe</a> и bat, запустите bat.
+            При ошибке «Visual C++» установщик откроет ссылку на компонент Microsoft.
+            Журнал: <code>%APPDATA%\FulfillmentCRM\PrintAgent\agent.log</code>
+          </p>
+        </section>
+
+        <section className="card print-agent__card print-agent__card--kiosk print-agent__card--secondary">
+          <h2>Запасной путь — ярлык Chrome (если агент не ставится)</h2>
           <p>
             Антивирус часто блокирует <code>.bat</code> и <code>.vbs</code> — это ложное срабатывание.
             Надёжнее создать ярлык <strong>вручную</strong> (скрипты не нужны).
@@ -182,28 +209,6 @@ export function PrintAgentPage() {
         </section>
 
         <section className="card print-agent__card">
-          <h2>Установка агента — рекомендуемый способ</h2>
-          <ol className="print-agent__steps">
-            <li>
-              Скачайте <a href={PRINT_AGENT_DOWNLOAD_URL} download>«FulfillmentCRM-PrintAgent.exe»</a> и{' '}
-              <a href={PRINT_AGENT_INSTALLER_URL} download>«install-agent.bat»</a> в одну папку (например, «Загрузки»)
-            </li>
-            <li>Подключите принтер по USB (драйвер Windows)</li>
-            <li>
-              Запустите <strong>install-agent.bat</strong> — он скопирует агент в постоянную папку,
-              снимет блокировку Windows и проверит, что порт 9123 отвечает
-            </li>
-            <li>
-              Появится окно «Агент запущен» и иконка <strong>FF</strong> в трее (возможно под стрелкой ^)
-            </li>
-          </ol>
-          <p className="print-agent__hint">
-            Можно запустить только .exe, но на новом ПК надёжнее через <strong>install-agent.bat</strong>.
-            Агент сам найдёт принтер: сначала по умолчанию в Windows, иначе Xprinter.
-          </p>
-        </section>
-
-        <section className="card print-agent__card">
           <h2>Когда нужен агент</h2>
           <p>
             CRM — сайт в браузере. Браузер не может печатать на USB-принтер без подтверждения.
@@ -226,8 +231,8 @@ export function PrintAgentPage() {
           <h2>Если не устанавливается / не работает</h2>
           <ol className="print-agent__steps">
             <li>
-              Используйте <a href={PRINT_AGENT_INSTALLER_URL} download>install-agent.bat</a> — не запускайте exe
-              напрямую из «Загрузок» без установщика
+              Скачайте <strong>portable.zip</strong> (не один exe) и{' '}
+              <a href={PRINT_AGENT_INSTALLER_URL} download>install-agent.bat</a> — bat сам распакует и проверит агент
             </li>
             <li>Если Windows SmartScreen блокирует — «Подробнее» → «Выполнить в любом случае»</li>
             <li>Антивирус / корпоративная политика — добавьте в исключения:

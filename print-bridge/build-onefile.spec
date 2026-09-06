@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+# Один файл — медленный первый запуск на старых ПК. Основная сборка: build.spec (папка).
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
@@ -59,9 +60,11 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
-    name='FulfillmentCRM-PrintAgent',
+    name='FulfillmentCRM-PrintAgent-onefile',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -73,15 +76,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(root / 'assets' / 'icon.ico') if (root / 'assets' / 'icon.ico').exists() else None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='FulfillmentCRM-PrintAgent',
 )

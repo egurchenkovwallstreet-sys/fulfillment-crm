@@ -1,6 +1,11 @@
 """Точка входа агента печати Fulfillment CRM (Windows, трей + HTTP API)."""
 from __future__ import annotations
 
+import compat
+
+compat.bootstrap_log("agent_main import start")
+compat.ensure_runtime_or_exit()
+
 import json
 import os
 import sys
@@ -121,7 +126,7 @@ def health_url() -> str:
   return f"http://127.0.0.1:{read_port()}/health"
 
 
-def wait_for_server(timeout_sec: float = 15.0) -> bool:
+def wait_for_server(timeout_sec: float = 90.0) -> bool:
   import urllib.error
   import urllib.request
 
@@ -329,6 +334,11 @@ def run_headless_keepalive() -> None:
 
 def main() -> int:
   log("=== Agent start ===")
+  log(
+    "Runtime "
+    + f"v={compat.AGENT_VERSION} win={compat.windows_version_label()} "
+    + f"arch={compat.collect_startup_info()['arch']}"
+  )
   if sys.platform != "win32":
     print("Агент печати поддерживается только на Windows.")
     return 1

@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           cache: pip
           cache-dependency-path: |
             print-bridge/requirements.txt
@@ -39,32 +39,39 @@ jobs:
       - name: Create icon
         run: python create_icon.py
 
-      - name: Build .exe (PyInstaller)
+      - name: Build portable folder (recommended for old PCs)
         run: pyinstaller build.spec --noconfirm --clean
 
-      - name: Verify output
+      - name: Build one-file (optional)
+        run: pyinstaller build-onefile.spec --noconfirm --clean
+
+      - name: Package zip
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/FulfillmentCRM-PrintAgent.exe")) {
-            throw "FulfillmentCRM-PrintAgent.exe not found"
+          if (-not (Test-Path "dist/FulfillmentCRM-PrintAgent/FulfillmentCRM-PrintAgent.exe")) {
+            throw "Portable exe not found"
           }
-          $size = (Get-Item "dist/FulfillmentCRM-PrintAgent.exe").Length
-          Write-Host "Built exe size: $size bytes"
+          Compress-Archive -Path "dist/FulfillmentCRM-PrintAgent" -DestinationPath "dist/FulfillmentCRM-PrintAgent-portable.zip" -Force
+          $folderSize = (Get-ChildItem "dist/FulfillmentCRM-PrintAgent" -Recurse | Measure-Object -Property Length -Sum).Sum
+          Write-Host "Portable folder size: $folderSize bytes"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: FulfillmentCRM-PrintAgent
-          path: print-bridge/dist/FulfillmentCRM-PrintAgent.exe
+          path: |
+            print-bridge/dist/FulfillmentCRM-PrintAgent-portable.zip
+            print-bridge/dist/FulfillmentCRM-PrintAgent-onefile.exe
           retention-days: 90
           if-no-files-found: error
 
-      - name: Publish GitHub Release (прямая ссылка для сервера)
+      - name: Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           gh release view print-agent 2>/dev/null || gh release create print-agent \
             --title "Fulfillment CRM — Агент печати" \
-            --notes "Последняя сборка с GitHub Actions. SHA256 в списке артефактов Actions."
-          gh release upload print-agent dist/FulfillmentCRM-PrintAgent.exe --clobber
+            --notes "Portable zip — для старых ПК. Onefile — один exe, первый запуск медленнее."
+          gh release upload print-agent dist/FulfillmentCRM-PrintAgent-portable.zip --clobber
+          gh release upload print-agent dist/FulfillmentCRM-PrintAgent-onefile.exe --clobber

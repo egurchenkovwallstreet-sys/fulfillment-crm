@@ -44,10 +44,16 @@ CRM (браузер)  --HTTP POST-->  localhost:9123  --GDI-->  Xprinter USB
 
 ## UX на ПК склада
 
-1. Скачать «Агент печати» из CRM (раздел «Настройки» / ссылка в шапке сборки) **или** с внутреннего URL.
-2. Установить → агент в трее, зелёный статус.
-3. Открыть сборку FBS — в шапке **«Печать: Xprinter»** (уже есть в UI).
+1. CRM → **Агент печати** → скачать **`FulfillmentCRM-PrintAgent-portable.zip`** + **`install-agent.bat`** в одну папку.
+2. Запустить **install-agent.bat** (ждать до 90 сек на старых ПК).
+3. Иконка **FF** в трее, в сборке FBS — **«Печать: Xprinter»**.
 4. Скан → автопечать стикера.
+
+**Старые / медленные ПК:** используйте **portable.zip** (папка), не onefile `.exe` — первый запуск onefile распаковывается 30–60 сек и установщик мог не дождаться.
+
+**Visual C++:** нужен [VC++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe). `install-agent.bat` проверяет и открывает ссылку.
+
+**Журнал:** `%APPDATA%\FulfillmentCRM\PrintAgent\agent.log` и `%TEMP%\FulfillmentCRM-PrintAgent-bootstrap.log`
 
 ## Запасной путь без агента: Chrome `--kiosk-printing`
 
@@ -76,15 +82,19 @@ Chrome с флагом `--kiosk-printing` печатает на default printer 
 | 3b | **CI GitHub Actions** — сборка без Python на ПК разработчика | ✅ |
 | 4 | Трей, автозапуск, config в AppData | ✅ |
 | 5 | Страница «Агент печати» в CRM + скачивание | ✅ |
-| 6 | Подпись кода (опционально, для доверия Windows SmartScreen) | ⬜ |
+| 6 | Portable zip для старых ПК, VC++ check, bootstrap log | ✅ |
+| 7 | Подпись кода (опционально, для доверия Windows SmartScreen) | ⬜ |
 
 ## Сборка без Python на вашем ПК
 
 Workflow: `.github/workflows/build-print-agent.yml`
 
 1. GitHub → **Actions** → **Build Print Agent** → **Run workflow**
-2. Скачать артефакт `FulfillmentCRM-PrintAgent`
-3. Положить на сервер: `frontend/public/downloads/FulfillmentCRM-PrintAgent.exe` → `deploy.sh`
+2. Скачать артефакт `FulfillmentCRM-PrintAgent` (zip + onefile exe)
+3. Положить на сервер:
+   - `frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip`
+   - `frontend/public/downloads/FulfillmentCRM-PrintAgent-onefile.exe` (опционально)
+   → `bash scripts/deploy.sh`
 
 ## Не в scope агента
 

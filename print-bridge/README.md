@@ -4,10 +4,11 @@
 
 ## Для пользователя склада
 
-1. В CRM откройте **«Агент печати»** в меню → **Скачать агент (.exe)**.
-2. Запустите `FulfillmentCRM-PrintAgent.exe` — иконка **FF** в трее Windows.
-3. В меню трея включите **«Автозапуск Windows»**.
-4. В **Сборке FBS** в шапке: **«Печать: Xprinter»**.
+1. В CRM → **Агент печати** → скачать **portable.zip** и **install-agent.bat** в одну папку.
+2. Запустить **install-agent.bat** (на старых ПК подождать до 90 сек).
+3. Иконка **FF** в трее; в **Сборке FBS** — **«Печать: Xprinter»**.
+
+Если не стартует — установите [VC++ x64](https://aka.ms/vs/17/release/vc_redist.x64.exe), добавьте `%LOCALAPPDATA%\FulfillmentCRM\PrintAgent` в исключения антивируса, пришлите `agent.log`.
 
 Настройки: `%APPDATA%\FulfillmentCRM\PrintAgent\config.json`
 

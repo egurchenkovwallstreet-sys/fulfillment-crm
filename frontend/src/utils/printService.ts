@@ -67,7 +67,7 @@ export async function printFbsSticker(
   const winner = await Promise.race([
     bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
     new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 400)
+      window.setTimeout(() => resolve('no'), 1200)
     }),
   ])
   if (winner === 'bridge') {
@@ -90,7 +90,7 @@ export async function printSupplySticker(
   const winner = await Promise.race([
     bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
     new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 400)
+      window.setTimeout(() => resolve('no'), 1200)
     }),
   ])
   if (winner === 'bridge') {
