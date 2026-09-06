@@ -191,6 +191,7 @@ RUSSIA_SHIPPING_CITIES: tuple[str, ...] = (
   "Сочи",
   "Ставрополь",
   "Мытищи",
+  "Вешки",
   "Пушкино",
   "Подольск",
   "Балашиха",
@@ -244,7 +245,7 @@ def fetch_all_russia_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:v1:{seller.id}:{resolved_cargo}"
+  cache_key = f"wb_sc_points:v2:{seller.id}:{resolved_cargo}"
   cached = cache.get(cache_key)
   if isinstance(cached, list) and cached:
     return cached, resolved_cargo
@@ -268,7 +269,7 @@ def fetch_all_russia_sc_shipping_points(
   points = _merge_pinned_shipping_points(client, resolved_cargo, list(merged.values()))
   points = [
     point for point in points
-    if isinstance(point, dict) and _is_sc_office_type(point)
+    if isinstance(point, dict) and _is_visible_sc_point(point)
   ]
   points.sort(key=lambda point: (
     _normalize_text(point.get("city")),
@@ -290,24 +291,34 @@ def _point_supports_cargo(point: dict, cargo_type: int) -> bool:
   return int(cargo_type) in {int(item) for item in cargo_types}
 
 
-def _matches_veshki_lipkinskoe(point: dict) -> bool:
-  if not _is_sc_office_type(point):
-    return False
-  haystack = " ".join(
+def _point_haystack(point: dict) -> str:
+  return " ".join(
     _normalize_text(point.get(key))
     for key in ("name", "address", "city")
   )
-  return "липкин" in haystack and "вешки" in haystack
+
+
+def _is_pinned_sc_point(point: dict) -> bool:
+  return _matches_veshki_lipkinskoe(point) or _matches_pushkino_sc(point)
+
+
+def _is_visible_sc_point(point: dict) -> bool:
+  if _is_pinned_sc_point(point):
+    return True
+  return _is_sc_office_type(point)
+
+
+def _matches_veshki_lipkinskoe(point: dict) -> bool:
+  haystack = _point_haystack(point)
+  if "липкин" in haystack:
+    return True
+  if "веш" in haystack and ("мытищ" in haystack or "москов" in haystack):
+    return True
+  return "вешки" in haystack or "veshki" in haystack
 
 
 def _matches_pushkino_sc(point: dict) -> bool:
-  if not _is_sc_office_type(point):
-    return False
-  haystack = " ".join(
-    _normalize_text(point.get(key))
-    for key in ("name", "address", "city")
-  )
-  return "пушкино" in haystack
+  return "пушкино" in _point_haystack(point)
 
 
 PINNED_SHIPPING_POINT_MATCHERS = (
@@ -319,8 +330,26 @@ PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = (
   "Москва",
   "Московская область",
   "Мытищи",
+  "Вешки",
   "Пушкино",
 )
+
+PINNED_SHIPPING_CARGO_TYPE = 1
+
+
+def _fetch_pinned_shipping_pool(client, cargo_type: int) -> list[dict]:
+  """Пул для закреплённых СЦ: всегда МГТ + тип поставки."""
+  pool: list[dict] = []
+  cargo_types = [PINNED_SHIPPING_CARGO_TYPE]
+  if cargo_type not in cargo_types:
+    cargo_types.append(cargo_type)
+  for fetch_city in PINNED_SHIPPING_POINT_FETCH_CITIES:
+    for fetch_cargo in cargo_types:
+      try:
+        pool.extend(client.fetch_shipping_points(fetch_city, fetch_cargo))
+      except WBApiError:
+        continue
+  return pool
 
 
 def _merge_pinned_shipping_points(
@@ -346,12 +375,7 @@ def _merge_pinned_shipping_points(
   if len(found_keys) == len(PINNED_SHIPPING_POINT_MATCHERS):
     return merged
 
-  pool: list[dict] = []
-  for fetch_city in PINNED_SHIPPING_POINT_FETCH_CITIES:
-    try:
-      pool.extend(client.fetch_shipping_points(fetch_city, cargo_type))
-    except WBApiError:
-      continue
+  pool = _fetch_pinned_shipping_pool(client, cargo_type)
 
   for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
     if key in found_keys:
