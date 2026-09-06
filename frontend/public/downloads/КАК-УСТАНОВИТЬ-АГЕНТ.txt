@@ -1,47 +1,15 @@
-Fulfillment CRM — установка агента печати (для администратора, без программирования)
-================================================================================
+Fulfillment CRM — установка агента печати
+======================================
 
-ОДИН РАЗ НА СЕРВЕРЕ
--------------------
+СЕРВЕР (скопируйте в консоль Timeweb, один раз):
 
-1) В браузере на своём компьютере откройте:
-   https://github.com/egurchenkovwallstreet-sys/fulfillment-crm/releases/tag/print-agent
-
-2) Скачайте файл: FulfillmentCRM-PrintAgent-portable.zip
-
-3) Загрузите его на сервер Timeweb в папку:
-   /opt/fulfillment-crm/frontend/public/downloads/
-   (через «Файлы» в панели Timeweb или WinSCP)
-
-4) В консоли сервера выполните две команды:
-
-   cd /opt/fulfillment-crm
-   bash scripts/deploy.sh
-
-   Дождитесь «done». Zip больше скачивать не нужно — он останется на сервере.
+cd /opt/fulfillment-crm && git pull && bash scripts/deploy.sh
 
 
-НА КАЖДОМ ПК СКЛАДА
--------------------
+ПК СКЛАДА:
 
-1) Откройте CRM → Агент печати
+1. CRM → Агент печати → «Скачать и установить (1 файл)»
+2. Дважды щёлкните Установить-агент-печати.bat
+3. Дождитесь «ГОТОВО»
 
-2) Скачайте два файла в папку «Загрузки»:
-   - FulfillmentCRM-PrintAgent-portable.zip
-   - install-agent.bat
-
-3) Дважды щёлкните install-agent.bat
-
-4) Подождите до 90 секунд — должно быть «УСПЕХ»
-
-5) Xprinter должен быть принтером по умолчанию в Windows
-
-
-ЕСЛИ НЕ РАБОТАЕТ
-----------------
-
-- Установите: https://aka.ms/vs/17/release/vc_redist.x64.exe
-- Антивirus: добавьте в исключения папку
-  %LOCALAPPDATA%\FulfillmentCRM\PrintAgent
-- Пришлите файл:
-  %APPDATA%\FulfillmentCRM\PrintAgent\agent.log
+Xprinter — принтер по умолчанию в Windows.

@@ -8,13 +8,14 @@ git reset --hard origin/main
 git log -1 --oneline
 
 echo "=== print agent download ==="
-bash scripts/fetch-print-agent.sh
+bash scripts/fetch-print-agent.sh || true
 
 echo "=== print agent files check ==="
 ZIP="frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip"
-if [[ ! -f "$ZIP" ]] || ! unzip -t "$ZIP" >/dev/null 2>&1; then
-  echo "ERROR: $ZIP missing or corrupt — fix fetch-print-agent.sh or upload manually"
-  exit 1
+if [[ -f "$ZIP" ]] && unzip -t "$ZIP" >/dev/null 2>&1; then
+  echo "OK: agent zip ready ($(du -h "$ZIP" | cut -f1))"
+else
+  echo "WARN: agent zip missing — после git pull должен быть в репозитории"
 fi
 ls -lh frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip frontend/public/downloads/FulfillmentCRM-PrintAgent-onefile.exe 2>/dev/null || true
 

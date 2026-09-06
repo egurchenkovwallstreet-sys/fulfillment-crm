@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import {
-  PRINT_AGENT_PORTABLE_ZIP_URL,
-  PRINT_AGENT_ONEFILE_URL,
+  PRINT_AGENT_ONE_CLICK_URL,
   PRINT_AGENT_INSTALLER_URL,
   KIOSK_CHROME_INSTALLER_URL,
   KIOSK_CHROME_VBS_URL,
@@ -68,7 +67,7 @@ export function PrintAgentPage() {
       <header className="topbar">
         <div>
           <h1>Агент печати</h1>
-          <p>Скачайте, запустите — стикеры FBS печатаются без диалога Chrome</p>
+          <p>Один файл — скачать и запустить на ПК склада</p>
         </div>
         <div className="topbar__actions">
           <span {...hintWrapProps('Проверить, запущен ли агент печати на этом компьютере.')}>
@@ -81,17 +80,8 @@ export function PrintAgentPage() {
               {checking ? 'Проверка…' : 'Проверить снова'}
             </button>
           </span>
-          <a className="btn btn--primary" href={PRINT_AGENT_PORTABLE_ZIP_URL} download {...uiHint('Рекомендуется: быстрый запуск на старых ПК.')}>
-            Скачать агент (.zip)
-          </a>
-          <a className="btn btn--secondary" href={PRINT_AGENT_ONEFILE_URL} download {...uiHint('Один exe — первый запуск на старых ПК может занять до минуты.')}>
-            Агент (.exe)
-          </a>
-          <a className="btn btn--secondary" href={PRINT_AGENT_INSTALLER_URL} download {...uiHint('Установщик: распакует zip, скопирует агент, проверит порт 9123.')}>
-            Установщик (.bat)
-          </a>
-          <a className="btn btn--secondary" href={KIOSK_CHROME_MANUAL_URL} download {...uiHint('Инструкция текстом — антивирус не блокирует.')}>
-            Chrome автопечать (инструкция)
+          <a className="btn btn--primary" href={PRINT_AGENT_ONE_CLICK_URL} download {...uiHint('Скачать один bat — сам скачает агент и установит.')}>
+            Скачать и установить (1 файл)
           </a>
         </div>
       </header>
@@ -112,8 +102,8 @@ export function PrintAgentPage() {
               <strong>Агент не найден.</strong> Без агента или ярлыка Chrome после скана будет диалог печати и Enter.
             </p>
             <p className="print-agent__hint">
-              Скачайте <a href={PRINT_AGENT_PORTABLE_ZIP_URL} download>portable.zip</a>
-              {' '}и <a href={PRINT_AGENT_INSTALLER_URL} download>install-agent.bat</a> — запустите bat.
+              Скачайте <a href={PRINT_AGENT_ONE_CLICK_URL} download>Установить-агент-печати.bat</a>
+              {' '}→ запустите двойным щелчком.
             </p>
           </section>
         )}
@@ -134,26 +124,28 @@ export function PrintAgentPage() {
           )}
         </section>
 
-        <section className="card print-agent__card">
-          <h2>Установка агента — 3 шага</h2>
+        <section className="card print-agent__card print-agent__card--hero">
+          <h2>ПК склада — 2 шага</h2>
           <ol className="print-agent__steps">
             <li>
-              Скачайте <a href={PRINT_AGENT_PORTABLE_ZIP_URL} download><strong>FulfillmentCRM-PrintAgent-portable.zip</strong></a>{' '}
-              и <a href={PRINT_AGENT_INSTALLER_URL} download><strong>install-agent.bat</strong></a> в одну папку
-              (например, «Загрузки»). Zip — <strong>рекомендуется для старых ПК</strong> (быстрый запуск).
+              Нажмите <a href={PRINT_AGENT_ONE_CLICK_URL} download><strong>Скачать и установить (1 файл)</strong></a>
             </li>
-            <li>Подключите Xprinter по USB, сделайте его <strong>принтером по умолчанию</strong> в Windows</li>
             <li>
-              Запустите <strong>install-agent.bat</strong> — подождите до 90 сек (на старых ПК дольше).
-              Должно появиться «УСПЕХ» и иконка <strong>FF</strong> в трее
+              Дважды щёлкните <strong>Установить-агент-печати.bat</strong> → подождите → «ГОТОВО»
             </li>
           </ol>
           <p className="print-agent__hint">
-            Если zip блокирует антивирус — скачайте{' '}
-            <a href={PRINT_AGENT_ONEFILE_URL} download>один .exe</a> и bat, запустите bat.
-            При ошибке «Visual C++» установщик откроет ссылку на компонент Microsoft.
-            Журнал: <code>%APPDATA%\FulfillmentCRM\PrintAgent\agent.log</code>
+            Xprinter должен быть <strong>принтером по умолчанию</strong> в Windows.
+            Если Windows спрашивает «Разрешить?» — нажмите «Да» / «Выполнить».
           </p>
+        </section>
+
+        <section className="card print-agent__card">
+          <h2>Сервер (один раз) — скопируйте в консоль Timeweb</h2>
+          <CopyLine
+            label="Вставьте целиком и нажмите Enter:"
+            value="cd /opt/fulfillment-crm && git pull && bash scripts/deploy.sh"
+          />
         </section>
 
         <section className="card print-agent__card print-agent__card--kiosk print-agent__card--secondary">
