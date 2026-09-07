@@ -12,13 +12,12 @@ from apps.orders.services.ozon_counts import OzonCountsError, ozon_client_for_se
 from apps.sellers.models import Seller, SellerOzonWarehouse, SellerWarehouse
 from apps.sellers.services.invite import ensure_seller_invite
 from apps.warehouse.models import ArticleIntakeSession, Cell, Product, StockOperation
-from apps.warehouse.services.catalog_fetch import CatalogError
+from apps.warehouse.services.catalog_fetch import CatalogError, barcode_lookup_variants, normalize_barcode
 from apps.warehouse.services.catalog_groups import (
   find_group_by_barcode,
   group_key_for_item,
   serialize_group_preview,
 )
-from apps.warehouse.services.catalog_fetch import normalize_barcode
 from apps.warehouse.services.cells import _next_cell_number, refresh_cell_occupied
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
@@ -80,6 +79,45 @@ def _delete_product_and_cell(product: Product) -> None:
       cell_obj.delete()
     elif cell_obj:
       refresh_cell_occupied(cell_obj)
+
+
+def _find_product_by_barcode(seller: Seller, marketplace: str, barcode: str) -> Product | None:
+  mp = normalize_marketplace(marketplace)
+  for variant in barcode_lookup_variants(barcode, mp):
+    product = (
+      Product.objects.filter(seller=seller, marketplace=mp, barcode=variant)
+      .select_related("cell")
+      .first()
+    )
+    if product:
+      return product
+  return None
+
+
+def _product_in_session(session: ArticleIntakeSession, product: Product | None) -> bool:
+  if not product:
+    return False
+  group_key = (product.article_group_key or "").strip()
+  if not group_key:
+    return False
+  return group_key in (session.confirmed_group_keys or [])
+
+
+def _group_has_session_cells(session: ArticleIntakeSession, group_key: str) -> bool:
+  if not group_key:
+    return False
+  return _session_product_qs(session).filter(article_group_key=group_key).exists()
+
+
+def _existing_products_map(seller: Seller, marketplace: str) -> dict[str, Product]:
+  mp = normalize_marketplace(marketplace)
+  by_barcode: dict[str, Product] = {}
+  for product in Product.objects.filter(seller=seller, marketplace=mp).select_related("cell"):
+    by_barcode[product.barcode] = product
+    if mp == OZON:
+      for alias in barcode_lookup_variants(product.barcode, mp):
+        by_barcode.setdefault(alias, product)
+  return by_barcode
 
 
 def _seller_has_marketplace_api(seller: Seller, marketplace: str) -> None:
@@ -213,35 +251,14 @@ def scan_barcode(
     raise ArticleIntakeError("Баркод слишком короткий")
 
   mode = (scan_mode or "lookup").strip().lower()
-  product = Product.objects.filter(seller=seller, marketplace=mp, barcode=barcode).select_related("cell").first()
+  product = _find_product_by_barcode(seller, mp, barcode)
 
-  if product and (session.confirmed_group_keys or []) and product.article_group_key in (session.confirmed_group_keys or []):
+  if product and _product_in_session(session, product):
     if mode == "increment":
-      return increment_product(session, barcode=barcode, user=user)
+      return increment_product(session, barcode=product.barcode, user=user)
     return {
       "action": "known",
       "product": _serialize_product(product),
-      "session": serialize_session(session),
-    }
-
-  if product:
-    if mode == "increment":
-      raise ArticleIntakeError("Баркод уже в CRM, но не из этой приёмки — укажите количество вручную")
-    if quantity <= 0:
-      raise ArticleIntakeError("Укажите количество больше 0")
-    product = _add_product_stock(
-      product,
-      quantity,
-      user,
-      f"Приёмка по артикулам: +{quantity} шт.",
-    )
-    session.scan_count += 1
-    session.total_units += quantity
-    session.save(update_fields=["scan_count", "total_units"])
-    return {
-      "action": "added",
-      "product": _serialize_product(product),
-      "quantity_added": quantity,
       "session": serialize_session(session),
     }
 
@@ -252,20 +269,28 @@ def scan_barcode(
 
   group_key = str(meta.get("group_key") or group_key_for_item(mp, anchor))
 
-  if group_key in (session.confirmed_group_keys or []):
-    raise ArticleIntakeError("Группа уже создана — отсканируйте баркод для +1 или введите количество")
+  if _group_has_session_cells(session, group_key):
+    if product and _product_in_session(session, product):
+      if mode == "increment":
+        return increment_product(session, barcode=product.barcode, user=user)
+      return {
+        "action": "known",
+        "product": _serialize_product(product),
+        "session": serialize_session(session),
+      }
+    raise ArticleIntakeError(
+      "Группа уже создана в этой приёмке — отсканируйте баркод для +1 или введите количество",
+    )
 
-  if Product.objects.filter(seller=seller, marketplace=mp, article_group_key=group_key).exists():
-    raise ArticleIntakeError("Группа артикул+цвет уже есть в CRM, но этот баркод не найден")
-
-  existing_barcodes = set(
-    Product.objects.filter(seller=seller, marketplace=mp).values_list("barcode", flat=True)
-  )
+  existing_map = _existing_products_map(seller, mp)
+  existing_barcodes = set(existing_map)
   start_cell = int(_next_cell_number(seller, mp))
   cell_numbers: dict[str, str] = {}
   num = start_cell
   for item in group_items:
-    if item.barcode in existing_barcodes:
+    existing_product = existing_map.get(item.barcode)
+    if existing_product and existing_product.cell_id:
+      cell_numbers[item.barcode] = existing_product.cell.number
       continue
     cell_numbers[item.barcode] = str(num)
     num += 1
@@ -335,19 +360,72 @@ def confirm_group(
   if not active_items:
     raise ArticleIntakeError("Нельзя удалить все ячейки — оставьте хотя бы один размер")
 
-  if scanned_barcode in excluded:
+  scan_variants = set(barcode_lookup_variants(scanned_barcode, mp))
+  if scan_variants & excluded:
     raise ArticleIntakeError("Нельзя исключить отсканированный баркод")
 
   created_cells: list[str] = []
   created_products = 0
   created_items: list[dict] = []
+  existing_map = _existing_products_map(seller, mp)
 
   for item in active_items:
-    if Product.objects.filter(seller=seller, marketplace=mp, barcode=item.barcode).exists():
-      raise ArticleIntakeError(f"Баркод {item.barcode} уже есть в CRM")
-
     row = payload_by_barcode.get(item.barcode) or {}
     cell_number = str(row.get("cell_number") or "").strip()
+    existing = existing_map.get(item.barcode)
+
+    if existing:
+      if _product_in_session(session, existing):
+        created_items.append(_serialize_product(existing))
+        continue
+      other_qty = int(existing.quantity or 0)
+      if other_qty > 0:
+        raise ArticleIntakeError(
+          f"Баркод {item.barcode} уже на складе ({other_qty} шт.) — "
+          "нельзя пересоздать ячейку через приёмку",
+        )
+      if not cell_number:
+        cell_number = existing.cell.number if existing.cell_id else _next_cell_number(seller, mp)
+      cell, _ = Cell.objects.get_or_create(
+        seller=seller,
+        marketplace=mp,
+        number=cell_number,
+        defaults={"is_occupied": False},
+      )
+      existing.name = item.title
+      existing.cell = cell
+      existing.quantity = 0
+      existing.requires_marking = item.requires_marking
+      existing.wb_nm_id = item.wb_nm_id
+      existing.vendor_code = item.vendor_code
+      existing.tech_size = item.tech_size
+      existing.wb_size = item.wb_size
+      existing.photo_url = item.photo_url
+      existing.color_label = item.color_label
+      existing.article_group_key = group_key
+      existing.save(
+        update_fields=[
+          "name",
+          "cell",
+          "quantity",
+          "requires_marking",
+          "wb_nm_id",
+          "vendor_code",
+          "tech_size",
+          "wb_size",
+          "photo_url",
+          "color_label",
+          "article_group_key",
+          "updated_at",
+        ]
+      )
+      refresh_cell_occupied(cell)
+      if cell_number not in created_cells:
+        created_cells.append(cell_number)
+      created_products += 1
+      created_items.append(_serialize_product(existing))
+      continue
+
     if not cell_number:
       cell_number = _next_cell_number(seller, mp)
 
@@ -421,13 +499,17 @@ def increment_product(
     ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   )
   barcode = normalize_barcode(barcode)
-  product = (
-    _session_product_qs(session)
-    .select_for_update()
-    .filter(barcode=barcode)
-    .select_related("cell")
-    .first()
-  )
+  product = None
+  for variant in barcode_lookup_variants(barcode, session.marketplace):
+    product = (
+      _session_product_qs(session)
+      .select_for_update()
+      .filter(barcode=variant)
+      .select_related("cell")
+      .first()
+    )
+    if product:
+      break
   if not product:
     raise ArticleIntakeError("Баркод не найден в этой приёмке")
   product = _add_product_stock(product, 1, user, "Приёмка по артикулам: +1 шт. (скан)")
@@ -680,6 +762,38 @@ def push_to_marketplace(
       + (f", ошибок: {len(errors)}" if errors else "")
     ),
   }
+
+
+@transaction.atomic
+def delete_session(session: ArticleIntakeSession, *, user=None) -> dict:
+  session = (
+    ArticleIntakeSession.objects.select_for_update()
+    .select_related("seller")
+    .get(pk=session.pk)
+  )
+  if session.marketplace_pushed_at:
+    raise ArticleIntakeError(
+      "Нельзя удалить приёмку после выгрузки остатков на маркетплейс",
+    )
+  seller = session.seller
+  session_id = session.id
+  seller_name = seller.company_name
+  deleted_products = 0
+  for product in list(_session_product_qs(session).select_related("cell")):
+    _delete_product_and_cell(product)
+    deleted_products += 1
+  session.delete()
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.INTAKE,
+    message=(
+      f"Приёмка по артикулам #{session_id} удалена "
+      f"(«{seller_name}», товаров: {deleted_products})"
+    ),
+    details={"session_id": session_id, "deleted_products": deleted_products},
+  )
+  return {"deleted": True, "session_id": session_id, "deleted_products": deleted_products}
 
 
 @transaction.atomic

@@ -35,6 +35,22 @@ def normalize_barcode(value: str) -> str:
   return barcode
 
 
+def barcode_lookup_variants(value: str, marketplace: str) -> list[str]:
+  """Варианты баркода для поиска в CRM (Ozon: с/без префикса OZN)."""
+  from apps.integrations.marketplace import OZON, normalize_marketplace
+  from apps.warehouse.services.catalog_fetch_ozon import ozon_barcode_aliases
+
+  barcode = normalize_barcode(value)
+  if not barcode:
+    return []
+  variants = [barcode]
+  if normalize_marketplace(marketplace) == OZON:
+    for alias in ozon_barcode_aliases(barcode):
+      if alias not in variants:
+        variants.append(alias)
+  return variants
+
+
 @dataclass
 class CatalogBarcodeItem:
   barcode: str

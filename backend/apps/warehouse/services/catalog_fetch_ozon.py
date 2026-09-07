@@ -291,8 +291,8 @@ def _photo_url(raw: dict) -> str:
   return ""
 
 
-def _ozon_barcode_aliases(value: str) -> list[str]:
-  """Ozon FBS-этикетки часто в формате OZN{sku}, в API — sku и EAN."""
+def ozon_barcode_aliases(value: str) -> list[str]:
+  """Ozon FBS-этикетки часто в формате OZN{sku}, в API — sku и EAN; префикса может не быть."""
   barcode = normalize_barcode(value)
   if not barcode:
     return []
@@ -300,13 +300,16 @@ def _ozon_barcode_aliases(value: str) -> list[str]:
   upper = barcode.upper()
   if upper.startswith("OZN") and len(barcode) > 3:
     tail = barcode[3:]
-    if tail.isdigit() and tail not in aliases:
+    if tail and tail not in aliases:
       aliases.append(tail)
   elif barcode.isdigit():
     ozn = f"OZN{barcode}"
     if ozn not in aliases:
       aliases.append(ozn)
   return aliases
+
+
+_ozon_barcode_aliases = ozon_barcode_aliases
 
 
 def _barcodes(raw: dict) -> list[str]:

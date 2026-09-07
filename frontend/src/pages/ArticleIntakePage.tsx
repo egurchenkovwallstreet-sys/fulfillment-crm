@@ -5,9 +5,9 @@ import {
   confirmArticleGroup,
   createArticleIntakeSession,
   deleteArticleIntakeProduct,
+  deleteArticleIntakeSession,
   fetchArticleIntakeSession,
   fetchArticleIntakeSessions,
-  incrementArticleIntake,
   pushArticleIntakeToMarketplace,
   saveArticleGroupQuantities,
   scanArticleIntake,
@@ -187,16 +187,9 @@ export function ArticleIntakePage() {
     }
     setLoading(true)
     try {
-      const inSession = session?.products?.some((p) => p.barcode === value)
-      if (entryMode === 'piece' && inSession) {
-        const result = await incrementArticleIntake(activeId, value)
-        applySession(result.session)
-        setCellHit(result.product)
-        setBarcode('')
-        return
-      }
-
-      const result = await scanArticleIntake(activeId, value, { scan_mode: 'lookup' })
+      const result = await scanArticleIntake(activeId, value, {
+        scan_mode: entryMode === 'piece' ? 'increment' : 'lookup',
+      })
       applySession(result.session)
       setBarcode('')
 
@@ -389,6 +382,40 @@ export function ArticleIntakePage() {
     }
   }
 
+  async function handleDeleteSession(targetId?: number) {
+    const id = targetId ?? activeId
+    if (!id) return
+    if (
+      !window.confirm(
+        'Удалить эту приёмку?\n\nВсе ячейки и товары, созданные в ней, будут удалены из CRM. Это нельзя отменить.',
+      )
+    ) {
+      return
+    }
+    setLoading(true)
+    try {
+      const result = await deleteArticleIntakeSession(id)
+      if (activeId === id) {
+        navigate('/intake-article')
+      } else {
+        await loadHome()
+      }
+      setResultModal({
+        kind: 'success',
+        title: 'Удалено',
+        message: `Приёмка #${result.session_id} удалена.\nТоваров/ячеек: ${result.deleted_products}.`,
+      })
+    } catch (err) {
+      setResultModal({
+        kind: 'error',
+        title: 'Ошибка',
+        message: err instanceof Error ? err.message : 'Не удалось удалить приёмку',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleComplete() {
     if (!activeId) return
     if (!window.confirm('Завершить приёмку?')) return
@@ -458,12 +485,23 @@ export function ArticleIntakePage() {
             ) : (
               <ul className="art-session-list">
                 {sessions.slice(0, 12).map((item) => (
-                  <li key={item.id}>
+                  <li key={item.id} className="art-session-list__item">
                     <Link to={`/intake-article/${item.id}`} {...uiHint(`Открыть сессию приёмки #${item.id} — ${item.seller_name}.`)}>
                       #{item.id} · {item.seller_name} · {STATUS_LABEL[item.status]}
                       {item.marketplace_pushed_at ? ' · выгружено' : ' · продолжить'}
                       {' · '}{item.total_units} шт.
                     </Link>
+                    {!item.marketplace_pushed_at && (
+                      <button
+                        type="button"
+                        className="btn btn--danger-outline btn--small"
+                        disabled={loading}
+                        onClick={() => void handleDeleteSession(item.id)}
+                        {...uiHint('Удалить приёмку и все созданные в ней ячейки.')}
+                      >
+                        Удалить
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -486,7 +524,20 @@ export function ArticleIntakePage() {
             {locked ? ' · заблокировано после выгрузки' : ''}
           </p>
         </div>
-        <Link to="/intake-article" className="btn btn--secondary" {...uiHint('Вернуться к списку всех сессий приёмки.')}>← Список</Link>
+        <div className="page__header-actions">
+          <Link to="/intake-article" className="btn btn--secondary" {...uiHint('Вернуться к списку всех сессий приёмки.')}>← Список</Link>
+          {canEdit && !locked && (
+            <button
+              type="button"
+              className="btn btn--danger-outline"
+              disabled={loading}
+              onClick={() => void handleDeleteSession()}
+              {...uiHint('Удалить всю приёмку и все ячейки, созданные в ней.')}
+            >
+              Удалить приёмку
+            </button>
+          )}
+        </div>
       </header>
 
       {session && (

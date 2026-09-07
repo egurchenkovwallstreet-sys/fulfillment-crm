@@ -13,6 +13,7 @@ from apps.warehouse.services.article_intake import (
   confirm_group,
   create_session,
   delete_intake_product,
+  delete_session,
   increment_product,
   push_to_marketplace,
   save_group_quantities,
@@ -59,6 +60,14 @@ class ArticleIntakeSessionDetailView(APIView):
   def get(self, request, session_id):
     session = _session_or_404(request.user, session_id)
     return Response(serialize_session(session))
+
+  def delete(self, request, session_id):
+    session = _session_or_404(request.user, session_id)
+    try:
+      result = delete_session(session, user=request.user)
+    except ArticleIntakeError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
 
 
 class ArticleIntakeScanView(APIView):

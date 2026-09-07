@@ -200,6 +200,13 @@ export function pushArticleIntakeToMarketplace(
   })
 }
 
+export function deleteArticleIntakeSession(sessionId: number) {
+  return apiFetch<{ deleted: boolean; session_id: number; deleted_products: number }>(
+    `/api/warehouse/article-intake/sessions/${sessionId}/`,
+    { method: 'DELETE' },
+  )
+}
+
 export function completeArticleIntakeSession(sessionId: number) {
   return apiFetch<ArticleIntakeSession>(
     `/api/warehouse/article-intake/sessions/${sessionId}/complete/`,
