@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError
-from apps.orders.models import Order, Supply
+from apps.orders.models import Order, PickList, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
 from apps.orders.services.assembly_queue import order_in_assembly
 from apps.orders.services.wb_status import (
@@ -831,6 +831,93 @@ def _complete_order_in_delivery(
   return stock_info
 
 
+def _detach_order_from_pick_list(order: Order) -> None:
+  from apps.orders.services.assembly import _detach_order_from_pick_list as detach
+
+  if not order.pick_list_id:
+    return
+  detach(order)
+  order.save(update_fields=["pick_list", "updated_at"])
+
+
+def _cleanup_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller) -> None:
+  """Удалить пустые листы подбора склада после передачи поставки в доставку."""
+  qs = PickList.objects.filter(
+    seller=seller,
+    is_completed=False,
+    marketplace="wb",
+  )
+  if supply.wb_warehouse_id is not None:
+    qs = qs.filter(wb_warehouse_id=supply.wb_warehouse_id)
+  for pick_list in qs:
+    if not pick_list.items.exists():
+      pick_list.delete()
+
+
+def _assert_all_supply_orders_ready_for_deliver(supply: Supply) -> None:
+  orders = _supply_orders(supply)
+  if not orders:
+    raise SupplyFlowError("В поставке нет заказов", code="not_ready")
+  not_ready = [order for order in orders if not order_can_send_to_delivery(order)]
+  if not_ready:
+    sample = not_ready[0]
+    reason = order_delivery_block_reason(sample) or "не готов"
+    raise SupplyFlowError(
+      f"В поставке WB {supply.wb_supply_id} {len(not_ready)} из {len(orders)} "
+      f"заказ(ов) ещё не готовы ({reason}). "
+      "Дособерите все заказы или перенесите неготовые в новую поставку.",
+      code="not_ready",
+    )
+
+
+def _prepare_supply_orders_for_deliver(
+  seller: Seller,
+  supply: Supply,
+  *,
+  user=None,
+) -> None:
+  for order in _supply_orders(supply):
+    if not order_can_send_to_delivery(order):
+      continue
+    _ensure_marking_verified_for_delivery(seller, order, user=user)
+    try:
+      assert_order_stock_deducted_at_print(order)
+    except StockDeductionError as exc:
+      raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
+  _assert_all_supply_orders_ready_for_deliver(supply)
+
+
+def _finalize_supply_after_wb_deliver(
+  supply: Supply,
+  *,
+  seller: Seller,
+  user=None,
+  primary_order: Order | None = None,
+) -> tuple[Order, dict]:
+  """
+  WB переводит в доставку всю поставку целиком — синхронизируем все заказы CRM
+  и сразу убираем лист подбора.
+  """
+  last_order = primary_order
+  last_stock: dict = {}
+  for order in _supply_orders(supply):
+    if order.status == Order.Status.IN_DELIVERY:
+      _detach_order_from_pick_list(order)
+      continue
+    _detach_order_from_pick_list(order)
+    last_stock = _complete_order_in_delivery(
+      order,
+      supply,
+      seller=seller,
+      user=user,
+    )
+    last_order = order
+  _cleanup_pick_lists_after_supply_delivery(supply, seller=seller)
+  if last_order is None:
+    raise SupplyFlowError("В поставке нет заказов для CRM", code="not_ready")
+  return last_order, last_stock
+
+
 def _delivery_result(
   order: Order,
   supply: Supply,
@@ -879,10 +966,9 @@ def send_order_to_delivery(
 ) -> dict:
   """
   Один заказ → deliver поставки WB → complete+waiting («В доставке»).
+  WB переводит в доставку всю поставку — в CRM обновляются все её заказы.
   """
   order = _get_order(seller, order_id)
-
-  _ensure_marking_verified_for_delivery(seller, order, user=user)
 
   if not order_can_send_to_delivery(order):
     requires_marking = resolve_product_requires_marking(
@@ -939,11 +1025,6 @@ def send_order_to_delivery(
       code="already_delivered",
     )
 
-  try:
-    assert_order_stock_deducted_at_print(order)
-  except StockDeductionError as exc:
-    raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
-
   supply_barcode_file = ""
   supply_barcode_value = ""
   supply_barcode_error = ""
@@ -953,11 +1034,11 @@ def send_order_to_delivery(
       client,
       supply.wb_supply_id,
     )
-    stock_info = _complete_order_in_delivery(
-      order,
+    order, stock_info = _finalize_supply_after_wb_deliver(
       supply,
       seller=seller,
       user=user,
+      primary_order=order,
     )
     return _delivery_result(
       order,
@@ -970,20 +1051,21 @@ def send_order_to_delivery(
       seller=seller,
     )
 
+  _prepare_supply_orders_for_deliver(seller, supply, user=user)
+
   try:
-    if supply.status != Supply.Status.CONFIRMED:
-      if not shipping_point_id or not shipping_date:
-        raise SupplyFlowError(
-          "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
-          code="shipping_required",
-        )
-      _apply_shipping_method(
-        client,
-        supply,
-        shipping_point_id=shipping_point_id,
-        shipping_date=shipping_date,
-        shipping_type=shipping_type,
+    if not shipping_point_id or not shipping_date:
+      raise SupplyFlowError(
+        "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
+        code="shipping_required",
       )
+    _apply_shipping_method(
+      client,
+      supply,
+      shipping_point_id=shipping_point_id,
+      shipping_date=shipping_date,
+      shipping_type=shipping_type,
+    )
     client.deliver_supply(supply.wb_supply_id)
   except WBApiError as exc:
     AuditLog.objects.create(
@@ -1004,11 +1086,11 @@ def send_order_to_delivery(
     supply.wb_supply_id,
   )
 
-  stock_info = _complete_order_in_delivery(
-    order,
+  order, stock_info = _finalize_supply_after_wb_deliver(
     supply,
     seller=seller,
     user=user,
+    primary_order=order,
   )
 
   supply.status = Supply.Status.CONFIRMED
@@ -1304,13 +1386,13 @@ def send_supply_to_delivery(
       code="not_ready",
     )
 
-  last_result: dict = {}
   client = _get_client(seller)
   supply_barcode_file = ""
   supply_barcode_value = ""
   supply_barcode_error = ""
 
   if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
+    _prepare_supply_orders_for_deliver(seller, supply, user=user)
     try:
       if not shipping_point_id or not shipping_date:
         raise SupplyFlowError(
@@ -1340,41 +1422,32 @@ def send_supply_to_delivery(
       supply.wb_supply_id,
     )
 
-  for order in _supply_orders(supply):
-    if order.status == Order.Status.IN_DELIVERY:
-      continue
-    if not order_can_send_to_delivery(order):
-      raise SupplyFlowError(
-        f"Заказ WB #{order.wb_order_id} не готов к отправке в доставку.",
-        code="not_ready",
-      )
-    _ensure_marking_verified_for_delivery(seller, order, user=user)
-    try:
-      assert_order_stock_deducted_at_print(order)
-    except StockDeductionError as exc:
-      raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
-    stock_info = _complete_order_in_delivery(
-      order,
-      supply,
-      seller=seller,
-      user=user,
-    )
-    last_result = _delivery_result(
-      order,
-      supply,
-      stock_info,
-      supply_barcode_file,
-      supply_barcode_value,
-      supply_barcode_error,
-      user=user,
-      seller=seller,
-    )
-
-  if not last_result:
+  primary_order = next(
+    (order for order in _supply_orders(supply) if order_can_send_to_delivery(order)),
+    None,
+  ) or (_supply_orders(supply)[0] if _supply_orders(supply) else None)
+  if primary_order is None:
     raise SupplyFlowError(
       "В поставке нет заказов для передачи в доставку.",
       code="not_ready",
     )
+  order, stock_info = _finalize_supply_after_wb_deliver(
+    supply,
+    seller=seller,
+    user=user,
+    primary_order=primary_order,
+  )
+  last_result = _delivery_result(
+    order,
+    supply,
+    stock_info,
+    supply_barcode_file,
+    supply_barcode_value,
+    supply_barcode_error,
+    user=user,
+    seller=seller,
+  )
+
   return last_result
 
 

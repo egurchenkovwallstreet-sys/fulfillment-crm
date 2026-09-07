@@ -1137,7 +1137,8 @@ function WbAssemblySellerPage() {
         `Поставка WB ${supply.wb_supply_id} (${supply.warehouse_name}) передана в доставку`,
       )
       setSelectedMoveIds(new Set())
-      await load({ stageKey: 'confirm', silent: false })
+      setStage('complete')
+      await load({ stageKey: 'complete', silent: false })
       void refreshMarkingStatus()
     } catch (err) {
       closePrintHolder(printWin)
