@@ -52,6 +52,7 @@ from .services.assembly import (
   AssemblyError,
   bind_marking_and_print,
   fetch_stickers_for_orders,
+  fetch_missing_assembly_stickers,
   get_seller_stage_counts,
   get_seller_wb_tab_counts,
   remove_order_from_assembly,
@@ -1023,6 +1024,36 @@ class AssemblyReprintStickerView(APIView):
       "action": "print",
       "order": OrderPrintSerializer(order).data,
     })
+
+
+class AssemblyFetchStickersView(APIView):
+  """Подтянуть стикеры WB для заказов на сборке без sticker_file (переданы через ЛК WB)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    order_ids = None
+    if isinstance(request.data, dict):
+      raw_ids = request.data.get("order_ids")
+      if isinstance(raw_ids, list) and raw_ids:
+        try:
+          order_ids = [int(item) for item in raw_ids]
+        except (TypeError, ValueError):
+          return Response({"detail": "order_ids должны быть числами"}, status=400)
+
+    try:
+      result = fetch_missing_assembly_stickers(
+        seller,
+        order_ids=order_ids,
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+
+    return Response({"success": True, **result})
 
 
 class AssemblySendToAssemblyView(APIView):

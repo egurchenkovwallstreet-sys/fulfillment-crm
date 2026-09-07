@@ -398,6 +398,68 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
   return updated
 
 
+def fetch_missing_assembly_stickers(
+  seller: Seller,
+  *,
+  order_ids: list[int] | None = None,
+  user=None,
+) -> dict:
+  """Подтянуть стикеры WB для заказов на сборке, переданных через ЛК WB (не через CRM)."""
+  qs = filter_orders_for_assembly(
+    Order.objects.filter(
+      seller=seller,
+      assembly_hidden=False,
+      wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+    )
+    .exclude(
+      status__in=[
+        Order.Status.CANCELLED,
+        Order.Status.SHIPPED,
+        Order.Status.IN_DELIVERY,
+      ],
+    )
+    .filter(has_sticker=False),
+    seller,
+  )
+  if order_ids:
+    qs = qs.filter(pk__in=order_ids)
+
+  orders = list(qs.order_by("wb_order_id"))
+  if not orders:
+    raise AssemblyError(
+      "Все заказы на сборке уже со стикерами в CRM",
+      code="no_missing_stickers",
+    )
+
+  requested = len(orders)
+  fetched = fetch_stickers_for_orders(seller, orders, user=user)
+  still_missing = sum(1 for order in orders if not (order.sticker_file or "").strip())
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=f"Подгрузка стикеров WB: {fetched} из {requested} (заказы с ЛК WB)",
+    details={
+      "requested": requested,
+      "fetched": fetched,
+      "still_missing": still_missing,
+      "order_ids": [order.id for order in orders],
+    },
+  )
+
+  message = f"Стикеры загружены: {fetched} из {requested}"
+  if still_missing:
+    message += f". Без стикера в WB осталось: {still_missing}"
+
+  return {
+    "requested": requested,
+    "fetched": fetched,
+    "still_missing": still_missing,
+    "message": message,
+  }
+
+
 def start_assembly(seller: Seller, *, user=None) -> dict:
   """Передать новые заказы на сборку в WB — одна поставка на склад."""
   from apps.orders.services.supply_flow import (  # noqa: PLC0415

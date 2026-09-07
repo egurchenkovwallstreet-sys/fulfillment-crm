@@ -8,6 +8,7 @@ from .views import (
   AssemblyDeleteOrderView,
   AssemblyDeletePickListView,
   AssemblyOzonPickListView,
+  AssemblyFetchStickersView,
   AssemblyReprintStickerView,
   AssemblyReplaceOrderView,
   AssemblyResetMarkingView,
@@ -137,6 +138,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/reprint-sticker/",
       AssemblyReprintStickerView.as_view(),
       name="assembly-reprint-sticker",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/fetch-stickers/",
+      AssemblyFetchStickersView.as_view(),
+      name="assembly-fetch-stickers",
     ),
     path(
       "assembly/sellers/<int:seller_id>/send-to-assembly/",

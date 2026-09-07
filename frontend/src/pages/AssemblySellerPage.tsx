@@ -6,6 +6,7 @@ import {
   deleteAssemblyOrder,
   deliverSupply,
   fetchAssemblySeller,
+  fetchAssemblyStickers,
   fetchBatchRibbon,
   fetchMarkingStatus,
   moveOrdersToNewSupply,
@@ -181,6 +182,7 @@ function WbAssemblySellerPage() {
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const [pickListDownloading, setPickListDownloading] = useState(false)
+  const [stickersFetching, setStickersFetching] = useState(false)
   const [selectedMoveIds, setSelectedMoveIds] = useState<Set<number>>(new Set())
   const bgSyncSellerRef = useRef<number | null>(null)
 
@@ -625,6 +627,36 @@ function WbAssemblySellerPage() {
       setError(err instanceof Error ? err.message : 'Не удалось подготовить ленту стикеров')
     } finally {
       setRibbonPrinting(false)
+    }
+  }
+
+  async function handleFetchMissingStickers() {
+    if (!id) return
+    const missing = (data?.orders ?? []).filter(
+      (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
+    )
+    if (missing.length < 1) {
+      setError('У всех заказов на сборке стикеры уже загружены в CRM')
+      return
+    }
+    if (
+      !window.confirm(
+        `Подтянуть стикеры из WB для ${missing.length} заказ(ов)?\n\n` +
+          'Нужно, если заказы передали на сборку через ЛК Wildberries, а не кнопкой CRM.',
+      )
+    ) {
+      return
+    }
+    setStickersFetching(true)
+    setError('')
+    try {
+      const result = await fetchAssemblyStickers(id)
+      setSuccess(result.message)
+      await load({ silent: false, stageKey: stage })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить стикеры из WB')
+    } finally {
+      setStickersFetching(false)
     }
   }
 
@@ -1520,6 +1552,9 @@ function WbAssemblySellerPage() {
   const canDownloadPickList =
     (stage === 'new' || stage === 'confirm') && (hasPickLists || pickListStageOrders > 0)
   const orders = data?.orders ?? []
+  const missingStickersCount = orders.filter(
+    (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
+  ).length
   const deliverySupplies = data?.delivery_supplies ?? []
   const activeSupplies = data?.active_supplies ?? []
   const movableOrdersCount = orders.filter((order) => order.can_move_to_new_supply).length
@@ -1603,6 +1638,21 @@ function WbAssemblySellerPage() {
           >
             Обновить заказы
           </button>
+          {stage === 'confirm' && missingStickersCount > 0 && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void handleFetchMissingStickers()}
+              disabled={loading || stickersFetching || syncing || refreshing}
+              {...uiHint(
+                'Загрузить стикеры FBS из WB для заказов, переданных на сборку через ЛК Wildberries',
+              )}
+            >
+              {stickersFetching
+                ? 'Стикеры…'
+                : `Подтянуть стикеры (${missingStickersCount})`}
+            </button>
+          )}
           {(stage === 'new' || stage === 'confirm') && (
             <button
               type="button"

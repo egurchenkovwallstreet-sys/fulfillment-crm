@@ -468,6 +468,24 @@ export function resetAssemblyMarking(sellerId: number, orderIds?: number[]) {
   )
 }
 
+export type FetchAssemblyStickersResult = {
+  success: boolean
+  requested: number
+  fetched: number
+  still_missing: number
+  message: string
+}
+
+export function fetchAssemblyStickers(sellerId: number, orderIds?: number[]) {
+  return apiFetch<FetchAssemblyStickersResult>(
+    `/api/orders/assembly/sellers/${sellerId}/fetch-stickers/`,
+    {
+      method: 'POST',
+      body: JSON.stringify(orderIds?.length ? { order_ids: orderIds } : {}),
+    },
+  )
+}
+
 export function sendOrderToAssembly(sellerId: number, orderId: number) {
   return apiFetch<SendToAssemblyResult>(
     `/api/orders/assembly/sellers/${sellerId}/send-to-assembly/`,
