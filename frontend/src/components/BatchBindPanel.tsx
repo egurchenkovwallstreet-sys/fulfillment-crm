@@ -17,7 +17,7 @@ const EMPTY_STATE: BatchBindState = {
 type BatchBindPanelProps = {
   sellerId: number
   disabled?: boolean
-  onBound: () => void | Promise<void>
+  onBound: (immediateVerify?: boolean) => void | Promise<void>
   onError?: (message: string) => void
   onSuccess?: (message: string) => void
 }
@@ -102,7 +102,7 @@ export function BatchBindPanel({
           onSuccess?.(result.message || 'Связка завершена')
           resetBind()
           try {
-            await onBound()
+            await onBound(Boolean(result.immediate_verify))
           } finally {
             focusScanInput()
           }

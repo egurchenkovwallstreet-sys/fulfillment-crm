@@ -672,6 +672,7 @@ def bind_wb_batch_scan(
       "scan_kind": kind,
     }
 
+  immediate_verify = False
   if requires_marking:
     if not state["marking_code"]:
       return {
@@ -682,6 +683,9 @@ def bind_wb_batch_scan(
         **state,
       }
     order = _bind_marking_without_print(seller, order, state["marking_code"], user=user)
+    from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
+
+    immediate_verify = queue_last_pick_list_marking_verify(seller)
     message = (
       f"Связка завершена: заказ WB #{order.wb_order_id}. "
       "ЧЗ отправлен в WB на проверку."
@@ -722,6 +726,7 @@ def bind_wb_batch_scan(
     "barcode": "",
     "sticker_scan": "",
     "marking_code": "",
+    "immediate_verify": immediate_verify,
   }
 
 

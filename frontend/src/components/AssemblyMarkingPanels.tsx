@@ -36,7 +36,7 @@ export function AssemblyQueuePanels({
         className="assembly-marking-panel assembly-marking-panel--ready"
         onClick={() => onOpenList('ready')}
         {...uiHint(
-          'Собранные заказы: баркод отсканирован, стикер напечатан, ЧЗ привязан (если нужен). Готовы к доставке.',
+          'Собранные заказы: баркод и стикер готовы. Если нужен ЧЗ — WB ещё может проверять код. В доставку — когда кнопка зелёная.',
         )}
       >
         <span className="assembly-marking-panel__count">{readyCount}</span>
@@ -201,10 +201,14 @@ export function AssemblyQueueListModal({
                     {kind === 'ready' && onDeliver && (
                       <button
                         type="button"
-                        className="btn btn--small btn--primary"
+                        className={`btn btn--small ${order.can_send_to_delivery ? 'btn--deliver-ready' : 'btn--deliver-wait'}`}
                         onClick={() => onDeliver(order)}
                         disabled={loading || !order.can_send_to_delivery}
-                        {...uiHint('Передать заказ в доставку WB')}
+                        {...uiHint(
+                          order.can_send_to_delivery
+                            ? 'Передать заказ в доставку WB'
+                            : 'Кнопка зелёная, когда WB примет ЧЗ без ошибок',
+                        )}
                       >
                         В доставку
                       </button>

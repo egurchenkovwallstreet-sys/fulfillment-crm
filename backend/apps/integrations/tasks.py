@@ -76,6 +76,42 @@ def scan_off_crm_shipments():
 
 
 @shared_task
+def verify_seller_marking_codes(seller_id: int):
+  """Опросить WB по pending ЧЗ одного селлера (после последнего скана листа)."""
+  from apps.orders.services.assembly import AssemblyError
+  from apps.orders.services.marking_verification import verify_marking_orders
+  from apps.sellers.models import Seller
+
+  seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+  if not seller:
+    return {"skipped": True, "seller_id": seller_id}
+  try:
+    results = verify_marking_orders(seller)
+  except AssemblyError as exc:
+    logger.warning("Marking verify failed for seller %s: %s", seller_id, exc)
+    return {"seller_id": seller_id, "error": str(exc)}
+  logger.info("Marking verify seller %s: %s orders", seller_id, len(results))
+  return {"seller_id": seller_id, "count": len(results)}
+
+
+@shared_task
+def verify_pending_marking_codes():
+  """Раз в 10 минут: проверка ЧЗ у всех селлеров с заказами pending."""
+  from apps.orders.models import Order
+
+  seller_ids = list(
+    Order.objects.filter(marking_verify_status="pending")
+    .exclude(marking_code="")
+    .values_list("seller_id", flat=True)
+    .distinct()
+  )
+  for seller_id in seller_ids:
+    verify_seller_marking_codes.delay(seller_id)
+  logger.info("Queued marking verify for %s sellers", len(seller_ids))
+  return {"sellers": len(seller_ids)}
+
+
+@shared_task
 def clear_daily_marking_codes():
   """Ежедневно в 23:59 — удалить ЧЗ у отгруженных заказов (CRM «забывает» коды)."""
   from apps.orders.services.marking_cleanup import clear_daily_shipped_marking_codes

@@ -719,13 +719,18 @@ def bind_marking_and_print(
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
+  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
+
+  immediate_verify = queue_last_pick_list_marking_verify(seller)
+
   return {
     "action": "print",
     "order": order,
     "stock": stock_info,
+    "immediate_verify": immediate_verify,
     "message": (
       f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
-      "Стикер печатается сразу; проверка в «Честном знаке» займёт несколько минут."
+      "Стикер печатается сразу; проверка WB — в фоне."
     ),
   }
 

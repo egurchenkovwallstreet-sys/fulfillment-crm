@@ -907,3 +907,43 @@
   background: #1e40af;
   color: #fff;
 }
+
+.btn.btn--deliver-wait,
+.btn.btn--deliver-wait:disabled {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.28), 0 0 14px rgba(220, 38, 38, 0.55);
+  animation: assembly-deliver-pulse-red 1.6s ease-in-out infinite;
+}
+
+.btn.btn--deliver-ready,
+.btn.btn--deliver-ready:disabled {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.28), 0 0 14px rgba(22, 163, 74, 0.5);
+  animation: assembly-deliver-pulse-green 1.6s ease-in-out infinite;
+}
+
+.btn--deliver-wait:hover:not(:disabled),
+.btn--deliver-ready:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.assembly-step-card--delivery-wait {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+@keyframes assembly-deliver-pulse-red {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.28), 0 0 10px rgba(220, 38, 38, 0.4); }
+  50% { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.4), 0 0 18px rgba(220, 38, 38, 0.7); }
+}
+
+@keyframes assembly-deliver-pulse-green {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.28), 0 0 10px rgba(22, 163, 74, 0.4); }
+  50% { box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.4), 0 0 18px rgba(22, 163, 74, 0.65); }
+}

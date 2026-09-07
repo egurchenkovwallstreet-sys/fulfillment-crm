@@ -170,6 +170,7 @@ export interface BindMarkingResult {
   message?: string
   order: PrintOrder
   stock?: StockDeductionInfo
+  immediate_verify?: boolean
 }
 
 export interface MarkingVerifyItem {
@@ -376,6 +377,7 @@ export interface BatchBindResult extends BatchBindState {
   requires_marking?: boolean
   scan_kind?: string
   message?: string
+  immediate_verify?: boolean
   order_id?: number
   wb_order_id?: number
   posting_id?: number

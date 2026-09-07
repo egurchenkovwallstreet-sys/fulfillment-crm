@@ -741,6 +741,7 @@ class AssemblyBindMarkingView(APIView):
       payload["message"] = result["message"]
     if result.get("stock"):
       payload["stock"] = result["stock"]
+    payload["immediate_verify"] = bool(result.get("immediate_verify"))
     return Response(payload)
 
 

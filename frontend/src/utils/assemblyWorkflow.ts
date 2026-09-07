@@ -20,12 +20,12 @@ export const WORKFLOW_STEPS = [
   {
     id: 3 as WorkflowStepId,
     title: 'Честный знак',
-    hint: 'Скан DataMatrix → привязка в WB → сразу печать стикера',
+    hint: 'Скан DataMatrix → привязка к стикеру в WB → сразу печать. Заказ сразу в «Готовые»',
   },
   {
     id: 4 as WorkflowStepId,
     title: 'В доставку',
-    hint: 'Подтверждение и печать QR поставки 58×40',
+    hint: 'Кнопка зелёная, когда WB принял все ЧЗ без ошибок. Красная — пока проверяет',
   },
 ] as const
 
@@ -40,6 +40,20 @@ export function orderStickerPrinted(order: AssemblyOrder): boolean {
 
 export function orderCanDeliver(order: AssemblyOrder): boolean {
   return Boolean(order.can_send_to_delivery)
+}
+
+export function orderChzPending(order: AssemblyOrder): boolean {
+  return Boolean(order.requires_marking && order.marking_verify_status === 'pending')
+}
+
+export function assemblyDeliveryUnlocked(status: {
+  errors_count: number
+  ready: AssemblyOrder[]
+}): boolean {
+  if (status.errors_count > 0) return false
+  if (status.ready.length === 0) return false
+  if (status.ready.some(orderChzPending)) return false
+  return status.ready.some(orderCanDeliver)
 }
 
 export function orderBlockReason(order: AssemblyOrder): string | null {

@@ -41,6 +41,8 @@ import {
   canSwitchToStage,
   orderBlockReason,
   orderCanDeliver,
+  orderChzPending,
+  assemblyDeliveryUnlocked,
   resolveWorkflowStep,
   assemblyScanErrorTitle,
   type ScanPhase,
@@ -76,9 +78,8 @@ import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
-const MARKING_STATUS_POLL_MS = 4000
-const MARKING_VERIFY_INITIAL_MS = 3000
-const MARKING_VERIFY_INTERVAL_MS = 3000
+const MARKING_STATUS_POLL_MS = 10_000
+const MARKING_VERIFY_AFTER_LAST_MS = 15_000
 
 const EMPTY_MARKING_STATUS: MarkingStatusResult = {
   success: true,
@@ -337,24 +338,36 @@ function WbAssemblySellerPage() {
   useEffect(() => {
     if (!id || stage !== 'confirm') return
 
-    void refreshMarkingStatus()
-    const statusTimer = window.setInterval(() => void refreshMarkingStatus(), MARKING_STATUS_POLL_MS)
-
-    let verifyInterval: number | undefined
-    const verifyBootstrap = window.setTimeout(() => {
-      void runMarkingVerify()
-      verifyInterval = window.setInterval(
-        () => void runMarkingVerify(),
-        MARKING_VERIFY_INTERVAL_MS,
-      )
-    }, MARKING_VERIFY_INITIAL_MS)
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void refreshMarkingStatus()
+    }
+    tick()
+    const statusTimer = window.setInterval(tick, MARKING_STATUS_POLL_MS)
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshMarkingStatus()
+    }
+    document.addEventListener('visibilitychange', onVis)
 
     return () => {
       window.clearInterval(statusTimer)
-      window.clearTimeout(verifyBootstrap)
-      if (verifyInterval) window.clearInterval(verifyInterval)
+      document.removeEventListener('visibilitychange', onVis)
     }
-  }, [id, stage, refreshMarkingStatus, runMarkingVerify])
+  }, [id, stage, refreshMarkingStatus])
+
+  useEffect(() => {
+    if (!id || stage !== 'confirm') return
+    const pending = markingStatus.ready.some(orderChzPending)
+    const stillScanningChz = markingStatus.in_assembly.some((order) => order.requires_marking)
+    if (!pending || stillScanningChz) return
+
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void runMarkingVerify()
+    }
+    const verifyTimer = window.setInterval(tick, MARKING_VERIFY_AFTER_LAST_MS)
+    return () => window.clearInterval(verifyTimer)
+  }, [id, stage, markingStatus.ready, markingStatus.in_assembly, runMarkingVerify])
 
   useEffect(() => {
     if (!id || stage !== 'complete') return
@@ -1038,6 +1051,17 @@ function WbAssemblySellerPage() {
       })
       return
     }
+    if (pendingChzCount > 0 || !deliveryUnlocked) {
+      setModal({
+        kind: 'block',
+        title: 'WB ещё проверяет Честный знак',
+        message:
+          'Заказы уже в «Готовые», стикеры напечатаны. Кнопка станет зелёной, ' +
+          'когда WB примет все ЧЗ без ошибок. Последние коды с листа уходят на проверку сразу, ' +
+          'остальные CRM перепроверяет каждые 10 минут.',
+      })
+      return
+    }
     const ready = markingStatus.ready.filter((order) => orderCanDeliver(order))
     if (ready.length === 0) {
       setModal({
@@ -1397,7 +1421,9 @@ function WbAssemblySellerPage() {
         void load({ silent: true })
         return
       }
-      window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
+      if (result.immediate_verify) {
+        void runMarkingVerify()
+      }
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
@@ -1561,13 +1587,24 @@ function WbAssemblySellerPage() {
   const movableOrdersCount = orders.filter((order) => order.can_move_to_new_supply).length
   const readyOrders = markingStatus.ready
   const readyToDeliverCount = readyOrders.filter((order) => orderCanDeliver(order)).length
+  const pendingChzCount = readyOrders.filter((order) => orderChzPending(order)).length
+  const deliveryUnlocked = assemblyDeliveryUnlocked(markingStatus)
+  const showDeliverButton = stage === 'confirm' && readyOrders.length > 0
   const markingQueueBlocked = stage === 'confirm' && markingStatus.errors_count > 0
+  const lastPrintedFresh =
+    lastPrinted &&
+    (readyOrders.find((order) => order.id === lastPrinted.id) ||
+      markingStatus.errors.find((order) => order.id === lastPrinted.id) ||
+      lastPrinted)
+  const lastPrintedCanDeliver = Boolean(
+    lastPrintedFresh && orderCanDeliver(lastPrintedFresh) && !markingQueueBlocked,
+  )
   const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
     scanPhase,
     !markingInProgress &&
-      (readyToDeliverCount > 0 || Boolean(lastPrinted && orderCanDeliver(lastPrinted))),
+      (deliveryUnlocked || lastPrintedCanDeliver),
   )
   const markingListOrders =
     markingListKind === 'errors'
@@ -1719,21 +1756,27 @@ function WbAssemblySellerPage() {
               В новую поставку ({selectedMoveIds.size})
             </button>
           )}
-          {stage === 'confirm' && readyToDeliverCount > 0 && (
+          {stage === 'confirm' && showDeliverButton && (
             <span
               {...hintWrapProps(
                 markingQueueBlocked
-                  ? 'Сначала закройте ошибки ЧЗ'
-                  : 'Передать все собранные заказы из «Готовые» в доставку WB',
+                  ? 'Сначала закройте ошибки ЧЗ — кнопка станет зелёной после замены товара'
+                  : deliveryUnlocked
+                    ? 'WB принял все ЧЗ — передать собранные заказы в доставку'
+                    : 'Кнопка красная, пока WB проверяет ЧЗ. Зелёная — когда все коды приняты без ошибок',
               )}
             >
               <button
                 type="button"
-                className="btn btn--primary"
+                className={`btn ${deliveryUnlocked ? 'btn--deliver-ready' : 'btn--deliver-wait'}`}
                 onClick={handleSendAllReadyToDelivery}
-                disabled={loading || markingQueueBlocked}
+                disabled={loading}
               >
-                Все готовые в доставку ({readyToDeliverCount})
+                {deliveryUnlocked
+                  ? `Все готовые в доставку (${readyToDeliverCount})`
+                  : markingQueueBlocked
+                    ? `В доставку · ошибки ЧЗ (${markingStatus.errors_count})`
+                    : `В доставку · ждём WB (${pendingChzCount || readyOrders.length})`}
               </button>
             </span>
           )}
@@ -1816,14 +1859,14 @@ function WbAssemblySellerPage() {
                     {supply.can_deliver ? (
                       <button
                         type="button"
-                        className="btn btn--small btn--primary"
+                        className="btn btn--small btn--deliver-ready"
                         onClick={() => handleDeliverSupply(supply)}
                         disabled={loading || markingQueueBlocked}
                       >
                         В доставку
                       </button>
                     ) : (
-                      <span className="assembly-muted">Ждёт сборки</span>
+                      <span className="assembly-muted">Ждёт сборки / ЧЗ</span>
                     )}
                   </td>
                 </tr>
@@ -1935,8 +1978,8 @@ function WbAssemblySellerPage() {
         <BatchBindPanel
           sellerId={id}
           disabled={!hasPickLists}
-          onBound={async () => {
-            window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
+          onBound={async (immediateVerify?: boolean) => {
+            if (immediateVerify) void runMarkingVerify()
             await refreshMarkingStatus()
             await load({ silent: true })
           }}
@@ -2032,23 +2075,36 @@ function WbAssemblySellerPage() {
             </div>
           )}
 
-          {lastPrinted && !markingInProgress && orderCanDeliver(lastPrinted) && (
-            <div className="assembly-last-print assembly-last-print--ready">
+          {lastPrintedFresh && !markingInProgress && (
+            <div className={`assembly-last-print${lastPrintedCanDeliver ? ' assembly-last-print--ready' : ''}`}>
               <p>
-                <strong>Шаг 4:</strong> WB #{lastPrinted.wb_order_id} готов к доставке
+                <strong>Шаг 4:</strong> WB #{lastPrintedFresh.wb_order_id}{' '}
+                {lastPrintedCanDeliver
+                  ? 'готов к доставке'
+                  : orderChzPending(lastPrintedFresh)
+                    ? 'ждёт ответ WB по ЧЗ'
+                    : 'пока нельзя в доставку'}
               </p>
               <span
                 {...hintWrapProps(
-                  markingQueueBlocked
-                    ? 'Сначала закройте ошибки ЧЗ'
-                    : 'Добавить заказ в поставку WB и перевести в доставку',
+                  lastPrintedCanDeliver
+                    ? 'Добавить заказ в поставку WB и перевести в доставку'
+                    : markingQueueBlocked
+                      ? 'Сначала закройте ошибки ЧЗ'
+                      : 'Кнопка станет зелёной, когда WB примет ЧЗ',
                 )}
               >
                 <button
                   type="button"
-                  className="btn btn--primary btn--small"
-                  onClick={() => handleSendToDelivery(lastPrinted)}
-                  disabled={loading || markingQueueBlocked}
+                  className={`btn btn--small ${lastPrintedCanDeliver ? 'btn--deliver-ready' : 'btn--deliver-wait'}`}
+                  onClick={() => {
+                    if (!lastPrintedCanDeliver) {
+                      handleSendAllReadyToDelivery()
+                      return
+                    }
+                    if (lastPrintedFresh) handleSendToDelivery(lastPrintedFresh)
+                  }}
+                  disabled={loading}
                 >
                   Подтвердить и в доставку
                 </button>
@@ -2064,12 +2120,17 @@ function WbAssemblySellerPage() {
         </section>
       )}
 
-      {stage === 'confirm' && readyToDeliverCount > 0 && !markingInProgress && (
-        <section className="panel assembly-step-card assembly-step-card--delivery">
-          <h2 className="section-title">Шаг 4 — готово к доставке: {readyToDeliverCount}</h2>
+      {stage === 'confirm' && showDeliverButton && !markingInProgress && (
+        <section className={`panel assembly-step-card assembly-step-card--delivery${deliveryUnlocked ? '' : ' assembly-step-card--delivery-wait'}`}>
+          <h2 className="section-title">
+            {deliveryUnlocked
+              ? `Шаг 4 — готово к доставке: ${readyToDeliverCount}`
+              : 'Шаг 4 — ждём ответ WB по Честному знаку'}
+          </h2>
           <p>
-            Заказы в «Готовые» ({markingStatus.ready_count}). Подтвердите передачу в WB — список
-            открывается по зелёному счётчику.
+            {deliveryUnlocked
+              ? 'WB принял все ЧЗ без ошибок. Зелёная кнопка «В доставку» в шапке.'
+              : 'Заказы уже в «Готовые». Кнопка красная, пока WB не примет все ЧЗ. Зелёная — можно отгружать.'}
           </p>
         </section>
       )}
@@ -2289,7 +2350,7 @@ function WbAssemblySellerPage() {
                       >
                         <button
                           type="button"
-                          className="btn btn--small btn--secondary"
+                          className="btn btn--small btn--deliver-ready"
                           onClick={() => handleSendToDelivery(order)}
                           disabled={loading || markingQueueBlocked}
                         >
