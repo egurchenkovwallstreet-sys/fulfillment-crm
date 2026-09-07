@@ -109,11 +109,13 @@ export interface StartAssemblyResult {
 
 export interface PickListPreviewResult {
   success: boolean
+  pick_lists?: PickList[]
   pick_list: PickList & {
     preview?: boolean
     warehouse_label?: string
     orders_in_list?: number
     orders_skipped?: number
+    pick_lists?: PickList[]
   }
 }
 
