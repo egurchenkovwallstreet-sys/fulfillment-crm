@@ -88,11 +88,11 @@ export function buildDeliveryConfirmMessage(order: AssemblyOrder): string {
     `Передать заказ WB #${order.wb_order_id} в доставку?`,
     '',
     'Проверьте перед подтверждением:',
-    '✓ Товар собран по листу подбора',
+    '✓ Товар собран',
     '✓ Стикер FBS напечатан и наклеен',
   ]
   if (order.requires_marking) {
-    lines.push('✓ Честный знак подтверждён WB (проверка перед доставкой)')
+    lines.push('✓ Честный знак подтверждён WB')
   }
   lines.push('', 'После подтверждения будет напечатан QR поставки.')
   return lines.join('\n')

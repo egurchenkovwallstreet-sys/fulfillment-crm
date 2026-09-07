@@ -40,7 +40,6 @@ from apps.warehouse.services.marking_lookup import resolve_product_requires_mark
 from apps.warehouse.services.stock_deduction import (
   StockDeductionError,
   assert_order_stock_deducted_at_print,
-  order_on_active_pick_list,
   order_sticker_printed_in_crm,
   stock_deduction_info,
 )
@@ -81,8 +80,6 @@ def order_can_send_to_assembly(order: Order) -> bool:
 
 def order_can_send_to_delivery(order: Order) -> bool:
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
-    return False
-  if not order_on_active_pick_list(order):
     return False
   if not order_sticker_printed_in_crm(order):
     return False
@@ -309,7 +306,7 @@ def fetch_all_russia_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:v3:{seller.id}:{resolved_cargo}"
+  cache_key = f"wb_sc_points:v4:{seller.id}:{resolved_cargo}"
   cached = cache.get(cache_key)
   if isinstance(cached, list) and cached:
     return cached, resolved_cargo
@@ -392,22 +389,40 @@ PINNED_SHIPPING_POINT_MATCHERS = (
 
 PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = MOSCOW_REGION_100KM_CITIES
 
-PINNED_SHIPPING_CARGO_TYPE = 1
+PINNED_SHIPPING_CARGO_TYPES: tuple[int, ...] = (1, 2, 3)
+
+PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
+  "Липкинское",
+  "Вёшки",
+)
 
 
 def _fetch_pinned_shipping_pool(client, cargo_type: int) -> list[dict]:
-  """Пул для закреплённых СЦ: всегда МГТ + тип поставки."""
+  """Пул для закреплённых точек: все типы груза + доп. города (Вёшки/Липкинское)."""
   pool: list[dict] = []
-  cargo_types = [PINNED_SHIPPING_CARGO_TYPE]
+  cargo_types = list(PINNED_SHIPPING_CARGO_TYPES)
   if cargo_type not in cargo_types:
     cargo_types.append(cargo_type)
-  for fetch_city in PINNED_SHIPPING_POINT_FETCH_CITIES:
+  cities = _dedupe_shipping_cities(
+    PINNED_SHIPPING_POINT_FETCH_CITIES,
+    PINNED_SHIPPING_EXTRA_CITIES,
+  )
+  for fetch_city in cities:
     for fetch_cargo in cargo_types:
       try:
         pool.extend(client.fetch_shipping_points(fetch_city, fetch_cargo))
       except WBApiError:
         continue
   return pool
+
+
+def _normalize_pinned_point(point: dict) -> dict:
+  """Вёшки в WB часто приходит как склад (sw) — показываем в списке СЦ."""
+  normalized = dict(point)
+  office_type = _normalize_text(normalized.get("officeType"))
+  if office_type not in ("sc", "sw", "pp"):
+    normalized["officeType"] = "sw"
+  return normalized
 
 
 def _merge_pinned_shipping_points(
@@ -447,7 +462,7 @@ def _merge_pinned_shipping_points(
       if point_id in known_ids:
         found_keys.add(key)
         break
-      merged.append(point)
+      merged.append(_normalize_pinned_point(point))
       known_ids.add(point_id)
       found_keys.add(key)
       break
@@ -482,8 +497,10 @@ def _apply_shipping_method(
 
 
 def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=None) -> None:
-  """Перед доставкой — свежий опрос WB по ЧЗ; ошибка = только замена товара."""
+  """Перед доставкой — свежий опрос WB по ЧЗ, если в CRM ещё не подтверждено."""
   if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    return
+  if order_marking_ready(order):
     return
   if not (order.marking_code or "").strip():
     raise SupplyFlowError(
@@ -1310,8 +1327,6 @@ def order_delivery_block_reason(order: Order) -> str | None:
     return None
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
     return "Не на сборке WB"
-  if not order_on_active_pick_list(order):
-    return "Заказ не в листе подбора — сформируйте лист и соберите"
   if not order_sticker_printed_in_crm(order):
     return "Нет стикера FBS — отсканируйте в сборке"
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
