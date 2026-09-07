@@ -165,6 +165,14 @@ USE_X_FORWARDED_HOST = True
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379/0")
+
+# Общий кеш между Gunicorn workers (СЦ, счётчики сборки). db 1 — отдельно от Celery (db 0).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("REDIS_CACHE_URL", default="redis://redis:6379/1"),
+    }
+}
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
