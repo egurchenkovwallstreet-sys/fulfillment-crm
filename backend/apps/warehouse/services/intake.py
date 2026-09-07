@@ -9,6 +9,8 @@ from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, first_free_cell, refresh_cell_occupied
+from apps.warehouse.services.catalog_fetch import CatalogError
+from apps.warehouse.services.catalog_groups import find_group_by_barcode
 from apps.warehouse.services.liter_pricing import apply_product_dimensions
 from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 from apps.warehouse.services.stock_balance import (
@@ -226,15 +228,36 @@ def perform_intake(
   else:
     crm_quantity_after = intake_quantity
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
-    marking = lookup_marking_for_barcode(seller, barcode) if mp == WB else None
+    product_name = name.strip()
+    requires_marking = False
+    vendor_code = ""
+    wb_nm_id = None
+    tech_size = ""
+    if mp == WB:
+      marking = lookup_marking_for_barcode(seller, barcode)
+      product_name = product_name or marking.title
+      requires_marking = marking.requires_marking if marking.wb_found else False
+    else:
+      try:
+        anchor, _, _ = find_group_by_barcode(seller, mp, barcode)
+        product_name = product_name or anchor.title
+        requires_marking = anchor.requires_marking
+        vendor_code = anchor.vendor_code or ""
+        wb_nm_id = anchor.wb_nm_id or None
+        tech_size = anchor.tech_size or ""
+      except CatalogError as exc:
+        raise IntakeError(str(exc)) from exc
     product = Product.objects.create(
       seller=seller,
       barcode=barcode,
-      name=name.strip() or (marking.title if marking else ""),
+      name=product_name,
       cell=cell,
       quantity=crm_quantity_after,
       marketplace=mp,
-      requires_marking=(marking.requires_marking if marking and marking.wb_found else False),
+      requires_marking=requires_marking,
+      vendor_code=vendor_code,
+      wb_nm_id=wb_nm_id,
+      tech_size=tech_size,
     )
     refresh_cell_occupied(cell)
     is_new = True

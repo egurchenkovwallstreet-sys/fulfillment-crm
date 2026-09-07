@@ -625,7 +625,10 @@ def push_to_marketplace(
         continue
       amount = crm_qty
       if mode == PUSH_MODE_ADD:
-        current = _ozon_stock_amount(client, offer_id, warehouse.ozon_warehouse_id)
+        try:
+          current = _ozon_stock_amount(client, offer_id, warehouse.ozon_warehouse_id)
+        except OzonApiError as exc:
+          raise ArticleIntakeError(str(exc)) from exc
         amount = current + crm_qty
       stocks.append({
         "offer_id": offer_id,

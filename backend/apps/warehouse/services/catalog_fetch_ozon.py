@@ -291,22 +291,47 @@ def _photo_url(raw: dict) -> str:
   return ""
 
 
+def _ozon_barcode_aliases(value: str) -> list[str]:
+  """Ozon FBS-этикетки часто в формате OZN{sku}, в API — sku и EAN."""
+  barcode = normalize_barcode(value)
+  if not barcode:
+    return []
+  aliases = [barcode]
+  upper = barcode.upper()
+  if upper.startswith("OZN") and len(barcode) > 3:
+    tail = barcode[3:]
+    if tail.isdigit() and tail not in aliases:
+      aliases.append(tail)
+  elif barcode.isdigit():
+    ozn = f"OZN{barcode}"
+    if ozn not in aliases:
+      aliases.append(ozn)
+  return aliases
+
+
 def _barcodes(raw: dict) -> list[str]:
   codes: list[str] = []
   barcodes = raw.get("barcodes") or []
   if isinstance(barcodes, str):
     barcodes = [part.strip() for part in barcodes.split(",") if part.strip()]
   for item in barcodes:
-    value = normalize_barcode(str(item))
-    if value and value not in codes:
-      codes.append(value)
+    for value in _ozon_barcode_aliases(str(item)):
+      if value and value not in codes:
+        codes.append(value)
   single = normalize_barcode(str(raw.get("barcode") or ""))
   if single:
     for part in single.split(","):
-      value = part.strip()
+      for value in _ozon_barcode_aliases(part.strip()):
+        if value and value not in codes:
+          codes.append(value)
+  sku = str(raw.get("sku") or "").strip()
+  if sku:
+    for value in _ozon_barcode_aliases(sku):
       if value and value not in codes:
         codes.append(value)
   offer_id = str(raw.get("offer_id") or "").strip()
+  if offer_id and offer_id not in codes:
+    codes.append(offer_id)
   if not codes and offer_id:
     codes.append(offer_id)
   return codes
@@ -431,9 +456,13 @@ def fetch_ozon_group_by_barcode(
   except (OzonCountsError, OzonApiError) as exc:
     raise CatalogError(str(exc)) from exc
   items, card_by_barcode = _parse_cards_to_items(cards)
-  anchor = next((item for item in items if item.barcode == barcode), None)
+  search_aliases = set(_ozon_barcode_aliases(barcode))
+  anchor = next((item for item in items if item.barcode in search_aliases), None)
   if not anchor:
-    raise CatalogError("Баркод не найден в каталоге Ozon")
+    raise CatalogError(
+      "Баркод не найден в каталоге Ozon. Проверьте ключи API селлера и что товар "
+      "есть в ЛК Ozon (сканируйте баркод с этикетки FBS или артикул offer_id)."
+    )
 
   anchor_card = card_by_barcode.get(anchor.barcode)
   anchor_key = ozon_group_key(anchor, anchor_card)

@@ -62,7 +62,7 @@ from .services.wb_sync_intake import (
   preview_wb_sync_intake,
   serialize_preview,
 )
-from .services.marking_lookup import lookup_marking_for_barcode, refresh_product_marking
+from .services.marking_lookup import lookup_intake_catalog_info, refresh_product_marking
 from .services.wb_product_sync import refresh_seller_products_from_wb
 
 
@@ -266,6 +266,7 @@ class IntakeLookupView(APIView):
       )
 
     seller = _require_seller(request, seller_id)
+    marketplace = parse_marketplace(request)
 
     wb_stock = None
     warehouse_name = ""
@@ -281,7 +282,7 @@ class IntakeLookupView(APIView):
       Product.objects.filter(
         seller_id=seller_id,
         barcode=barcode,
-        marketplace=parse_marketplace(request),
+        marketplace=marketplace,
       )
       .select_related("cell", "seller")
       .first()
@@ -302,14 +303,7 @@ class IntakeLookupView(APIView):
         },
       })
 
-    seller = get_seller_for_user(request.user, seller_id, active_only=True)
-    if not seller:
-      from django.http import Http404
-      raise Http404
-    marking = lookup_marking_for_barcode(
-      seller,
-      barcode,
-    )
+    marking = lookup_intake_catalog_info(seller, barcode, marketplace)
     return Response({
       "exists": False,
       "barcode": barcode,
@@ -561,7 +555,7 @@ class InventoryLookupView(APIView):
         },
       })
 
-    marking = lookup_marking_for_barcode(seller, barcode)
+    marking = lookup_intake_catalog_info(seller, barcode, marketplace)
     return Response({
       "exists": False,
       "barcode": barcode,
