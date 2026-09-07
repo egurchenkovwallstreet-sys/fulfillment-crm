@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+  CellDeleteView,
   CellListView,
   CellDetailView,
   IntakeHistoryView,
@@ -61,6 +62,7 @@ urlpatterns = [
     name="warehouse_seller_products_refresh",
   ),
   path("cells/", CellListView.as_view(), name="warehouse_cells"),
+  path("cells/<int:cell_id>/", CellDeleteView.as_view(), name="warehouse_cell_delete"),
   path(
     "sellers/<int:seller_id>/cells/<str:cell_number>/",
     CellDetailView.as_view(),

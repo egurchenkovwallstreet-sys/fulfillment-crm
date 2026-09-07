@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  deleteCell,
   fetchAllCells,
   fetchCellDetail,
   fetchProductCellLabel,
@@ -15,11 +16,19 @@ import {
 } from '../api/warehouse'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
+import { useAuth } from '../context/AuthContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './CellInventoryPage.css'
 
+type DeleteCellTarget = {
+  cellId: number
+  cellNumber: string
+  product: Product | null
+}
+
 export function CellInventoryPage() {
+  const { isAdmin } = useAuth()
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [products, setProducts] = useState<Product[]>([])
@@ -35,6 +44,8 @@ export function CellInventoryPage() {
   const [moveCellId, setMoveCellId] = useState<number | ''>('')
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteCellTarget | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchSellers()
@@ -142,6 +153,34 @@ export function CellInventoryPage() {
     }
   }
 
+  function openDeleteCellDialog(target: DeleteCellTarget) {
+    setDeleteTarget(target)
+  }
+
+  async function handleDeleteCellConfirm() {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setError('')
+    setSuccess('')
+    try {
+      const result = await deleteCell(deleteTarget.cellId)
+      setSuccess(result.message)
+      setDeleteTarget(null)
+      if (cellDetail?.cell.id === deleteTarget.cellId) {
+        setCellDetail(null)
+        setCellQuery('')
+      }
+      await loadProducts()
+      if (sellerId) {
+        setCells(await fetchAllCells(Number(sellerId)))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить ячейку')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const movingProduct = products.find((p) => p.id === moveProductId)
 
   const filteredProducts = useMemo(() => {
@@ -218,9 +257,27 @@ export function CellInventoryPage() {
         <section className="panel cell-detail-panel">
           <div className="cell-detail-panel__head">
             <h2 className="section-title">Ячейка №{cellDetail.cell.number}</h2>
-            <button type="button" className="btn btn--ghost btn--small" onClick={() => setCellDetail(null)} {...uiHint('Закрыть карточку ячейки и вернуться к списку.')}>
-              Закрыть
-            </button>
+            <div className="cell-detail-panel__actions">
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={() =>
+                    openDeleteCellDialog({
+                      cellId: cellDetail.cell.id,
+                      cellNumber: cellDetail.cell.number,
+                      product: cellDetail.product,
+                    })
+                  }
+                  {...uiHint('Удалить ячейку и привязанный товар без возможности восстановления.')}
+                >
+                  Удалить ячейку
+                </button>
+              )}
+              <button type="button" className="btn btn--ghost btn--small" onClick={() => setCellDetail(null)} {...uiHint('Закрыть карточку ячейки и вернуться к списку.')}>
+                Закрыть
+              </button>
+            </div>
           </div>
           {!cellDetail.product ? (
             <p className="cell-inventory-empty">Ячейка свободна — товар не привязан</p>
@@ -346,6 +403,22 @@ export function CellInventoryPage() {
                     >
                       Перенести
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="btn btn--danger btn--small"
+                        onClick={() =>
+                          openDeleteCellDialog({
+                            cellId: product.cell,
+                            cellNumber: product.cell_number,
+                            product,
+                          })
+                        }
+                        {...uiHint('Удалить ячейку вместе с этим товаром.')}
+                      >
+                        Удалить
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -396,6 +469,51 @@ export function CellInventoryPage() {
 
       {labelPrompt && (
         <CellLabelPrompt label={labelPrompt} onClose={() => setLabelPrompt(null)} />
+      )}
+
+      {deleteTarget && (
+        <div className="cell-inventory-modal-backdrop" role="presentation" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="cell-inventory-modal cell-inventory-modal--danger" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Удалить ячейку №{deleteTarget.cellNumber}?</h3>
+            {deleteTarget.product ? (
+              <p>
+                Будет удалены ячейка и товар:
+                <br />
+                Баркод: <strong>{deleteTarget.product.barcode}</strong>
+                <br />
+                Остаток CRM: <strong>{deleteTarget.product.quantity} шт.</strong>
+                <br />
+                <span className="cell-inventory-delete-warning">
+                  Позиции листов подбора и привязки к заказам будут сняты. Отменить нельзя.
+                </span>
+              </p>
+            ) : (
+              <p>
+                Ячейка свободна — будет удалена только запись в CRM.
+                <br />
+                <span className="cell-inventory-delete-warning">Отменить нельзя.</span>
+              </p>
+            )}
+            <div className="cell-inventory-modal__actions">
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={deleting}
+                onClick={() => void handleDeleteCellConfirm()}
+              >
+                {deleting ? 'Удаление…' : 'Удалить навсегда'}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

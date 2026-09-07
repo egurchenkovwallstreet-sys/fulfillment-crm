@@ -4,8 +4,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsManager
-from apps.accounts.tenant import get_product_for_user, get_seller_for_user, sellers_for_user, stock_operations_for_user
+from apps.accounts.permissions import IsAdmin, IsManager
+from apps.accounts.tenant import get_cell_for_user, get_product_for_user, get_seller_for_user, sellers_for_user, stock_operations_for_user
 from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller
 
@@ -29,6 +29,7 @@ from .serializers import (
   WbSyncAutoSerializer,
   WbSyncPreviewSerializer,
 )
+from .services.cell_delete import force_delete_cells
 from .services.cell_label import build_cell_label_data
 from .services.cell_move import CellMoveError, move_product_to_cell
 from .services.cells import cells_queryset_ordered
@@ -129,6 +130,29 @@ class CellDetailView(APIView):
       .first()
     )
     return Response(CellDetailSerializer({"cell": cell, "product": product}).data)
+
+
+class CellDeleteView(APIView):
+  """Удалить ячейку с товаром (кабинет владельца / ячейки селлера)."""
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def delete(self, request, cell_id):
+    cell = get_cell_for_user(request.user, cell_id)
+    marketplace = parse_marketplace(request)
+    if cell.marketplace != marketplace:
+      return Response({"detail": "Ячейка не найдена"}, status=status.HTTP_404_NOT_FOUND)
+
+    cell_number = cell.number
+    stats = force_delete_cells(Cell.objects.filter(pk=cell.pk))
+    message = f"Ячейка №{cell_number} удалена"
+    if stats["products"]:
+      message += f" (товаров: {stats['products']})"
+
+    return Response({
+      "success": True,
+      "message": message,
+      **stats,
+    })
 
 
 class SellerProductsView(APIView):

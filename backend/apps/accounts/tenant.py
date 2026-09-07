@@ -105,6 +105,19 @@ def get_product_for_user(user: User, product_id: int):
   )
 
 
+def cells_for_user(user: User):
+  from apps.warehouse.models import Cell
+  return Cell.objects.filter(seller__in=sellers_for_user(user))
+
+
+def get_cell_for_user(user: User, cell_id: int):
+  from django.shortcuts import get_object_or_404
+  return get_object_or_404(
+    cells_for_user(user).select_related("seller"),
+    pk=cell_id,
+  )
+
+
 def get_supply_for_user(user: User, supply_id: int):
   from django.shortcuts import get_object_or_404
   from apps.orders.models import Supply

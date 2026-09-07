@@ -207,6 +207,21 @@ export function moveProductToCell(productId: number, cellId: number) {
   })
 }
 
+export type DeleteCellResult = {
+  success: boolean
+  message: string
+  cells: number
+  products: number
+  pick_list_items: number
+  orders_unlinked: number
+}
+
+export function deleteCell(cellId: number) {
+  return apiFetch<DeleteCellResult>(`/api/warehouse/cells/${cellId}/`, {
+    method: 'DELETE',
+  })
+}
+
 export function lookupBarcode(sellerId: number, barcode: string, warehouseId?: number) {
   const params = new URLSearchParams({
     seller_id: String(sellerId),
