@@ -207,6 +207,70 @@ RUSSIA_SHIPPING_CITIES: tuple[str, ...] = (
   "Архангельск",
 )
 
+# Города Москвы и МО в радиусе ~100 км — WB API не поддерживает geo/radius, только city.
+MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
+  "Москва",
+  "Московская область",
+  "Мытищи",
+  "Вешки",
+  "Пушкино",
+  "Подольск",
+  "Балашиха",
+  "Химки",
+  "Люберцы",
+  "Королёв",
+  "Щёлково",
+  "Долгопрудный",
+  "Одинцово",
+  "Красногорск",
+  "Домодедово",
+  "Видное",
+  "Раменское",
+  "Жуковский",
+  "Ногинск",
+  "Электросталь",
+  "Коломна",
+  "Зеленоград",
+  "Истра",
+  "Чехов",
+  "Ступино",
+  "Сергиев Посад",
+  "Дмитров",
+  "Лобня",
+  "Реутов",
+  "Фрязино",
+  "Орехово-Зуево",
+  "Серпухов",
+  "Клин",
+  "Наро-Фоминск",
+  "Егорьевск",
+  "Дубна",
+  "Павловский Посад",
+  "Солнечногorsk",
+  "Чашниково",
+  "Обухово",
+  "Софьино",
+  "Коледино",
+  "Белые Столбы",
+)
+
+
+def _dedupe_shipping_cities(*groups: tuple[str, ...]) -> tuple[str, ...]:
+  seen: set[str] = set()
+  ordered: list[str] = []
+  for group in groups:
+    for city in group:
+      key = city.strip().lower()
+      if not key or key in seen:
+        continue
+      seen.add(key)
+      ordered.append(city.strip())
+  return tuple(ordered)
+
+
+def _all_sc_fetch_cities() -> tuple[str, ...]:
+  return _dedupe_shipping_cities(RUSSIA_SHIPPING_CITIES, MOSCOW_REGION_100KM_CITIES)
+
 ALL_SC_SHIPPING_CACHE_TTL = 3600
 
 
@@ -245,13 +309,13 @@ def fetch_all_russia_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:v2:{seller.id}:{resolved_cargo}"
+  cache_key = f"wb_sc_points:v3:{seller.id}:{resolved_cargo}"
   cached = cache.get(cache_key)
   if isinstance(cached, list) and cached:
     return cached, resolved_cargo
 
   merged: dict[int, dict] = {}
-  for fetch_city in RUSSIA_SHIPPING_CITIES:
+  for fetch_city in _all_sc_fetch_cities():
     try:
       batch = client.fetch_shipping_points(fetch_city, resolved_cargo)
     except WBApiError:
@@ -312,7 +376,7 @@ def _matches_veshki_lipkinskoe(point: dict) -> bool:
   haystack = _point_haystack(point)
   if "липкин" in haystack:
     return True
-  if "веш" in haystack and ("мытищ" in haystack or "москов" in haystack):
+  if "веш" in haystack and ("москва" in haystack or "мытищ" in haystack or "москов" in haystack):
     return True
   return "вешки" in haystack or "veshki" in haystack
 
@@ -326,13 +390,7 @@ PINNED_SHIPPING_POINT_MATCHERS = (
   ("pushkino_sc", _matches_pushkino_sc),
 )
 
-PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = (
-  "Москва",
-  "Московская область",
-  "Мытищи",
-  "Вешки",
-  "Пушкино",
-)
+PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = MOSCOW_REGION_100KM_CITIES
 
 PINNED_SHIPPING_CARGO_TYPE = 1
 

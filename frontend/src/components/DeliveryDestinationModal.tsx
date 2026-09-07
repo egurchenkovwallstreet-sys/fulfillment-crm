@@ -287,7 +287,7 @@ export function DeliveryDestinationModal({
           </label>
         ) : (
           <p className="delivery-destination-modal__hint">
-            Сортировочные центры по всей России ({filteredPoints.length})
+            Сортировочные центры по всей России ({filteredPoints.length}). Поиск: «липкин», «веш», «пушкино»…
           </p>
         )}
 
