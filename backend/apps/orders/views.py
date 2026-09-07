@@ -1110,7 +1110,7 @@ class AssemblyShippingPointsView(APIView):
           cargo_type=cargo_type,
           wb_supply_id=wb_supply_id,
         )
-        city = "Россия (все СЦ)"
+        city = "Москва и Московская область"
       else:
         points, resolved_cargo = fetch_seller_shipping_points(
           seller,

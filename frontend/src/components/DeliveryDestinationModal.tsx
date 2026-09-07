@@ -3,17 +3,14 @@ import {
   fetchShippingPoints,
   type DeliveryShippingParams,
   type ShippingPoint,
-  type ShippingPointOfficeType,
 } from '../api/assembly'
 import './AssemblyModal.css'
 import './DeliveryDestinationModal.css'
 
 export type DeliveryDateOffset = 0 | 1 | 2
-export type ShippingOfficeKind = 'sc' | 'pp'
 
 export type DeliveryDestinationPrefs = {
   city: string
-  officeKind: ShippingOfficeKind
   shippingPointId: number | null
   dateOffset: DeliveryDateOffset
 }
@@ -29,41 +26,25 @@ type Props = {
   loading?: boolean
 }
 
-const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v2-${sellerId}`
-
-export const SHIPPING_CITY_OPTIONS = [
-  { value: 'Москва', label: 'Москва' },
-  { value: 'Московская область', label: 'Московская область' },
-  { value: 'Санкт-Петербург', label: 'Санкт-Петербург' },
-] as const
+const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v3-${sellerId}`
 
 const DEFAULT_PREFS: DeliveryDestinationPrefs = {
-  city: 'Москва',
-  officeKind: 'sc',
+  city: 'Москва и Московская область',
   shippingPointId: null,
   dateOffset: 0,
-}
-
-function normalizeOfficeKind(value: unknown): ShippingOfficeKind {
-  return value === 'pp' ? 'pp' : 'sc'
-}
-
-function normalizeCity(value: unknown): string {
-  const trimmed = typeof value === 'string' ? value.trim() : ''
-  if (SHIPPING_CITY_OPTIONS.some((option) => option.value === trimmed)) {
-    return trimmed
-  }
-  return DEFAULT_PREFS.city
 }
 
 function readPrefs(sellerId: number): DeliveryDestinationPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY(sellerId))
     if (!raw) return DEFAULT_PREFS
-    const parsed = JSON.parse(raw) as Partial<DeliveryDestinationPrefs>
+    const parsed = JSON.parse(raw) as Partial<DeliveryDestinationPrefs> & {
+      officeKind?: string
+    }
     return {
-      city: normalizeCity(parsed.city),
-      officeKind: normalizeOfficeKind(parsed.officeKind),
+      city: typeof parsed.city === 'string' && parsed.city.trim()
+        ? parsed.city.trim()
+        : DEFAULT_PREFS.city,
       shippingPointId:
         typeof parsed.shippingPointId === 'number' ? parsed.shippingPointId : null,
       dateOffset: ([0, 1, 2] as const).includes(parsed.dateOffset as DeliveryDateOffset)
@@ -89,16 +70,6 @@ function formatShippingDate(offset: DeliveryDateOffset): string {
   return `${y}-${m}-${d}`
 }
 
-function matchesOfficeKind(
-  officeType: ShippingPointOfficeType,
-  kind: ShippingOfficeKind,
-): boolean {
-  if (kind === 'sc') {
-    return officeType === 'sc' || officeType === 'sw'
-  }
-  return officeType === 'pp'
-}
-
 function formatPointLabel(point: ShippingPoint): string {
   const city = point.city ? `${point.city}, ` : ''
   return `${city}${point.name} — ${point.address}`
@@ -115,6 +86,11 @@ function pickPointId(
   ) {
     return preferredId
   }
+  const veshki = points.find((point) => {
+    const haystack = `${point.city} ${point.name} ${point.address}`.toLowerCase()
+    return haystack.includes('липкин') || haystack.includes('веш')
+  })
+  if (veshki) return veshki.id
   return points[0].id
 }
 
@@ -137,7 +113,6 @@ export function DeliveryDestinationModal({
     [initialPrefs, sellerId],
   )
   const [city, setCity] = useState(saved.city)
-  const [officeKind, setOfficeKind] = useState<ShippingOfficeKind>(saved.officeKind)
   const [dateOffset, setDateOffset] = useState<DeliveryDateOffset>(saved.dateOffset)
   const [selectedPointId, setSelectedPointId] = useState<number | ''>(
     saved.shippingPointId ?? '',
@@ -147,58 +122,35 @@ export function DeliveryDestinationModal({
   const [pointsError, setPointsError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
 
-  const filteredPoints = useMemo(
-    () => points.filter((point) => matchesOfficeKind(point.officeType, officeKind)),
-    [points, officeKind],
-  )
-
   const visiblePoints = useMemo(() => {
     const query = normalizeSearch(searchQuery)
-    if (!query) return filteredPoints
-    return filteredPoints.filter((point) => {
+    if (!query) return points
+    return points.filter((point) => {
       const haystack = normalizeSearch(
         `${point.city} ${point.name} ${point.address}`,
       )
       return haystack.includes(query)
     })
-  }, [filteredPoints, searchQuery])
+  }, [points, searchQuery])
 
   const loadPoints = useCallback(
-    async (
-      nextKind: ShippingOfficeKind,
-      nextCity: string,
-      preferredPointId?: number | null,
-    ) => {
+    async (preferredPointId?: number | null) => {
       setPointsLoading(true)
       setPointsError('')
       try {
-        const result =
-          nextKind === 'sc'
-            ? await fetchShippingPoints(sellerId, {
-                scope: 'all_sc',
-                wb_supply_id: wbSupplyId,
-              })
-            : await fetchShippingPoints(sellerId, {
-                city: normalizeCity(nextCity),
-                wb_supply_id: wbSupplyId,
-              })
-
-        if (nextKind === 'pp') {
-          setCity(normalizeCity(nextCity))
-        } else {
-          setCity(result.city || 'Россия (все СЦ)')
-        }
+        const result = await fetchShippingPoints(sellerId, {
+          scope: 'all_sc',
+          wb_supply_id: wbSupplyId,
+        })
+        setCity(result.city || 'Москва и Московская область')
         setPoints(result.shipping_points)
-
-        const visible = result.shipping_points.filter((point) =>
-          matchesOfficeKind(point.officeType, nextKind),
-        )
-        if (visible.length === 0) {
-          const kindLabel = nextKind === 'sc' ? 'СЦ' : 'ПВЗ'
-          setPointsError(`WB не вернул пункты типа «${kindLabel}»`)
+        if (result.shipping_points.length === 0) {
+          setPointsError('WB не вернул пункты отгрузки (СЦ/склады) по Москве и МО')
           setSelectedPointId('')
         } else {
-          setSelectedPointId(pickPointId(visible, preferredPointId ?? saved.shippingPointId))
+          setSelectedPointId(
+            pickPointId(result.shipping_points, preferredPointId ?? saved.shippingPointId),
+          )
           setPointsError('')
         }
       } catch (err) {
@@ -213,21 +165,8 @@ export function DeliveryDestinationModal({
   )
 
   useEffect(() => {
-    void loadPoints(saved.officeKind, saved.city, saved.shippingPointId)
-  }, [loadPoints, saved.city, saved.officeKind, saved.shippingPointId])
-
-  function handleCityChange(nextCity: string) {
-    const normalized = normalizeCity(nextCity)
-    setCity(normalized)
-    setSearchQuery('')
-    void loadPoints('pp', normalized, null)
-  }
-
-  function handleOfficeKindChange(nextKind: ShippingOfficeKind) {
-    setOfficeKind(nextKind)
-    setSearchQuery('')
-    void loadPoints(nextKind, city, null)
-  }
+    void loadPoints(saved.shippingPointId)
+  }, [loadPoints, saved.shippingPointId])
 
   function handleConfirm() {
     if (selectedPointId === '' || !Number.isFinite(selectedPointId)) {
@@ -236,7 +175,6 @@ export function DeliveryDestinationModal({
     }
     const prefs: DeliveryDestinationPrefs = {
       city,
-      officeKind,
       shippingPointId: selectedPointId,
       dateOffset,
     }
@@ -254,11 +192,6 @@ export function DeliveryDestinationModal({
     { offset: 2, label: 'Послезавтра' },
   ]
 
-  const officeKindLabels: Array<{ kind: ShippingOfficeKind; label: string }> = [
-    { kind: 'sc', label: 'СЦ' },
-    { kind: 'pp', label: 'ПВЗ' },
-  ]
-
   return (
     <div className="assembly-modal-backdrop" role="presentation" onClick={onClose}>
       <div
@@ -270,45 +203,10 @@ export function DeliveryDestinationModal({
         <h2 id="delivery-destination-title">{title}</h2>
         <p className="assembly-modal__message delivery-destination-modal__message">{message}</p>
 
-        {officeKind === 'pp' ? (
-          <label className="delivery-destination-modal__field">
-            <span>Город для ПВЗ</span>
-            <select
-              value={city}
-              disabled={loading || pointsLoading}
-              onChange={(e) => handleCityChange(e.target.value)}
-            >
-              {SHIPPING_CITY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <p className="delivery-destination-modal__hint">
-            Сортировочные центры по всей России ({filteredPoints.length}). Поиск: «липкин», «веш», «пушкино»…
-          </p>
-        )}
-
-        <div className="delivery-destination-modal__field">
-          <span>Тип пункта</span>
-          <div className="delivery-destination-modal__type-row">
-            {officeKindLabels.map(({ kind, label }) => (
-              <button
-                key={kind}
-                type="button"
-                className={`btn btn--ghost delivery-destination-modal__type${
-                  officeKind === kind ? ' delivery-destination-modal__type--active' : ''
-                }`}
-                disabled={loading || pointsLoading}
-                onClick={() => handleOfficeKindChange(kind)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <p className="delivery-destination-modal__hint">
+          Сортировочные центры и склады WB — Москва и Московская область ({points.length}).
+          Поиск: «липкин», «веш», «вешки», «пушкино»…
+        </p>
 
         <label className="delivery-destination-modal__field">
           <span>Поиск пункта отгрузки</span>
@@ -316,18 +214,18 @@ export function DeliveryDestinationModal({
             type="search"
             value={searchQuery}
             disabled={loading || pointsLoading}
-            placeholder="Город, название или адрес…"
+            placeholder="Гorod, название или адрес"
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </label>
 
         <div className="delivery-destination-modal__field">
           <span>
-            Пункт отгрузки ({officeKind === 'sc' ? 'СЦ' : 'ПВЗ'})
-            {visiblePoints.length !== filteredPoints.length
-              ? ` — найдено ${visiblePoints.length} из ${filteredPoints.length}`
-              : filteredPoints.length > 0
-                ? ` — ${filteredPoints.length}`
+            Пункт отгрузки (СЦ / склад)
+            {visiblePoints.length !== points.length
+              ? ` — найдено ${visiblePoints.length} из ${points.length}`
+              : points.length > 0
+                ? ` — ${points.length}`
                 : ''}
           </span>
           <div
