@@ -1,17 +1,15 @@
-"""Удаление кодов ЧЗ из БД через 3 часа после передачи в доставку."""
+"""Удаление кодов ЧЗ из БД — ежедневно в 23:59 для отгруженных заказов."""
 from __future__ import annotations
 
-from datetime import timedelta
-
-from django.utils import timezone
+from django.db.models import Q
 
 from apps.orders.models import Order, OzonPosting
 
-MARKING_RETENTION_HOURS = 3
-
 
 def stamp_in_delivery_at(order: Order, *, at=None) -> None:
-  """Зафиксировать момент «в доставке» для отложенного удаления ЧЗ."""
+  """Зафиксировать момент «в доставке» (для учёта, не для срока хранения ЧЗ)."""
+  from django.utils import timezone
+
   if order.in_delivery_at is not None:
     return
   order.in_delivery_at = at or timezone.now()
@@ -61,54 +59,48 @@ def _clear_posting_marking(posting: OzonPosting) -> bool:
   return True
 
 
-def clear_expired_marking_codes(*, hours: int = MARKING_RETENTION_HOURS) -> dict:
-  """Стереть ЧЗ, если с момента передачи в доставку прошло hours часов."""
-  cutoff = timezone.now() - timedelta(hours=hours)
+def _shipped_wb_orders_with_marking():
+  return Order.objects.exclude(marking_code="").filter(
+    Q(status__in=[Order.Status.IN_DELIVERY, Order.Status.SHIPPED])
+    | Q(in_delivery_at__isnull=False),
+  )
 
+
+def _shipped_ozon_postings_with_marking():
+  return OzonPosting.objects.filter(
+    Q(crm_stage=OzonPosting.CrmStage.IN_DELIVERY)
+    | Q(shipped_at__isnull=False),
+  )
+
+
+def clear_daily_shipped_marking_codes() -> dict:
+  """
+  Ежедневная очистка (23:59): CRM забывает ЧЗ отгруженных заказов.
+  На следующий день тот же физический код можно сканировать как новый.
+  """
   wb_cleared = 0
-  wb_orders = Order.objects.filter(
-    in_delivery_at__isnull=False,
-    in_delivery_at__lte=cutoff,
-  ).exclude(marking_code="")
-  for order in wb_orders.iterator():
+  for order in _shipped_wb_orders_with_marking().iterator():
     if _clear_order_marking(order):
       wb_cleared += 1
 
   ozon_cleared = 0
-  ozon_postings = OzonPosting.objects.filter(
-    shipped_at__isnull=False,
-    shipped_at__lte=cutoff,
-  )
-  for posting in ozon_postings.iterator():
+  for posting in _shipped_ozon_postings_with_marking().iterator():
     if _clear_posting_marking(posting):
       ozon_cleared += 1
 
   return {
     "wb_cleared": wb_cleared,
     "ozon_cleared": ozon_cleared,
-    "cutoff": cutoff.isoformat(),
-    "retention_hours": hours,
+    "mode": "daily_shipped",
   }
+
+
+def clear_expired_marking_codes(*, hours: int | None = None) -> dict:
+  """Обратная совместимость для старых вызовов — делегирует в ежедневную очистку."""
+  del hours
+  return clear_daily_shipped_marking_codes()
 
 
 def clear_all_delivered_marking_codes() -> dict:
   """Срочный сброс: удалить все ЧЗ у заказов, уже переданных в доставку."""
-  wb_cleared = 0
-  wb_orders = Order.objects.filter(
-    status__in=[Order.Status.IN_DELIVERY, Order.Status.SHIPPED],
-  )
-  for order in wb_orders.iterator():
-    if _clear_order_marking(order):
-      wb_cleared += 1
-
-  ozon_cleared = 0
-  ozon_postings = OzonPosting.objects.filter(crm_stage=OzonPosting.CrmStage.IN_DELIVERY)
-  for posting in ozon_postings.iterator():
-    if _clear_posting_marking(posting):
-      ozon_cleared += 1
-
-  return {
-    "wb_cleared": wb_cleared,
-    "ozon_cleared": ozon_cleared,
-    "mode": "all_delivered",
-  }
+  return clear_daily_shipped_marking_codes()

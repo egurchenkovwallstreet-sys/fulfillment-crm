@@ -554,8 +554,9 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
   )
   if duplicate:
     raise _marking_error(
-      "Этот код ЧЗ уже использован для другого заказа в CRM. "
-      "Возьмите другой экземпляр товара",
+      "Этот код ЧЗ уже привязан к другому заказу в CRM сегодня. "
+      "Если товар уже отгружали — очистка списка ЧЗ в 23:59; "
+      "иначе возьмите другой экземпляр товара.",
       order,
       code="duplicate_marking",
     )

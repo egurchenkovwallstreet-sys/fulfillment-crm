@@ -76,14 +76,20 @@ def scan_off_crm_shipments():
 
 
 @shared_task
-def clear_expired_marking_codes():
-  """Удалить коды ЧЗ из БД через 3 часа после передачи в доставку."""
-  from apps.orders.services.marking_cleanup import clear_expired_marking_codes as run_cleanup
+def clear_daily_marking_codes():
+  """Ежедневно в 23:59 — удалить ЧЗ у отгруженных заказов (CRM «забывает» коды)."""
+  from apps.orders.services.marking_cleanup import clear_daily_shipped_marking_codes
 
-  result = run_cleanup()
+  result = clear_daily_shipped_marking_codes()
   if result["wb_cleared"] or result["ozon_cleared"]:
-    logger.info("Expired marking codes cleared: %s", result)
+    logger.info("Daily shipped marking codes cleared: %s", result)
   return result
+
+
+@shared_task
+def clear_expired_marking_codes():
+  """@deprecated — используйте clear_daily_marking_codes."""
+  return clear_daily_marking_codes()
 
 
 @shared_task

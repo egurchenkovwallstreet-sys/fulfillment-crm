@@ -578,7 +578,8 @@ def bind_marking_and_print(
 
   if not order.has_sticker or not order.sticker_file:
     raise _marking_error(
-      "Стикер не загружен — начните сборку заново",
+      f"Стикер заказа WB #{order.wb_order_id} не загружен из WB. "
+      "Вернитесь на шаг «Новые» — «Передать на сборку» или нажмите «Обновить из WB».",
       order,
       code="no_sticker",
     )
@@ -595,8 +596,9 @@ def bind_marking_and_print(
   )
   if duplicate:
     raise _marking_error(
-      "Этот код ЧЗ уже использован для другого заказа в CRM. "
-      "Возьмите другой экземпляр товара",
+      "Этот код ЧЗ уже привязан к другому заказу в CRM сегодня. "
+      "Если товар уже отгружали — очистка списка ЧЗ в 23:59; "
+      "иначе возьмите другой экземпляр товара.",
       order,
       code="duplicate_marking",
     )

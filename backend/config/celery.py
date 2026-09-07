@@ -33,9 +33,9 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.scan_off_crm_shipments",
         "schedule": crontab(hour=4, minute=0),
     },
-    "clear-expired-marking-codes": {
-        "task": "apps.integrations.tasks.clear_expired_marking_codes",
-        "schedule": crontab(minute="*/15"),
+    "clear-daily-marking-codes": {
+        "task": "apps.integrations.tasks.clear_daily_marking_codes",
+        "schedule": crontab(hour=23, minute=59),
     },
     "accrue-daily-liter-storage": {
         "task": "apps.integrations.tasks.accrue_daily_storage_charges",

@@ -39,6 +39,7 @@ import {
   orderBlockReason,
   orderCanDeliver,
   resolveWorkflowStep,
+  assemblyScanErrorTitle,
   type ScanPhase,
   type StageKey,
 } from '../utils/assemblyWorkflow'
@@ -405,6 +406,21 @@ function WbAssemblySellerPage() {
       markingRef.current?.focus()
       window.setTimeout(() => markingRef.current?.focus(), 0)
     })
+  }
+
+  function showScanError(
+    message: string,
+    title: string,
+    onDismiss?: () => void,
+  ) {
+    playAssemblyScanErrorBeep()
+    setModal({
+      kind: 'scan-error',
+      title,
+      message,
+      onDismiss: onDismiss ?? (() => focusMarkingInput()),
+    })
+    setError(message)
   }
 
   function resetScanFlow(force = false) {
@@ -1232,26 +1248,35 @@ function WbAssemblySellerPage() {
       }
 
       if (err instanceof ApiError && err.code === 'not_in_pick_list') {
-        playAssemblyScanErrorBeep()
-        setModal({
-          kind: 'scan-error',
-          title: 'Ошибка',
-          message: 'Баркода нет в листе подбора!',
-          onDismiss: () => {
+        showScanError(
+          'Баркода нет в листе подбора! Обновите лист подбора или проверьте штрихкод.',
+          'Баркода нет в листе подбора',
+          () => {
             if (keepMarkingUi || markingLockRef.current) {
               focusMarkingInput()
             } else {
               resetScanFlow()
             }
           },
-        })
+        )
         if (keepMarkingUi || markingLockRef.current) {
-          setError('Баркода нет в листе подбора! Обновите лист подбора или проверьте штрихкод.')
           focusMarkingInput()
         }
         return
       }
-      setError(assemblyErrorMessage(err, 'Ошибка сканирования баркода'))
+
+      const barcodeErrMsg = assemblyErrorMessage(err, 'Ошибка сканирования баркода')
+      showScanError(
+        barcodeErrMsg,
+        assemblyScanErrorTitle(err, 'Ошибка сканирования баркода'),
+        () => {
+          if (keepMarkingUi || markingLockRef.current) {
+            focusMarkingInput()
+          } else {
+            scanRef.current?.focus()
+          }
+        },
+      )
       if (keepMarkingUi || markingLockRef.current) {
         focusMarkingInput()
       } else {
@@ -1279,10 +1304,27 @@ function WbAssemblySellerPage() {
         await new Promise((resolve) => window.setTimeout(resolve, 40))
       }
       const result = await bindMarking(id, pendingOrder.id, code)
-      await finishPrint(result.order, printWin)
-      const stockMsg = formatStockDeductionMessage(result.stock)
-      if (stockMsg) {
-        setSuccess(`Стикер WB #${result.order.wb_order_id}${stockMsg}`)
+      try {
+        await finishPrint(result.order, printWin)
+        const stockMsg = formatStockDeductionMessage(result.stock)
+        if (stockMsg) {
+          setSuccess(`Стикер WB #${result.order.wb_order_id}${stockMsg}`)
+        }
+      } catch (printErr) {
+        const printMsg = assemblyErrorMessage(
+          printErr,
+          `ЧЗ привязан к заказу WB #${result.order.wb_order_id}, но стикер не напечатан. ` +
+            'Проверьте принтер и нажмите «Печать ещё раз» в списке «Готовые».',
+          result.order,
+        )
+        showScanError(
+          printMsg,
+          'Стикер не напечатан',
+          () => focusMarkingInput(),
+        )
+        void refreshMarkingStatus()
+        void load({ silent: true })
+        return
       }
       window.setTimeout(() => void runMarkingVerify(), MARKING_VERIFY_INITIAL_MS)
       void refreshMarkingStatus()
@@ -1294,7 +1336,16 @@ function WbAssemblySellerPage() {
         void load({ silent: true })
         resetScanFlow(true)
       }
-      setError(assemblyErrorMessage(err, 'Ошибка привязки Честного знака', pendingOrder))
+      const markingErrMsg = assemblyErrorMessage(
+        err,
+        'Не удалось привязать Честный знак и напечатать стикер',
+        pendingOrder,
+      )
+      showScanError(
+        markingErrMsg,
+        assemblyScanErrorTitle(err, 'Ошибка сканирования ЧЗ'),
+        () => focusMarkingInput(),
+      )
       focusMarkingInput()
     } finally {
       scanBusyRef.current = false

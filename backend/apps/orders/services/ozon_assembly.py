@@ -194,7 +194,9 @@ def bind_ozon_marking(seller, posting_id: int, marking_code: str) -> dict:
         break
   if duplicate:
     raise OzonAssemblyError(
-      "Этот код ЧЗ уже привязан к другому отправлению. Возьмите другой экземпляр товара",
+      "Этот код ЧЗ уже привязан к другому отправлению сегодня. "
+      "Если товар уже отгружали — очистка списка ЧЗ в 23:59; "
+      "иначе возьмите другой экземпляр товара.",
       code="duplicate_marking",
     )
 

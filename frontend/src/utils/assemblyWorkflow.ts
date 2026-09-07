@@ -1,4 +1,5 @@
 import type { AssemblyOrder } from '../api/assembly'
+import { ApiError } from '../api/client'
 import { appendStickerHint } from './stickerLabel'
 
 export type WorkflowStepId = 1 | 2 | 3 | 4
@@ -128,4 +129,23 @@ export function canSwitchToStage(
     }
   }
   return { ok: true }
+}
+
+const SCAN_ERROR_TITLES: Record<string, string> = {
+  duplicate_marking: 'ЧЗ уже использован сегодня',
+  wb_bind_failed: 'WB отклонил Честный знак',
+  invalid_marking_code: 'Неверный код ЧЗ',
+  insufficient_stock: 'Недостаточно остатка на складе',
+  no_sticker: 'Стикер не загружен',
+  wb_not_confirm: 'Заказ не на сборке в WB',
+  not_in_pick_list: 'Баркода нет в листе подбора',
+  already_printed: 'Стикер уже напечатан',
+  invalid_status: 'Заказ в неподходящем статусе',
+  marking_not_required: 'ЧЗ не требуется',
+  order_not_found: 'Заказ не найден',
+}
+
+export function assemblyScanErrorTitle(err: unknown, fallback = 'Ошибка сканирования'): string {
+  if (!(err instanceof ApiError) || !err.code) return fallback
+  return SCAN_ERROR_TITLES[err.code] ?? fallback
 }
