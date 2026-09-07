@@ -92,12 +92,42 @@ def deduct_stock_for_sticker_print(*, order: Order, user=None) -> dict:
     return {
       "deducted": False,
       "already_deducted": True,
+      "skipped": False,
       "quantity": product.quantity if product else 0,
       "cell_number": product.cell.number if product and product.cell_id else "",
       "barcode": product.barcode if product else order.barcode,
     }
 
-  product = check_stock_for_delivery(order)
+  product = resolve_order_product(order)
+  if not product or product.quantity < 1:
+    qty = product.quantity if product else 0
+    cell_number = product.cell.number if product and product.cell_id else ""
+    barcode = product.barcode if product else order.barcode
+    AuditLog.objects.create(
+      user=user,
+      seller=order.seller,
+      action_type=AuditLog.ActionType.LABEL_PRINT,
+      message=(
+        f"Печать стикера без списания: баркод {barcode}, "
+        f"заказ WB #{order.wb_order_id}, остаток CRM {qty} шт."
+      ),
+      details={
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "barcode": barcode,
+        "quantity": qty,
+        "cell": cell_number,
+        "stock_skipped": True,
+      },
+    )
+    return {
+      "deducted": False,
+      "already_deducted": False,
+      "skipped": True,
+      "quantity": qty,
+      "cell_number": cell_number,
+      "barcode": barcode,
+    }
 
   product.quantity -= 1
   product.save(update_fields=["quantity", "updated_at"])
@@ -138,6 +168,7 @@ def deduct_stock_for_sticker_print(*, order: Order, user=None) -> dict:
   return {
     "deducted": True,
     "already_deducted": False,
+    "skipped": False,
     "quantity": product.quantity,
     "cell_number": product.cell.number,
     "barcode": product.barcode,
@@ -159,18 +190,14 @@ def stock_deduction_info(order: Order) -> dict:
 
 def assert_order_stock_deducted_at_print(order: Order) -> None:
   """
-  Перед «в доставку»: стикер напечатан, остаток списан при печати.
-  Заказы уже «в доставке» остаток не трогаем (актуальные остатки — из WB).
+  Перед «в доставку»: стикер напечатан через CRM.
+  Списание могло быть пропущено при нулевом остатке в CRM — доставку не блокирует.
   """
   if order.status == Order.Status.IN_DELIVERY:
     return
   if not order_sticker_printed_in_crm(order):
     raise StockDeductionError(
       "Стикер FBS не распечатан через CRM — сначала завершите сборку",
-    )
-  if not order_has_crm_shipment_deduction(order):
-    raise StockDeductionError(
-      "Остаток не списан при печати стикера — распечатайте стикер FBS через сборку",
     )
 
 

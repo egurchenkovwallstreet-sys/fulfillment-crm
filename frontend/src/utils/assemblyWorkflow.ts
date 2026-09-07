@@ -39,9 +39,7 @@ export function orderStickerPrinted(order: AssemblyOrder): boolean {
 }
 
 export function orderCanDeliver(order: AssemblyOrder): boolean {
-  if (!order.can_send_to_delivery) return false
-  if (order.warehouse_quantity != null && order.warehouse_quantity < 1) return false
-  return true
+  return Boolean(order.can_send_to_delivery)
 }
 
 export function orderBlockReason(order: AssemblyOrder): string | null {
@@ -65,12 +63,6 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
       )
     }
     return 'Привяжите Честный знак (DataMatrix)'
-  }
-  if (order.warehouse_quantity == null) {
-    return 'Товар не принят на склад — выполните приёмку'
-  }
-  if (order.warehouse_quantity < 1) {
-    return `Нет остатка на складе (яч. ${order.cell_number || '—'})`
   }
   if (!order.can_send_to_delivery) {
     return 'Заказ не готов к доставке'
