@@ -305,6 +305,14 @@ class ReplaceOrderSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 
 
+class ResetAssemblyMarkingSerializer(serializers.Serializer):
+  order_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=True,
+  )
+
+
 class OrderActionSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 

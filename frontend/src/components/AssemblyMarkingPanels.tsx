@@ -67,6 +67,7 @@ type AssemblyQueueListModalProps = {
   loading?: boolean
   onClose: () => void
   onReplace?: (order: AssemblyOrder) => void
+  onResetMarking?: (orderIds?: number[]) => void
   onReprint?: (order: AssemblyOrder) => void
   onDeliver?: (order: AssemblyOrder) => void
 }
@@ -77,9 +78,12 @@ export function AssemblyQueueListModal({
   loading = false,
   onClose,
   onReplace,
+  onResetMarking,
   onReprint,
   onDeliver,
 }: AssemblyQueueListModalProps) {
+  const markingOrders = orders.filter((order) => order.requires_marking)
+  const markingCount = markingOrders.length
   const title =
     kind === 'errors'
       ? 'Ошибки Честного знака'
@@ -103,14 +107,29 @@ export function AssemblyQueueListModal({
       >
         <div className="assembly-marking-modal__head">
           <h2 id="marking-list-title">{title}</h2>
-          <button
-            type="button"
-            className="btn btn--ghost btn--small"
-            onClick={onClose}
-            {...uiHint('Закрыть список')}
-          >
-            Закрыть
-          </button>
+          <div className="assembly-marking-list__head-actions">
+            {kind === 'in_assembly' && onResetMarking && markingCount > 0 && (
+              <button
+                type="button"
+                className="btn btn--small btn--secondary"
+                disabled={loading}
+                onClick={() => onResetMarking(markingOrders.map((order) => order.id))}
+                {...uiHint(
+                  'Снять сохранённый ЧЗ в CRM и WB — повторный скан баркода и DataMatrix',
+                )}
+              >
+                Сбросить ЧЗ ({markingCount})
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn--ghost btn--small"
+              onClick={onClose}
+              {...uiHint('Закрыть список')}
+            >
+              Закрыть
+            </button>
+          </div>
         </div>
         {orders.length === 0 ? (
           <p className="assembly-marking-modal__empty">{emptyText}</p>
@@ -146,6 +165,17 @@ export function AssemblyQueueListModal({
                     )}
                   </div>
                   <div className="assembly-marking-list__actions">
+                    {kind === 'in_assembly' && order.requires_marking && onResetMarking && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        onClick={() => onResetMarking([order.id])}
+                        disabled={loading}
+                        {...uiHint('Сбросить ЧЗ по этому заказу для повторного скана')}
+                      >
+                        Сброс ЧЗ
+                      </button>
+                    )}
                     {kind === 'errors' && onReplace && (
                       <button
                         type="button"
@@ -187,7 +217,7 @@ export function AssemblyQueueListModal({
         )}
         <p className="assembly-marking-modal__hint">
           {kind === 'in_assembly'
-            ? 'Сканируйте баркод (и ЧЗ при необходимости) в панели справа — заказ сразу перейдёт в «Готовые».'
+            ? 'Сканируйте баркод (и ЧЗ при необходимости) в панели справа. «Сбросить ЧЗ» — если код завис или нужен повторный скан.'
             : kind === 'ready'
               ? 'Повторная печать стикера — только через подтверждение менеджера.'
               : 'После замены товара повторите сборку: баркод → ЧЗ → печать стикера.'}

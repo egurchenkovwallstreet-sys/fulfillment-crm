@@ -38,6 +38,7 @@ from .serializers import (
   PickListGenerateSerializer,
   PickListSerializer,
   ReplaceOrderSerializer,
+  ResetAssemblyMarkingSerializer,
   ReprintStickerSerializer,
   ScanPrintSerializer,
   SellerAssemblyCountersSerializer,
@@ -55,6 +56,7 @@ from .services.assembly import (
   get_seller_wb_tab_counts,
   remove_order_from_assembly,
   replace_order_item,
+  reset_assembly_marking_for_pick_list,
   scan_order_barcode,
   start_assembly,
 )
@@ -937,6 +939,38 @@ class AssemblyReplaceOrderView(APIView):
       "success": True,
       "order": OrderAssemblySerializer(order).data,
       "message": f"Заказ WB #{order.wb_order_id} сброшен — возьмите другой экземпляр товара",
+    })
+
+
+class AssemblyResetMarkingView(APIView):
+  """Сброс ЧЗ у заказов «На сборке» из активного листа подбора."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ResetAssemblyMarkingSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    order_ids = serializer.validated_data.get("order_ids") or None
+
+    try:
+      result = reset_assembly_marking_for_pick_list(
+        seller,
+        order_ids=order_ids,
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+
+    status_data = get_assembly_queue_status(seller)
+    return Response({
+      "success": True,
+      **result,
+      "in_assembly_count": status_data["in_assembly_count"],
+      "ready_count": status_data["ready_count"],
+      "errors_count": status_data["errors_count"],
     })
 
 

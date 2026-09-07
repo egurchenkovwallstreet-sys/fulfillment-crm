@@ -10,6 +10,7 @@ from .views import (
   AssemblyOzonPickListView,
   AssemblyReprintStickerView,
   AssemblyReplaceOrderView,
+  AssemblyResetMarkingView,
   AssemblyScanPrintView,
   AssemblySendAllToAssemblyView,
   AssemblySendToAssemblyView,
@@ -126,6 +127,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/replace-order/",
       AssemblyReplaceOrderView.as_view(),
       name="assembly-replace-order",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/reset-assembly-marking/",
+      AssemblyResetMarkingView.as_view(),
+      name="assembly-reset-marking",
     ),
     path(
       "assembly/sellers/<int:seller_id>/reprint-sticker/",

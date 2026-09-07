@@ -726,6 +726,123 @@ def replace_order_item(seller: Seller, order_id: int, *, user=None) -> Order:
   return order
 
 
+def reset_assembly_marking_for_pick_list(
+  seller: Seller,
+  *,
+  order_ids: list[int] | None = None,
+  user=None,
+) -> dict:
+  """Сброс ЧЗ у заказов «На сборке» из активного листа подбора (повторный скан)."""
+  from apps.orders.services.assembly_queue import order_in_assembly
+  from apps.orders.services.marking_cleanup import _order_has_marking_data
+  from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+  from apps.warehouse.services.stock_deduction import order_on_active_pick_list
+
+  pick_lists = _get_active_pick_lists(seller)
+  if not pick_lists or not any(pl.items.exists() for pl in pick_lists):
+    raise AssemblyError("Нет активного листа подбора", code="no_pick_list")
+
+  pick_list_ids = {pl.id for pl in pick_lists}
+  qs = Order.objects.filter(seller=seller, pick_list_id__in=pick_list_ids).select_related("product")
+  if order_ids:
+    qs = qs.filter(pk__in=order_ids)
+
+  reset_ids: list[int] = []
+  skipped = 0
+  errors: list[dict] = []
+
+  for order in qs:
+    if not order_in_assembly(order):
+      skipped += 1
+      continue
+    if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
+      skipped += 1
+      continue
+    if not order_on_active_pick_list(order):
+      skipped += 1
+      continue
+
+    needs_reset = _order_has_marking_data(order) or order.status in (
+      Order.Status.LABEL_PRINTED,
+      Order.Status.MARKED,
+    )
+    if not needs_reset and order.status == Order.Status.IN_PICKING:
+      skipped += 1
+      continue
+
+    try:
+      _reset_assembly_marking_pick_order(order, seller, user=user)
+      reset_ids.append(order.id)
+    except AssemblyError as exc:
+      errors.append({
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "error": str(exc),
+      })
+
+  if not reset_ids and errors:
+    raise AssemblyError(errors[0]["error"], code="reset_failed")
+  if not reset_ids and skipped:
+    raise AssemblyError(
+      "Нет заказов с ЧЗ для сброса в листе подбора",
+      code="nothing_to_reset",
+    )
+
+  message = f"ЧЗ сброшен у {len(reset_ids)} заказ(ов)"
+  if errors:
+    message += f". Ошибок: {len(errors)}"
+
+  return {
+    "reset_count": len(reset_ids),
+    "reset_order_ids": reset_ids,
+    "skipped": skipped,
+    "errors": errors,
+    "message": message,
+  }
+
+
+def _reset_assembly_marking_pick_order(order: Order, seller: Seller, *, user=None) -> None:
+  """Снять ЧЗ в WB/CRM, оставить заказ в листе подбора для повторного скана."""
+  had_code = bool((order.marking_code or "").strip())
+
+  if had_code:
+    client = _get_client(seller)
+    try:
+      client.delete_order_meta(order.wb_order_id, key="sgtin")
+    except WBApiError as exc:
+      raise _marking_error(
+        f"WB #{order.wb_order_id}: не удалось снять ЧЗ — {parse_wb_marking_error(exc)}",
+        order,
+        code="wb_unbind_failed",
+      ) from exc
+
+  order.marking_code = ""
+  order.marking_bound = False
+  order.marking_verify_status = ""
+  order.marking_verify_error = ""
+
+  update_fields = [
+    "marking_code",
+    "marking_bound",
+    "marking_verify_status",
+    "marking_verify_error",
+    "updated_at",
+  ]
+  if order.status in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
+    order.status = Order.Status.ASSEMBLED
+    update_fields.append("status")
+
+  order.save(update_fields=update_fields)
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=f"Сброс ЧЗ — заказ WB #{order.wb_order_id} (лист подбора)",
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
+
+
 def _detach_order_from_pick_list(order: Order) -> None:
   pick_list_id = order.pick_list_id
   if not pick_list_id:

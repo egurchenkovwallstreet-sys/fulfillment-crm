@@ -446,6 +446,28 @@ export function replaceOrderItem(sellerId: number, orderId: number) {
   })
 }
 
+export type ResetAssemblyMarkingResult = {
+  success: boolean
+  reset_count: number
+  reset_order_ids: number[]
+  skipped: number
+  errors: Array<{ order_id: number; wb_order_id?: number; error: string }>
+  message: string
+  in_assembly_count: number
+  ready_count: number
+  errors_count: number
+}
+
+export function resetAssemblyMarking(sellerId: number, orderIds?: number[]) {
+  return apiFetch<ResetAssemblyMarkingResult>(
+    `/api/orders/assembly/sellers/${sellerId}/reset-assembly-marking/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_ids: orderIds ?? [] }),
+    },
+  )
+}
+
 export function sendOrderToAssembly(sellerId: number, orderId: number) {
   return apiFetch<SendToAssemblyResult>(
     `/api/orders/assembly/sellers/${sellerId}/send-to-assembly/`,

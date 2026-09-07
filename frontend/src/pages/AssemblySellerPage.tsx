@@ -10,6 +10,7 @@ import {
   fetchMarkingStatus,
   moveOrdersToNewSupply,
   replaceOrderItem,
+  resetAssemblyMarking,
   reprintOrderSticker,
   scanOrderBarcode,
   sendOrderToAssembly,
@@ -1407,6 +1408,40 @@ function WbAssemblySellerPage() {
     }
   }
 
+  async function handleResetAssemblyMarking(orderIds?: number[]) {
+    if (!id) return
+    const count = orderIds?.length ?? markingStatus.in_assembly.filter((o) => o.requires_marking).length
+    if (count < 1) {
+      setError('Нет заказов с ЧЗ для сброса')
+      return
+    }
+    const label =
+      count === 1
+        ? 'Сбросить ЧЗ у выбранного заказа?\n\nКод будет удалён из CRM и WB. Повторите скан баркода и DataMatrix.'
+        : `Сбросить ЧЗ у ${count} заказов?\n\nКоды будут удалены из CRM и WB. Повторите скан баркода и DataMatrix.`
+    if (!window.confirm(label)) return
+
+    setLoading(true)
+    setError('')
+    try {
+      const result = await resetAssemblyMarking(id, orderIds)
+      setSuccess(result.message)
+      setMarkingStatus((prev) => ({
+        ...prev,
+        in_assembly_count: result.in_assembly_count,
+        ready_count: result.ready_count,
+        errors_count: result.errors_count,
+      }))
+      await refreshMarkingStatus()
+      await load({ silent: true })
+      resetScanFlow()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сбросить ЧЗ')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleReplaceOrder() {
     if (!id || !pendingOrder) return
     setLoading(true)
@@ -2280,6 +2315,11 @@ function WbAssemblySellerPage() {
           loading={loading}
           onClose={() => setMarkingListKind(null)}
           onReplace={markingListKind === 'errors' ? (order) => void handleReplaceOrderFromList(order) : undefined}
+          onResetMarking={
+            markingListKind === 'in_assembly'
+              ? (orderIds) => void handleResetAssemblyMarking(orderIds)
+              : undefined
+          }
           onReprint={
             markingListKind === 'ready'
               ? (order) => confirmReprintSticker(order, () => setMarkingListKind(null))
