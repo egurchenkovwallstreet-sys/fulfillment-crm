@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from apps.orders.models import Order
+from apps.orders.services.marking_verification import order_marking_ready
 from apps.orders.services.order_sticker import order_sticker_printed_in_crm
 from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
@@ -30,13 +31,13 @@ def order_has_chz_error(order: Order) -> bool:
 
 
 def order_assembly_ready(order: Order) -> bool:
-  """Баркод отсканирован, стикер привязан и напечатан в CRM (сборка завершена)."""
+  """Стикер напечатан; для ЧЗ — WB подтвердил код (можно в доставку)."""
   if order_has_chz_error(order):
     return False
   if not order_sticker_printed_in_crm(order):
     return False
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    return bool((order.marking_code or "").strip())
+    return order_marking_ready(order)
   return True
 
 

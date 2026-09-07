@@ -30,20 +30,27 @@ def order_marking_ready(order: Order) -> bool:
 
 
 def _extract_sgtin_decision(meta_item: dict) -> str:
+  """Статус sgtin из metaDetails (decision) или устаревшего meta."""
   for detail in meta_item.get("metaDetails") or []:
     if (detail.get("key") or "").lower() != "sgtin":
       continue
-    status = str(detail.get("status") or detail.get("decision") or "").strip()
-    if status:
-      return status
+    decision = str(detail.get("decision") or detail.get("status") or "").strip()
+    if decision:
+      return decision
+    # Код есть, но WB ещё не вернул решение — проверка продолжается.
     if detail.get("value"):
-      return "filled"
+      return VERIFY_PENDING
+
   meta = meta_item.get("meta") or {}
   sgtin = meta.get("sgtin")
-  if isinstance(sgtin, dict) and sgtin.get("value"):
-    return "filled"
-  if isinstance(sgtin, str) and sgtin.strip():
-    return "filled"
+  if isinstance(sgtin, dict):
+    decision = str(sgtin.get("decision") or sgtin.get("status") or "").strip()
+    if decision:
+      return decision
+    if sgtin.get("value"):
+      return VERIFY_PENDING
+  elif isinstance(sgtin, str) and sgtin.strip():
+    return VERIFY_PENDING
   return ""
 
 
@@ -70,6 +77,19 @@ def _apply_verify_result(order: Order, decision: str) -> str:
   return status
 
 
+def _orders_for_marking_verify(seller: Seller, order_ids: list[int] | None = None):
+  """Заказы с ЧЗ, у которых WB ещё не подтвердил код (pending / пустой статус)."""
+  qs = (
+    Order.objects.filter(seller=seller)
+    .exclude(marking_code="")
+    .exclude(marking_verify_status=VERIFY_VERIFIED)
+    .exclude(marking_verify_status=VERIFY_ERROR)
+  )
+  if order_ids:
+    qs = qs.filter(pk__in=order_ids)
+  return qs.select_related("product", "seller")
+
+
 def verify_marking_orders(
   seller: Seller,
   order_ids: list[int] | None = None,
@@ -77,10 +97,11 @@ def verify_marking_orders(
   user=None,
 ) -> list[dict]:
   """Опросить WB и обновить статусы проверки ЧЗ для заказов селлера."""
-  qs = Order.objects.filter(seller=seller, marking_verify_status=VERIFY_PENDING)
-  if order_ids:
-    qs = qs.filter(pk__in=order_ids)
-  orders = list(qs.select_related("product"))
+  orders = [
+    order
+    for order in _orders_for_marking_verify(seller, order_ids)
+    if resolve_product_requires_marking(order.product, order.barcode, order.seller)
+  ]
   if not orders:
     return []
 
@@ -108,8 +129,9 @@ def verify_marking_orders(
   for order in orders:
     meta_item = meta_by_wb_id.get(order.wb_order_id, {})
     decision = _extract_sgtin_decision(meta_item)
+    # WB не видит sgtin в meta — для CRM код «не принят», а не «всё ещё проверяется».
     if not decision and order.marking_code:
-      decision = "pending"
+      decision = "required"
     status = _apply_verify_result(order, decision)
     results.append({
       "order_id": order.id,
