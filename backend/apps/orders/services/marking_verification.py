@@ -29,29 +29,50 @@ def order_marking_ready(order: Order) -> bool:
   return order.marking_bound
 
 
-def _extract_sgtin_decision(meta_item: dict) -> str:
-  """Статус sgtin из metaDetails (decision) или устаревшего meta."""
+def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
+  found: list[str] = []
   for detail in meta_item.get("metaDetails") or []:
     if (detail.get("key") or "").lower() != "sgtin":
       continue
     decision = str(detail.get("decision") or detail.get("status") or "").strip()
+    extra = str(
+      detail.get("error") or detail.get("failReason") or detail.get("comment") or "",
+    ).strip()
     if decision:
-      return decision
-    # Код есть, но WB ещё не вернул решение — проверка продолжается.
-    if detail.get("value"):
-      return VERIFY_PENDING
+      found.append(decision)
+    elif extra:
+      found.append("invalid")
+    elif detail.get("value"):
+      found.append(VERIFY_PENDING)
 
   meta = meta_item.get("meta") or {}
   sgtin = meta.get("sgtin")
   if isinstance(sgtin, dict):
     decision = str(sgtin.get("decision") or sgtin.get("status") or "").strip()
     if decision:
-      return decision
-    if sgtin.get("value"):
-      return VERIFY_PENDING
+      found.append(decision)
+    elif sgtin.get("value"):
+      found.append(VERIFY_PENDING)
   elif isinstance(sgtin, str) and sgtin.strip():
-    return VERIFY_PENDING
-  return ""
+    found.append(VERIFY_PENDING)
+  return found
+
+
+def _extract_sgtin_decision(meta_item: dict) -> str:
+  """Статус sgtin из metaDetails: если WB отклонил хотя бы один код — это ошибка ЧЗ."""
+  decisions = _collect_sgtin_decisions(meta_item)
+  if not decisions:
+    return ""
+  rank = {"error": 3, "pending": 2, "verified": 1}
+  best = decisions[0]
+  best_rank = 0
+  for decision in decisions:
+    status, _ = parse_marking_verify_decision(decision)
+    current = rank.get(status, 3)
+    if current > best_rank:
+      best_rank = current
+      best = decision
+  return best
 
 
 def _apply_verify_result(order: Order, decision: str) -> str:
@@ -107,8 +128,13 @@ def verify_marking_orders(
 
   client = _get_client(seller)
   wb_ids = [order.wb_order_id for order in orders]
+  meta_by_wb_id: dict[int, dict] = {}
   try:
-    meta_items = client.fetch_orders_meta(wb_ids)
+    for offset in range(0, len(wb_ids), 100):
+      for item in client.fetch_orders_meta(wb_ids[offset:offset + 100]):
+        wb_id = item.get("id")
+        if wb_id is not None:
+          meta_by_wb_id[int(wb_id)] = item
   except WBApiError as exc:
     AuditLog.objects.create(
       user=user,
@@ -118,12 +144,6 @@ def verify_marking_orders(
       details={"status_code": exc.status_code, "order_ids": order_ids},
     )
     raise AssemblyError(parse_wb_marking_error(exc), code="wb_verify_failed") from exc
-
-  meta_by_wb_id: dict[int, dict] = {}
-  for item in meta_items:
-    wb_id = item.get("id")
-    if wb_id is not None:
-      meta_by_wb_id[int(wb_id)] = item
 
   results: list[dict] = []
   for order in orders:

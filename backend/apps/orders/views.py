@@ -64,6 +64,7 @@ from .services.assembly import (
 from .services.assembly_queue import (
   get_assembly_queue_status,
   order_in_current_assembly_list,
+  repair_moved_orders_off_pick_list,
 )
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
@@ -521,6 +522,9 @@ class AssemblySellerDetailView(APIView):
         orders_qs = orders_qs.filter(status=stage)
       else:
         orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
+
+    if stage == "confirm":
+      repair_moved_orders_off_pick_list(seller)
 
     orders = list(orders_qs.order_by("-created_at")[:300])
     if stage == "confirm":

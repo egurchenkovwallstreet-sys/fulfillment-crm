@@ -361,16 +361,16 @@ function WbAssemblySellerPage() {
   useEffect(() => {
     if (!id || stage !== 'confirm') return
     const pending = markingStatus.ready.some(orderChzPending)
-    const stillScanningChz = markingStatus.in_assembly.some((order) => order.requires_marking)
-    if (!pending || stillScanningChz) return
+    if (!pending) return
 
     const tick = () => {
       if (document.visibilityState !== 'visible') return
       void runMarkingVerify()
     }
+    tick()
     const verifyTimer = window.setInterval(tick, MARKING_VERIFY_AFTER_LAST_MS)
     return () => window.clearInterval(verifyTimer)
-  }, [id, stage, markingStatus.ready, markingStatus.in_assembly, runMarkingVerify])
+  }, [id, stage, markingStatus.ready, runMarkingVerify])
 
   useEffect(() => {
     if (!id || stage !== 'complete') return
@@ -1048,19 +1048,18 @@ function WbAssemblySellerPage() {
       })
       return
     }
-    if (pendingChzCount > 0 || !deliveryUnlocked) {
-      setModal({
-        kind: 'block',
-        title: 'WB ещё проверяет Честный знак',
-        message:
-          'Заказы уже в «Готовые», стикеры напечатаны. Кнопка станет зелёной, ' +
-          'когда WB примет все ЧЗ без ошибок. Последние коды с листа уходят на проверку сразу, ' +
-          'остальные CRM перепроверяет каждые 10 минут.',
-      })
-      return
-    }
     const ready = markingStatus.ready.filter((order) => orderCanDeliver(order))
     if (ready.length === 0) {
+      if (pendingChzCount > 0) {
+        setModal({
+          kind: 'block',
+          title: 'WB ещё проверяет Честный знак',
+          message:
+            'Заказы уже в «Готовые», стикеры напечатаны. Кнопка станет зелёной, ' +
+            'когда WB примет коды без ошибок. Если в ЛК WB код отклонён — он появится в «Ошибки ЧЗ».',
+        })
+        return
+      }
       setModal({
         kind: 'block',
         title: 'Нет готовых заказов',
@@ -1752,8 +1751,8 @@ function WbAssemblySellerPage() {
                 markingQueueBlocked
                   ? 'Сначала закройте ошибки ЧЗ — кнопка станет зелёной после замены товара'
                   : deliveryUnlocked
-                    ? 'WB принял все ЧЗ — передать собранные заказы в доставку'
-                    : 'Кнопка красная, пока WB проверяет ЧЗ. Зелёная — когда все коды приняты без ошибок',
+                    ? 'WB принял ЧЗ у готовых заказов — можно передать их в доставку. Перенесённые не блокируют.'
+                    : 'Кнопка красная, пока WB проверяет ЧЗ. Если в ЛК код отклонён — смотрите «Ошибки ЧЗ».',
               )}
             >
               <button

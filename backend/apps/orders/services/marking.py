@@ -128,23 +128,39 @@ MARKING_VERIFY_PENDING = frozenset({
 MARKING_VERIFY_ERROR = frozenset({
   "required",
   "invalid",
+  "error",
+  "failed",
+  "rejected",
+  "declined",
   "sgtininvalidformat",
   "sgtinnotfound",
   "sgtinemitted",
   "sgtinapplied",
   "sgtinwrittenoff",
   "sgtinretired",
+  "sgtinincorrectstatus",
+  "sgtinnotunique",
+  "sgtinalreadyinuse",
+  "sgtinalready",
 })
 
 _MARKING_VERIFY_MESSAGES: dict[str, str] = {
   "required": "Честный знак обязателен, но не привязан к заказу.",
   "invalid": "WB отклонил код ЧЗ при проверке.",
+  "error": "WB отклонил код ЧЗ. Замените товар.",
+  "failed": "WB отклонил код ЧЗ. Замените товар.",
+  "rejected": "WB отклонил код ЧЗ. Замените товар.",
+  "declined": "WB отклонил код ЧЗ. Замените товар.",
   "sgtininvalidformat": "Неверный формат кода ЧЗ. Отсканируйте DataMatrix заново.",
   "sgtinnotfound": "Код ЧЗ не найден в системе «Честный знак». Замените товар.",
   "sgtinemitted": "Код ЧЗ выпущен, но не введён в оборот. Замените товар.",
   "sgtinapplied": "Код ЧЗ не введён в оборот. Замените товар.",
   "sgtinwrittenoff": "Код ЧЗ списан. Замените товар.",
   "sgtinretired": "Код ЧЗ выведен из оборота. Замените товар.",
+  "sgtinincorrectstatus": "Неверный статус кода ЧЗ в «Честном знаке». Замените товар.",
+  "sgtinnotunique": "Этот код ЧЗ уже привязан к другому заказу. Замените товар.",
+  "sgtinalreadyinuse": "Этот код ЧЗ уже привязан к другому заказу. Замените товар.",
+  "sgtinalready": "Этот код ЧЗ уже привязан к другому заказу. Замените товар.",
 }
 
 
@@ -155,10 +171,16 @@ def parse_marking_verify_decision(decision: str) -> tuple[str, str | None]:
     return "pending", None
   if key in MARKING_VERIFY_SUCCESS:
     return "verified", None
+  if key == "optional":
+    return "verified", None
   if key in MARKING_VERIFY_PENDING:
     return "pending", None
   if key in MARKING_VERIFY_ERROR or key.startswith("sgtin"):
-    return "error", _MARKING_VERIFY_MESSAGES.get(key, f"WB отклонил код ЧЗ ({decision}). Замените товар.")
-  if key == "optional":
-    return "verified", None
-  return "pending", None
+    return "error", _MARKING_VERIFY_MESSAGES.get(
+      key,
+      f"WB отклонил код ЧЗ ({decision}). Замените товар.",
+    )
+  if any(token in key for token in ("fail", "reject", "invalid", "error", "declin")):
+    return "error", f"WB отклонил код ЧЗ ({decision}). Замените товар."
+  # Неизвестный статус из ЛК WB не держим как «ждём» — показываем в ошибках ЧЗ.
+  return "error", f"WB отклонил код ЧЗ ({decision}). Замените товар."

@@ -52,7 +52,6 @@ export function assemblyDeliveryUnlocked(status: {
 }): boolean {
   if (status.errors_count > 0) return false
   if (status.ready.length === 0) return false
-  if (status.ready.some(orderChzPending)) return false
   return status.ready.some(orderCanDeliver)
 }
 
