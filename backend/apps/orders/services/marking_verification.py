@@ -36,6 +36,35 @@ def _sgtin_key(value: str) -> bool:
   return key in ("sgtin", "kiz", "cis") or "sgtin" in key
 
 
+def _detail_has_value(detail: dict) -> bool:
+  for field in ("value", "values", "sgtin", "sgtins"):
+    raw = detail.get(field)
+    if isinstance(raw, list):
+      if any(str(item or "").strip() for item in raw):
+        return True
+    elif str(raw or "").strip():
+      return True
+  return False
+
+
+def _decision_from_sgtin_blob(blob) -> list[str]:
+  found: list[str] = []
+  if isinstance(blob, dict):
+    decision = str(
+      blob.get("decision") or blob.get("status") or blob.get("checkStatus") or "",
+    ).strip()
+    if decision:
+      found.append(decision)
+    elif _detail_has_value(blob):
+      found.append("filled")
+  elif isinstance(blob, list):
+    for item in blob:
+      found.extend(_decision_from_sgtin_blob(item))
+  elif str(blob or "").strip():
+    found.append("filled")
+  return found
+
+
 def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
   found: list[str] = []
   details = meta_item.get("metaDetails") or meta_item.get("meta_details") or []
@@ -44,9 +73,11 @@ def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
   for detail in details:
     if not isinstance(detail, dict):
       continue
-    if not _sgtin_key(str(detail.get("key") or detail.get("name") or "")):
+    if not _sgtin_key(str(detail.get("key") or detail.get("name") or detail.get("type") or "")):
       continue
-    decision = str(detail.get("decision") or detail.get("status") or "").strip()
+    decision = str(
+      detail.get("decision") or detail.get("status") or detail.get("checkStatus") or "",
+    ).strip()
     extra = str(
       detail.get("error") or detail.get("failReason") or detail.get("comment") or "",
     ).strip()
@@ -54,35 +85,18 @@ def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
       found.append(decision)
     elif extra:
       found.append("invalid")
-    elif detail.get("value"):
-      found.append(VERIFY_PENDING)
+    elif _detail_has_value(detail):
+      found.append("filled")
 
   meta = meta_item.get("meta") or {}
   if isinstance(meta, dict):
-    sgtin = meta.get("sgtin")
-    if isinstance(sgtin, dict):
-      decision = str(sgtin.get("decision") or sgtin.get("status") or "").strip()
-      if decision:
-        found.append(decision)
-      elif sgtin.get("value"):
-        found.append(VERIFY_PENDING)
-    elif isinstance(sgtin, list):
-      for item in sgtin:
-        if isinstance(item, dict):
-          decision = str(item.get("decision") or item.get("status") or "").strip()
-          if decision:
-            found.append(decision)
-          elif item.get("value"):
-            found.append(VERIFY_PENDING)
-        elif str(item or "").strip():
-          found.append(VERIFY_PENDING)
-    elif isinstance(sgtin, str) and sgtin.strip():
-      found.append(VERIFY_PENDING)
+    found.extend(_decision_from_sgtin_blob(meta.get("sgtin")))
+  found.extend(_decision_from_sgtin_blob(meta_item.get("sgtin")))
   return found
 
 
 def _extract_sgtin_decision(meta_item: dict) -> str:
-  """Если WB отклонил хотя бы один код — ошибка ЧЗ; filled — принят."""
+  """Отказ WB важнее pending; filled / код без статуса — принят к доставке."""
   decisions = _collect_sgtin_decisions(meta_item)
   if not decisions:
     return ""
@@ -122,7 +136,7 @@ def _apply_verify_result(order: Order, decision: str) -> str:
 
 
 def _meta_order_id(item: dict) -> int | None:
-  for key in ("id", "orderId", "order_id"):
+  for key in ("id", "orderId", "order_id", "orderID", "rid"):
     value = item.get(key)
     if value is None or str(value).strip() == "":
       continue
@@ -186,13 +200,31 @@ def verify_marking_orders(
     )
     raise AssemblyError(parse_wb_marking_error(exc), code="wb_verify_failed") from exc
 
+  if not meta_by_wb_id or not any(int(order.wb_order_id) in meta_by_wb_id for order in orders):
+    AuditLog.objects.create(
+      user=user,
+      seller=seller,
+      action_type=AuditLog.ActionType.API_ERROR,
+      message="WB не вернул статусы ЧЗ (пустой ответ /orders/meta)",
+      details={
+        "order_ids": [order.id for order in orders],
+        "wb_ids": wb_ids[:20],
+        "meta_ids": list(meta_by_wb_id.keys())[:20],
+      },
+    )
+    raise AssemblyError(
+      "WB не вернул статусы Честного знака. Нажмите «Проверить ЧЗ» ещё раз.",
+      code="wb_verify_empty",
+    )
+
   results: list[dict] = []
   for order in orders:
     meta_item = meta_by_wb_id.get(int(order.wb_order_id))
+    has_code = bool((order.marking_code or "").strip())
     if meta_item is None:
-      decision = "required" if meta_by_wb_id else VERIFY_PENDING
+      decision = "filled" if has_code else "required"
     else:
-      decision = _extract_sgtin_decision(meta_item) or "required"
+      decision = _extract_sgtin_decision(meta_item) or ("filled" if has_code else "required")
     status = _apply_verify_result(order, decision)
     results.append({
       "order_id": order.id,

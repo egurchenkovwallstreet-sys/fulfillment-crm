@@ -24,6 +24,64 @@ class WBApiError(Exception):
     self.status_code = status_code
 
 
+def _looks_like_order_meta_item(item: dict) -> bool:
+  if any(key in item for key in ("metaDetails", "meta_details", "meta")):
+    return True
+  has_id = any(key in item for key in ("id", "orderId", "order_id", "orderID"))
+  nested = any(
+    key in item and isinstance(item.get(key), (list, dict))
+    for key in ("orders", "data", "result")
+  )
+  return has_id and not nested
+
+
+def parse_orders_meta_payload(payload: dict | list | None) -> list[dict]:
+  """Достать заказы из ответа POST /orders/meta — WB отдаёт разные обёртки."""
+  found: list[dict] = []
+
+  def walk(node: object, depth: int = 0) -> None:
+    if found or node is None or depth > 6:
+      return
+    if isinstance(node, list):
+      dicts = [item for item in node if isinstance(item, dict)]
+      if dicts and all(_looks_like_order_meta_item(item) for item in dicts):
+        found.extend(dicts)
+        return
+      for item in dicts:
+        walk(item, depth + 1)
+        if found:
+          return
+      return
+    if not isinstance(node, dict):
+      return
+    if _looks_like_order_meta_item(node):
+      found.append(node)
+      return
+    for key in ("orders", "data", "result", "items", "metas", "ordersMeta", "content"):
+      if key in node:
+        walk(node.get(key), depth + 1)
+        if found:
+          return
+    values = list(node.values())
+    if values and all(isinstance(value, dict) for value in values):
+      items: list[dict] = []
+      for key, value in node.items():
+        if not _looks_like_order_meta_item(value):
+          continue
+        item = dict(value)
+        if item.get("id") is None:
+          try:
+            item["id"] = int(key)
+          except (TypeError, ValueError):
+            pass
+        items.append(item)
+      if items:
+        found.extend(items)
+
+  walk(payload)
+  return found
+
+
 @dataclass
 class WBOrderData:
   wb_order_id: int
@@ -346,23 +404,21 @@ class WBClient:
     """POST /api/marketplace/v3/orders/meta — метаданные и статусы проверки ЧЗ."""
     if not order_ids:
       return []
-    payload = self._request(
-      "POST",
-      "/api/marketplace/v3/orders/meta",
-      json={"orders": [int(item) for item in order_ids[:100]]},
-    )
-    if isinstance(payload, list):
-      return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
-      return []
-    for key in ("orders", "data", "result"):
-      chunk = payload.get(key)
-      if isinstance(chunk, list):
-        return [item for item in chunk if isinstance(item, dict)]
-      if isinstance(chunk, dict):
-        nested = chunk.get("orders")
-        if isinstance(nested, list):
-          return [item for item in nested if isinstance(item, dict)]
+    body = {"orders": [int(item) for item in order_ids[:100]]}
+    last_payload: dict | list | None = None
+    for path in ("/api/marketplace/v3/orders/meta", "/api/v3/orders/meta"):
+      try:
+        payload = self._request("POST", path, json=body)
+      except WBApiError as exc:
+        if exc.status_code in (400, 404, 405):
+          continue
+        raise
+      last_payload = payload
+      items = parse_orders_meta_payload(payload)
+      if items:
+        return items
+    keys = ",".join(sorted(last_payload.keys())) if isinstance(last_payload, dict) else type(last_payload).__name__
+    logger.warning("WB orders/meta empty payload keys=%s ids=%s", keys, body["orders"][:8])
     return []
 
   def create_supply(self, name: str) -> str:

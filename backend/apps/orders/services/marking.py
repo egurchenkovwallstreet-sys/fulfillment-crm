@@ -116,6 +116,8 @@ def parse_wb_marking_error(exc: WBApiError) -> str:
 
 MARKING_VERIFY_SUCCESS = frozenset({
   "filled",
+  "optional",
+  "deadlineexceeded",
   "sgtinintroduced",
   "sgtinsoldb2b",
 })
@@ -131,13 +133,20 @@ MARKING_VERIFY_ERROR = frozenset({
   "failed",
   "rejected",
   "declined",
-  "deadlineexceeded",
   "sgtininvalidformat",
+  "sgtinnogs",
+  "sgtinhasinvalidsymbols",
+  "sgtinhasnonlatinsymbols",
+  "sgtininvalidpattern",
   "sgtinnotfound",
   "sgtinemitted",
   "sgtinapplied",
   "sgtinwrittenoff",
+  "sgtinwithdrawn",
   "sgtinretired",
+  "sgtindisaggregated",
+  "sgtindisaggregation",
+  "sgtinappliednotpaid",
   "sgtinincorrectstatus",
   "sgtinnotunique",
   "sgtinalreadyinuse",
@@ -151,13 +160,20 @@ _MARKING_VERIFY_MESSAGES: dict[str, str] = {
   "failed": "WB отклонил код ЧЗ. Замените товар.",
   "rejected": "WB отклонил код ЧЗ. Замените товар.",
   "declined": "WB отклонил код ЧЗ. Замените товар.",
-  "deadlineexceeded": "WB не подтвердил Честный знак вовремя. Проверьте код в ЛК WB или замените товар.",
   "sgtininvalidformat": "Неверный формат кода ЧЗ. Отсканируйте DataMatrix заново.",
+  "sgtinnogs": "В коде ЧЗ нет разделителя GS. Отсканируйте DataMatrix заново.",
+  "sgtinhasinvalidsymbols": "Код ЧЗ содержит недопустимые символы. Отсканируйте DataMatrix заново.",
+  "sgtinhasnonlatinsymbols": "Код ЧЗ содержит недопустимые символы. Отсканируйте DataMatrix заново.",
+  "sgtininvalidpattern": "Неверный формат кода ЧЗ. Отсканируйте DataMatrix заново.",
   "sgtinnotfound": "Код ЧЗ не найден в системе «Честный знак». Замените товар.",
   "sgtinemitted": "Код ЧЗ выпущен, но не введён в оборот. Замените товар.",
   "sgtinapplied": "Код ЧЗ не введён в оборот. Замените товар.",
   "sgtinwrittenoff": "Код ЧЗ списан. Замените товар.",
+  "sgtinwithdrawn": "Код ЧЗ выбыл из оборота. Замените товар.",
   "sgtinretired": "Код ЧЗ выведен из оборота. Замените товар.",
+  "sgtindisaggregated": "Код ЧЗ расформирован. Замените товар.",
+  "sgtindisaggregation": "Код ЧЗ расформирован. Замените товар.",
+  "sgtinappliednotpaid": "Код ЧЗ не оплачен. Замените товар.",
   "sgtinincorrectstatus": "Неверный статус кода ЧЗ в «Честном знаке». Замените товар.",
   "sgtinnotunique": "Этот код ЧЗ уже привязан к другому заказу. Замените товар.",
   "sgtinalreadyinuse": "Этот код ЧЗ уже привязан к другому заказу. Замените товар.",
@@ -171,8 +187,6 @@ def parse_marking_verify_decision(decision: str) -> tuple[str, str | None]:
   if not key:
     return "pending", None
   if key in MARKING_VERIFY_SUCCESS:
-    return "verified", None
-  if key == "optional":
     return "verified", None
   if key in MARKING_VERIFY_PENDING:
     return "pending", None
