@@ -27,6 +27,7 @@ import { BatchBindPanel } from '../components/BatchBindPanel'
 import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import { readAssemblySellerCache, writeAssemblySellerCache } from '../utils/assemblyCache'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import './AssemblyPage.css'
 
 const STAGES = [
@@ -42,6 +43,11 @@ function stageCount(counts: Record<string, number> | undefined, key: string): nu
 }
 
 export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
+  const { showSuccess, showError } = useCrmNotice()
+  const noticeOk = (message: string, title = 'Готово') => showSuccess(title, message)
+  const noticeFail = (title: string, err: unknown, fallback: string) => {
+    showError(title, err instanceof Error ? err.message : fallback)
+  }
   const scanRef = useRef<HTMLInputElement>(null)
   const [data, setData] = useState<AssemblySellerDetail | null>(
     () => readAssemblySellerCache(sellerId, 'new'),
@@ -51,8 +57,6 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   const [refreshing, setRefreshing] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [barcode, setBarcode] = useState('')
   const [pendingMarking, setPendingMarking] = useState<AssemblyOrder | null>(null)
   const [lastCarriageId, setLastCarriageId] = useState<number | null>(null)
@@ -70,7 +74,6 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       setRefreshing(true)
     } else {
       setLoading(true)
-      setError('')
     }
     try {
       const fresh = await fetchAssemblySeller(sellerId, pickStage)
@@ -78,7 +81,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       writeAssemblySellerCache(sellerId, pickStage, fresh)
     } catch (err) {
       if (!silent) {
-        setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+        noticeFail('Загрузка сборки', err, 'Ошибка загрузки')
       }
     } finally {
       if (silent) {
@@ -106,7 +109,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
         }
       } catch (err) {
         if (!cancelled && !cached) {
-          setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+          showError('Загрузка сборки', err instanceof Error ? err.message : 'Ошибка загрузки')
         }
       } finally {
         if (!cancelled) setRefreshing(false)
@@ -152,14 +155,12 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
   async function handleSync() {
     setSyncing(true)
-    setError('')
-    setSuccess('')
     try {
       const payload = await syncOzonAssembly(sellerId, stage)
       setData(payload)
-      setSuccess('Отправления Ozon обновлены')
+      noticeOk('Отправления Ozon обновлены', 'Ozon')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации Ozon')
+      noticeFail('Синхронизация Ozon', err, 'Ошибка синхронизации Ozon')
     } finally {
       setSyncing(false)
     }
@@ -169,17 +170,15 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
     e?.preventDefault()
     const value = barcode.trim()
     if (!value) return
-    setError('')
-    setSuccess('')
     try {
       if (stage === 'confirm' || pendingMarking) {
         const target = pendingMarking || data?.orders.find((item) => item.requires_marking && !item.marking_bound)
         if (!target) {
-          setError('Сначала отсканируйте баркод во вкладке «Новые» или нажмите «Скан ЧЗ» в строке')
+          showError('Скан ЧЗ', 'Сначала отсканируйте баркод во вкладке «Новые» или нажмите «Скан ЧЗ» в строке')
           return
         }
         const result = await bindOzonMarking(sellerId, target.id, value)
-        setSuccess(result.message)
+        noticeOk(result.message, 'Честный знак')
         setBarcode('')
         if (result.action === 'bound') {
           setPendingMarking(null)
@@ -190,7 +189,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
         return
       }
       const result = await scanOzonBarcode(sellerId, value)
-      setSuccess(result.message)
+      noticeOk(result.message, 'Скан')
       setBarcode('')
       if (result.action === 'await_marking') {
         setPendingMarking(result.posting)
@@ -198,7 +197,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       }
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Скан не принят')
+      noticeFail('Скан', err, 'Скан не принят')
     } finally {
       scanRef.current?.focus()
     }
@@ -214,17 +213,15 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   async function handleBulkToAssembly() {
     const ids = Array.from(selectedIds)
     if (ids.length < 1) return
-    setError('')
-    setSuccess('')
     setBulkBusy(true)
     try {
       const result = await bulkMoveOzonToAssembly(sellerId, ids)
-      setSuccess(result.message)
+      noticeOk(result.message, 'На сборке')
       setSelectedIds(new Set())
       setStage('confirm')
       setData(await fetchAssemblySeller(sellerId, 'confirm'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось перевести на сборку')
+      noticeFail('На сборке', err, 'Не удалось перевести на сборку')
     } finally {
       setBulkBusy(false)
     }
@@ -240,20 +237,18 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       )
       .map((item) => item.id)
     if (ids.length < 1) {
-      setError('Выберите отправления с привязанным ЧЗ (или без маркировки)')
+      showError('В доставку', 'Выберите отправления с привязанным ЧЗ (или без маркировки)')
       return
     }
-    setError('')
-    setSuccess('')
     setBulkBusy(true)
     try {
       const result = await bulkShipOzonPostings(sellerId, ids)
-      setSuccess(result.message)
+      noticeOk(result.message, 'В доставку')
       setSelectedIds(new Set())
       setStage('complete')
       setData(await fetchAssemblySeller(sellerId, 'complete'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось передать в доставку')
+      noticeFail('В доставку', err, 'Не удалось передать в доставку')
     } finally {
       setBulkBusy(false)
     }
@@ -284,35 +279,31 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   }
 
   async function handleShip(order: AssemblyOrder) {
-    setError('')
-    setSuccess('')
     setBusyId(order.id)
     try {
       const result = await shipOzonPosting(sellerId, order.id)
-      setSuccess(result.message)
+      noticeOk(result.message, 'К отгрузке')
       setStage('complete')
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось передать к отгрузке')
+      noticeFail('Отгрузка', err, 'Не удалось передать к отгрузке')
     } finally {
       setBusyId(null)
     }
   }
 
   async function handleLabel(order: AssemblyOrder) {
-    setError('')
-    setSuccess('')
     setBusyId(order.id)
     try {
       const result = await fetchOzonLabel(sellerId, order.id)
       openPdfBase64(result.pdf_base64, result.filename)
-      setSuccess(`Этикетка ${order.posting_number} открыта. Напечатайте из окна PDF.`)
+      noticeOk(`Этикетка ${order.posting_number} открыта. Напечатайте из окна PDF.`, 'Этикетка')
     } catch (err) {
       const code = err instanceof ApiError ? err.code : ''
       if (code === 'not_ready') {
-        setError('Этикетка ещё готовится. Подождите около минуты после «В доставку» и нажмите ещё раз.')
+        showError('Этикетка', 'Этикетка ещё готовится. Подождите около минуты после «В доставку» и нажмите ещё раз.')
       } else {
-        setError(err instanceof Error ? err.message : 'Не удалось получить этикетку')
+        noticeFail('Этикетка', err, 'Не удалось получить этикетку')
       }
     } finally {
       setBusyId(null)
@@ -322,23 +313,19 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   async function handleLabelsAll() {
     const ids = (data?.orders || []).filter((item) => item.can_print_label).map((item) => item.id)
     if (ids.length < 1) return
-    setError('')
-    setSuccess('')
     setBusyId(-1)
     try {
       const result = await fetchOzonLabelsBulk(sellerId, ids.slice(0, 20))
       openPdfBase64(result.pdf_base64, result.filename)
-      setSuccess(`Открыт PDF с ${result.count ?? ids.length} этикетками`)
+      noticeOk(`Открыт PDF с ${result.count ?? ids.length} этикетками`, 'Этикетки')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось получить этикетки')
+      noticeFail('Этикетки', err, 'Не удалось получить этикетки')
     } finally {
       setBusyId(null)
     }
   }
 
   async function handleAct(carriageId?: number) {
-    setError('')
-    setSuccess('')
     setBusyId(-2)
     try {
       const result = await formOzonAct(sellerId, carriageId)
@@ -356,12 +343,13 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
           openPdfBase64(act.pdf_base64, act.filename || 'ozon-act.pdf')
         }
       }
-      setSuccess(result.message || 'Акт сформирован')
-      if (acts.some((item) => item.warning)) {
-        setError(acts.map((item) => item.warning).filter(Boolean).join(' '))
+      noticeOk(result.message || 'Акт сформирован', 'Акт Ozon')
+      const warnings = acts.map((item) => item.warning).filter(Boolean).join(' ')
+      if (warnings) {
+        showError('Акт Ozon', warnings)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сформировать акт')
+      noticeFail('Акт Ozon', err, 'Не удалось сформировать акт')
     } finally {
       setBusyId(null)
     }
@@ -369,34 +357,29 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
 
   async function handleWorkflowModeChange(mode: AssemblyWorkflowMode) {
     if (!data) return
-    setError('')
     try {
       const result = await setAssemblyWorkflowMode(sellerId, mode)
       setData({ ...data, assembly_workflow_mode: result.assembly_workflow_mode })
-      setSuccess(mode === 'batch' ? 'Режим: лента стикеров' : 'Режим: пошаговый скан')
+      noticeOk(mode === 'batch' ? 'Режим: лента стикеров' : 'Режим: пошаговый скан', 'Режим сборки')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сменить режим сборки')
+      noticeFail('Режим сборки', err, 'Не удалось сменить режим сборки')
     }
   }
 
   async function handleGenerateOzonPickList() {
-    setError('')
-    setSuccess('')
     setLoading(true)
     try {
       const result = await generateOzonPickList(sellerId)
       setData((prev) => (prev ? { ...prev, active_pick_list: result.pick_list } : prev))
-      setSuccess(`Лист подбора Ozon №${result.pick_list.id}: ${result.pick_list.total_quantity} поз.`)
+      noticeOk(`Лист подбора Ozon №${result.pick_list.id}: ${result.pick_list.total_quantity} поз.`, 'Лист подбора')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
+      noticeFail('Лист подбора', err, 'Не удалось сформировать лист подбора')
     } finally {
       setLoading(false)
     }
   }
 
   async function handlePrintBatchRibbon() {
-    setError('')
-    setSuccess('')
     setRibbonPrinting(true)
     const printWin = openPrintHolder()
     try {
@@ -404,15 +387,16 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
       const printed = await printBatchRibbon(result.items, true, printWin)
       if (!printed) {
         closePrintHolder(printWin)
-        setError('Не удалось открыть печать — разрешите всплывающие окна')
+        showError('Печать ленты', 'Не удалось открыть печать — разрешите всплывающие окна')
         return
       }
-      setSuccess(
+      noticeOk(
         `Лента отправлена на печать: ${result.stickers_count} этикеток в ${result.groups_count} группах`,
+        'Лента стикеров',
       )
     } catch (err) {
       closePrintHolder(printWin)
-      setError(err instanceof Error ? err.message : 'Не удалось подготовить ленту')
+      noticeFail('Лента стикеров', err, 'Не удалось подготовить ленту')
     } finally {
       setRibbonPrinting(false)
     }
@@ -421,7 +405,6 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
   async function handleToggleWarehouse(warehouse: SellerOzonWarehouse) {
     setTogglingId(warehouse.id)
     setPickListRefreshing(true)
-    setError('')
     try {
       await toggleSellerOzonWarehouse(sellerId, warehouse.id, !warehouse.is_enabled)
       const payload = await syncOzonAssembly(sellerId, stage)
@@ -435,7 +418,7 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось переключить склад')
+      noticeFail('Склад Ozon', err, 'Не удалось переключить склад')
     } finally {
       setTogglingId(null)
       setPickListRefreshing(false)
@@ -519,9 +502,6 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
         </div>
       </header>
 
-      {error && <div className="alert alert--error">{error}</div>}
-      {success && <div className="alert alert--success">{success}</div>}
-
       {warehouses.length > 0 && (
         <section className="panel">
           <h2 className="section-title">Склады Ozon</h2>
@@ -589,8 +569,8 @@ export function OzonAssemblySellerPage({ sellerId }: { sellerId: number }) {
           sellerId={sellerId}
           disabled={!data?.active_pick_list}
           onBound={() => load()}
-          onSuccess={setSuccess}
-          onError={setError}
+          onSuccess={(message) => noticeOk(message, 'Связка ЧЗ')}
+          onError={(message) => showError('Связка ЧЗ', message)}
         />
       )}
 

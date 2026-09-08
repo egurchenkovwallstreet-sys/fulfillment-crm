@@ -10,6 +10,7 @@ import {
   type PickListBrief,
 } from '../api/orders'
 import { fetchSellers, type Seller } from '../api/warehouse'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import './OrdersPage.css'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -40,18 +41,16 @@ function formatSyncMessage(result: Awaited<ReturnType<typeof syncOrders>>): stri
 }
 
 export function OrdersPage() {
+  const { showSuccess, showError } = useCrmNotice()
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [orders, setOrders] = useState<Order[]>([])
   const [pickLists, setPickLists] = useState<PickListBrief[]>([])
   const [activePickList, setActivePickList] = useState<PickList | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
   const loadData = useCallback(async (selectedSeller?: number) => {
     setLoading(true)
-    setError('')
     try {
       const [sellersData, ordersData, listsData] = await Promise.all([
         fetchSellers(),
@@ -68,29 +67,28 @@ export function OrdersPage() {
         setActivePickList(null)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [showError])
 
   useEffect(() => {
     loadData(sellerId === '' ? undefined : sellerId)
   }, [sellerId, loadData])
 
   async function handleSync() {
-    setError('')
-    setSuccess('')
     setLoading(true)
     try {
       const result = await syncOrders(sellerId === '' ? undefined : sellerId)
       if (result.errors?.length) {
-        setError(result.errors.map((e) => e.error).join('; '))
+        showError('Синхронизация', result.errors.map((e) => e.error).join('; '))
+      } else {
+        showSuccess('Синхронизация', formatSyncMessage(result))
       }
-      setSuccess(formatSyncMessage(result))
       await loadData(sellerId === '' ? undefined : sellerId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
+      showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
     } finally {
       setLoading(false)
     }
@@ -98,11 +96,9 @@ export function OrdersPage() {
 
   async function handleGeneratePickList() {
     if (!sellerId) {
-      setError('Выберите селлера для формирования листа подбора')
+      showError('Лист подбора', 'Выберите селлера для формирования листа подбора')
       return
     }
-    setError('')
-    setSuccess('')
     setLoading(true)
     try {
       const result = await generatePickList(sellerId)
@@ -112,11 +108,11 @@ export function OrdersPage() {
         const extra = result.pick_lists.length > 1
           ? ` (+${result.pick_lists.length - 1} складов)`
           : ''
-        setSuccess(`Лист подбора #${pickList.id} сформирован (${pickList.total_quantity} шт.)${extra}`)
+        showSuccess('Лист подбора', `Лист подбора #${pickList.id} сформирован (${pickList.total_quantity} шт.)${extra}`)
       }
       await loadData(sellerId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка формирования')
+      showError('Лист подбора', err instanceof Error ? err.message : 'Ошибка формирования')
     } finally {
       setLoading(false)
     }
@@ -128,7 +124,7 @@ export function OrdersPage() {
       const detail = await fetchPickList(id)
       setActivePickList(detail)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки листа')
+      showError('Лист подбора', err instanceof Error ? err.message : 'Ошибка загрузки листа')
     } finally {
       setLoading(false)
     }
@@ -154,9 +150,6 @@ export function OrdersPage() {
           </button>
         </div>
       </header>
-
-      {error && <div className="alert alert--error">{error}</div>}
-      {success && <div className="alert alert--success">{success}</div>}
 
       <section className="orders-toolbar panel">
         <label className="orders-field">

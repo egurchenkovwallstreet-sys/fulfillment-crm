@@ -16,12 +16,14 @@ import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } fro
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './InventoryPage.css'
 
 export function InventoryPage() {
   const { marketplace } = useMarketplace()
+  const { showError } = useCrmNotice()
   const isOzon = marketplace === 'ozon'
   const barcodeRef = useRef<HTMLInputElement>(null)
   const quantityRef = useRef<HTMLInputElement>(null)
@@ -44,7 +46,6 @@ export function InventoryPage() {
   const [cellId, setCellId] = useState<number | ''>('')
   const [lookup, setLookup] = useState<InventoryLookup | null>(null)
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
-  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionCount, setSessionCount] = useState(0)
 
@@ -94,7 +95,7 @@ export function InventoryPage() {
           void loadWarehouses(data[0].id)
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
+      .catch((err) => showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки'))
   }, [loadWarehouses])
 
   useEffect(() => {
@@ -127,13 +128,12 @@ export function InventoryPage() {
   }
 
   function startSession() {
-    setError('')
     if (!sellerId) {
-      setError('Выберите селлера')
+      showError('Инвентаризация', 'Выберите селлера')
       return
     }
     if (!isOzon && warehouseIds.length < 1) {
-      setError('Выберите хотя бы один FBS-склад')
+      showError('Склады', 'Выберите хотя бы один FBS-склад')
       return
     }
     setSessionActive(true)
@@ -151,7 +151,6 @@ export function InventoryPage() {
     setResultModal(null)
     setPendingRetry(null)
     resetBarcodeForm()
-    setError('')
   }
 
   function handlePrintCellLabel() {
@@ -162,26 +161,24 @@ export function InventoryPage() {
   async function handleSyncWarehouses() {
     if (!sellerId) return
     setLoading(true)
-    setError('')
     try {
       const result = await syncSellerWarehouses(Number(sellerId))
       setWarehouses(result.warehouses)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
+      showError('Склады WB', err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
     } finally {
       setLoading(false)
     }
   }
 
   async function handleLookup() {
-    setError('')
     const trimmed = barcode.trim()
     if (!sellerId || !trimmed) {
-      setError('Отсканируйте баркод')
+      showError('Баркод', 'Отсканируйте баркод')
       return
     }
     if (completedBarcodes.has(trimmed)) {
-      setError(`Баркод ${trimmed} уже инвентаризирован в этой сессии — сканируйте следующий`)
+      showError('Баркод', `Баркод ${trimmed} уже инвентаризирован в этой сессии — сканируйте следующий`)
       setLookup(null)
       focusBarcode()
       return
@@ -199,7 +196,7 @@ export function InventoryPage() {
       }
       window.setTimeout(() => quantityRef.current?.focus(), 50)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка поиска')
+      showError('Поиск', err instanceof Error ? err.message : 'Ошибка поиска')
       setLookup(null)
       focusBarcode()
     } finally {
@@ -248,7 +245,6 @@ export function InventoryPage() {
     }
 
     setLoading(true)
-    setError('')
     try {
       const retried = await retryInventory({
         seller_id: Number(sellerId),
@@ -268,7 +264,7 @@ export function InventoryPage() {
         })
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
+      showError('Остатки', err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
     } finally {
       setLoading(false)
     }
@@ -276,20 +272,19 @@ export function InventoryPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    setError('')
     const trimmed = barcode.trim()
     if (!lookup) {
-      setError('Сначала отсканируйте баркод (Enter)')
+      showError('Инвентаризация', 'Сначала отсканируйте баркод (Enter)')
       return
     }
     if (completedBarcodes.has(trimmed)) {
-      setError(`Баркод ${trimmed} уже инвентаризирован в этой сессии`)
+      showError('Баркод', `Баркод ${trimmed} уже инвентаризирован в этой сессии`)
       return
     }
 
     const quantity = parseInt(quantityInput, 10)
     if (!Number.isFinite(quantity) || quantity < 0) {
-      setError('Укажите фактическое количество — целое число от 0')
+      showError('Количество', 'Укажите фактическое количество — целое число от 0')
       return
     }
 
@@ -321,7 +316,7 @@ export function InventoryPage() {
       setCellMode('auto')
       setCellId('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка инвентаризации')
+      showError('Инвентаризация', err instanceof Error ? err.message : 'Ошибка инвентаризации')
     } finally {
       setLoading(false)
     }
@@ -342,8 +337,6 @@ export function InventoryPage() {
           ← Склад
         </Link>
       </header>
-
-      {error && <div className="alert alert--error">{error}</div>}
 
       {!sessionActive ? (
         <section className="panel inventory-setup">

@@ -53,6 +53,7 @@ export function ArticleIntakePage() {
   const [pushWarehouseId, setPushWarehouseId] = useState<number | ''>('')
   const [pushMode, setPushMode] = useState<'replace' | 'add'>('replace')
   const [previewQty, setPreviewQty] = useState('0')
+  const [preview, setPreview] = useState<ArticleGroupPreview | null>(null)
   const [previewItems, setPreviewItems] = useState<ArticleGroupPreviewItem[]>([])
   const [zoomPhotoUrl, setZoomPhotoUrl] = useState<string | null>(null)
   const [activeGroupKey, setActiveGroupKey] = useState('')

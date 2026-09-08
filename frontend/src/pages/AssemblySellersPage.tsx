@@ -3,31 +3,30 @@ import { Link } from 'react-router-dom'
 import { fetchAssemblySellers, type SellerAssemblyCounters } from '../api/assembly'
 import { syncOrders } from '../api/orders'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import { readAssemblySellersCache, writeAssemblySellersCache } from '../utils/assemblyCache'
 import { uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
 export function AssemblySellersPage() {
   const { marketplace } = useMarketplace()
+  const { showSuccess, showError } = useCrmNotice()
   const [sellers, setSellers] = useState<SellerAssemblyCounters[]>(
     () => readAssemblySellersCache(marketplace) ?? [],
   )
   const [loading, setLoading] = useState(() => !(readAssemblySellersCache(marketplace)?.length))
-  const [error, setError] = useState('')
-  const [syncMessage, setSyncMessage] = useState('')
   const [syncing, setSyncing] = useState(false)
   const bgSyncStartedRef = useRef(false)
 
   const load = useCallback(async () => {
-    setError('')
     try {
       const list = await fetchAssemblySellers()
       setSellers(list)
       writeAssemblySellersCache(marketplace, list)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки')
     }
-  }, [marketplace])
+  }, [marketplace, showError])
 
   useEffect(() => {
     let cancelled = false
@@ -57,25 +56,13 @@ export function AssemblySellersPage() {
     const timer = window.setTimeout(() => {
       void (async () => {
         setSyncing(true)
-        setSyncMessage('')
         try {
-          const result = await syncOrders(undefined, 'quick')
+          await syncOrders(undefined, 'quick')
           if (cancelled) return
-          const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
-          const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
           await load()
-          if (cancelled) return
-          setSyncMessage(
-            marketplace === 'ozon'
-              ? 'Счётчики Ozon обновлены'
-              : `Синхронизация с WB: заказов ${fetched}, статусов обновлено ${statusesUpdated}`,
-          )
         } catch (err) {
-          if (!cancelled) {
-            setSyncMessage('')
-            if (!sellers.length) {
-              setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
-            }
+          if (!cancelled && !sellers.length) {
+            showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
           }
         } finally {
           if (!cancelled) setSyncing(false)
@@ -92,20 +79,19 @@ export function AssemblySellersPage() {
 
   async function handleSyncAll() {
     setLoading(true)
-    setSyncMessage('')
-    setError('')
     try {
       const result = await syncOrders(undefined, 'quick')
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
-      setSyncMessage(
+      showSuccess(
+        'Синхронизация',
         marketplace === 'ozon'
           ? 'Счётчики Ozon обновлены'
           : `Синхронизация завершена. Из WB: ${fetched}, статусов обновлено: ${statusesUpdated}`,
       )
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка синхронизации')
+      showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
     } finally {
       setLoading(false)
     }
@@ -134,9 +120,6 @@ export function AssemblySellersPage() {
               : 'Обновить из WB'}
         </button>
       </header>
-
-      {error && <div className="alert alert--error">{error}</div>}
-      {syncMessage && <div className="alert alert--success">{syncMessage}</div>}
 
       <section className="panel assembly-sellers">
         <table className="assembly-table">

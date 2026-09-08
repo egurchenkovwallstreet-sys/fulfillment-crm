@@ -30,6 +30,7 @@ import {
   type SellerWarehouse,
 } from '../api/sellers'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import { StockTransferResultModal } from '../components/StockTransferResultModal'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './WarehouseHubPage.css'
@@ -77,14 +78,13 @@ function qtyOnWarehouse(product: StockOverviewProduct, warehouseId: number): num
 
 export function WarehouseHubPage() {
   const { marketplace } = useMarketplace()
+  const { showSuccess, showError } = useCrmNotice()
   const isOzon = marketplace === 'ozon'
   const mpName = isOzon ? 'Ozon' : 'WB'
   const [tab, setTab] = useState<TabId>('onboarding')
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
   const [preview, setPreview] = useState<OnboardingPreview | null>(null)
   const [sellerWarehouses, setSellerWarehouses] = useState<HubWarehouse[]>([])
@@ -143,7 +143,7 @@ export function WarehouseHubPage() {
         setSellers(data)
         if (data.length === 1) setSellerId(data[0].id)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка'))
+      .catch((err) => showError('Селлеры', err instanceof Error ? err.message : 'Ошибка'))
   }, [])
 
   useEffect(() => {
@@ -211,12 +211,10 @@ export function WarehouseHubPage() {
   const handleLoadPreview = useCallback(async () => {
     if (!sellerId) return
     if (selectedWarehouseIds.length === 0) {
-      setError('Выберите хотя бы один FBS-склад')
+      showError('Склады', 'Выберите хотя бы один FBS-склад')
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     setExcludeBarcodes(new Set())
     setExcludeNmIds(new Set())
     try {
@@ -234,16 +232,17 @@ export function WarehouseHubPage() {
         warehouse_ids: selectedWarehouseIds,
       })
       setPreview(data)
-      setSuccess(
+      showSuccess(
+        'Каталог',
         `Каталог: ${data.cards_count} карточек, ${data.barcodes_count} баркодов, новых: ${data.new_barcodes_count}`,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки каталога')
+      showError('Каталог', err instanceof Error ? err.message : 'Ошибка загрузки каталога')
       setPreview(null)
     } finally {
       setLoading(false)
     }
-  }, [sellerId, catalogMode, selectedWarehouseIds, isOzon])
+  }, [sellerId, catalogMode, selectedWarehouseIds, isOzon, showSuccess, showError])
 
   function toggleWarehouseSelection(warehouseId: number, checked: boolean) {
     setSelectedWarehouseIds((prev) => {
@@ -256,8 +255,6 @@ export function WarehouseHubPage() {
     if (!sellerId || !importFile || !importWarehouseId) return
     setImportMode(mode)
     setLoading(true)
-    setError('')
-    setSuccess('')
     setStockImportResult(null)
     setStockImportPreview(null)
     try {
@@ -278,9 +275,9 @@ export function WarehouseHubPage() {
       if (totals.skipped_unknown > 0) {
         msg += `. Не в каталоге WB: ${totals.skipped_unknown} баркодов (${totals.skipped_units} шт.)`
       }
-      setSuccess(msg)
+      showSuccess('Файл остатков', msg)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка чтения файла')
+      showError('Файл остатков', err instanceof Error ? err.message : 'Ошибка чтения файла')
     } finally {
       setLoading(false)
     }
@@ -308,8 +305,6 @@ export function WarehouseHubPage() {
   async function handleStockImportApply() {
     if (!sellerId || !stockImportPreview || !importWarehouseId) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     setStockImportResult(null)
     try {
       const result = await applyStockImport(
@@ -321,14 +316,14 @@ export function WarehouseHubPage() {
       setStockImportResult(result)
       const message = buildImportResultMessage(result)
       if (result.ok) {
-        setSuccess(message)
+        showSuccess('Загрузка остатков', message)
         setStockImportPreview(null)
         setImportFile(null)
       } else {
-        setError(message)
+        showError('Загрузка остатков', message)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка применения')
+      showError('Загрузка остатков', err instanceof Error ? err.message : 'Ошибка применения')
     } finally {
       setLoading(false)
     }
@@ -348,13 +343,12 @@ export function WarehouseHubPage() {
       `Создать ${newToCreate.length} товаров с ячейками ${mpName}?\n\nУже в CRM: ${preview?.existing_barcodes_count ?? 0} баркодов будут пропущены.`,
     )) return
     setLoading(true)
-    setError('')
     try {
       const result = await confirmOnboarding(Number(sellerId), renumberedItems)
-      setSuccess(`Создано товаров: ${result.created_products}, пропущено: ${result.skipped}`)
+      showSuccess('Каталог', `Создано товаров: ${result.created_products}, пропущено: ${result.skipped}`)
       await handleLoadPreview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка подтверждения')
+      showError('Каталог', err instanceof Error ? err.message : 'Ошибка подтверждения')
     } finally {
       setLoading(false)
     }
@@ -362,20 +356,18 @@ export function WarehouseHubPage() {
 
   const handlePushOzonStocks = async () => {
     if (!sellerId || !pushWarehouseId) {
-      setError('Выберите склад Ozon для отправки остатков')
+      showError('Ozon', 'Выберите склад Ozon для отправки остатков')
       return
     }
     if (!window.confirm(
       'Отправить текущие остатки CRM на выбранный склад Ozon? Количество в ЛК Ozon станет как в CRM.',
     )) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await pushOzonStocks(Number(sellerId), Number(pushWarehouseId))
-      setSuccess(result.message)
+      showSuccess('Ozon', result.message)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить остатки на Ozon')
+      showError('Ozon', err instanceof Error ? err.message : 'Не удалось отправить остатки на Ozon')
     } finally {
       setLoading(false)
     }
@@ -384,15 +376,14 @@ export function WarehouseHubPage() {
   const handleLoadStockOverview = useCallback(async () => {
     if (!sellerId) return
     setLoading(true)
-    setError('')
     try {
       setStockOverview(await fetchStockOverview(Number(sellerId)))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки остатков')
+      showError('Остатки', err instanceof Error ? err.message : 'Ошибка загрузки остатков')
     } finally {
       setLoading(false)
     }
-  }, [sellerId])
+  }, [sellerId, showError])
 
   useEffect(() => {
     if (tab === 'transfer' && sellerId) {
@@ -423,22 +414,20 @@ export function WarehouseHubPage() {
 
   async function runDistributeEvenly(productIds?: number[]) {
     if (!sellerId || !canDistributeEvenly || !fromWh) {
-      setError('Выберите склад «откуда» для распределения')
+      showError('Распределение', 'Выберите склад «откуда» для распределения')
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await distributeStockEvenly(Number(sellerId), Number(fromWh), productIds)
       let msg = `Распределено: ${result.distributed}`
       if (result.skipped > 0) msg += `, пропущено: ${result.skipped}`
       if (result.errors.length > 0) msg += `, ошибок: ${result.errors.length}`
-      setSuccess(msg)
+      showSuccess('Распределение', msg)
       setSelectedDistributeIds(new Set())
       await handleLoadStockOverview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка распределения')
+      showError('Распределение', err instanceof Error ? err.message : 'Ошибка распределения')
     } finally {
       setLoading(false)
     }
@@ -446,7 +435,7 @@ export function WarehouseHubPage() {
 
   function handleDistributeProduct(product: StockOverviewProduct) {
     if (!canDistributeEvenly || !fromWh) {
-      setError('Выберите склад «откуда» для распределения')
+      showError('Распределение', 'Выберите склад «откуда» для распределения')
       return
     }
     if (crmQtyOnWarehouse(product, Number(fromWh)) <= 0) return
@@ -460,11 +449,11 @@ export function WarehouseHubPage() {
   function handleDistributeSelected() {
     const ids = [...selectedDistributeIds]
     if (!fromWh) {
-      setError('Выберите склад «откуда» для распределения')
+      showError('Распределение', 'Выберите склад «откуда» для распределения')
       return
     }
     if (ids.length === 0) {
-      setError('Отметьте товары галочкой')
+      showError('Распределение', 'Отметьте товары галочкой')
       return
     }
     if (!window.confirm(
@@ -476,11 +465,11 @@ export function WarehouseHubPage() {
 
   function handleDistributeAll() {
     if (!fromWh) {
-      setError('Выберите склад «откуда» для распределения')
+      showError('Распределение', 'Выберите склад «откуда» для распределения')
       return
     }
     if (!distributableProducts.length) {
-      setError('Нет товаров с остатком на складе-источнике')
+      showError('Распределение', 'Нет товаров с остатком на складе-источнике')
       return
     }
     if (!window.confirm(
@@ -499,11 +488,11 @@ export function WarehouseHubPage() {
 
   function validateTransferWarehouses(): boolean {
     if (!fromWh || !toWh) {
-      setError('Выберите склады «откуда» и «куда»')
+      showError('Перенос', 'Выберите склады «откуда» и «куда»')
       return false
     }
     if (fromWh === toWh) {
-      setError('Склады «откуда» и «куда» должны отличаться')
+      showError('Перенос', 'Склады «откуда» и «куда» должны отличаться')
       return false
     }
     return true
@@ -512,8 +501,6 @@ export function WarehouseHubPage() {
   async function runTransferBulk(productIds?: number[]) {
     if (!sellerId || !validateTransferWarehouses()) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await transferStockBulk(Number(sellerId), {
         from_warehouse_id: Number(fromWh),
@@ -527,7 +514,7 @@ export function WarehouseHubPage() {
       setSelectedDistributeIds(new Set())
       await handleLoadStockOverview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка переноса')
+      showError('Перенос', err instanceof Error ? err.message : 'Ошибка переноса')
     } finally {
       setLoading(false)
     }
@@ -536,7 +523,7 @@ export function WarehouseHubPage() {
   function handleTransferSelected() {
     const ids = selectedTransferableProducts.map((product) => product.product_id)
     if (ids.length === 0) {
-      setError('Отметьте товары с остатком на выбранном складе «откуда»')
+      showError('Перенос', 'Отметьте товары с остатком на выбранном складе «откуда»')
       return
     }
     if (!window.confirm(
@@ -547,7 +534,7 @@ export function WarehouseHubPage() {
 
   function handleTransferAll() {
     if (!transferableProducts.length) {
-      setError(`На складе «${fromWarehouseName || 'откуда'}» нет остатков для переноса`)
+      showError('Перенос', `На складе «${fromWarehouseName || 'откуда'}» нет остатков для переноса`)
       return
     }
     if (!window.confirm(
@@ -562,15 +549,14 @@ export function WarehouseHubPage() {
     const maxQty = qtyOnWarehouse(transferProduct, Number(fromWh))
     const quantity = transferAllFromSource ? maxQty : transferQty
     if (quantity <= 0) {
-      setError('На складе «откуда» нет остатка для переноса')
+      showError('Перенос', 'На складе «откуда» нет остатка для переноса')
       return
     }
     if (quantity > maxQty) {
-      setError(`На складе «откуда» только ${maxQty} шт.`)
+      showError('Перенос', `На складе «откуда» только ${maxQty} шт.`)
       return
     }
     setLoading(true)
-    setError('')
     try {
       const result = await transferStock(Number(sellerId), {
         product_id: transferProduct.product_id,
@@ -585,7 +571,7 @@ export function WarehouseHubPage() {
       setTransferProduct(null)
       await handleLoadStockOverview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка переноса')
+      showError('Перенос', err instanceof Error ? err.message : 'Ошибка переноса')
     } finally {
       setLoading(false)
     }
@@ -661,9 +647,6 @@ export function WarehouseHubPage() {
           </select>
         </label>
       </section>
-
-      {error && <div className="alert alert--error">{error}</div>}
-      {success && <div className="alert alert--success">{success}</div>}
 
       {tab === 'onboarding' && (
         <section className="panel">

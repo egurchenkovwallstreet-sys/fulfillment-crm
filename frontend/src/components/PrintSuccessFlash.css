@@ -1,0 +1,17 @@
+.print-success-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  pointer-events: none;
+  background: rgba(22, 163, 74, 0.82);
+  animation: print-success-flash-fade 0.55s ease-out forwards;
+}
+
+@keyframes print-success-flash-fade {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

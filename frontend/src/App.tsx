@@ -3,6 +3,7 @@ import { AppLayout } from './components/AppLayout'
 import { AdminRoute, ManagerRoute, ProtectedRoute, SellerRoute } from './components/ProtectedRoute'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { MarketplaceProvider } from './context/MarketplaceContext'
+import { CrmNoticeProvider } from './context/CrmNoticeContext'
 import { AdminBillingPage } from './pages/AdminBillingPage'
 import { OwnerHomePage } from './pages/owner/OwnerHomePage'
 import { OwnerLayout } from './pages/owner/OwnerLayout'
@@ -95,7 +96,9 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <MarketplaceProvider>
-          <AppRoutes />
+          <CrmNoticeProvider>
+            <AppRoutes />
+          </CrmNoticeProvider>
         </MarketplaceProvider>
       </AuthProvider>
     </BrowserRouter>

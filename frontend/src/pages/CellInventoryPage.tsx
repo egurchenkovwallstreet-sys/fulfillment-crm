@@ -17,6 +17,7 @@ import {
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { useAuth } from '../context/AuthContext'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './CellInventoryPage.css'
@@ -29,6 +30,7 @@ type DeleteCellTarget = {
 
 export function CellInventoryPage() {
   const { isAdmin } = useAuth()
+  const { showSuccess, showError } = useCrmNotice()
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [products, setProducts] = useState<Product[]>([])
@@ -38,8 +40,6 @@ export function CellInventoryPage() {
   const [cellDetail, setCellDetail] = useState<CellDetail | null>(null)
   const [cellSearchLoading, setCellSearchLoading] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [moveProductId, setMoveProductId] = useState<number | null>(null)
   const [moveCellId, setMoveCellId] = useState<number | ''>('')
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
@@ -53,7 +53,7 @@ export function CellInventoryPage() {
         setSellers(data)
         if (data.length === 1) setSellerId(data[0].id)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
+      .catch((err) => showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки'))
   }, [])
 
   useEffect(() => {
@@ -72,15 +72,14 @@ export function CellInventoryPage() {
       return
     }
     setLoading(true)
-    setError('')
     try {
       setProducts(await fetchSellerProducts(Number(sellerId)))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки товаров')
+      showError('Товары', err instanceof Error ? err.message : 'Ошибка загрузки товаров')
     } finally {
       setLoading(false)
     }
-  }, [sellerId])
+  }, [sellerId, showError])
 
   useEffect(() => {
     loadProducts()
@@ -89,14 +88,12 @@ export function CellInventoryPage() {
   async function handleRefreshFromWb() {
     if (!sellerId) return
     setRefreshing(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await refreshSellerProductsFromWb(Number(sellerId))
       setProducts(result.products)
-      setSuccess(result.message)
+      showSuccess('Каталог', result.message)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка обновления из WB')
+      showError('Каталог', err instanceof Error ? err.message : 'Ошибка обновления из WB')
     } finally {
       setRefreshing(false)
     }
@@ -106,24 +103,22 @@ export function CellInventoryPage() {
     e?.preventDefault()
     if (!sellerId || !cellQuery.trim()) return
     setCellSearchLoading(true)
-    setError('')
     setCellDetail(null)
     try {
       setCellDetail(await fetchCellDetail(Number(sellerId), cellQuery.trim()))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ячейка не найдена')
+      showError('Ячейка', err instanceof Error ? err.message : 'Ячейка не найдена')
     } finally {
       setCellSearchLoading(false)
     }
   }
 
   async function handlePrint(productId: number) {
-    setError('')
     try {
       const label = await fetchProductCellLabel(productId)
       printCellLabel(label, true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка печати')
+      showError('Печать', err instanceof Error ? err.message : 'Ошибка печати')
     }
   }
 
@@ -131,11 +126,9 @@ export function CellInventoryPage() {
     e.preventDefault()
     if (!moveProductId || !moveCellId) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await moveProductToCell(moveProductId, Number(moveCellId))
-      setSuccess(result.message)
+      showSuccess('Ячейка', result.message)
       setMoveProductId(null)
       setMoveCellId('')
       await loadProducts()
@@ -147,7 +140,7 @@ export function CellInventoryPage() {
         setLabelPrompt(result.cell_label)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка переноса')
+      showError('Перенос', err instanceof Error ? err.message : 'Ошибка переноса')
     } finally {
       setLoading(false)
     }
@@ -160,11 +153,9 @@ export function CellInventoryPage() {
   async function handleDeleteCellConfirm() {
     if (!deleteTarget) return
     setDeleting(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await deleteCell(deleteTarget.cellId)
-      setSuccess(result.message)
+      showSuccess('Ячейка', result.message)
       setDeleteTarget(null)
       if (cellDetail?.cell.id === deleteTarget.cellId) {
         setCellDetail(null)
@@ -175,7 +166,7 @@ export function CellInventoryPage() {
         setCells(await fetchAllCells(Number(sellerId)))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить ячейку')
+      showError('Ячейка', err instanceof Error ? err.message : 'Не удалось удалить ячейку')
     } finally {
       setDeleting(false)
     }
@@ -197,9 +188,6 @@ export function CellInventoryPage() {
           <p>Список товаров по селлеру · поиск по ячейке · печать этикеток · перенос</p>
         </div>
       </header>
-
-      {error && <div className="alert alert--error">{error}</div>}
-      {success && <div className="alert alert--success">{success}</div>}
 
       <section className="panel cell-inventory-toolbar">
         <label className="cell-inventory-field">

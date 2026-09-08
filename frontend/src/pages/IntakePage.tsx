@@ -24,11 +24,13 @@ import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { printCellLabels } from '../utils/cellLabelPrint'
 import { useMarketplace } from '../context/MarketplaceContext'
+import { useCrmNotice } from '../context/CrmNoticeContext'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './IntakePage.css'
 
 export function IntakePage() {
   const { marketplace } = useMarketplace()
+  const { showSuccess, showError } = useCrmNotice()
   const isOzon = marketplace === 'ozon'
   const barcodeRef = useRef<HTMLInputElement>(null)
   const [sellers, setSellers] = useState<Seller[]>([])
@@ -53,8 +55,6 @@ export function IntakePage() {
   const [cellId, setCellId] = useState<number | ''>('')
   const [lookup, setLookup] = useState<IntakeLookup | null>(null)
   const [labelPrompt, setLabelPrompt] = useState<CellLabelData | null>(null)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const [resultModal, setResultModal] = useState<StockBalanceModalData | null>(null)
   const [pendingRetry, setPendingRetry] = useState<{
@@ -88,7 +88,7 @@ export function IntakePage() {
         await loadWarehouses(sellersData[0].id)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки')
     }
   }, [loadWarehouses])
 
@@ -113,24 +113,21 @@ export function IntakePage() {
   async function handleSyncWarehouses() {
     if (!sellerId) return
     setLoading(true)
-    setError('')
     try {
       const result = await syncSellerWarehouses(Number(sellerId))
       setWarehouses(result.warehouses)
-      setSuccess(`Склады WB обновлены: ${result.total} шт.`)
+      showSuccess('Склады WB', `Склады WB обновлены: ${result.total} шт.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
+      showError('Склады WB', err instanceof Error ? err.message : 'Ошибка загрузки складов WB')
     } finally {
       setLoading(false)
     }
   }
 
   async function handleLookup() {
-    setError('')
-    setSuccess('')
     setVerifiedStockMatch(false)
     if (!sellerId || !barcode.trim() || (!isOzon && !warehouseId)) {
-      setError(isOzon ? 'Выберите селлера и отсканируйте баркод' : 'Выберите селлера, склад FBS и отсканируйте баркод')
+      showError('Приёмка', isOzon ? 'Выберите селлера и отсканируйте баркод' : 'Выберите селлера, склад FBS и отсканируйте баркод')
       return
     }
     setLoading(true)
@@ -158,7 +155,7 @@ export function IntakePage() {
         setQuantityInput(String(result.wb_stock))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка поиска')
+      showError('Поиск', err instanceof Error ? err.message : 'Ошибка поиска')
       setLookup(null)
     } finally {
       setLoading(false)
@@ -227,7 +224,6 @@ export function IntakePage() {
     }
 
     setLoading(true)
-    setError('')
     try {
       const retried = await retryIntake({
         seller_id: Number(sellerId),
@@ -262,7 +258,7 @@ export function IntakePage() {
         })
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
+      showError('Остатки', err instanceof Error ? err.message : 'Ошибка перезаписи остатков')
     } finally {
       setLoading(false)
     }
@@ -270,19 +266,16 @@ export function IntakePage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    setError('')
-    setSuccess('')
-
     if (!sellerId || !barcode.trim() || (!isOzon && !warehouseId)) {
-      setError(isOzon ? 'Укажите селлера и баркод' : 'Укажите селлера, склад FBS и баркод')
+      showError('Приёмка', isOzon ? 'Укажите селлера и баркод' : 'Укажите селлера, склад FBS и баркод')
       return
     }
     if (!lookup) {
-      setError('Сначала отсканируйте баркод (Enter)')
+      showError('Приёмка', 'Сначала отсканируйте баркод (Enter)')
       return
     }
     if (stockMode === 'sync_from_wb' && syncVariant !== 'scan' && !verifiedStockMatch) {
-      setError('Подтвердите сверку остатков на фулфилменте')
+      showError('Сверка', 'Подтвердите сверку остатков на фулфилменте')
       return
     }
 
@@ -291,11 +284,11 @@ export function IntakePage() {
       : parseInt(quantityInput, 10)
 
     if (stockMode === 'intake' && (!Number.isFinite(quantity) || quantity < 1)) {
-      setError('Укажите количество — целое число от 1')
+      showError('Количество', 'Укажите количество — целое число от 1')
       return
     }
     if (stockMode === 'set_actual' && (!Number.isFinite(quantity) || quantity < 0)) {
-      setError('Укажите фактический остаток — целое число от 0')
+      showError('Количество', 'Укажите фактический остаток — целое число от 0')
       return
     }
 
@@ -346,7 +339,8 @@ export function IntakePage() {
         setCellId('')
         setVerifiedStockMatch(false)
       } else {
-        setSuccess(
+        showSuccess(
+          'Приёмка',
           `${result.message} Ячейка №${result.product.cell_number}, остаток CRM: ${result.product.quantity} шт.${
             result.product.requires_marking ? ' · Товар с Честным знаком' : ''
           }`,
@@ -363,7 +357,7 @@ export function IntakePage() {
         setHistory(historyData)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка приёмки')
+      showError('Приёмка', err instanceof Error ? err.message : 'Ошибка приёмки')
     } finally {
       setLoading(false)
     }
@@ -379,8 +373,6 @@ export function IntakePage() {
     setBarcode('')
     setLookup(null)
     setVerifiedStockMatch(false)
-    setError('')
-    setSuccess('')
     barcodeRef.current?.focus()
   }
 
@@ -420,20 +412,18 @@ export function IntakePage() {
 
   async function handleLoadWbSyncPreview() {
     if (!sellerId || !warehouseId) {
-      setError('Выберите селлера и склад FBS')
+      showError('Сверка', 'Выберите селлера и склад FBS')
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await previewWbSyncIntake(Number(sellerId), Number(warehouseId))
       setWbSyncPreview(result)
       setSelectedBarcodes(new Set(result.items.map((item) => item.barcode)))
       setWbSyncLabels([])
-      setSuccess(`Загружено ${result.items.length} позиций с остатком WB (${result.warehouse_name})`)
+      showSuccess('Сверка WB', `Загружено ${result.items.length} позиций с остатком WB (${result.warehouse_name})`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить остатки WB')
+      showError('Сверка WB', err instanceof Error ? err.message : 'Не удалось загрузить остатки WB')
       setWbSyncPreview(null)
       setSelectedBarcodes(new Set())
     } finally {
@@ -445,16 +435,14 @@ export function IntakePage() {
     if (!sellerId || !warehouseId || !wbSyncPreview) return
     const barcodes = Array.from(selectedBarcodes)
     if (barcodes.length < 1) {
-      setError('Отметьте хотя бы один баркод')
+      showError('Сверка', 'Отметьте хотя бы один баркод')
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const result = await applyWbSyncAuto(Number(sellerId), Number(warehouseId), barcodes)
       setWbSyncLabels(result.cell_labels)
-      setSuccess(result.message)
+      showSuccess('Сверка', result.message)
       const [cellsData, historyData] = await Promise.all([
         fetchFreeCells(Number(sellerId)),
         fetchIntakeHistory(),
@@ -463,7 +451,7 @@ export function IntakePage() {
       setHistory(historyData)
       await handleLoadWbSyncPreview()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка автоматической сверки')
+      showError('Сверка', err instanceof Error ? err.message : 'Ошибка автоматической сверки')
     } finally {
       setLoading(false)
     }
@@ -474,11 +462,11 @@ export function IntakePage() {
       ? wbSyncLabels
       : wbSyncLabels.filter((label) => selectedBarcodes.has(label.barcode))
     if (labels.length < 1) {
-      setError(all ? 'Нет новых этикеток для печати' : 'Выберите позиции с новыми ячейками')
+      showError('Печать', all ? 'Нет новых этикеток для печати' : 'Выберите позиции с новыми ячейками')
       return
     }
     printCellLabels(labels, true)
-    setSuccess(`Отправлено на печать: ${labels.length} этикеток`)
+    showSuccess('Печать', `Отправлено на печать: ${labels.length} этикеток`)
   }
 
   function renderWbSyncRow(item: WbSyncPreviewItem) {
@@ -977,8 +965,6 @@ export function IntakePage() {
             </>
             )}
 
-            {error && <p className="intake-message intake-message--error">{error}</p>}
-            {success && <p className="intake-message intake-message--success">{success}</p>}
           </form>
         </section>
 

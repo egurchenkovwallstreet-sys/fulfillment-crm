@@ -51,11 +51,16 @@ export function XlIntakePage() {
   const [existingSellerId, setExistingSellerId] = useState<number | ''>('')
   const [barcode, setBarcode] = useState('')
   const [token, setToken] = useState('')
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const [showUnmatched, setShowUnmatched] = useState(false)
   const [resultModal, setResultModal] = useState<CrmResultModalState | null>(null)
+  const noticeOk = (message: string, title = 'Готово') => {
+    setResultModal({ kind: 'success', title, message })
+  }
+  const noticeFail = (title: string, err: unknown, fallback = 'Ошибка') => {
+    const message = typeof err === 'string' ? err : err instanceof Error ? err.message : fallback
+    setResultModal({ kind: 'error', title, message })
+  }
   const [lastCellLabel, setLastCellLabel] = useState<CellLabelData | null>(null)
 
   const activeId = sessionId ? Number(sessionId) : null
@@ -71,7 +76,7 @@ export function XlIntakePage() {
       setSessions(list)
       setSellers(sellerList)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки')
+      noticeFail('Загрузка', err, 'Ошибка загрузки')
     }
   }, [])
 
@@ -89,7 +94,7 @@ export function XlIntakePage() {
           setShowUnmatched(true)
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Сессия не найдена'))
+      .catch((err) => noticeFail('Сессия', err, 'Сессия не найдена'))
       .finally(() => setLoading(false))
   }, [activeId, loadHome])
 
@@ -107,7 +112,7 @@ export function XlIntakePage() {
   function handleReprintCellLabel() {
     if (!lastCellLabel) return
     if (!printCellLabel(lastCellLabel, true)) {
-      setError('Не удалось открыть окно печати — разрешите всплывающие окна')
+      noticeFail('Печать', 'Не удалось открыть окно печати — разрешите всплывающие окна')
       return
     }
     focusBarcode()
@@ -119,7 +124,6 @@ export function XlIntakePage() {
       const value = raw.trim()
       if (value.length < 4) return
       scanBusy.current = true
-      setError('')
       setBarcode('')
       try {
         const next = await scanXlBarcode(activeId, value)
@@ -131,7 +135,7 @@ export function XlIntakePage() {
           printCellLabel(next.cell_label as CellLabelData, true)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Ошибка скана')
+        noticeFail('Скан', err, 'Ошибка скана')
       } finally {
         scanBusy.current = false
         focusBarcode()
@@ -167,18 +171,17 @@ export function XlIntakePage() {
   async function startNew() {
     const name = companyName.trim()
     if (!name && !existingSellerId) {
-      setError('Укажите название ИП или выберите клиента')
+      noticeFail('Приёмка', 'Укажите название ИП или выберите клиента')
       return
     }
     setLoading(true)
-    setError('')
     try {
       const created = existingSellerId
         ? await createXlSession({ seller_id: Number(existingSellerId) })
         : await createXlSession({ company_name: name })
       navigate(`/intake-xl/${created.id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось начать приёмку')
+      noticeFail('Приёмка', err, 'Не удалось начать приёмку')
     } finally {
       setLoading(false)
     }
@@ -187,14 +190,12 @@ export function XlIntakePage() {
   async function handleSave() {
     if (!activeId) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const next = await saveXlSession(activeId)
       setSession(next)
-      setSuccess('Контрольная точка сохранена. Можно продолжать сканирование.')
+      noticeOk('Контрольная точка сохранена. Можно продолжать сканирование.', 'Сохранено')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сохранить')
+      noticeFail('Сохранение', err, 'Не удалось сохранить')
     } finally {
       setLoading(false)
     }
@@ -239,41 +240,38 @@ export function XlIntakePage() {
 
   async function handleExcel() {
     if (!activeId) return
-    setError('')
     try {
       await downloadXlExcel(activeId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось скачать Excel')
+      noticeFail('Excel', err, 'Не удалось скачать Excel')
     }
   }
 
   async function handleConnectWb() {
     if (!activeId) return
     if (!session?.has_wb_token && !token.trim()) {
-      setError('Вставьте персональный токен WB')
+      noticeFail('Токен WB', 'Вставьте персональный токен WB')
       return
     }
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const next = await connectXlWb(activeId, token.trim())
       setSession(next)
       setToken('')
       const updated = next.updated_products ?? 0
       if (updated === 0 && (next.matched_count ?? 0) === 0) {
-        setSuccess('Новых позиций для применения нет — всё уже в CRM.')
+        noticeOk('Новых позиций для применения нет — всё уже в CRM.', 'WB')
       } else if ((next.matched_count ?? 0) === 0) {
-        setSuccess('')
-        setError('Ни один баркод не найден в ЛК WB. Карточки не обновлены.')
+        noticeFail('WB', 'Ни один баркод не найден в ЛК WB. Карточки не обновлены.')
       } else {
-        setSuccess(
+        noticeOk(
           `Карточки WB обновлены: ${updated}. Не найдено в ЛК: ${next.unmatched_count ?? 0}.`,
+          'WB',
         )
       }
       if ((next.unmatched || []).length > 0) setShowUnmatched(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось подключить WB')
+      noticeFail('WB', err, 'Не удалось подключить WB')
     } finally {
       setLoading(false)
     }
@@ -286,14 +284,12 @@ export function XlIntakePage() {
     )
     if (!ok) return
     setLoading(true)
-    setError('')
-    setSuccess('')
     try {
       const next = await completeXlSession(activeId)
       setSession(next)
-      setSuccess('Приёмка завершена.')
+      noticeOk('Приёмка завершена.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось завершить')
+      noticeFail('Приёмка', err, 'Не удалось завершить')
     } finally {
       setLoading(false)
     }
@@ -318,9 +314,6 @@ export function XlIntakePage() {
           </Link>
         )}
       </div>
-
-      {error && <div className="dashboard-sync-msg dashboard-sync-msg--error">{error}</div>}
-      {success && <div className="dashboard-sync-msg">{success}</div>}
 
       {!activeId && (
         <section className="xl-home">
