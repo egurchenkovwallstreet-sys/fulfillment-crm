@@ -173,8 +173,6 @@ function WbAssemblySellerPage() {
   const [scanBusy, setScanBusy] = useState(false)
   const [verifyingChz, setVerifyingChz] = useState(false)
   const verifyInFlightRef = useRef(false)
-  const markingStatusRef = useRef(markingStatus)
-  markingStatusRef.current = markingStatus
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [deliveryModal, setDeliveryModal] = useState<{
     title: string
@@ -313,16 +311,20 @@ function WbAssemblySellerPage() {
     }
   }, [id])
 
-  const runMarkingVerify = useCallback(async (opts?: { silent?: boolean; orderIds?: number[] }) => {
-    if (!id || verifyInFlightRef.current) return null
-    verifyInFlightRef.current = true
+  const runMarkingVerify = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!id) return null
     const silent = opts?.silent ?? true
-    try {
-      const result = await verifyMarking(id, opts?.orderIds)
-      await refreshMarkingStatus()
-      if (!(opts?.silent ?? true)) {
-        await load({ silent: true })
+    if (verifyInFlightRef.current) {
+      if (silent) return null
+      const started = Date.now()
+      while (verifyInFlightRef.current && Date.now() - started < 20000) {
+        await new Promise((resolve) => window.setTimeout(resolve, 200))
       }
+    }
+    verifyInFlightRef.current = true
+    try {
+      const result = await verifyMarking(id)
+      await refreshMarkingStatus()
       return result
     } catch (err) {
       if (!silent) throw err
@@ -330,7 +332,7 @@ function WbAssemblySellerPage() {
     } finally {
       verifyInFlightRef.current = false
     }
-  }, [id, refreshMarkingStatus, load])
+  }, [id, refreshMarkingStatus])
 
   useLayoutEffect(() => {
     if (stage !== 'confirm') return
@@ -372,8 +374,6 @@ function WbAssemblySellerPage() {
     if (!id || stage !== 'confirm') return
     const tick = () => {
       if (document.visibilityState !== 'visible') return
-      const needs = markingStatusRef.current.ready.some(orderNeedsChzVerify)
-      if (!needs) return
       void runMarkingVerify({ silent: true })
     }
     tick()
@@ -1048,32 +1048,34 @@ function WbAssemblySellerPage() {
 
   async function handleForceVerifyChz() {
     if (!id) return
-    const orderIds = markingStatus.ready
-      .filter((order) => orderNeedsChzVerify(order) || orderChzPending(order))
-      .map((order) => order.id)
     setVerifyingChz(true)
     try {
-      const result = await runMarkingVerify({
-        silent: false,
-        orderIds: orderIds.length ? orderIds : undefined,
-      })
+      const result = await runMarkingVerify({ silent: false })
+      await load({ silent: true })
       if (!result) {
-        showError('Проверка ЧЗ', 'Не удалось спросить WB. Повторите.')
+        showError('Проверка ЧЗ', 'Не удалось спросить WB. Нажмите «Проверить ЧЗ» ещё раз.')
         return
       }
       const verified = result.verified_count ?? result.results.filter((item) => item.status === 'verified').length
       const errors = result.error_count ?? result.results.filter((item) => item.status === 'error').length
       const pending = result.pending_count ?? result.results.filter((item) => item.status === 'pending').length
+      if (!result.results.length) {
+        showError(
+          'Проверка ЧЗ',
+          'WB нечего проверять: у готовых заказов нет кода ЧЗ или проверка уже завершена. Обновите заказы и повторите.',
+        )
+        return
+      }
       if (errors > 0) {
         setMarkingListKind('errors')
         showError(
           'Ошибки ЧЗ',
-          `WB отклонил ${errors} код(ов). Откройте «Ошибки ЧЗ» и замените товар. Принято: ${verified}, ещё проверяет: ${pending}.`,
+          `WB не принял ${errors} код(ов) — они в списке «Ошибки ЧЗ». Принято: ${verified}.`,
         )
         return
       }
       if (verified > 0 && pending === 0) {
-        noticeOk(`WB принял ЧЗ у ${verified} заказ(ов). Можно передавать в доставку.`, 'Проверка ЧЗ')
+        noticeOk(`WB принял ЧЗ у ${verified} заказ(ов). Кнопка «В доставку» зелёная.`, 'Проверка ЧЗ')
         return
       }
       if (pending > 0) {
@@ -1081,12 +1083,12 @@ function WbAssemblySellerPage() {
           kind: 'block',
           title: 'WB ещё проверяет ЧЗ',
           message:
-            `Сейчас в WB ещё проверяется ${pending} код(ов). CRM спросит снова через 12 секунд.\n` +
-            `Принято: ${verified}. Если в ЛК WB код красный — нажмите «Проверить ЧЗ» ещё раз, отказ попадёт в «Ошибки ЧЗ».`,
+            `WB ещё проверяет ${pending} код(ов). CRM повторит запрос через 12 секунд.\n` +
+            `Принято сейчас: ${verified}. Если в ЛК код красный — отказ появится в «Ошибки ЧЗ».`,
         })
         return
       }
-      noticeOk('Все готовые заказы уже проверены в WB.', 'Проверка ЧЗ')
+      noticeOk('Проверка ЧЗ завершена.', 'Проверка ЧЗ')
     } catch (err) {
       noticeFail('Проверка ЧЗ', err, 'Не удалось проверить Честный знак в WB')
     } finally {
@@ -1804,15 +1806,15 @@ function WbAssemblySellerPage() {
               В новую поставку ({selectedMoveIds.size})
             </button>
           )}
-          {stage === 'confirm' && showDeliverButton && !deliveryUnlocked && !markingQueueBlocked && (
+          {stage === 'confirm' && (
             <button
               type="button"
               className="btn btn--secondary"
               onClick={() => void handleForceVerifyChz()}
               disabled={loading || verifyingChz}
-              {...uiHint('Сразу спросить WB по всем готовым заказам: принято → в доставку, отказ → «Ошибки ЧЗ»')}
+              {...uiHint('Спросить WB по всем заказам на сборке: принял ЧЗ — зелёная кнопка, не принял — «Ошибки ЧЗ»')}
             >
-              {verifyingChz ? 'Проверяем ЧЗ…' : `Проверить ЧЗ (${waitingWbCount || readyOrders.length})`}
+              {verifyingChz ? 'Проверяем ЧЗ…' : 'Проверить ЧЗ'}
             </button>
           )}
           {stage === 'confirm' && showDeliverButton && (

@@ -349,12 +349,20 @@ class WBClient:
     payload = self._request(
       "POST",
       "/api/marketplace/v3/orders/meta",
-      json={"orders": order_ids[:100]},
+      json={"orders": [int(item) for item in order_ids[:100]]},
     )
-    if isinstance(payload, dict):
-      return payload.get("orders") or []
     if isinstance(payload, list):
-      return payload
+      return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+      return []
+    for key in ("orders", "data", "result"):
+      chunk = payload.get(key)
+      if isinstance(chunk, list):
+        return [item for item in chunk if isinstance(item, dict)]
+      if isinstance(chunk, dict):
+        nested = chunk.get("orders")
+        if isinstance(nested, list):
+          return [item for item in nested if isinstance(item, dict)]
     return []
 
   def create_supply(self, name: str) -> str:

@@ -8,6 +8,7 @@ from apps.integrations.wb_client import WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client
 from apps.orders.services.marking import parse_marking_verify_decision, parse_wb_marking_error
+from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.sellers.models import Seller
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
@@ -27,14 +28,23 @@ def order_marking_ready(order: Order) -> bool:
     return False
   if status == VERIFY_VERIFIED:
     return order.marking_bound
-  # Заказы до внедрения проверки: только marking_bound
   return order.marking_bound
+
+
+def _sgtin_key(value: str) -> bool:
+  key = (value or "").strip().lower()
+  return key in ("sgtin", "kiz", "cis") or "sgtin" in key
 
 
 def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
   found: list[str] = []
-  for detail in meta_item.get("metaDetails") or []:
-    if (detail.get("key") or "").lower() != "sgtin":
+  details = meta_item.get("metaDetails") or meta_item.get("meta_details") or []
+  if isinstance(details, dict):
+    details = [details]
+  for detail in details:
+    if not isinstance(detail, dict):
+      continue
+    if not _sgtin_key(str(detail.get("key") or detail.get("name") or "")):
       continue
     decision = str(detail.get("decision") or detail.get("status") or "").strip()
     extra = str(
@@ -48,20 +58,31 @@ def _collect_sgtin_decisions(meta_item: dict) -> list[str]:
       found.append(VERIFY_PENDING)
 
   meta = meta_item.get("meta") or {}
-  sgtin = meta.get("sgtin")
-  if isinstance(sgtin, dict):
-    decision = str(sgtin.get("decision") or sgtin.get("status") or "").strip()
-    if decision:
-      found.append(decision)
-    elif sgtin.get("value"):
+  if isinstance(meta, dict):
+    sgtin = meta.get("sgtin")
+    if isinstance(sgtin, dict):
+      decision = str(sgtin.get("decision") or sgtin.get("status") or "").strip()
+      if decision:
+        found.append(decision)
+      elif sgtin.get("value"):
+        found.append(VERIFY_PENDING)
+    elif isinstance(sgtin, list):
+      for item in sgtin:
+        if isinstance(item, dict):
+          decision = str(item.get("decision") or item.get("status") or "").strip()
+          if decision:
+            found.append(decision)
+          elif item.get("value"):
+            found.append(VERIFY_PENDING)
+        elif str(item or "").strip():
+          found.append(VERIFY_PENDING)
+    elif isinstance(sgtin, str) and sgtin.strip():
       found.append(VERIFY_PENDING)
-  elif isinstance(sgtin, str) and sgtin.strip():
-    found.append(VERIFY_PENDING)
   return found
 
 
 def _extract_sgtin_decision(meta_item: dict) -> str:
-  """Статус sgtin из metaDetails: если WB отклонил хотя бы один код — это ошибка ЧЗ."""
+  """Если WB отклонил хотя бы один код — ошибка ЧЗ; filled — принят."""
   decisions = _collect_sgtin_decisions(meta_item)
   if not decisions:
     return ""
@@ -103,25 +124,36 @@ def _apply_verify_result(order: Order, decision: str) -> str:
 def _meta_order_id(item: dict) -> int | None:
   for key in ("id", "orderId", "order_id"):
     value = item.get(key)
-    if value is not None and str(value).strip() != "":
-      try:
-        return int(value)
-      except (TypeError, ValueError):
-        continue
+    if value is None or str(value).strip() == "":
+      continue
+    try:
+      return int(value)
+    except (TypeError, ValueError):
+      continue
   return None
 
 
 def _orders_for_marking_verify(seller: Seller, order_ids: list[int] | None = None):
-  """Заказы, по которым нужно спросить WB: pending, пустой статус или есть код ЧЗ."""
+  """Заказы на сборке, по которым уже есть ЧЗ или WB ещё не подтвердил код."""
   qs = (
-    Order.objects.filter(seller=seller)
+    Order.objects.filter(
+      seller=seller,
+      assembly_hidden=False,
+      wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+    )
     .exclude(marking_verify_status=VERIFY_VERIFIED)
     .exclude(marking_verify_status=VERIFY_ERROR)
-    .filter(Q(marking_code__gt="") | Q(marking_verify_status=VERIFY_PENDING))
+    .filter(Q(marking_verify_status=VERIFY_PENDING) | ~Q(marking_code=""))
   )
   if order_ids:
     qs = qs.filter(pk__in=order_ids)
-  return qs.select_related("product", "seller")
+  result: list[Order] = []
+  for order in qs.select_related("product", "seller"):
+    has_code = bool((order.marking_code or "").strip())
+    is_pending = (order.marking_verify_status or "").strip() == VERIFY_PENDING
+    if has_code or is_pending:
+      result.append(order)
+  return result
 
 
 def verify_marking_orders(
@@ -130,7 +162,7 @@ def verify_marking_orders(
   *,
   user=None,
 ) -> list[dict]:
-  """Опросить WB и обновить статусы проверки ЧЗ для заказов селлера."""
+  """Опросить WB: принял ЧЗ → готовы к доставке, отклонил → ошибки ЧЗ."""
   orders = list(_orders_for_marking_verify(seller, order_ids))
   if not orders:
     return []
@@ -156,7 +188,7 @@ def verify_marking_orders(
 
   results: list[dict] = []
   for order in orders:
-    meta_item = meta_by_wb_id.get(order.wb_order_id)
+    meta_item = meta_by_wb_id.get(int(order.wb_order_id))
     if meta_item is None:
       decision = "required" if meta_by_wb_id else VERIFY_PENDING
     else:
