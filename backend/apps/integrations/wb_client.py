@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 PAGE_LIMIT = 1000
 REQUEST_INTERVAL_SEC = 0.1
+# После POST /supplies WB не сразу принимает PATCH заказов — иначе 409.
+SUPPLY_CREATE_SETTLE_SEC = 0.8
 # PATCH .../supplies/{id}/orders — не более 100 заказов за запрос (WB API)
 SUPPLY_ORDERS_BATCH_SIZE = 100
 
@@ -447,10 +449,32 @@ class WBClient:
         return str(supply_id)
     raise WBApiError("Не удалось создать поставку WB")
 
+  def fetch_reshipment_order_ids(self) -> set[int]:
+    """GET /api/v3/supplies/orders/reshipment — заказы на повторную отгрузку."""
+    payload = self._request("GET", "/api/v3/supplies/orders/reshipment")
+    if isinstance(payload, dict):
+      items = payload.get("orders") or []
+    elif isinstance(payload, list):
+      items = payload
+    else:
+      items = []
+    ids: set[int] = set()
+    for item in items:
+      if isinstance(item, dict):
+        raw = item.get("orderID") or item.get("orderId") or item.get("id")
+      else:
+        raw = item
+      try:
+        ids.add(int(raw))
+      except (TypeError, ValueError):
+        continue
+    return ids
+
   def add_orders_to_supply(self, supply_id: str, order_ids: list[int]) -> None:
     """PATCH .../supplies/{supplyId}/orders — добавить или перенести заказы в поставку."""
     if not order_ids:
       raise WBApiError("Не переданы ID заказов")
+    supply_id = str(supply_id).strip()
     for offset in range(0, len(order_ids), SUPPLY_ORDERS_BATCH_SIZE):
       batch = {"orders": [int(item) for item in order_ids[offset:offset + SUPPLY_ORDERS_BATCH_SIZE]]}
       last_error: WBApiError | None = None
@@ -465,10 +489,19 @@ class WBClient:
           break
         except WBApiError as exc:
           last_error = exc
-          if exc.status_code in (400, 404, 405, 409):
+          # 409 — конфликт правил WB, второй путь его не исправит и сожжёт лимит (409 = 10 запросов).
+          if exc.status_code in (400, 404, 405):
             continue
           raise
       if not added:
+        logger.warning(
+          "WB add_orders_to_supply failed supply=%s ids=%s status=%s code=%s msg=%s",
+          supply_id,
+          batch["orders"][:8],
+          getattr(last_error, "status_code", None),
+          getattr(last_error, "code", ""),
+          last_error,
+        )
         raise last_error or WBApiError("WB не принял заказы в поставку")
       if offset + SUPPLY_ORDERS_BATCH_SIZE < len(order_ids):
         time.sleep(REQUEST_INTERVAL_SEC)
