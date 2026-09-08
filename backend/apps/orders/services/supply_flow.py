@@ -1288,23 +1288,59 @@ def count_new_orders_for_barcode_on_warehouse(
   ).count()
 
 
+def picking_stage_orders_queryset(seller: Seller) -> QuerySet:
+  """Заказы вкладки «На сборке» (confirm) на странице сборки."""
+  qs = filter_orders_for_assembly(
+    Order.objects.filter(seller=seller, assembly_hidden=False).filter(
+      WB_STAGE_QUERIES["confirm"](),
+    ),
+    seller,
+  )
+  return qs.exclude(
+    status__in=[
+      Order.Status.CANCELLED,
+      Order.Status.SHIPPED,
+    ],
+  )
+
+
+def count_picking_orders_for_barcode_on_warehouse(
+  seller: Seller,
+  barcode: str,
+  wb_warehouse_id: int | None,
+) -> int:
+  """Заказы «На сборке» по баркоду на конкретном FBS-складе WB."""
+  barcode = (barcode or "").strip()
+  if not barcode or not wb_warehouse_id:
+    return 0
+  return picking_stage_orders_queryset(seller).filter(
+    barcode=barcode,
+    wb_warehouse_id=wb_warehouse_id,
+  ).count()
+
+
+def order_counts_by_barcode_on_warehouse(qs: QuerySet, wb_warehouse_id: int | None) -> dict[str, int]:
+  """Счётчик заказов по баркоду на складе WB (одним запросом)."""
+  from django.db.models import Count
+
+  if not wb_warehouse_id:
+    return {}
+  rows = (
+    qs.filter(wb_warehouse_id=wb_warehouse_id)
+    .exclude(barcode="")
+    .values("barcode")
+    .annotate(n=Count("id"))
+  )
+  return {str(row["barcode"]): int(row["n"]) for row in rows if row.get("barcode")}
+
+
 def count_orders_ready_for_assembly(seller: Seller) -> int:
   return new_stage_orders_queryset(seller).count()
 
 
 def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
   """Счётчики вкладок сборки FBS (без скрытых заказов)."""
-  confirm_qs = filter_orders_for_assembly(
-    Order.objects.filter(seller=seller, assembly_hidden=False).filter(
-      WB_STAGE_QUERIES["confirm"](),
-    ),
-    seller,
-  ).exclude(
-    status__in=[
-      Order.Status.CANCELLED,
-      Order.Status.SHIPPED,
-    ],
-  )
+  confirm_qs = picking_stage_orders_queryset(seller)
   in_delivery = filter_orders_for_assembly(
     Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
     seller,

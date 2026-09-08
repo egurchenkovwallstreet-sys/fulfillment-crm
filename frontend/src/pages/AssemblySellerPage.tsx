@@ -41,6 +41,7 @@ import {
   orderBlockReason,
   orderCanDeliver,
   orderChzPending,
+  orderStickerPrinted,
   assemblyDeliveryUnlocked,
   resolveWorkflowStep,
   assemblyScanErrorTitle,
@@ -492,7 +493,8 @@ function WbAssemblySellerPage() {
       title: 'Повторная печать стикера',
       message:
         `Стикер заказа WB #${order.wb_order_id} уже был напечатан.\n\n` +
-        'Печатать повторно только если стикер повреждён или потерян. Продолжить?',
+        'Печатать повторно только если стикер повреждён или потерян.\n' +
+        'Остаток в CRM не списывается. Продолжить?',
       confirmLabel: 'Печать ещё раз',
       onConfirm: () => void runReprintSticker(order.id, onDone),
     })
@@ -2316,6 +2318,17 @@ function WbAssemblySellerPage() {
                       {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
                     </td>
                   <td className="assembly-table__actions">
+                      {orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--ghost"
+                        onClick={() => confirmReprintSticker(order)}
+                        disabled={loading}
+                        {...uiHint('Напечатать тот же стикер ещё раз. Остаток CRM не списывается.')}
+                      >
+                        Печать стикера повторно
+                      </button>
+                    )}
                       {showAssemblyButton(order) && stage !== 'complete' && (
                       <button
                         type="button"

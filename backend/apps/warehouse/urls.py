@@ -52,6 +52,14 @@ from .views_article_intake import (
   ArticleIntakeSessionDetailView,
   ArticleIntakeSessionListCreateView,
 )
+from .views_wb_fact_intake import (
+  WbFactIntakeFinishView,
+  WbFactIntakeReportView,
+  WbFactIntakeScanView,
+  WbFactIntakeSessionDetailView,
+  WbFactIntakeSessionListCreateView,
+  WbFactIntakeSetQtyView,
+)
 
 urlpatterns = [
   path("sellers/", SellerListView.as_view(), name="warehouse_sellers"),
@@ -214,6 +222,36 @@ urlpatterns = [
     "article-intake/sessions/<int:session_id>/complete/",
     ArticleIntakeCompleteView.as_view(),
     name="article_intake_complete",
+  ),
+  path(
+    "wb-fact-intake/sessions/",
+    WbFactIntakeSessionListCreateView.as_view(),
+    name="wb_fact_intake_sessions",
+  ),
+  path(
+    "wb-fact-intake/sessions/<int:session_id>/",
+    WbFactIntakeSessionDetailView.as_view(),
+    name="wb_fact_intake_session_detail",
+  ),
+  path(
+    "wb-fact-intake/sessions/<int:session_id>/scan/",
+    WbFactIntakeScanView.as_view(),
+    name="wb_fact_intake_scan",
+  ),
+  path(
+    "wb-fact-intake/sessions/<int:session_id>/set-qty/",
+    WbFactIntakeSetQtyView.as_view(),
+    name="wb_fact_intake_set_qty",
+  ),
+  path(
+    "wb-fact-intake/sessions/<int:session_id>/report/",
+    WbFactIntakeReportView.as_view(),
+    name="wb_fact_intake_report",
+  ),
+  path(
+    "wb-fact-intake/sessions/<int:session_id>/finish/",
+    WbFactIntakeFinishView.as_view(),
+    name="wb_fact_intake_finish",
   ),
   path("price-groups/", PriceGroupListView.as_view(), name="price_groups"),
   path(

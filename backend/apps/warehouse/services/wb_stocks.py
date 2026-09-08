@@ -235,15 +235,29 @@ def set_wb_stock_absolute(
   """Установить абсолютный остаток на складе WB."""
   barcode = barcode.strip()
   amount = max(0, int(amount))
+  set_wb_stocks_absolute_batch(seller, warehouse, [(barcode, amount)])
+  return amount
+
+
+def set_wb_stocks_absolute_batch(
+  seller: Seller,
+  warehouse: SellerWarehouse,
+  items: list[tuple[str, int]],
+) -> int:
+  """Пакетно выставить абсолютные остатки на складе WB."""
+  stocks = [
+    {"sku": barcode.strip(), "amount": max(0, int(amount))}
+    for barcode, amount in items
+    if str(barcode or "").strip()
+  ]
+  if not stocks:
+    return 0
   client = _get_wb_client(seller)
   try:
-    client.update_warehouse_stocks(
-      warehouse.wb_warehouse_id,
-      [{"sku": barcode, "amount": amount}],
-    )
+    client.update_warehouse_stocks(warehouse.wb_warehouse_id, stocks)
   except WBApiError as exc:
-    raise WBStockError(f"Не удалось обновить остаток в WB: {exc}") from exc
-  return amount
+    raise WBStockError(f"Не удалось обновить остатки в WB: {exc}") from exc
+  return len(stocks)
 
 
 def transfer_wb_stock_between_warehouses(

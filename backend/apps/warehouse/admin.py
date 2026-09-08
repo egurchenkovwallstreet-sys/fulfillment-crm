@@ -1,6 +1,16 @@
 from django.contrib import admin, messages
 
-from .models import ArticleIntakeSession, Cell, PriceGroup, Product, StockOperation, XlIntakeLine, XlIntakeSession
+from .models import (
+  ArticleIntakeSession,
+  Cell,
+  PriceGroup,
+  Product,
+  StockOperation,
+  WbFactIntakeLine,
+  WbFactIntakeSession,
+  XlIntakeLine,
+  XlIntakeSession,
+)
 from .services.cell_delete import force_delete_cells
 
 
@@ -91,3 +101,26 @@ class ArticleIntakeSessionAdmin(admin.ModelAdmin):
   list_display = ("id", "seller", "marketplace", "status", "scan_count", "total_units", "created_at")
   list_filter = ("status", "marketplace")
   search_fields = ("seller__company_name",)
+
+
+class WbFactIntakeLineInline(admin.TabularInline):
+  model = WbFactIntakeLine
+  extra = 0
+  readonly_fields = ("barcode", "fact_quantity", "accepted", "cell_number")
+  can_delete = False
+
+
+@admin.register(WbFactIntakeSession)
+class WbFactIntakeSessionAdmin(admin.ModelAdmin):
+  list_display = (
+    "id",
+    "seller",
+    "warehouse",
+    "status",
+    "accepted_count",
+    "catalog_count",
+    "created_at",
+  )
+  list_filter = ("status",)
+  search_fields = ("seller__company_name",)
+  inlines = [WbFactIntakeLineInline]

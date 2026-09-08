@@ -1,0 +1,149 @@
+.fact-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.fact-overlay__card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 1.6rem 1.8rem;
+  max-width: 420px;
+  text-align: center;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+}
+
+.fact-overlay__card p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.fact-current {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.1rem;
+}
+
+.fact-current__meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.fact-current__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.fact-current__qty {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.fact-table-wrap {
+  overflow-x: auto;
+}
+
+.fact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.fact-table th,
+.fact-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.fact-qty-input {
+  width: 72px;
+  min-height: 36px;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.fact-report {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.fact-report__block h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.fact-row--green {
+  background: #dcfce7;
+}
+
+.fact-row--yellow {
+  background: #fef9c3;
+}
+
+.fact-row--red {
+  background: #fee2e2;
+}
+
+.fact-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.fact-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.fact-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.fact-swatch--green { background: #16a34a; }
+.fact-swatch--yellow { background: #ca8a04; }
+.fact-swatch--red { background: #dc2626; }
+
+.art-muted {
+  color: #64748b;
+  margin: 0;
+}
+
+.fact-confirm {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  margin-top: 1rem;
+}
+
+.fact-confirm p {
+  margin: 0 0 0.75rem;
+}
+
+@media (max-width: 720px) {
+  .art-home {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-current {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1057,6 +1057,11 @@ export function WarehouseHubPage() {
             <Link to="/intake-article" className="btn btn--secondary" {...uiHint('Приёмка с группировкой по артикулам и цветам — ячейки на все размеры.')}>
               Приёмка с ячейками по артикулам
             </Link>
+            {!isOzon && (
+              <Link to="/intake-cards" className="btn btn--secondary" {...uiHint('Приёмка по всем карточкам WB: факт в CRM, сверка и остатки в ЛК.')}>
+                Приёмка карточек WB
+              </Link>
+            )}
           </div>
         </section>
       )}

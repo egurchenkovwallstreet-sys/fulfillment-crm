@@ -25,6 +25,7 @@ import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
 import { XlIntakePage } from './pages/XlIntakePage'
 import { ArticleIntakePage } from './pages/ArticleIntakePage'
+import { WbFactIntakePage } from './pages/WbFactIntakePage'
 import { initKioskPrintMode } from './utils/printMode'
 
 initKioskPrintMode()
@@ -67,6 +68,8 @@ function AppRoutes() {
             <Route path="/intake-xl/:sessionId" element={<XlIntakePage />} />
             <Route path="/intake-article" element={<ArticleIntakePage />} />
             <Route path="/intake-article/:sessionId" element={<ArticleIntakePage />} />
+            <Route path="/intake-cards" element={<WbFactIntakePage />} />
+            <Route path="/intake-cards/:sessionId" element={<WbFactIntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />

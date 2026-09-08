@@ -12,6 +12,7 @@ const SIDEBAR_NAV: Array<{
   end?: boolean
   className?: string
   roles: Array<'admin' | 'manager' | 'seller'>
+  marketplaceOnly?: 'wb' | 'ozon'
 }> = [
   {
     to: '/',
@@ -51,6 +52,13 @@ const SIDEBAR_NAV: Array<{
     label: 'Приёмка по артикулам',
     hint: 'Приёмка по артикулу и цвету с ячейками и выгрузкой на MP',
     roles: ['admin', 'manager'],
+  },
+  {
+    to: '/intake-cards',
+    label: 'Приёмка карточек WB',
+    hint: 'Факт по карточкам WB: скан, ячейка, сверка с ЛК и выставление остатков FBS',
+    roles: ['admin', 'manager'],
+    marketplaceOnly: 'wb' as const,
   },
   {
     to: '/cells',
@@ -139,7 +147,7 @@ export function AppLayout() {
           </div>
         )}
         <nav className="sidebar__nav">
-          {SIDEBAR_NAV.filter((item) => canSee(item.roles)).map((item) => (
+          {SIDEBAR_NAV.filter((item) => canSee(item.roles)).filter((item) => !item.marketplaceOnly || item.marketplaceOnly === marketplace).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

@@ -304,3 +304,93 @@ class ArticleIntakeSession(models.Model):
 
   def __str__(self):
     return f"Артикул-приёмка #{self.pk} · {self.seller}"
+
+
+class WbFactIntakeSession(models.Model):
+  class Status(models.TextChoices):
+    SCANNING = "scanning", "Приёмка"
+    COMPLETED = "completed", "Завершена"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="wb_fact_intake_sessions",
+  )
+  warehouse = models.ForeignKey(
+    "sellers.SellerWarehouse",
+    on_delete=models.PROTECT,
+    related_name="wb_fact_intake_sessions",
+    verbose_name="Склад FBS WB",
+  )
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.SCANNING,
+    db_index=True,
+  )
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
+  )
+  catalog_count = models.PositiveIntegerField("Карточек в каталоге", default=0)
+  accepted_count = models.PositiveIntegerField("Принято баркодов", default=0)
+  created_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    related_name="wb_fact_intake_sessions",
+  )
+  created_at = models.DateTimeField(auto_now_add=True)
+  completed_at = models.DateTimeField(null=True, blank=True)
+  wb_pushed_at = models.DateTimeField("Выгрузка в ЛК WB", null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Приёмка карточек WB"
+    verbose_name_plural = "Приёмки карточек WB"
+    ordering = ["-created_at"]
+
+  def __str__(self):
+    return f"Карточки WB #{self.pk} · {self.seller}"
+
+
+class WbFactIntakeLine(models.Model):
+  session = models.ForeignKey(
+    WbFactIntakeSession,
+    on_delete=models.CASCADE,
+    related_name="lines",
+  )
+  barcode = models.CharField("Баркод", max_length=100)
+  wb_nm_id = models.BigIntegerField("Артикул WB (nmID)", null=True, blank=True)
+  vendor_code = models.CharField("Артикул продавца", max_length=200, blank=True)
+  title = models.CharField("Название", max_length=500, blank=True)
+  tech_size = models.CharField("Размер (EU/тех.)", max_length=50, blank=True)
+  wb_size = models.CharField("Размер (RU)", max_length=50, blank=True)
+  photo_url = models.URLField("Фото WB", max_length=500, blank=True)
+  color_label = models.CharField("Цвет", max_length=200, blank=True)
+  requires_marking = models.BooleanField("Требует ЧЗ", default=False)
+  wb_stock_snapshot = models.PositiveIntegerField("Остаток WB на старте", default=0)
+  accepted = models.BooleanField("Отсканирован", default=False, db_index=True)
+  fact_quantity = models.PositiveIntegerField("Факт CRM", default=0)
+  cell_number = models.CharField("Ячейка", max_length=50, blank=True, default="")
+  product = models.ForeignKey(
+    Product,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="wb_fact_intake_lines",
+  )
+  scanned_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Строка приёмки карточек WB"
+    verbose_name_plural = "Строки приёмки карточек WB"
+    unique_together = [("session", "barcode")]
+    indexes = [
+      models.Index(fields=["session", "accepted"], name="wh_fact_sess_acc_idx"),
+    ]
+
+  def __str__(self):
+    return f"{self.barcode} × {self.fact_quantity}"
