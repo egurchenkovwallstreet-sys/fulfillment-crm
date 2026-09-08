@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase
 
 from apps.integrations.wb_client import WBApiError
+from apps.orders.services.assembly import _sticker_item_order_id
 from apps.orders.services.supply_flow import (
   _wb_supply_closed,
   parse_wb_supply_move_error,
@@ -35,3 +36,11 @@ class SupplyMoveErrorTests(SimpleTestCase):
     self.assertTrue(_wb_supply_closed({"closedAt": "2026-09-08T10:00:00Z"}))
     self.assertFalse(_wb_supply_closed({"done": False, "closedAt": None}))
     self.assertFalse(_wb_supply_closed({}))
+
+
+class StickerPayloadTests(SimpleTestCase):
+  def test_order_id_from_official_and_aliases(self):
+    self.assertEqual(_sticker_item_order_id({"orderId": 5694512102}), 5694512102)
+    self.assertEqual(_sticker_item_order_id({"order_id": "11"}), 11)
+    self.assertEqual(_sticker_item_order_id({"id": 22}), 22)
+    self.assertIsNone(_sticker_item_order_id({"file": "abc"}))

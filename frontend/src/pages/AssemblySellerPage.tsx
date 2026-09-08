@@ -565,8 +565,11 @@ function WbAssemblySellerPage() {
       }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
       noticeOk(msg, 'На сборке')
+      if (result.sticker_errors) {
+        showError('Стикеры не подтянулись', result.sticker_errors)
+      }
       setStage('confirm')
-      await load()
+      await load({ stageKey: 'confirm' })
     } catch (err) {
       noticeFail('Передача на сборку', err, 'Ошибка передачи на сборку')
     } finally {
@@ -657,17 +660,10 @@ function WbAssemblySellerPage() {
 
   async function handleFetchMissingStickers() {
     if (!id) return
-    const missing = (data?.orders ?? []).filter(
-      (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
-    )
-    if (missing.length < 1) {
-      showSuccess('Стикеры уже в CRM', 'У всех заказов на сборке стикеры загружены. Можно сканировать.')
-      return
-    }
     setStickersFetching(true)
     try {
       const result = await fetchAssemblyStickers(id)
-      await load({ silent: false, stageKey: stage })
+      await load({ silent: false, stageKey: 'confirm' })
       if (result.still_missing > 0) {
         showError(
           'Не все стикеры загружены',
@@ -676,10 +672,15 @@ function WbAssemblySellerPage() {
       } else {
         showSuccess(
           'Стикеры загружены',
-          result.message || `Загружено ${result.fetched} из ${result.requested}. Можно формировать лист подбора и собирать.`,
+          result.message || `Загружено ${result.fetched} из ${result.requested}. Можно сканировать.`,
         )
       }
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'no_missing_stickers') {
+        showSuccess('Стикеры уже в CRM', err.message)
+        await load({ silent: false, stageKey: 'confirm' })
+        return
+      }
       showError('Ошибка стикеров', err instanceof Error ? err.message : 'Не удалось загрузить стикеры из WB')
     } finally {
       setStickersFetching(false)
@@ -854,7 +855,7 @@ function WbAssemblySellerPage() {
       if (result.sticker_error) msg += `. Ошибка стикера: ${result.sticker_error}`
       noticeOk(msg, 'На сборке')
       setStage('confirm')
-      await load()
+      await load({ stageKey: 'confirm' })
     } catch (err) {
       noticeFail('Отправка на сборку', err, 'Ошибка отправки на сборку')
     } finally {
@@ -2319,7 +2320,9 @@ function WbAssemblySellerPage() {
                     {refreshing || syncing
                       ? 'Загрузка заказов…'
                       : stage === 'confirm'
-                        ? 'Все заказы собраны — см. зелёный счётчик «Готовые»'
+                        ? (counts.in_picking ?? 0) > 0
+                          ? 'Заказы на сборке не попали в таблицу — нажмите «Обновить заказы»'
+                          : 'Все заказы собраны — см. зелёный счётчик «Готовые»'
                         : 'Нет заказов на этой вкладке'}
                   </td>
                 </tr>

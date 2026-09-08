@@ -17,6 +17,7 @@ from apps.orders.services.supply_flow import (
   delivery_stage_supplies_queryset,
   get_assembly_stage_counts,
   new_stage_orders_queryset,
+  picking_stage_orders_queryset,
 )
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from .services.supply_sync import sync_supplies_from_wb
@@ -509,6 +510,10 @@ class AssemblySellerDetailView(APIView):
       )
     elif stage == "complete":
       orders_qs = delivery_stage_orders_queryset(seller).select_related(
+        "product", "product__cell",
+      )
+    elif stage == "confirm":
+      orders_qs = picking_stage_orders_queryset(seller).select_related(
         "product", "product__cell",
       )
     else:

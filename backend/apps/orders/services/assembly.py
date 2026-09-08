@@ -1,10 +1,12 @@
+import logging
 import re
+import time
 
 from django.db import transaction
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
-from apps.integrations.wb_client import WBApiError, WBClient
+from apps.integrations.wb_client import SUPPLY_CREATE_SETTLE_SEC, WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.services.wb_status import (
   WB_SUPPLIER_ASSEMBLY,
@@ -33,6 +35,9 @@ class AssemblyError(Exception):
     super().__init__(message)
     self.code = code
     self.order = order
+
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_wb_sticker_scan(scan: str) -> str:
@@ -349,51 +354,91 @@ def _order_requires_marking(
   return False
 
 
+def _sticker_item_order_id(item: dict) -> int | None:
+  for key in ("orderId", "order_id", "id"):
+    raw = item.get(key)
+    if raw is None:
+      continue
+    try:
+      return int(raw)
+    except (TypeError, ValueError):
+      continue
+  return None
+
+
+def _apply_sticker_to_order(order: Order, data: dict, now) -> bool:
+  file = str(data.get("file") or data.get("sticker") or "").strip()
+  if not file:
+    return False
+  order.sticker_file = file
+  order.sticker_part_a = str(data.get("partA") or data.get("part_a") or "")
+  order.sticker_part_b = str(data.get("partB") or data.get("part_b") or "")
+  order.sticker_scan_code = str(data.get("barcode") or "").strip()
+  order.has_sticker = True
+  order.sticker_fetched_at = now
+  order.save(
+    update_fields=[
+      "sticker_file",
+      "sticker_part_a",
+      "sticker_part_b",
+      "sticker_scan_code",
+      "has_sticker",
+      "sticker_fetched_at",
+      "updated_at",
+    ]
+  )
+  return True
+
+
 def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None) -> int:
   if not orders:
     return 0
 
   client = _get_client(seller)
-  wb_ids = [order.wb_order_id for order in orders]
-
-  try:
-    stickers = client.fetch_order_stickers(wb_ids)
-  except WBApiError as exc:
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message=f"Ошибка получения стикеров WB: {exc}",
-      details={"status_code": exc.status_code},
-    )
-    raise AssemblyError(str(exc)) from exc
-
-  sticker_map = {int(item.get("orderId")): item for item in stickers if item.get("orderId")}
-
+  pending = list(orders)
   updated = 0
   now = timezone.now()
-  for order in orders:
-    data = sticker_map.get(order.wb_order_id)
-    if not data:
-      continue
-    order.sticker_file = data.get("file") or ""
-    order.sticker_part_a = str(data.get("partA") or "")
-    order.sticker_part_b = str(data.get("partB") or "")
-    order.sticker_scan_code = str(data.get("barcode") or "").strip()
-    order.has_sticker = bool(order.sticker_file)
-    order.sticker_fetched_at = now
-    order.save(
-      update_fields=[
-        "sticker_file",
-        "sticker_part_a",
-        "sticker_part_b",
-        "sticker_scan_code",
-        "has_sticker",
-        "sticker_fetched_at",
-        "updated_at",
-      ]
-    )
-    updated += 1
+
+  for attempt in (1, 2):
+    wb_ids = [order.wb_order_id for order in pending]
+    try:
+      stickers = client.fetch_order_stickers(wb_ids)
+    except WBApiError as exc:
+      AuditLog.objects.create(
+        user=user,
+        seller=seller,
+        action_type=AuditLog.ActionType.API_ERROR,
+        message=f"Ошибка получения стикеров WB: {exc}",
+        details={"status_code": exc.status_code},
+      )
+      raise AssemblyError(str(exc)) from exc
+
+    sticker_map: dict[int, dict] = {}
+    for item in stickers:
+      if not isinstance(item, dict):
+        continue
+      order_id = _sticker_item_order_id(item)
+      if order_id is None:
+        continue
+      sticker_map[order_id] = item
+
+    still_pending: list[Order] = []
+    for order in pending:
+      data = sticker_map.get(order.wb_order_id)
+      if data and _apply_sticker_to_order(order, data, now):
+        updated += 1
+      else:
+        still_pending.append(order)
+    pending = still_pending
+    if not pending:
+      break
+    if attempt == 1:
+      logger.warning(
+        "WB stickers missing on first try seller=%s ids=%s",
+        seller.id,
+        [order.wb_order_id for order in pending][:8],
+      )
+      time.sleep(SUPPLY_CREATE_SETTLE_SEC)
 
   return updated
 
@@ -478,12 +523,21 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     if item.get("error")
   ]
 
+  sent = result["sent"]
+  fetched = result["stickers_fetched"]
+  sticker_errors = ""
+  if fetched < sent:
+    sticker_errors = (
+      f"Стикеры загружены {fetched} из {sent}. "
+      "На вкладке «На сборке» нажмите «Подтянуть стикеры» — Честный знак для этого не нужен."
+    )
+
   return {
     "orders_count": result["total"],
-    "wb_assembly_sent": result["sent"],
+    "wb_assembly_sent": sent,
     "wb_assembly_errors": wb_errors,
-    "stickers_fetched": result["stickers_fetched"],
-    "sticker_errors": "",
+    "stickers_fetched": fetched,
+    "sticker_errors": sticker_errors,
     "supplies": result.get("supplies", 0),
   }
 
@@ -518,10 +572,19 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       )
     _reset_marking_for_retry(order, seller, user=user)
 
-  if not order.has_sticker or not order.sticker_file:
+  if not order.has_sticker or not (order.sticker_file or "").strip():
+    try:
+      fetch_stickers_for_orders(seller, [order], user=user)
+      order.refresh_from_db()
+    except AssemblyError as exc:
+      raise AssemblyError(
+        f"Не удалось загрузить стикер WB #{order.wb_order_id}: {exc}",
+        code="no_sticker",
+      ) from exc
+  if not order.has_sticker or not (order.sticker_file or "").strip():
     raise AssemblyError(
-      f"Стикер для заказа WB #{order.wb_order_id} ещё не загружен. "
-      "Нажмите «Передать на сборку» или обновите заказы.",
+      f"WB ещё не отдал стикер для заказа #{order.wb_order_id}. "
+      "Нажмите «Подтянуть стикеры» и повторите скан. Честный знак для печати стикера не нужен.",
       code="no_sticker",
     )
 
@@ -638,10 +701,20 @@ def bind_marking_and_print(
       code="wb_not_confirm",
     )
 
-  if not order.has_sticker or not order.sticker_file:
+  if not order.has_sticker or not (order.sticker_file or "").strip():
+    try:
+      fetch_stickers_for_orders(seller, [order], user=user)
+      order.refresh_from_db()
+    except AssemblyError as exc:
+      raise _marking_error(
+        f"Не удалось загрузить стикер WB #{order.wb_order_id}: {exc}",
+        order,
+        code="no_sticker",
+      ) from exc
+  if not order.has_sticker or not (order.sticker_file or "").strip():
     raise _marking_error(
-      f"Стикер заказа WB #{order.wb_order_id} не загружен из WB. "
-      "Вернитесь на шаг «Новые» — «Передать на сборку» или нажмите «Обновить из WB».",
+      f"WB ещё не отдал стикер для заказа #{order.wb_order_id}. "
+      "Нажмите «Подтянуть стикеры» и повторите скан.",
       order,
       code="no_sticker",
     )
