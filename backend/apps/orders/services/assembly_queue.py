@@ -158,29 +158,8 @@ def order_moved_to_other_supply(
   return current.isdisjoint(ready_ids)
 
 
-def _detach_orders_moved_to_other_supply(orders: list[Order]) -> None:
-  """Снять с листа заказы, которые уже перенесли в новую поставку (в т.ч. до правки)."""
-  from apps.orders.services.assembly import _detach_order_from_pick_list as detach
-
-  ready_supplies_by_list = _ready_supply_ids_by_pick_list(orders)
-  for order in orders:
-    if not order_in_assembly(order) or not order.pick_list_id:
-      continue
-    if not order_moved_to_other_supply(order, ready_supplies_by_list):
-      continue
-    detach(order)
-    order.save(update_fields=["pick_list", "updated_at"])
-
-
 def _load_confirm_orders(seller: Seller) -> list[Order]:
-  orders = list(_assembly_confirm_orders_qs(seller))
-  _detach_orders_moved_to_other_supply(orders)
-  return orders
-
-
-def repair_moved_orders_off_pick_list(seller: Seller) -> None:
-  """Снять с текущего листа заказы, уже перенесённые в другую поставку."""
-  _load_confirm_orders(seller)
+  return list(_assembly_confirm_orders_qs(seller))
 
 
 def get_assembly_queue_status(seller: Seller) -> dict:
@@ -189,17 +168,13 @@ def get_assembly_queue_status(seller: Seller) -> dict:
   ready: list[Order] = []
   errors: list[Order] = []
   orders = _load_confirm_orders(seller)
-  ready_supplies_by_list = _ready_supply_ids_by_pick_list(orders)
 
   for order in orders:
     if order_has_chz_error(order):
       errors.append(order)
     elif order_assembly_ready(order):
       ready.append(order)
-    elif order_in_current_assembly_list(order) and not order_moved_to_other_supply(
-      order,
-      ready_supplies_by_list,
-    ):
+    elif order_in_assembly(order):
       in_assembly.append(order)
 
   return {

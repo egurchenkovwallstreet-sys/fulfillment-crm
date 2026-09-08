@@ -662,6 +662,152 @@ def _create_new_forming_supply(
   )
 
 
+def _warehouse_name(seller: Seller, wb_warehouse_id: int | None) -> str:
+  if wb_warehouse_id is None:
+    return ""
+  from apps.sellers.models import SellerWarehouse
+
+  warehouse = SellerWarehouse.objects.filter(
+    seller=seller,
+    wb_warehouse_id=wb_warehouse_id,
+  ).first()
+  if warehouse and warehouse.name:
+    return warehouse.name
+  return f"Склад #{wb_warehouse_id}"
+
+
+def _current_wb_supply_ids(orders: list[Order]) -> set[str]:
+  ids: set[str] = set()
+  for order in orders:
+    for supply in order.supplies.filter(status__in=(Supply.Status.FORMING, Supply.Status.READY)):
+      if supply.wb_supply_id:
+        ids.add(str(supply.wb_supply_id))
+  return ids
+
+
+def _crm_supply_candidate_ok(supply: Supply) -> bool:
+  if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
+    return False
+  if not supply.wb_supply_id:
+    return False
+  orders = _supply_orders(supply)
+  if orders and all(order_can_send_to_delivery(order) for order in orders):
+    return False
+  if any(order_can_send_to_delivery(order) for order in orders):
+    return False
+  return True
+
+
+def list_move_target_supplies(seller: Seller, order_ids: list[int]) -> list[dict]:
+  """Другие открытые поставки ЛК WB — куда можно перенести недостающий заказ."""
+  if not order_ids:
+    raise SupplyFlowError("Не выбраны заказы для переноса", code="empty")
+
+  orders = list(
+    Order.objects.filter(seller=seller, pk__in=order_ids).prefetch_related("supplies")
+  )
+  if not orders:
+    raise SupplyFlowError("Заказы не найдены", code="not_found")
+
+  current_ids = _current_wb_supply_ids(orders)
+  warehouse_ids = {
+    int(order.wb_warehouse_id)
+    for order in orders
+    if order.wb_warehouse_id is not None
+  }
+  crm_by_wb_id = {
+    str(supply.wb_supply_id): supply
+    for supply in Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ).exclude(wb_supply_id="")
+    if str(supply.wb_supply_id)
+  }
+
+  open_wb_ids: set[str] = set()
+  try:
+    client = _get_client(seller)
+    for item in client.fetch_supplies():
+      if item.get("done"):
+        continue
+      raw_id = item.get("id")
+      if raw_id is None or str(raw_id).strip() == "":
+        continue
+      open_wb_ids.add(str(raw_id))
+  except WBApiError:
+    open_wb_ids = set(crm_by_wb_id)
+
+  targets: list[dict] = []
+  seen: set[str] = set()
+  for wb_id in sorted(open_wb_ids | set(crm_by_wb_id)):
+    if wb_id in current_ids or wb_id in seen:
+      continue
+    crm = crm_by_wb_id.get(wb_id)
+    if crm:
+      if not _crm_supply_candidate_ok(crm):
+        continue
+      if warehouse_ids and crm.wb_warehouse_id is not None and int(crm.wb_warehouse_id) not in warehouse_ids:
+        continue
+    elif wb_id not in open_wb_ids:
+      continue
+    seen.add(wb_id)
+    warehouse_id = crm.wb_warehouse_id if crm else (next(iter(warehouse_ids), None))
+    targets.append({
+      "wb_supply_id": wb_id,
+      "name": (crm and f"Поставка WB {wb_id}") or f"Поставка WB {wb_id}",
+      "orders_count": crm.orders.count() if crm else 0,
+      "wb_warehouse_id": warehouse_id,
+      "warehouse_name": _warehouse_name(seller, warehouse_id),
+    })
+  return targets
+
+
+def _resolve_move_target_supply(
+  seller: Seller,
+  wb_warehouse_id: int,
+  client,
+  *,
+  target_wb_supply_id: str | None,
+  current_wb_ids: set[str],
+) -> Supply:
+  requested = (target_wb_supply_id or "").strip()
+  if not requested:
+    return _create_new_forming_supply(seller, wb_warehouse_id, client)
+  if requested in current_wb_ids:
+    raise SupplyFlowError(
+      "Нельзя перенести заказ в ту же поставку. Выберите другую поставку в ЛК WB или создайте новую.",
+      code="same_supply",
+    )
+
+  supply = Supply.objects.filter(seller=seller, wb_supply_id=requested).first()
+  if supply:
+    if not _crm_supply_candidate_ok(supply):
+      raise SupplyFlowError(
+        "Эта поставка уже готова к доставке или закрыта. Выберите другую или создайте новую.",
+        code="supply_not_open",
+      )
+    return supply
+
+  try:
+    details = client.fetch_supply(requested)
+  except WBApiError as exc:
+    raise SupplyFlowError(
+      f"Поставка {requested} не найдена в ЛК WB.",
+      code="supply_not_found",
+    ) from exc
+  if details.get("done"):
+    raise SupplyFlowError(
+      "Эта поставка уже передана в доставку в ЛК WB. Выберите другую или создайте новую.",
+      code="supply_done",
+    )
+  return Supply.objects.create(
+    seller=seller,
+    wb_supply_id=requested,
+    wb_warehouse_id=wb_warehouse_id,
+    status=Supply.Status.FORMING,
+  )
+
+
 def order_can_move_to_new_supply(order: Order) -> bool:
   if order.wb_warehouse_id is None:
     return False
@@ -676,6 +822,7 @@ def move_orders_to_new_supply(
   order_ids: list[int],
   *,
   user=None,
+  wb_supply_id: str | None = None,
 ) -> dict:
   if not order_ids:
     raise SupplyFlowError("Не выбраны заказы для переноса", code="empty")
@@ -710,16 +857,26 @@ def move_orders_to_new_supply(
 
   client = _get_client(seller)
   created_supplies: list[dict] = []
+  target_id = (wb_supply_id or "").strip() or None
 
   for wb_warehouse_id, wh_orders in by_warehouse.items():
-    new_supply = _create_new_forming_supply(seller, wb_warehouse_id, client)
+    current_ids = _current_wb_supply_ids(wh_orders)
+    new_supply = _resolve_move_target_supply(
+      seller,
+      wb_warehouse_id,
+      client,
+      target_wb_supply_id=target_id,
+      current_wb_ids=current_ids,
+    )
     wb_order_ids = [int(order.wb_order_id) for order in wh_orders]
+    created_now = str(new_supply.wb_supply_id) not in current_ids and not target_id
     try:
       client.add_orders_to_supply(new_supply.wb_supply_id, wb_order_ids)
     except WBApiError as exc:
-      new_supply.delete()
+      if created_now and not new_supply.orders.exists():
+        new_supply.delete()
       raise SupplyFlowError(
-        f"WB не принял перенос заказов в новую поставку: {exc}",
+        f"WB не принял перенос заказов в поставку: {exc}",
         code="wb_move_failed",
       ) from exc
 
@@ -728,22 +885,24 @@ def move_orders_to_new_supply(
       for old_supply in order.supplies.filter(
         status__in=(Supply.Status.FORMING, Supply.Status.READY),
       ):
+        if str(old_supply.wb_supply_id) == str(new_supply.wb_supply_id):
+          continue
         old_supply.orders.remove(order)
         old_supply_ids.add(old_supply.id)
       new_supply.orders.add(order)
-      # Снять с текущего листа: иначе «На сборке» горит, скан может взять перенесённый заказ.
-      _detach_order_from_pick_list(order)
 
     for old_supply_id in old_supply_ids:
       old_supply = Supply.objects.filter(pk=old_supply_id).first()
       if old_supply:
         refresh_supply_readiness(old_supply)
+    refresh_supply_readiness(new_supply)
 
     created_supplies.append({
       "supply_id": new_supply.id,
       "wb_supply_id": new_supply.wb_supply_id,
       "wb_warehouse_id": wb_warehouse_id,
       "orders_moved": len(wh_orders),
+      "created": not bool(target_id),
     })
 
   queue_last_pick_list_marking_verify(seller)
@@ -971,7 +1130,7 @@ def _assert_all_supply_orders_ready_for_deliver(supply: Supply) -> None:
     raise SupplyFlowError(
       f"В поставке WB {supply.wb_supply_id} {len(not_ready)} из {len(orders)} "
       f"заказ(ов) ещё не готовы ({reason}). "
-      "Дособерите все заказы или перенесите неготовые в новую поставку.",
+      "Дособерите все заказы или откройте «На сборке» и перенесите неготовые в другую поставку.",
       code="not_ready",
     )
 

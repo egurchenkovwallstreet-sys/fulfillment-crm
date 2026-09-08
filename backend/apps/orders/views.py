@@ -63,8 +63,7 @@ from .services.assembly import (
 )
 from .services.assembly_queue import (
   get_assembly_queue_status,
-  order_in_current_assembly_list,
-  repair_moved_orders_off_pick_list,
+  order_in_assembly,
 )
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
@@ -73,6 +72,7 @@ from .services.supply_flow import (
   fetch_seller_shipping_points,
   fetch_supply_barcode,
   move_orders_to_new_supply,
+  list_move_target_supplies,
   refresh_supply_readiness,
   send_order_to_assembly,
   send_order_to_delivery,
@@ -523,12 +523,9 @@ class AssemblySellerDetailView(APIView):
       else:
         orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
-    if stage == "confirm":
-      repair_moved_orders_off_pick_list(seller)
-
     orders = list(orders_qs.order_by("-created_at")[:300])
     if stage == "confirm":
-      orders = [order for order in orders if order_in_current_assembly_list(order)]
+      orders = [order for order in orders if order_in_assembly(order)]
 
     active_pick_lists = active_wb_pick_lists(seller)
     active_pick_list = active_pick_lists[0] if active_pick_lists else None
@@ -1145,8 +1142,36 @@ class AssemblyShippingPointsView(APIView):
 
 
 class AssemblyMoveOrdersToNewSupplyView(APIView):
-  """Перенести неотсканированные заказы в новую поставку WB (тот же склад)."""
+  """Перенести неотсканированные заказы в другую поставку WB (существующую или новую)."""
   permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    raw = request.query_params.get("order_ids") or ""
+    order_ids: list[int] = []
+    for part in str(raw).replace(";", ",").split(","):
+      part = part.strip()
+      if not part:
+        continue
+      try:
+        order_ids.append(int(part))
+      except ValueError:
+        continue
+    if not order_ids:
+      return Response(
+        {"success": False, "error": "Укажите заказы для переноса", "code": "empty"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    try:
+      targets = list_move_target_supplies(seller, order_ids)
+    except SupplyFlowError as exc:
+      return _assembly_error_response(exc)
+
+    return Response({"success": True, "targets": targets})
 
   def post(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id, active_only=True)
@@ -1156,15 +1181,28 @@ class AssemblyMoveOrdersToNewSupplyView(APIView):
     serializer = MoveOrdersToNewSupplySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     order_ids = serializer.validated_data["order_ids"]
+    wb_supply_id = (serializer.validated_data.get("wb_supply_id") or "").strip() or None
 
     try:
-      result = move_orders_to_new_supply(seller, order_ids, user=request.user)
+      result = move_orders_to_new_supply(
+        seller,
+        order_ids,
+        user=request.user,
+        wb_supply_id=wb_supply_id,
+      )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
 
+    created = any(item.get("created") for item in result["supplies"])
+    supply_ids = ", ".join(item["wb_supply_id"] for item in result["supplies"])
+    message = (
+      f"Перенесено заказов: {result['moved_count']} в новую поставку WB {supply_ids}"
+      if created
+      else f"Перенесено заказов: {result['moved_count']} в поставку WB {supply_ids}"
+    )
     return Response({
       "success": True,
-      "message": f"Перенесено заказов: {result['moved_count']}",
+      "message": message,
       **result,
     })
 

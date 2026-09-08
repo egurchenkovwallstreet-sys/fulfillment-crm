@@ -25,7 +25,7 @@ export function AssemblyQueuePanels({
         className={`assembly-marking-panel assembly-marking-panel--work${inAssemblyCount > 0 ? ' assembly-marking-panel--alert' : ''}`}
         onClick={() => onOpenList('in_assembly')}
         {...uiHint(
-          'Заказы, где ещё не отсканирован баркод или не напечатан стикер. Нажмите — список с ячейками.',
+          'Заказы без товара или без скана. Нажмите — список. Если товара нет в остатках — перенесите в другую поставку WB.',
         )}
       >
         <span className="assembly-marking-panel__count">{inAssemblyCount}</span>
@@ -70,6 +70,7 @@ type AssemblyQueueListModalProps = {
   onResetMarking?: (orderIds?: number[]) => void
   onReprint?: (order: AssemblyOrder) => void
   onDeliver?: (order: AssemblyOrder) => void
+  onMove?: (order: AssemblyOrder) => void
 }
 
 export function AssemblyQueueListModal({
@@ -81,6 +82,7 @@ export function AssemblyQueueListModal({
   onResetMarking,
   onReprint,
   onDeliver,
+  onMove,
 }: AssemblyQueueListModalProps) {
   const markingOrders = orders.filter((order) => order.requires_marking)
   const markingCount = markingOrders.length
@@ -95,7 +97,7 @@ export function AssemblyQueueListModal({
       ? 'Нет заказов с отклонённым ЧЗ'
       : kind === 'ready'
         ? 'Пока нет собранных заказов — отсканируйте баркод в панели справа'
-        : 'Все заказы собраны — новые появятся после передачи на сборку'
+        : 'Все заказы собраны — неотсканированные появятся здесь, их можно перенести в другую поставку'
 
   return (
     <div className="assembly-marking-modal-backdrop" role="presentation" onClick={onClose}>
@@ -165,6 +167,19 @@ export function AssemblyQueueListModal({
                     )}
                   </div>
                   <div className="assembly-marking-list__actions">
+                    {kind === 'in_assembly' && onMove && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => onMove(order)}
+                        disabled={loading}
+                        {...uiHint(
+                          'Товара нет в остатках — перенести заказ в другую поставку WB, чтобы собранные можно было отгрузить',
+                        )}
+                      >
+                        Перенести
+                      </button>
+                    )}
                     {kind === 'in_assembly' && order.requires_marking && onResetMarking && (
                       <button
                         type="button"
@@ -221,7 +236,7 @@ export function AssemblyQueueListModal({
         )}
         <p className="assembly-marking-modal__hint">
           {kind === 'in_assembly'
-            ? 'Сканируйте баркод (и ЧЗ при необходимости) в панели справа. «Сбросить ЧЗ» — если код завис или нужен повторный скан.'
+            ? 'Если товара нет — нажмите «Перенести»: CRM предложит другую поставку из ЛК WB или создаст новую. Собранные заказы можно сразу отгрузить.'
             : kind === 'ready'
               ? 'Повторная печать стикера — только через подтверждение менеджера.'
               : 'После замены товара повторите сборку: баркод → ЧЗ → печать стикера.'}

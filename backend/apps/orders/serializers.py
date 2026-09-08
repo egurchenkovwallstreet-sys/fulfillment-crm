@@ -334,6 +334,7 @@ class MoveOrdersToNewSupplySerializer(serializers.Serializer):
     min_length=1,
     max_length=100,
   )
+  wb_supply_id = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class SupplyDeliverSerializer(serializers.Serializer):

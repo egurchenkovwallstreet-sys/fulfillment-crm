@@ -9,6 +9,7 @@ import {
   fetchAssemblyStickers,
   fetchBatchRibbon,
   fetchMarkingStatus,
+  fetchMoveSupplyTargets,
   moveOrdersToNewSupply,
   replaceOrderItem,
   resetAssemblyMarking,
@@ -30,6 +31,7 @@ import {
   type MarkingStatusResult,
   type SendToDeliveryResult,
   type DeliveryShippingParams,
+  type MoveSupplyTarget,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
 import { syncOrders, generatePickList } from '../api/orders'
@@ -174,6 +176,10 @@ function WbAssemblySellerPage() {
   const [verifyingChz, setVerifyingChz] = useState(false)
   const verifyInFlightRef = useRef(false)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
+  const [movePicker, setMovePicker] = useState<{
+    orderIds: number[]
+    targets: MoveSupplyTarget[]
+  } | null>(null)
   const [deliveryModal, setDeliveryModal] = useState<{
     title: string
     message: string
@@ -1259,41 +1265,52 @@ function WbAssemblySellerPage() {
   }
 
   function handleMoveSingleOrder(order: AssemblyOrder) {
-    if (!order.can_move_to_new_supply) {
-      setModal({
-        kind: 'block',
-        title: 'Нельзя перенести',
-        message: 'Перенос доступен только для неотсканированных заказов на сборке.',
-      })
-      return
-    }
-    setModal({
-      kind: 'confirm',
-      title: 'Перенос в новую поставку',
-      message:
-        `Перенести заказ WB #${order.wb_order_id} в новую поставку WB?\n\n` +
-        'Склад заказа не изменится. Позже можно распечатать QR новой поставки и передать её в доставку отдельно.',
-      confirmLabel: 'Перенести',
-      onConfirm: () => {
-        setModal(null)
-        void runMoveOrders([order.id])
-      },
-    })
+    void startMoveOrders([order.id])
   }
 
-  async function runMoveOrders(orderIds: number[]) {
+  async function startMoveOrders(orderIds: number[]) {
     if (!id || orderIds.length === 0) return
     setError('')
     setLoading(true)
     try {
-      const result = await moveOrdersToNewSupply(id, orderIds)
+      const result = await fetchMoveSupplyTargets(id, orderIds)
+      const targets = result.targets ?? []
+      if (targets.length === 0) {
+        setModal({
+          kind: 'confirm',
+          title: 'Новая поставка WB',
+          message:
+            'В ЛК WB нет другой открытой поставки. Создать новую и перенести туда заказ, которого нет в остатках?\n\nСобранные заказы останутся в текущей поставке — их можно сразу отгрузить.',
+          confirmLabel: 'Создать и перенести',
+          onConfirm: () => {
+            setModal(null)
+            void runMoveOrders(orderIds)
+          },
+        })
+        return
+      }
+      setMovePicker({ orderIds, targets })
+    } catch (err) {
+      noticeFail('Перенос в поставку', err, 'Не удалось получить поставки из ЛК WB')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function runMoveOrders(orderIds: number[], wbSupplyId?: string) {
+    if (!id || orderIds.length === 0) return
+    setError('')
+    setLoading(true)
+    try {
+      const result = await moveOrdersToNewSupply(id, orderIds, wbSupplyId)
       setSelectedMoveIds(new Set())
-      const supplyIds = result.supplies.map((item) => item.wb_supply_id).join(', ')
-      noticeOk(`${result.message}. Новые поставки WB: ${supplyIds}`, 'Новая поставка')
+      setMovePicker(null)
+      setMarkingListKind(null)
+      noticeOk(result.message, 'Перенос в поставку')
       await load({ stageKey: 'confirm', silent: false })
       void refreshMarkingStatus()
     } catch (err) {
-      noticeFail('Перенос в поставку', err, 'Ошибка переноса в новую поставку')
+      noticeFail('Перенос в поставку', err, 'Ошибка переноса в поставку WB')
     } finally {
       setLoading(false)
     }
@@ -1302,18 +1319,7 @@ function WbAssemblySellerPage() {
   function handleMoveSelectedOrders() {
     const ids = Array.from(selectedMoveIds)
     if (ids.length === 0) return
-    setModal({
-      kind: 'confirm',
-      title: 'Перенос в новые поставки',
-      message:
-        `Перенести ${ids.length} неотсканированных заказов в новые поставки WB?\n\n` +
-        'Заказы будут сгруппированы по складам — отдельная поставка на каждый склад.',
-      confirmLabel: 'Перенести',
-      onConfirm: () => {
-        setModal(null)
-        void runMoveOrders(ids)
-      },
-    })
+    void startMoveOrders(ids)
   }
 
   async function handleBarcodeSubmit(e?: FormEvent, rawBarcode?: string) {
@@ -1885,9 +1891,9 @@ function WbAssemblySellerPage() {
         <section className="panel assembly-active-supplies">
           <h2 className="section-title">Поставки на сборке ({activeSupplies.length})</h2>
           <p className="assembly-scan-hint">
-            Готовую поставку можно передать в доставку отдельно — не дожидаясь сборки на других
-            складах. Неотсканированные заказы переносите в новую поставку (кнопка у заказа или
-            галочки): они снимаются с текущего списка и не блокируют отгрузку уже собранных.
+            Если товара нет в остатках — откройте «На сборке» и нажмите «Перенести». CRM предложит
+            другую поставку из ЛК WB или создаст новую. Собранные заказы остаются в текущей поставке
+            и уходят в доставку.
           </p>
           <table className="assembly-table">
             <thead>
@@ -2517,7 +2523,68 @@ function WbAssemblySellerPage() {
                 }
               : undefined
           }
+          onMove={
+            markingListKind === 'in_assembly'
+              ? (order) => {
+                  setMarkingListKind(null)
+                  handleMoveSingleOrder(order)
+                }
+              : undefined
+          }
         />
+      )}
+
+      {movePicker && (
+        <div className="assembly-modal-backdrop" role="presentation" onClick={() => setMovePicker(null)}>
+          <div
+            className="assembly-modal assembly-move-picker"
+            role="dialog"
+            aria-labelledby="move-supply-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="move-supply-title">Куда перенести заказ</h2>
+            <p className="assembly-modal__message">
+              Выберите другую поставку из ЛК WB или создайте новую. Текущая поставка останется для
+              собранных заказов — их можно сразу отгрузить.
+            </p>
+            <ul className="assembly-move-picker__list">
+              {movePicker.targets.map((target) => (
+                <li key={target.wb_supply_id}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary assembly-move-picker__item"
+                    disabled={loading}
+                    onClick={() => void runMoveOrders(movePicker.orderIds, target.wb_supply_id)}
+                  >
+                    <strong>WB {target.wb_supply_id}</strong>
+                    <span>
+                      {target.warehouse_name || 'Склад'}
+                      {target.orders_count ? ` · заказов: ${target.orders_count}` : ' · пустая'}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="assembly-modal__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={loading}
+                onClick={() => void runMoveOrders(movePicker.orderIds)}
+              >
+                Создать новую поставку
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={loading}
+                onClick={() => setMovePicker(null)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <AssemblySyncOverlay visible={pickListRefreshing} marketplace="wb" />

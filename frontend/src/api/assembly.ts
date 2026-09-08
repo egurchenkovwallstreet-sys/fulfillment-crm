@@ -533,6 +533,21 @@ export function fetchShippingPoints(
   )
 }
 
+export interface MoveSupplyTarget {
+  wb_supply_id: string
+  name: string
+  orders_count: number
+  wb_warehouse_id?: number | null
+  warehouse_name?: string
+}
+
+export function fetchMoveSupplyTargets(sellerId: number, orderIds: number[]) {
+  const qs = new URLSearchParams({ order_ids: orderIds.join(',') })
+  return apiFetch<{ success: boolean; targets: MoveSupplyTarget[] }>(
+    `/api/orders/assembly/sellers/${sellerId}/move-orders-to-new-supply/?${qs.toString()}`,
+  )
+}
+
 export interface MoveOrdersToNewSupplyResult {
   success: boolean
   message: string
@@ -542,16 +557,24 @@ export interface MoveOrdersToNewSupplyResult {
     wb_supply_id: string
     wb_warehouse_id: number
     orders_moved: number
+    created?: boolean
   }>
   skipped: Array<{ order_id: number; wb_order_id: number; error: string }>
 }
 
-export function moveOrdersToNewSupply(sellerId: number, orderIds: number[]) {
+export function moveOrdersToNewSupply(
+  sellerId: number,
+  orderIds: number[],
+  wbSupplyId?: string,
+) {
   return apiFetch<MoveOrdersToNewSupplyResult>(
     `/api/orders/assembly/sellers/${sellerId}/move-orders-to-new-supply/`,
     {
       method: 'POST',
-      body: JSON.stringify({ order_ids: orderIds }),
+      body: JSON.stringify({
+        order_ids: orderIds,
+        wb_supply_id: wbSupplyId ?? '',
+      }),
     },
   )
 }
