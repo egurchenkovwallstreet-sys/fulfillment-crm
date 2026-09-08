@@ -13,7 +13,7 @@ from django.db.models import Exists, OuterRef, QuerySet
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
-from apps.integrations.wb_client import WBApiError
+from apps.integrations.wb_client import REQUEST_INTERVAL_SEC, WBApiError
 from apps.orders.models import Order, PickList, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
 from apps.orders.services.assembly_queue import order_in_assembly, queue_last_pick_list_marking_verify
@@ -106,6 +106,48 @@ def _parse_deliver_error(exc: WBApiError) -> str:
       )
     return f"WB отклонил передачу в доставку: {exc}"
   return str(exc)
+
+
+def parse_wb_supply_move_error(exc: WBApiError) -> str:
+  """Понятная причина, почему WB не даёт перенести заказ в другую поставку."""
+  text = f"{exc} {getattr(exc, 'code', '')}".lower()
+  if any(token in text for token in ("cargotype", "cargo_type", "cargo type", "габарит", "тип груза")):
+    return (
+      "WB не принял перенос: у заказа другой тип груза (обычный / крупногабарит), "
+      "чем у выбранной поставки. Создайте новую пустую поставку."
+    )
+  if any(token in text for token in ("warehouse", "склад", "office")):
+    return (
+      "WB не принял перенос: заказ с другого склада FBS. "
+      "Нужна поставка того же склада или новая пустая."
+    )
+  if "b2b" in text:
+    return (
+      "WB не принял перенос: нельзя смешивать заказы B2B и обычные в одной поставке. "
+      "Создайте новую пустую поставку."
+    )
+  if any(token in text for token in ("crossborder", "cross_border", "кроссбордер")):
+    return (
+      "WB не принял перенос: нельзя смешивать кроссбордер и обычные заказы. "
+      "Создайте новую пустую поставку."
+    )
+  if any(token in text for token in ("closed", "done", "deliver", "закрыт", "доставк")):
+    return (
+      "WB уже закрыл текущую поставку. Заказ из неё нельзя перенести. "
+      "Оставьте его в этой поставке или отмените в ЛК WB."
+    )
+  if any(token in text for token in ("confirm", "status", "статус")):
+    return (
+      "WB не даёт перенести заказ: он не в статусе «На сборке». "
+      "Нажмите «Обновить заказы» и повторите."
+    )
+  if exc.status_code == 409:
+    return (
+      "WB не даёт перенести этот заказ в выбранную поставку. "
+      "Частые причины: текущая поставка уже закрыта, или у другой поставки другой склад / тип груза / B2B. "
+      f"Ответ WB: {exc}"
+    )
+  return f"WB не принял перенос заказа в поставку: {exc}"
 
 
 def _resolve_supply_cargo_type(client, supply: Supply) -> int:
@@ -662,6 +704,52 @@ def _create_new_forming_supply(
   )
 
 
+def _wb_supply_cargo(item: dict) -> int:
+  try:
+    return int(item.get("cargoType") or 0)
+  except (TypeError, ValueError):
+    return 0
+
+
+def _wb_supply_open(item: dict) -> bool:
+  return not bool(item.get("done"))
+
+
+def _cargo_types_compatible(source: int, target: int) -> bool:
+  if target == 0 or source == 0:
+    return True
+  return source == target
+
+
+def _b2b_compatible(source, target, *, target_empty: bool) -> bool:
+  if target_empty or source is None or target is None:
+    return True
+  return bool(source) == bool(target)
+
+
+def _assert_source_supplies_open(client, current_ids: set[str]) -> dict:
+  """Если WB уже закрыл текущую поставку — перенос невозможен."""
+  details_by_id: dict[str, dict] = {}
+  for supply_id in current_ids:
+    try:
+      details = client.fetch_supply(supply_id)
+    except WBApiError as exc:
+      if exc.status_code == 404:
+        continue
+      raise SupplyFlowError(
+        f"Не удалось проверить поставку {supply_id} в ЛК WB: {exc}",
+        code="wb_supply_check_failed",
+      ) from exc
+    details_by_id[supply_id] = details if isinstance(details, dict) else {}
+    if details_by_id[supply_id].get("done"):
+      raise SupplyFlowError(
+        f"WB уже закрыл поставку {supply_id}. Заказ из закрытой поставки нельзя перенести. "
+        "Его можно только отгрузить вместе с этой поставкой или отменить в ЛК WB.",
+        code="source_supply_closed",
+      )
+  return details_by_id
+
+
 def _warehouse_name(seller: Seller, wb_warehouse_id: int | None) -> str:
   if wb_warehouse_id is None:
     return ""
@@ -724,23 +812,46 @@ def list_move_target_supplies(seller: Seller, order_ids: list[int]) -> list[dict
     if str(supply.wb_supply_id)
   }
 
-  open_wb_ids: set[str] = set()
+  wb_by_id: dict[str, dict] = {}
+  client = _get_client(seller)
+  _assert_source_supplies_open(client, current_ids)
+  source_cargo = 0
+  source_b2b = None
   try:
-    client = _get_client(seller)
     for item in client.fetch_supplies():
-      if item.get("done"):
-        continue
       raw_id = item.get("id")
       if raw_id is None or str(raw_id).strip() == "":
         continue
-      open_wb_ids.add(str(raw_id))
-  except WBApiError:
-    open_wb_ids = set(crm_by_wb_id)
+      wb_by_id[str(raw_id)] = item
+  except WBApiError as exc:
+    raise SupplyFlowError(
+      f"Не удалось получить поставки из ЛК WB: {exc}",
+      code="wb_supplies_failed",
+    ) from exc
+
+  for current_id in current_ids:
+    current_meta = wb_by_id.get(current_id) or {}
+    if not current_meta:
+      try:
+        current_meta = client.fetch_supply(current_id)
+      except WBApiError:
+        current_meta = {}
+    source_cargo = _wb_supply_cargo(current_meta) or source_cargo
+    if current_meta.get("isB2b") is not None:
+      source_b2b = current_meta.get("isB2b")
 
   targets: list[dict] = []
   seen: set[str] = set()
-  for wb_id in sorted(open_wb_ids | set(crm_by_wb_id)):
+  for wb_id, item in wb_by_id.items():
     if wb_id in current_ids or wb_id in seen:
+      continue
+    if not _wb_supply_open(item):
+      continue
+    target_cargo = _wb_supply_cargo(item)
+    target_empty = target_cargo == 0
+    if not _cargo_types_compatible(source_cargo, target_cargo):
+      continue
+    if not _b2b_compatible(source_b2b, item.get("isB2b"), target_empty=target_empty):
       continue
     crm = crm_by_wb_id.get(wb_id)
     if crm:
@@ -748,13 +859,11 @@ def list_move_target_supplies(seller: Seller, order_ids: list[int]) -> list[dict
         continue
       if warehouse_ids and crm.wb_warehouse_id is not None and int(crm.wb_warehouse_id) not in warehouse_ids:
         continue
-    elif wb_id not in open_wb_ids:
-      continue
     seen.add(wb_id)
     warehouse_id = crm.wb_warehouse_id if crm else (next(iter(warehouse_ids), None))
     targets.append({
       "wb_supply_id": wb_id,
-      "name": (crm and f"Поставка WB {wb_id}") or f"Поставка WB {wb_id}",
+      "name": f"Поставка WB {wb_id}",
       "orders_count": crm.orders.count() if crm else 0,
       "wb_warehouse_id": warehouse_id,
       "warehouse_name": _warehouse_name(seller, warehouse_id),
@@ -861,6 +970,7 @@ def move_orders_to_new_supply(
 
   for wb_warehouse_id, wh_orders in by_warehouse.items():
     current_ids = _current_wb_supply_ids(wh_orders)
+    _assert_source_supplies_open(client, current_ids)
     new_supply = _resolve_move_target_supply(
       seller,
       wb_warehouse_id,
@@ -870,15 +980,26 @@ def move_orders_to_new_supply(
     )
     wb_order_ids = [int(order.wb_order_id) for order in wh_orders]
     created_now = str(new_supply.wb_supply_id) not in current_ids and not target_id
+    if created_now:
+      time.sleep(REQUEST_INTERVAL_SEC)
     try:
       client.add_orders_to_supply(new_supply.wb_supply_id, wb_order_ids)
     except WBApiError as exc:
-      if created_now and not new_supply.orders.exists():
-        new_supply.delete()
-      raise SupplyFlowError(
-        f"WB не принял перенос заказов в поставку: {exc}",
-        code="wb_move_failed",
-      ) from exc
+      retry_exc = exc
+      if created_now:
+        time.sleep(REQUEST_INTERVAL_SEC)
+        try:
+          client.add_orders_to_supply(new_supply.wb_supply_id, wb_order_ids)
+          retry_exc = None
+        except WBApiError as second:
+          retry_exc = second
+      if retry_exc:
+        if created_now and not new_supply.orders.exists():
+          new_supply.delete()
+        raise SupplyFlowError(
+          parse_wb_supply_move_error(retry_exc),
+          code="wb_move_failed",
+        ) from retry_exc
 
     old_supply_ids: set[int] = set()
     for order in wh_orders:

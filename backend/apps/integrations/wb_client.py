@@ -19,9 +19,10 @@ SUPPLY_ORDERS_BATCH_SIZE = 100
 
 
 class WBApiError(Exception):
-  def __init__(self, message: str, status_code: int | None = None):
+  def __init__(self, message: str, status_code: int | None = None, code: str = ""):
     super().__init__(message)
     self.status_code = status_code
+    self.code = code or ""
 
 
 def _looks_like_order_meta_item(item: dict) -> bool:
@@ -127,13 +128,29 @@ class WBClient:
       raise WBApiError(f"Ошибка сети WB API: {exc}") from exc
 
     if response.status_code == 401:
-      raise WBApiError("Токен WB недействителен", status_code=401)
+      raise WBApiError("Токен WB недействителен", status_code=401, code="unauthorized")
     if response.status_code == 429:
-      raise WBApiError("Превышен лимит запросов WB API", status_code=429)
+      raise WBApiError("Превышен лимит запросов WB API", status_code=429, code="rate_limit")
     if response.status_code >= 400:
+      payload: dict = {}
+      try:
+        raw = response.json()
+        if isinstance(raw, dict):
+          payload = raw
+      except ValueError:
+        payload = {}
+      wb_code = str(payload.get("code") or payload.get("title") or payload.get("error") or "")
+      wb_message = str(
+        payload.get("message")
+        or payload.get("detail")
+        or payload.get("error")
+        or response.text[:300]
+        or f"WB API ошибка {response.status_code}",
+      )
       raise WBApiError(
-        f"WB API ошибка {response.status_code}: {response.text[:200]}",
+        f"WB API ошибка {response.status_code}: {wb_message}",
         status_code=response.status_code,
+        code=wb_code,
       )
 
     if not response.content:
@@ -431,16 +448,28 @@ class WBClient:
     raise WBApiError("Не удалось создать поставку WB")
 
   def add_orders_to_supply(self, supply_id: str, order_ids: list[int]) -> None:
-    """PATCH /api/marketplace/v3/supplies/{supplyId}/orders — добавить заказы в поставку."""
+    """PATCH .../supplies/{supplyId}/orders — добавить или перенести заказы в поставку."""
     if not order_ids:
       raise WBApiError("Не переданы ID заказов")
     for offset in range(0, len(order_ids), SUPPLY_ORDERS_BATCH_SIZE):
-      batch = order_ids[offset : offset + SUPPLY_ORDERS_BATCH_SIZE]
-      self._request(
-        "PATCH",
+      batch = {"orders": [int(item) for item in order_ids[offset:offset + SUPPLY_ORDERS_BATCH_SIZE]]}
+      last_error: WBApiError | None = None
+      added = False
+      for path in (
         f"/api/marketplace/v3/supplies/{supply_id}/orders",
-        json={"orders": batch},
-      )
+        f"/api/v3/supplies/{supply_id}/orders",
+      ):
+        try:
+          self._request("PATCH", path, json=batch)
+          added = True
+          break
+        except WBApiError as exc:
+          last_error = exc
+          if exc.status_code in (400, 404, 405, 409):
+            continue
+          raise
+      if not added:
+        raise last_error or WBApiError("WB не принял заказы в поставку")
       if offset + SUPPLY_ORDERS_BATCH_SIZE < len(order_ids):
         time.sleep(REQUEST_INTERVAL_SEC)
 
