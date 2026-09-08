@@ -13,6 +13,7 @@ from apps.sellers.models import Seller, SellerOzonWarehouse, SellerWarehouse
 from apps.sellers.services.invite import ensure_seller_invite
 from apps.warehouse.models import ArticleIntakeSession, Cell, Product, StockOperation
 from apps.warehouse.services.catalog_fetch import CatalogError, barcode_lookup_variants, normalize_barcode
+from apps.warehouse.services.catalog_fetch_ozon import fetch_ozon_item_by_barcode
 from apps.warehouse.services.catalog_groups import (
   find_group_by_barcode,
   group_key_for_item,
@@ -262,6 +263,9 @@ def scan_barcode(
       "session": serialize_session(session),
     }
 
+  if mp == OZON:
+    return _preview_ozon_barcode(session, seller, barcode)
+
   try:
     anchor, group_items, meta = find_group_by_barcode(seller, mp, barcode)
   except CatalogError as exc:
@@ -313,6 +317,58 @@ def scan_barcode(
   }
 
 
+def _preview_ozon_barcode(session: ArticleIntakeSession, seller: Seller, barcode: str) -> dict:
+  try:
+    item, meta = fetch_ozon_item_by_barcode(seller, barcode)
+  except CatalogError as exc:
+    raise ArticleIntakeError(str(exc)) from exc
+
+  group_key = str(meta.get("group_key") or f"ozon:barcode:{item.barcode}")
+  if _group_has_session_cells(session, group_key):
+    product = _find_product_by_barcode(seller, OZON, item.barcode)
+    if product and _product_in_session(session, product):
+      return {
+        "action": "known",
+        "product": _serialize_product(product),
+        "session": serialize_session(session),
+      }
+    raise ArticleIntakeError("Этот баркод уже принят в этой сессии — измените количество в таблице")
+
+  existing_map = _existing_products_map(seller, OZON)
+  existing = existing_map.get(item.barcode)
+  if existing and int(existing.quantity or 0) > 0 and not _product_in_session(session, existing):
+    raise ArticleIntakeError(
+      f"Баркод {item.barcode} уже на складе CRM ({existing.quantity} шт., "
+      f"яч. №{existing.cell.number if existing.cell_id else '—'}). "
+      "Приёмка не создаёт вторую ячейку — правьте остаток в карточке товара."
+    )
+  cell_number = ""
+  if existing and existing.cell_id:
+    cell_number = existing.cell.number
+  else:
+    cell_number = str(_next_cell_number(seller, OZON))
+
+  fbs_qty = int(meta.get("ozon_fbs_quantity") or 0)
+  preview = serialize_group_preview(
+    OZON,
+    item,
+    [item],
+    scanned_barcode=item.barcode,
+    scanned_quantity=fbs_qty,
+    cell_numbers={item.barcode: cell_number},
+    existing_barcodes={item.barcode} if existing else set(),
+    article_label=str(meta.get("article_label") or item.vendor_code or item.barcode),
+  )
+  preview["group_key"] = group_key
+  preview["ozon_fbs_quantity"] = fbs_qty
+  preview["group_size"] = 1
+  return {
+    "action": "preview",
+    "preview": preview,
+    "session": serialize_session(session),
+  }
+
+
 @transaction.atomic
 def confirm_group(
   session: ArticleIntakeSession,
@@ -325,6 +381,14 @@ def confirm_group(
   session = _require_editable(
     ArticleIntakeSession.objects.select_for_update().select_related("seller").get(pk=session.pk)
   )
+  if normalize_marketplace(session.marketplace) == OZON:
+    return _confirm_ozon_barcode(
+      session,
+      scanned_barcode=scanned_barcode,
+      items=items,
+      user=user,
+    )
+
   seller = session.seller
   mp = session.marketplace
   scanned_barcode = normalize_barcode(scanned_barcode)
@@ -484,6 +548,174 @@ def confirm_group(
     "created_products": created_products,
     "created_cells": created_cells,
     "products": created_items,
+    "session": serialize_session(session),
+  }
+
+
+def _payload_quantity(row: dict) -> int:
+  try:
+    return max(0, int(row.get("quantity") or 0))
+  except (TypeError, ValueError):
+    return 0
+
+
+def _set_product_quantity(product: Product, quantity: int, user, comment: str) -> None:
+  old_qty = int(product.quantity or 0)
+  new_qty = max(0, quantity)
+  if new_qty == old_qty:
+    return
+  product.quantity = new_qty
+  product.save(update_fields=["quantity", "updated_at"])
+  delta = new_qty - old_qty
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.INTAKE if delta > 0 else StockOperation.OperationType.ADJUSTMENT,
+    quantity=abs(delta),
+    performed_by=user,
+    comment=comment,
+  )
+
+
+def _confirm_ozon_barcode(
+  session: ArticleIntakeSession,
+  *,
+  scanned_barcode: str,
+  items: list[dict],
+  user=None,
+) -> dict:
+  seller = session.seller
+  scanned_barcode = normalize_barcode(scanned_barcode)
+  try:
+    item, meta = fetch_ozon_item_by_barcode(seller, scanned_barcode)
+  except CatalogError as exc:
+    raise ArticleIntakeError(str(exc)) from exc
+
+  group_key = str(meta.get("group_key") or f"ozon:barcode:{item.barcode}")
+  if group_key in (session.confirmed_group_keys or []):
+    raise ArticleIntakeError("Этот баркод уже подтверждён в этой приёмке")
+
+  payload_by_barcode = {
+    normalize_barcode(str(row.get("barcode") or "")): row
+    for row in items
+    if normalize_barcode(str(row.get("barcode") or ""))
+  }
+  row = payload_by_barcode.get(item.barcode) or payload_by_barcode.get(scanned_barcode) or {}
+  if row.get("excluded"):
+    raise ArticleIntakeError("Нельзя исключить отсканированный баркод")
+  quantity = _payload_quantity(row)
+  cell_number = str(row.get("cell_number") or "").strip()
+
+  existing_map = _existing_products_map(seller, OZON)
+  existing = existing_map.get(item.barcode)
+
+  if existing and _product_in_session(session, existing):
+    raise ArticleIntakeError("Этот баркод уже принят в этой сессии")
+
+  if existing and int(existing.quantity or 0) > 0 and not _product_in_session(session, existing):
+    raise ArticleIntakeError(
+      f"Баркод {item.barcode} уже на складе ({existing.quantity} шт.) — "
+      "нельзя пересоздать ячейку через приёмку",
+    )
+
+  if existing:
+    if not cell_number:
+      cell_number = existing.cell.number if existing.cell_id else _next_cell_number(seller, OZON)
+    cell, _ = Cell.objects.get_or_create(
+      seller=seller,
+      marketplace=OZON,
+      number=cell_number,
+      defaults={"is_occupied": False},
+    )
+    existing.name = item.title
+    existing.cell = cell
+    existing.requires_marking = item.requires_marking
+    existing.wb_nm_id = item.wb_nm_id
+    existing.vendor_code = item.vendor_code
+    existing.tech_size = item.tech_size
+    existing.wb_size = item.wb_size
+    existing.photo_url = item.photo_url
+    existing.color_label = item.color_label
+    existing.article_group_key = group_key
+    existing.save(
+      update_fields=[
+        "name",
+        "cell",
+        "requires_marking",
+        "wb_nm_id",
+        "vendor_code",
+        "tech_size",
+        "wb_size",
+        "photo_url",
+        "color_label",
+        "article_group_key",
+        "updated_at",
+      ]
+    )
+    product = existing
+  else:
+    if not cell_number:
+      cell_number = _next_cell_number(seller, OZON)
+    cell, _ = Cell.objects.get_or_create(
+      seller=seller,
+      marketplace=OZON,
+      number=cell_number,
+      defaults={"is_occupied": False},
+    )
+    product = Product.objects.create(
+      seller=seller,
+      marketplace=OZON,
+      barcode=item.barcode,
+      name=item.title,
+      cell=cell,
+      quantity=0,
+      requires_marking=item.requires_marking,
+      wb_nm_id=item.wb_nm_id,
+      vendor_code=item.vendor_code,
+      tech_size=item.tech_size,
+      wb_size=item.wb_size,
+      photo_url=item.photo_url,
+      color_label=item.color_label,
+      article_group_key=group_key,
+    )
+
+  _set_product_quantity(
+    product,
+    quantity,
+    user,
+    f"Приёмка Ozon: остаток CRM {quantity} шт. (FBS в ЛК: {meta.get('ozon_fbs_quantity') or 0})",
+  )
+  refresh_cell_occupied(product.cell)
+
+  keys = list(session.confirmed_group_keys or [])
+  keys.append(group_key)
+  session.confirmed_group_keys = keys
+  session.active_group_key = group_key
+  session.scan_count += 1
+  session.save(update_fields=["confirmed_group_keys", "active_group_key", "scan_count"])
+  _recalc_session_totals(session)
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.INTAKE,
+    message=(
+      f"Приёмка Ozon #{session.id}: баркод {item.barcode}, "
+      f"яч. {product.cell.number if product.cell_id else '—'}, {quantity} шт."
+    ),
+    details={
+      "session_id": session.id,
+      "group_key": group_key,
+      "barcode": item.barcode,
+      "quantity": quantity,
+      "ozon_fbs_quantity": meta.get("ozon_fbs_quantity") or 0,
+    },
+  )
+
+  return {
+    "group_key": group_key,
+    "created_products": 1,
+    "created_cells": [product.cell.number] if product.cell_id else [],
+    "products": [_serialize_product(product)],
     "session": serialize_session(session),
   }
 

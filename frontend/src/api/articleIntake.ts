@@ -63,6 +63,7 @@ export type ArticleGroupPreview = {
   scanned_barcode: string
   scanned_quantity: number
   next_cell_number?: number
+  ozon_fbs_quantity?: number
   items: ArticleGroupPreviewItem[]
 }
 
@@ -142,7 +143,7 @@ export function confirmArticleGroup(
   sessionId: number,
   payload: {
     scanned_barcode: string
-    items: Array<{ barcode: string; cell_number: string; excluded?: boolean }>
+    items: Array<{ barcode: string; cell_number: string; excluded?: boolean; quantity?: number }>
   },
 ) {
   return apiFetch<{

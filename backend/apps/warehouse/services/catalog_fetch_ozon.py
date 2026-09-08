@@ -484,6 +484,86 @@ def fetch_ozon_group_by_barcode(
   }
 
 
+def _fbs_quantity_for_offer(seller: Seller, offer_id: str, sku: str = "") -> int:
+  """Сумма present по складам FBS селлера для одного offer/sku."""
+  client = ozon_client_for_seller(seller)
+  rows: list[dict] = []
+  if offer_id:
+    try:
+      rows = client.fbs_stocks_by_offer_ids([offer_id])
+    except OzonApiError:
+      rows = []
+  if not rows and sku:
+    try:
+      rows = client.fbs_stocks_by_skus([sku])
+    except OzonApiError:
+      rows = []
+  warehouses = list(SellerOzonWarehouse.objects.filter(seller=seller, is_enabled=True))
+  allowed = {int(wh.ozon_warehouse_id) for wh in warehouses} if warehouses else None
+  total = 0
+  for row in rows:
+    try:
+      warehouse_id = int(row.get("warehouse_id") or 0)
+    except (TypeError, ValueError):
+      continue
+    if allowed and warehouse_id not in allowed:
+      continue
+    try:
+      total += max(0, int(row.get("present") or 0))
+    except (TypeError, ValueError):
+      continue
+  return total
+
+
+def fetch_ozon_item_by_barcode(
+  seller: Seller,
+  barcode: str,
+) -> tuple[CatalogBarcodeItem, dict]:
+  """Один баркод из ЛК Ozon + остаток FBS. Без группы артикул+цвет."""
+  barcode = normalize_barcode(barcode)
+  if not barcode:
+    raise CatalogError("Пустой баркод")
+  try:
+    cards = _load_ozon_cards(seller)
+  except (OzonCountsError, OzonApiError) as exc:
+    raise CatalogError(str(exc)) from exc
+  items, card_by_barcode = _parse_cards_to_items(cards)
+  search_aliases = set(_ozon_barcode_aliases(barcode))
+  search_aliases.add(barcode)
+
+  anchor = next((item for item in items if item.barcode in search_aliases), None)
+  if not anchor:
+    anchor = next(
+      (
+        item
+        for item in items
+        if (item.vendor_code or "").strip() in search_aliases
+      ),
+      None,
+    )
+  if not anchor:
+    raise CatalogError(
+      "Баркод не найден в каталоге Ozon. Проверьте ключи API селлера и что товар "
+      "есть в ЛК Ozon (сканируйте баркод с этикетки FBS или offer_id)."
+    )
+
+  card = card_by_barcode.get(anchor.barcode) or {}
+  sku = str(card.get("sku") or "").strip()
+  offer_id = (anchor.vendor_code or "").strip()
+  try:
+    fbs_qty = _fbs_quantity_for_offer(seller, offer_id, sku)
+  except (OzonCountsError, OzonApiError):
+    fbs_qty = 0
+
+  return anchor, {
+    "article_label": offer_id or anchor.barcode,
+    "group_size": 1,
+    "group_key": f"ozon:barcode:{anchor.barcode}",
+    "ozon_fbs_quantity": fbs_qty,
+    "offer_id": offer_id,
+  }
+
+
 def _stock_map(
   rows: list[dict],
   warehouses: list[SellerOzonWarehouse],

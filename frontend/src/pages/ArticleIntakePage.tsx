@@ -52,7 +52,7 @@ export function ArticleIntakePage() {
   const [ozonWarehouses, setOzonWarehouses] = useState<SellerOzonWarehouse[]>([])
   const [pushWarehouseId, setPushWarehouseId] = useState<number | ''>('')
   const [pushMode, setPushMode] = useState<'replace' | 'add'>('replace')
-  const [preview, setPreview] = useState<ArticleGroupPreview | null>(null)
+  const [previewQty, setPreviewQty] = useState('0')
   const [previewItems, setPreviewItems] = useState<ArticleGroupPreviewItem[]>([])
   const [zoomPhotoUrl, setZoomPhotoUrl] = useState<string | null>(null)
   const [activeGroupKey, setActiveGroupKey] = useState('')
@@ -154,6 +154,10 @@ export function ArticleIntakePage() {
     }
   }, [activeGroupKey, session?.products, syncQtyDraft])
 
+  useEffect(() => {
+    if (isOzon) setEntryMode('manual')
+  }, [isOzon])
+
   async function startNew() {
     const name = companyName.trim()
     if (!name && !existingSellerId) {
@@ -196,6 +200,9 @@ export function ArticleIntakePage() {
       if (result.action === 'preview') {
         setPreview(result.preview)
         setPreviewItems(result.preview.items.map((item) => ({ ...item })))
+        setPreviewQty(
+          String(result.preview.ozon_fbs_quantity ?? result.preview.items[0]?.quantity ?? 0),
+        )
         return
       }
       if (result.action === 'incremented' || result.action === 'added') {
@@ -243,6 +250,7 @@ export function ArticleIntakePage() {
 
   async function handleConfirmGroup() {
     if (!activeId || !preview) return
+    const crmQty = Math.max(0, parseInt(previewQty, 10) || 0)
     const activeCount = previewItems.filter((item) => !item.excluded).length
     if (activeCount === 0) {
       setResultModal({ kind: 'error', title: 'Ошибка', message: 'Оставьте хотя бы один размер' })
@@ -256,16 +264,20 @@ export function ArticleIntakePage() {
           barcode: item.barcode,
           cell_number: item.cell_number,
           excluded: item.excluded,
+          quantity: item.barcode === preview.scanned_barcode ? crmQty : 0,
         })),
       })
       applySession(result.session)
       setPreview(null)
       setPreviewItems([])
       setActiveGroupKey(result.group_key)
+      const cellLabel = result.created_cells?.[0] ? `ячейка №${result.created_cells[0]}` : 'ячейка создана'
       setResultModal({
         kind: 'success',
-        title: 'Ячейки созданы',
-        message: `Создано ${result.created_products} ячеек.\nТеперь внесите остатки по размерам.`,
+        title: isOzon ? 'Принято на остатки CRM' : 'Ячейки созданы',
+        message: isOzon
+          ? `${cellLabel}, количество: ${crmQty} шт.\nМожно сразу поправить число в таблице.`
+          : `Создано ${result.created_products} ячеек.\nТеперь внесите остатки по размерам.`,
       })
       focusBarcode()
     } catch (err) {
@@ -292,7 +304,9 @@ export function ArticleIntakePage() {
       setResultModal({
         kind: 'success',
         title: 'Остатки сохранены',
-        message: `Группа сохранена.\nОбновлено позиций: ${result.updated}`,
+        message: isOzon
+          ? `Количество в CRM обновлено. Позиций: ${result.updated}`
+          : `Группа сохранена.\nОбновлено позиций: ${result.updated}`,
       })
     } catch (err) {
       setResultModal({
@@ -443,7 +457,11 @@ export function ArticleIntakePage() {
         <header className="page__header">
           <div>
             <h1>Приёмка с ячейками по артикулам</h1>
-            <p>Скан → проверка артикула и цвета → ячейки → остатки на фулфилменте → выгрузка на {mpName}</p>
+            <p>
+              {isOzon
+                ? 'Скан баркода → остаток FBS из ЛК Ozon → сверка и количество в CRM → ячейка'
+                : `Скан → проверка артикула и цвета → ячейки → остатки на фулфилменте → выгрузка на ${mpName}`}
+            </p>
           </div>
           <Link to="/warehouse" className="btn btn--secondary" {...uiHint('Вернуться на главную страницу склада.')}>← Склад</Link>
         </header>
@@ -544,7 +562,7 @@ export function ArticleIntakePage() {
         <>
           <section className="art-card art-scan">
             <div className="art-stats">
-              <span>Групп: <strong>{session.confirmed_groups_count}</strong></span>
+              <span>{isOzon ? 'Баркодов' : 'Групп'}: <strong>{session.confirmed_groups_count}</strong></span>
               <span>Товаров: <strong>{session.products_count}</strong></span>
               <span>На складе: <strong>{session.total_units} шт.</strong></span>
             </div>
@@ -584,12 +602,14 @@ export function ArticleIntakePage() {
                         </button>
                       </div>
                     </div>
-                    <button type="submit" className="btn btn--primary art-scan-row__submit" disabled={loading} {...uiHint(entryMode === 'piece' && activeProducts.length > 0 ? 'Добавить +1 к количеству отсканированного баркода.' : 'Проверить баркод и создать или дополнить группу артикула.')}>
+                    <button type="submit" className="btn btn--primary art-scan-row__submit" disabled={loading} {...uiHint(entryMode === 'piece' && activeProducts.length > 0 ? 'Добавить +1 к количеству отсканированного баркода.' : isOzon ? 'Найти баркод в ЛК Ozon и показать остаток FBS.' : 'Проверить баркод и создать или дополнить группу артикула.')}>
                       {entryMode === 'piece' && activeProducts.length > 0 ? '+1 скан' : 'Проверить'}
                     </button>
                   </div>
                   <p className="art-muted">
-                    Новый цвет — проверка группы и создание ячеек. После ячеек — скан +1 или ручной ввод, затем «Сохранить количество».
+                    {isOzon
+                      ? 'Сканируйте баркод. CRM найдёт его в Ozon и покажет остаток FBS. После сверки подтвердите — товар попадёт в ячейку, количество можно поправить.'
+                      : 'Новый цвет — проверка группы и создание ячеек. После ячеек — скан +1 или ручной ввод, затем «Сохранить количество».'}
                   </p>
                 </form>
 
@@ -597,17 +617,25 @@ export function ArticleIntakePage() {
                   <div className="art-qty-panel">
                     <div className="art-qty-panel__head">
                       <label className="art-field art-field--inline">
-                        Цвет / группа
+                        {isOzon ? 'Баркод в приёмке' : 'Цвет / группа'}
                         <select
                           value={activeGroupKey}
                           onChange={(e) => setActiveGroupKey(e.target.value)}
                         >
-                          {groups.map((key) => (
-                            <option key={key} value={key}>{key.replace(/^ozon:\d+:/, '')}</option>
-                          ))}
+                          {groups.map((key) => {
+                            const product = session.products?.find((item) => item.article_group_key === key)
+                            const ozonLabel = product
+                              ? `${product.barcode}${product.tech_size ? ` · ${product.tech_size}` : ''}`
+                              : key
+                            return (
+                              <option key={key} value={key}>
+                                {isOzon ? ozonLabel : key.replace(/^ozon:\d+:/, '')}
+                              </option>
+                            )
+                          })}
                         </select>
                       </label>
-                      <span {...hintWrapProps('Сохранить введённые количества для всех размеров выбранной группы.')}>
+                      <span {...hintWrapProps(isOzon ? 'Сохранить количество в CRM для выбранного баркода.' : 'Сохранить введённые количества для всех размеров выбранной группы.')}>
                         <button
                           type="button"
                           className="btn btn--primary"
@@ -744,6 +772,74 @@ export function ArticleIntakePage() {
       {preview && (
         <div className="art-modal-backdrop" role="presentation">
           <div className="art-modal" role="dialog" aria-modal="true">
+            {isOzon ? (
+              <>
+                <div className="art-modal__head">
+                  <div className="art-modal__head-text">
+                    <h2>Баркод найден в Ozon</h2>
+                    <p className="art-modal__meta">
+                      Offer <strong>{preview.vendor_code || preview.article_label}</strong>
+                      {preview.color_label && preview.color_label !== '—' ? <> {' · '}{preview.color_label}</> : null}
+                      {previewItems[0]?.size_label && previewItems[0].size_label !== '—' ? <> {' · '}{previewItems[0].size_label}</> : null}
+                    </p>
+                    <p className="art-modal__meta">{preview.title}</p>
+                    <p className="art-modal__meta">
+                      Баркод <code>{preview.scanned_barcode}</code>
+                      {' · '}ячейка <strong>№ {previewItems[0]?.cell_number || '—'}</strong>
+                    </p>
+                    <p className="art-modal__meta">
+                      Остаток FBS в ЛК Ozon: <strong>{preview.ozon_fbs_quantity ?? previewItems[0]?.quantity ?? 0} шт.</strong>
+                    </p>
+                  </div>
+                  {(preview.photo_url || previewItems[0]?.photo_url) && (
+                    <button
+                      type="button"
+                      className="art-modal__photo-btn"
+                      {...uiHint('Увеличить фото товара.')}
+                      onClick={() => setZoomPhotoUrl(preview.photo_url || previewItems[0]?.photo_url || null)}
+                    >
+                      <img src={preview.photo_url || previewItems[0]?.photo_url} alt="" className="art-modal__photo" />
+                    </button>
+                  )}
+                </div>
+                <label className="art-field">
+                  Количество в CRM
+                  <input
+                    className="art-qty-input"
+                    type="number"
+                    min={0}
+                    value={previewQty}
+                    onChange={(e) => setPreviewQty(e.target.value)}
+                  />
+                </label>
+                <p className="art-muted">Можно оставить как в Ozon или поправить после сверки. Потом количество тоже можно изменить в таблице.</p>
+                <div className="art-modal__actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={loading}
+                    onClick={() => {
+                      setPreview(null)
+                      setPreviewItems([])
+                      focusBarcode()
+                    }}
+                    {...uiHint('Закрыть без приёмки на остатки CRM.')}
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={loading}
+                    onClick={() => void handleConfirmGroup()}
+                    {...uiHint('Записать остаток в CRM и создать ячейку для этого баркода.')}
+                  >
+                    Принять на остатки
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
             <div className="art-modal__head">
               <div className="art-modal__head-text">
                 <h2>Проверка: артикул + цвет</h2>
@@ -847,6 +943,8 @@ export function ArticleIntakePage() {
                 Сохранить ячейки
               </button>
             </div>
+              </>
+            )}
           </div>
         </div>
       )}
