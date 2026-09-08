@@ -46,6 +46,14 @@ export function orderChzPending(order: AssemblyOrder): boolean {
   return Boolean(order.requires_marking && order.marking_verify_status === 'pending')
 }
 
+export function orderNeedsChzVerify(order: AssemblyOrder): boolean {
+  if (order.marking_verify_status === 'error') return false
+  if (orderCanDeliver(order)) return false
+  if (order.marking_verify_status === 'pending') return true
+  if (!order.requires_marking) return false
+  return !order.marking_bound
+}
+
 export function assemblyDeliveryUnlocked(status: {
   errors_count: number
   ready: AssemblyOrder[]

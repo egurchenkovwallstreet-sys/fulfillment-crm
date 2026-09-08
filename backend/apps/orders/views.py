@@ -798,9 +798,15 @@ class AssemblyVerifyMarkingView(APIView):
     for item in results:
       item["order"] = orders_by_id.get(item["order_id"])
 
+    verified_count = sum(1 for item in results if item["status"] == "verified")
+    error_count = sum(1 for item in results if item["status"] == "error")
+    pending_count = sum(1 for item in results if item["status"] == "pending")
     return Response({
       "success": True,
       "results": results,
+      "verified_count": verified_count,
+      "error_count": error_count,
+      "pending_count": pending_count,
     })
 
 

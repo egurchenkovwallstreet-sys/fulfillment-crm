@@ -186,6 +186,9 @@ export interface MarkingVerifyItem {
 export interface VerifyMarkingResult {
   success: boolean
   results: MarkingVerifyItem[]
+  verified_count?: number
+  error_count?: number
+  pending_count?: number
 }
 
 export interface ReplaceOrderResult {

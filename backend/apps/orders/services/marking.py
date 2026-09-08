@@ -122,7 +122,6 @@ MARKING_VERIFY_SUCCESS = frozenset({
 
 MARKING_VERIFY_PENDING = frozenset({
   "pending",
-  "deadlineexceeded",
 })
 
 MARKING_VERIFY_ERROR = frozenset({
@@ -132,6 +131,7 @@ MARKING_VERIFY_ERROR = frozenset({
   "failed",
   "rejected",
   "declined",
+  "deadlineexceeded",
   "sgtininvalidformat",
   "sgtinnotfound",
   "sgtinemitted",
@@ -151,6 +151,7 @@ _MARKING_VERIFY_MESSAGES: dict[str, str] = {
   "failed": "WB отклонил код ЧЗ. Замените товар.",
   "rejected": "WB отклонил код ЧЗ. Замените товар.",
   "declined": "WB отклонил код ЧЗ. Замените товар.",
+  "deadlineexceeded": "WB не подтвердил Честный знак вовремя. Проверьте код в ЛК WB или замените товар.",
   "sgtininvalidformat": "Неверный формат кода ЧЗ. Отсканируйте DataMatrix заново.",
   "sgtinnotfound": "Код ЧЗ не найден в системе «Честный знак». Замените товар.",
   "sgtinemitted": "Код ЧЗ выпущен, но не введён в оборот. Замените товар.",
