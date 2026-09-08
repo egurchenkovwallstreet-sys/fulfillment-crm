@@ -297,6 +297,7 @@ export type InventoryPayload = {
   cell_mode: 'auto' | 'manual'
   cell_id?: number | null
   name?: string
+  distribute?: boolean
 }
 
 export type InventoryResponse = {
@@ -305,6 +306,8 @@ export type InventoryResponse = {
   message: string
   physical_quantity: number
   reserved_new_orders: number
+  reserved_label?: string
+  distribute?: boolean
   crm_quantity_before: number
   crm_quantity_after: number
   wb_target_quantity: number
@@ -324,6 +327,7 @@ export type InventoryRetryPayload = {
   barcode: string
   crm_quantity: number
   warehouse_ids: number[]
+  distribute?: boolean
 }
 
 export type IntakeRetryPayload = {

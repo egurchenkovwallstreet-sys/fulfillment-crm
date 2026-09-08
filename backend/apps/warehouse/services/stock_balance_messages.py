@@ -12,10 +12,11 @@ def stock_balance_breakdown_message(
   restock_required: bool = False,
   physical_quantity: int | None = None,
   intake_quantity: int | None = None,
+  reserved_label: str = "«Новые»",
 ) -> str:
   parts = [
     f"CRM: было {crm_quantity_before} → стало {crm_quantity_after} шт.",
-    f"«Новые»: {reserved_new_orders} шт.",
+    f"{reserved_label}: {reserved_new_orders} шт.",
     f"ЛК WB: {wb_target_quantity} шт.",
   ]
   if physical_quantity is not None:

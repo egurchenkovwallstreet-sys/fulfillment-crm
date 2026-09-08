@@ -290,6 +290,7 @@ class InventorySerializer(serializers.Serializer):
   cell_mode = serializers.ChoiceField(choices=["auto", "manual"], default="auto")
   cell_id = serializers.IntegerField(required=False, allow_null=True)
   name = serializers.CharField(required=False, allow_blank=True, max_length=500)
+  distribute = serializers.BooleanField(required=False, default=False)
 
   def validate_seller_id(self, value):
     if not Seller.objects.filter(pk=value, is_active=True).exists():
@@ -303,11 +304,14 @@ class InventorySerializer(serializers.Serializer):
     marketplace = self.context.get("marketplace") or "wb"
     if marketplace == OZON:
       attrs["warehouse_ids"] = []
+      attrs["distribute"] = False
       return attrs
 
     seller_id = attrs["seller_id"]
     warehouse_ids = list(dict.fromkeys(attrs.get("warehouse_ids") or []))
     attrs["warehouse_ids"] = warehouse_ids
+    if attrs.get("distribute"):
+      return attrs
     if not warehouse_ids:
       raise serializers.ValidationError({"warehouse_ids": "Выберите хотя бы один склад WB"})
 
@@ -328,13 +332,32 @@ class InventoryRetrySerializer(serializers.Serializer):
   crm_quantity = serializers.IntegerField(min_value=0)
   warehouse_ids = serializers.ListField(
     child=serializers.IntegerField(),
-    allow_empty=False,
+    required=False,
+    allow_empty=True,
   )
+  distribute = serializers.BooleanField(required=False, default=False)
 
   def validate_seller_id(self, value):
     if not Seller.objects.filter(pk=value, is_active=True).exists():
       raise serializers.ValidationError("Селлер не найден или неактивен")
     return value
+
+  def validate(self, attrs):
+    from apps.integrations.marketplace import OZON
+
+    marketplace = self.context.get("marketplace") or "wb"
+    if marketplace == OZON:
+      attrs["warehouse_ids"] = []
+      attrs["distribute"] = False
+      return attrs
+    if attrs.get("distribute"):
+      attrs["warehouse_ids"] = list(dict.fromkeys(attrs.get("warehouse_ids") or []))
+      return attrs
+    warehouse_ids = list(dict.fromkeys(attrs.get("warehouse_ids") or []))
+    if not warehouse_ids:
+      raise serializers.ValidationError({"warehouse_ids": "Выберите хотя бы один склад WB"})
+    attrs["warehouse_ids"] = warehouse_ids
+    return attrs
 
 
 class IntakeRetrySerializer(serializers.Serializer):

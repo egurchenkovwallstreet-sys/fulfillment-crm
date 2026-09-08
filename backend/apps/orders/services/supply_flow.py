@@ -1304,6 +1304,14 @@ def picking_stage_orders_queryset(seller: Seller) -> QuerySet:
   )
 
 
+def count_picking_orders_for_barcode(seller: Seller, barcode: str) -> int:
+  """Заказы вкладки «На сборке» по баркоду на обслуживаемых FBS-складах."""
+  barcode = (barcode or "").strip()
+  if not barcode:
+    return 0
+  return picking_stage_orders_queryset(seller).filter(barcode=barcode).count()
+
+
 def count_picking_orders_for_barcode_on_warehouse(
   seller: Seller,
   barcode: str,

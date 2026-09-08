@@ -33,6 +33,7 @@ export function InventoryPage() {
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [warehouseIds, setWarehouseIds] = useState<number[]>([])
   const [sessionActive, setSessionActive] = useState(false)
+  const [distributeMode, setDistributeMode] = useState(false)
   const [completedBarcodes, setCompletedBarcodes] = useState<Set<string>>(new Set())
   const [resultModal, setResultModal] = useState<StockBalanceModalData | null>(null)
   const [pendingRetry, setPendingRetry] = useState<{
@@ -50,6 +51,10 @@ export function InventoryPage() {
   const [sessionCount, setSessionCount] = useState(0)
 
   const sellerName = sellers.find((s) => s.id === sellerId)?.company_name ?? ''
+  const workingWarehouses = useMemo(
+    () => warehouses.filter((wh) => wh.is_enabled),
+    [warehouses],
+  )
 
   const cellLabelData = useMemo((): CellLabelData | null => {
     if (!lookup || !barcode.trim()) return null
@@ -136,6 +141,29 @@ export function InventoryPage() {
       showError('Склады', 'Выберите хотя бы один FBS-склад')
       return
     }
+    setDistributeMode(false)
+    setSessionActive(true)
+    setSessionCount(0)
+    setCompletedBarcodes(new Set())
+    setResultModal(null)
+    setPendingRetry(null)
+    resetBarcodeForm()
+  }
+
+  function startDistributeSession() {
+    if (!sellerId) {
+      showError('Инвентаризация', 'Выберите селлера')
+      return
+    }
+    if (workingWarehouses.length < 1) {
+      showError(
+        'Склады',
+        'Нет рабочих FBS-складов. Включите склады в карточке клиента или в сборке и повторите.',
+      )
+      return
+    }
+    setWarehouseIds(workingWarehouses.map((wh) => wh.id))
+    setDistributeMode(true)
     setSessionActive(true)
     setSessionCount(0)
     setCompletedBarcodes(new Set())
@@ -146,6 +174,7 @@ export function InventoryPage() {
 
   function finishSession() {
     setSessionActive(false)
+    setDistributeMode(false)
     setWarehouseIds([])
     setCompletedBarcodes(new Set())
     setResultModal(null)
@@ -221,6 +250,7 @@ export function InventoryPage() {
       crmQuantityBefore: result.crm_quantity_before,
       crmQuantityAfter: result.crm_quantity_after,
       reservedNewOrders: result.reserved_new_orders,
+      reservedLabel: result.reserved_label,
       wbQuantityTarget: result.wb_target_quantity,
       wbQuantityActual: result.wb_total_actual,
       physicalQuantity: result.physical_quantity,
@@ -251,6 +281,7 @@ export function InventoryPage() {
         barcode: pendingRetry.barcode,
         crm_quantity: pendingRetry.crmQuantity,
         warehouse_ids: warehouseIds,
+        distribute: distributeMode,
       })
       if (retried.verified) {
         setResultModal(null)
@@ -298,6 +329,7 @@ export function InventoryPage() {
         cell_mode: lookup.exists ? 'auto' : cellMode,
         cell_id: !lookup.exists && cellMode === 'manual' ? Number(cellId) : null,
         name: productName,
+        distribute: distributeMode,
       })
       setSessionCount((value) => value + 1)
       setCompletedBarcodes((prev) => new Set(prev).add(trimmed))
@@ -323,6 +355,7 @@ export function InventoryPage() {
   }
 
   const selectedWarehouses = warehouses.filter((wh) => warehouseIds.includes(wh.id))
+  const sessionWarehouses = distributeMode ? workingWarehouses : selectedWarehouses
 
   return (
     <div className="page inventory-page">
@@ -330,7 +363,9 @@ export function InventoryPage() {
         <div>
           <h1>Инвентаризация</h1>
           <p>
-            Скан баркода → факт на полке в CRM → в ЛК WB минус «Новые». Завершение — отдельной кнопкой.
+            {isOzon
+              ? 'Скан баркода → факт на полке в CRM.'
+              : 'Обычная: факт в CRM, в WB минус «Новые» по выбранным складам. С распределением: все рабочие склады, резерв «Новые»+«На сборке», свободное делится поровну.'}
           </p>
         </div>
         <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
@@ -395,18 +430,41 @@ export function InventoryPage() {
                   Остаток будет распределён поровну между {warehouseIds.length} складами
                 </p>
               )}
+              {!isOzon && (
+                <p className="inventory-hint">
+                  «Инвентаризация с распределением» берёт все рабочие склады (включённые в сборке), склады выбирать не нужно.
+                </p>
+              )}
             </div>
           </div>
-          <span {...hintWrapProps('Начать сессию пересчёта: выберите селлера и хотя бы один FBS-склад.')}>
-            <button
-              type="button"
-              className="btn btn--danger inventory-btn inventory-btn--large"
-              disabled={!sellerId || (!isOzon && warehouseIds.length < 1) || loading}
-              onClick={startSession}
-            >
-              Начать инвентаризацию
-            </button>
-          </span>
+          <div className="inventory-setup__actions">
+            <span {...hintWrapProps('Начать сессию пересчёта: выберите селлера и хотя бы один FBS-склад.')}>
+              <button
+                type="button"
+                className="btn btn--danger inventory-btn inventory-btn--large"
+                disabled={!sellerId || (!isOzon && warehouseIds.length < 1) || loading}
+                onClick={startSession}
+              >
+                Начать инвентаризацию
+              </button>
+            </span>
+            {!isOzon && (
+              <span
+                {...hintWrapProps(
+                  'Факт в CRM. Резерв: «Новые» + «На сборке» по всем рабочим складам. Свободное делится поровну в ЛК WB.',
+                )}
+              >
+                <button
+                  type="button"
+                  className="btn btn--secondary inventory-btn inventory-btn--large"
+                  disabled={!sellerId || loading}
+                  onClick={startDistributeSession}
+                >
+                  Инвентаризация с распределением
+                </button>
+              </span>
+            )}
+          </div>
         </section>
       ) : (
         <>
@@ -415,7 +473,8 @@ export function InventoryPage() {
               <div>
                 <strong>{sellerName}</strong>
                 <span className="inventory-session__warehouses">
-                  {selectedWarehouses.map((wh) => wh.name || `#${wh.wb_warehouse_id}`).join(' · ')}
+                  {distributeMode ? 'С распределением · ' : ''}
+                  {sessionWarehouses.map((wh) => wh.name || `#${wh.wb_warehouse_id}`).join(' · ')}
                 </span>
               </div>
               <div className="inventory-session__actions">
@@ -536,7 +595,7 @@ export function InventoryPage() {
                 )}
 
                 <label className="inventory-field">
-                  Факт на полке (включая товар под заказы «Новые»)
+                  Факт на полке{distributeMode ? ' (включая товар под «Новые» и «На сборке»)' : ' (включая товар под заказы «Новые»)'}
                   <input
                     ref={quantityRef}
                     className="inventory-control inventory-control--quantity"

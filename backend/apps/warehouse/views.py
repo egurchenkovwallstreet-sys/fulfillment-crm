@@ -482,6 +482,7 @@ def _intake_balance_response(result) -> dict:
 
 
 def _inventory_response(result) -> dict:
+  reserved_label = "«Новые» + «На сборке»" if result.distribute else "«Новые»"
   return {
     "success": True,
     "verified": result.verified,
@@ -493,9 +494,12 @@ def _inventory_response(result) -> dict:
       wb_target_quantity=result.wb_target_quantity,
       verified=result.verified,
       restock_required=result.restock_required,
+      reserved_label=reserved_label,
     ),
     "physical_quantity": result.physical_quantity,
     "reserved_new_orders": result.reserved_new_orders,
+    "reserved_label": reserved_label,
+    "distribute": result.distribute,
     "crm_quantity_before": result.crm_quantity_before,
     "crm_quantity_after": result.crm_quantity_after,
     "wb_target_quantity": result.wb_target_quantity,
@@ -590,6 +594,7 @@ class InventoryView(APIView):
         cell_id=data.get("cell_id"),
         name=data.get("name", ""),
         marketplace=marketplace,
+        distribute=bool(data.get("distribute")),
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -614,9 +619,10 @@ class InventoryRetryView(APIView):
         seller=seller,
         barcode=data["barcode"],
         crm_quantity=data["crm_quantity"],
-        warehouse_ids=data["warehouse_ids"],
+        warehouse_ids=data.get("warehouse_ids") or [],
         user=request.user,
         marketplace=marketplace,
+        distribute=bool(data.get("distribute")),
       )
     except IntakeError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

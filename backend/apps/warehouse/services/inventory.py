@@ -16,6 +16,7 @@ from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_new_orders,
+  count_reserved_open_orders,
 )
 from apps.warehouse.services.stock_balance_messages import stock_balance_breakdown_message
 from apps.warehouse.services.stock_transfer import even_split_quantity
@@ -54,6 +55,7 @@ class InventoryResult:
   wb_total_actual: int
   wb_total_difference: int
   restock_required: bool = False
+  distribute: bool = False
 
 
 def _resolve_warehouses(seller: Seller, warehouse_ids: list[int]) -> list[SellerWarehouse]:
@@ -72,6 +74,15 @@ def _resolve_warehouses(seller: Seller, warehouse_ids: list[int]) -> list[Seller
   return warehouses
 
 
+def _working_warehouses(seller: Seller) -> list[SellerWarehouse]:
+  warehouses = list(
+    SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name", "id")
+  )
+  if not warehouses:
+    raise IntakeError("Нет рабочих FBS-складов — включите склады в карточке клиента или сборке")
+  return warehouses
+
+
 def _inventory_breakdown_message(
   *,
   physical_quantity: int,
@@ -81,6 +92,7 @@ def _inventory_breakdown_message(
   wb_target_quantity: int,
   verified: bool,
   restock_required: bool = False,
+  reserved_label: str = "«Новые»",
 ) -> str:
   return stock_balance_breakdown_message(
     physical_quantity=physical_quantity,
@@ -90,6 +102,7 @@ def _inventory_breakdown_message(
     wb_target_quantity=wb_target_quantity,
     verified=verified,
     restock_required=restock_required,
+    reserved_label=reserved_label,
   )
 
 
@@ -186,6 +199,7 @@ def _build_inventory_result(
   lines: list[InventoryWarehouseLine],
   wb_total_sent: int,
   wb_total_actual: int,
+  distribute: bool = False,
 ) -> InventoryResult:
   return InventoryResult(
     product=product,
@@ -203,6 +217,7 @@ def _build_inventory_result(
     wb_total_actual=wb_total_actual,
     wb_total_difference=wb_total_actual - wb_total_sent,
     restock_required=restock_required,
+    distribute=distribute,
   )
 
 
@@ -218,6 +233,7 @@ def perform_inventory(
   cell_id: int | None = None,
   name: str = "",
   marketplace: str = WB,
+  distribute: bool = False,
 ) -> InventoryResult:
   mp = normalize_marketplace(marketplace)
   barcode = barcode.strip()
@@ -226,15 +242,22 @@ def perform_inventory(
   physical_quantity = quantity
   if physical_quantity < 0:
     raise IntakeError("Количество не может быть отрицательным")
+  if distribute and mp == OZON:
+    raise IntakeError("Инвентаризация с распределением только для Wildberries")
 
-  reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+  if distribute:
+    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
+    warehouses = _working_warehouses(seller)
+    warehouse_ids = [wh.id for wh in warehouses]
+  else:
+    reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+    warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
+
   crm_quantity_after = physical_quantity
   wb_target_quantity, restock_required = compute_wb_amount_from_crm(
     crm_quantity_after,
     reserved_new_orders,
   )
-
-  warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
 
   product = (
     Product.objects.select_for_update()
@@ -269,12 +292,14 @@ def perform_inventory(
     f"{wh.name or wh.wb_warehouse_id}"
     for wh in warehouses
   )
+  reserved_label = "«Новые» + «На сборке»" if distribute else "«Новые»"
   if restock_required:
-    reserve_note = f", «Новые» {reserved_new_orders} шт. — недостаток"
+    reserve_note = f", {reserved_label} {reserved_new_orders} шт. — недостаток"
   elif reserved_new_orders:
-    reserve_note = f", «Новые» −{reserved_new_orders} шт."
+    reserve_note = f", {reserved_label} −{reserved_new_orders} шт."
   else:
     reserve_note = ""
+  mode_label = "Инвентаризация с распределением" if distribute else "Инвентаризация"
   StockOperation.objects.create(
     product=product,
     operation_type=StockOperation.OperationType.ADJUSTMENT,
@@ -284,7 +309,7 @@ def perform_inventory(
       f"Инвентаризация Ozon: насчитано {physical_quantity} шт. → CRM {crm_quantity_after} шт."
       if mp == OZON
       else (
-        f"Инвентаризация: насчитано {physical_quantity} шт.{reserve_note} "
+        f"{mode_label}: насчитано {physical_quantity} шт.{reserve_note} "
         f"→ CRM {crm_quantity_after}, WB {wb_target_quantity} ({warehouse_labels})"
       )
     ),
@@ -306,14 +331,16 @@ def perform_inventory(
     seller=seller,
     action_type=AuditLog.ActionType.OTHER,
     message=(
-      f"Инвентаризация баркод {barcode}: CRM {crm_quantity_before}→{crm_quantity_after}, "
-      f"WB {wb_target_quantity}, «Новые» {reserved_new_orders}, "
+      f"{'Инвентаризация с распределением' if distribute else 'Инвентаризация'} баркод {barcode}: "
+      f"CRM {crm_quantity_before}→{crm_quantity_after}, "
+      f"WB {wb_target_quantity}, {reserved_label} {reserved_new_orders}, "
       f"{'сверка OK' if verified else 'расхождение с WB'}"
     ),
     details={
       "barcode": barcode,
       "physical_quantity": physical_quantity,
       "reserved_new_orders": reserved_new_orders,
+      "distribute": distribute,
       "crm_quantity_before": crm_quantity_before,
       "crm_quantity_after": crm_quantity_after,
       "wb_target_quantity": wb_target_quantity,
@@ -351,6 +378,7 @@ def perform_inventory(
     lines=lines,
     wb_total_sent=wb_total_sent,
     wb_total_actual=wb_total_actual,
+    distribute=distribute,
   )
 
 
@@ -363,6 +391,7 @@ def force_rewrite_inventory(
   warehouse_ids: list[int],
   user,
   marketplace: str = WB,
+  distribute: bool = False,
 ) -> InventoryResult:
   """Повторная запись CRM и WB после расхождения сверки."""
   mp = normalize_marketplace(marketplace)
@@ -371,6 +400,8 @@ def force_rewrite_inventory(
     raise IntakeError("Баркод не может быть пустым")
   if crm_quantity < 0:
     raise IntakeError("Количество CRM не может быть отрицательным")
+  if distribute and mp == OZON:
+    raise IntakeError("Инвентаризация с распределением только для Wildberries")
 
   product = (
     Product.objects.select_for_update()
@@ -382,12 +413,17 @@ def force_rewrite_inventory(
     raise IntakeError("Товар не найден — сначала выполните инвентаризацию")
 
   crm_quantity_before = product.quantity
-  reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+  if distribute:
+    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
+    warehouses = _working_warehouses(seller)
+    warehouse_ids = [wh.id for wh in warehouses]
+  else:
+    reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+    warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
   wb_target_quantity, restock_required = compute_wb_amount_from_crm(
     crm_quantity,
     reserved_new_orders,
   )
-  warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
 
   product.quantity = crm_quantity
   product.save(update_fields=["quantity", "updated_at"])
@@ -444,4 +480,5 @@ def force_rewrite_inventory(
     lines=lines,
     wb_total_sent=wb_total_sent,
     wb_total_actual=wb_total_actual,
+    distribute=distribute,
   )

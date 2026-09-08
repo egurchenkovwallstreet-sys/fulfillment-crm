@@ -10,6 +10,7 @@ export type StockBalanceModalData = {
   crmQuantityBefore: number
   crmQuantityAfter: number
   reservedNewOrders: number
+  reservedLabel?: string
   wbQuantityBefore?: number | null
   wbQuantityTarget: number
   wbQuantityActual?: number | null
@@ -70,7 +71,7 @@ export function StockBalanceModal({ data, loading = false, onConfirm }: StockBal
               <td>{data.crmQuantityBefore} → <strong>{data.crmQuantityAfter}</strong> шт.</td>
             </tr>
             <tr>
-              <th>«Новые»</th>
+              <th>{data.reservedLabel || '«Новые»'}</th>
               <td>{data.reservedNewOrders} шт.</td>
             </tr>
             <tr>

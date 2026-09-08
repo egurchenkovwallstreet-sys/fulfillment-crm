@@ -5,6 +5,7 @@ from apps.integrations.marketplace import OZON, WB, normalize_marketplace
 from apps.orders.services.supply_flow import (
   count_new_orders_for_barcode,
   count_new_orders_for_barcode_on_warehouse,
+  count_picking_orders_for_barcode,
 )
 from apps.sellers.models import Seller, SellerWarehouse
 
@@ -45,3 +46,19 @@ def compute_wb_amount_from_crm(crm_quantity: int, reserved_new: int) -> tuple[in
   if reserved_new > crm_quantity:
     return 0, True
   return crm_quantity - reserved_new, False
+
+
+def count_reserved_open_orders(
+  seller: Seller,
+  barcode: str,
+  *,
+  marketplace: str = WB,
+) -> int:
+  """Заказы «Новые» + «На сборке» по баркоду на рабочих FBS-складах."""
+  mp = normalize_marketplace(marketplace)
+  if mp == OZON:
+    return 0
+  code = barcode.strip()
+  if not code:
+    return 0
+  return count_new_orders_for_barcode(seller, code) + count_picking_orders_for_barcode(seller, code)
