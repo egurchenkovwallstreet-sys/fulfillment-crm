@@ -14,10 +14,13 @@ import {
 import {
   deleteSellerOzonWarehouse,
   deleteSellerWarehouse,
+  fetchExcludedSellerWarehouses,
   fetchSellerOzonWarehouses,
   fetchSellerWarehouses,
+  restoreSellerWarehouse,
   syncSellerOzonWarehouses,
   syncSellerWarehouses,
+  type ExcludedSellerWarehouse,
   type SellerOzonWarehouse,
   type SellerWarehouse,
 } from '../api/sellers'
@@ -60,6 +63,8 @@ export function SellersManagePage() {
   const [warehousesLoading, setWarehousesLoading] = useState(false)
   const [warehousesSyncing, setWarehousesSyncing] = useState(false)
   const [warehouseDeletingId, setWarehouseDeletingId] = useState<number | null>(null)
+  const [excludedWarehouses, setExcludedWarehouses] = useState<ExcludedSellerWarehouse[]>([])
+  const [warehouseRestoringId, setWarehouseRestoringId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -87,6 +92,7 @@ export function SellersManagePage() {
     setEditOzonApiKey('')
     setWbWarehouses([])
     setOzonWarehouses([])
+    setExcludedWarehouses([])
     setError('')
     void loadSellerWarehouses(seller)
   }
@@ -108,6 +114,15 @@ export function SellersManagePage() {
             setOzonWarehouses(rows)
           }),
         )
+      }
+      if (isAdmin) {
+        tasks.push(
+          fetchExcludedSellerWarehouses(seller.id).then((rows) => {
+            setExcludedWarehouses(rows)
+          }),
+        )
+      } else {
+        setExcludedWarehouses([])
       }
       await Promise.all(tasks)
     } catch (err) {
@@ -163,16 +178,40 @@ export function SellersManagePage() {
         marketplace === 'wb'
           ? await deleteSellerWarehouse(editSeller.id, warehouse.id)
           : await deleteSellerOzonWarehouse(editSeller.id, warehouse.id)
-      if (marketplace === 'wb') {
-        setWbWarehouses((rows) => rows.filter((row) => row.id !== warehouse.id))
-      } else {
-        setOzonWarehouses((rows) => rows.filter((row) => row.id !== warehouse.id))
-      }
+      await loadSellerWarehouses(editSeller)
       setMessage(result.detail)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить склад')
     } finally {
       setWarehouseDeletingId(null)
+    }
+  }
+
+  async function handleRestoreWarehouse(row: ExcludedSellerWarehouse) {
+    if (!editSeller) return
+    const mp = row.marketplace === 'ozon' ? 'ozon' : 'wb'
+    if (
+      !window.confirm(
+        `Вернуть склад «${row.name}» в CRM?\n\nОн снова появится в сборке. При печати стикера остаток CRM спишется как у обычного склада.`,
+      )
+    ) {
+      return
+    }
+    setWarehouseRestoringId(row.id)
+    setError('')
+    try {
+      const result = await restoreSellerWarehouse(editSeller.id, {
+        marketplace: mp,
+        warehouse_external_id: row.warehouse_external_id,
+      })
+      setWbWarehouses(result.warehouses)
+      setOzonWarehouses(result.ozon_warehouses)
+      setExcludedWarehouses(result.excluded)
+      setMessage(result.detail)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось вернуть склад')
+    } finally {
+      setWarehouseRestoringId(null)
     }
   }
 
@@ -624,13 +663,16 @@ export function SellersManagePage() {
                     className="btn btn--ghost btn--sm"
                     disabled={warehousesLoading || warehousesSyncing || savingEdit}
                     onClick={() => void handleSyncWarehouses()}
-                    {...uiHint('Подтянуть склады из WB/Ozon. Удалённые ранее склады не вернутся.')}
+                    {...uiHint('Подтянуть склады из WB/Ozon. Удалённые склады владелец может вернуть отдельно.')}
                   >
                     {warehousesSyncing ? 'Синхронизация…' : 'Обновить из ЛК'}
                   </button>
                 </div>
                 <p className="sellers-ozon-hint">
-                  Удалённый склад исчезает из всех списков CRM и не появится снова при синхронизации.
+                  Удалённый склад исчезает из сборки, приёмки и синхронизации.
+                  {isAdmin
+                    ? ' Вернуть его можно кнопкой ниже — после этого заказы снова в сборке, списание CRM как у обычного склада.'
+                    : ' Вернуть удалённый склад может только владелец фулфилмента.'}{' '}
                   Чтобы временно скрыть склад без удаления — используйте сборку FBS (галочка «Обслуживаем»).
                 </p>
                 {warehousesLoading ? (
@@ -662,7 +704,7 @@ export function SellersManagePage() {
                                   className="btn btn--danger-outline btn--sm"
                                   disabled={warehouseDeletingId === warehouse.id || savingEdit}
                                   onClick={() => void handleDeleteWarehouse('wb', warehouse)}
-                                  {...uiHint('Удалить склад из CRM навсегда.')}
+                                  {...uiHint('Удалить склад из CRM. Вернуть сможет только владелец.')}
                                 >
                                   {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
                                 </button>
@@ -697,7 +739,7 @@ export function SellersManagePage() {
                                   className="btn btn--danger-outline btn--sm"
                                   disabled={warehouseDeletingId === warehouse.id || savingEdit}
                                   onClick={() => void handleDeleteWarehouse('ozon', warehouse)}
-                                  {...uiHint('Удалить склад из CRM навсегда.')}
+                                  {...uiHint('Удалить склад из CRM. Вернуть сможет только владелец.')}
                                 >
                                   {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
                                 </button>
@@ -708,6 +750,32 @@ export function SellersManagePage() {
                       </div>
                     )}
                   </>
+                )}
+                {isAdmin && excludedWarehouses.length > 0 && (
+                  <div className="sellers-warehouses-group">
+                    <span className="sellers-warehouses-group__title">Удалённые склады</span>
+                    <ul className="sellers-warehouses-list">
+                      {excludedWarehouses.map((row) => (
+                        <li key={row.id} className="sellers-warehouses-list__item">
+                          <div>
+                            <strong>{row.name}</strong>
+                            <span className="sellers-warehouses-list__meta">
+                              {row.marketplace === 'ozon' ? 'Ozon' : 'Wildberries'} · ID {row.warehouse_external_id}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            disabled={warehouseRestoringId === row.id || savingEdit}
+                            onClick={() => void handleRestoreWarehouse(row)}
+                            {...uiHint('Вернуть склад в CRM: сборка и списание остатка как у обычного склада.')}
+                          >
+                            {warehouseRestoringId === row.id ? '…' : 'Вернуть'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}

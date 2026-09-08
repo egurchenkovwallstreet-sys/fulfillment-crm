@@ -166,6 +166,7 @@ class ExcludedSellerWarehouse(models.Model):
   )
   marketplace = models.CharField("Маркетплейс", max_length=10, choices=MARKETPLACE_CHOICES)
   warehouse_external_id = models.BigIntegerField("ID склада в ЛК")
+  name = models.CharField("Название на момент удаления", max_length=255, blank=True, default="")
   excluded_at = models.DateTimeField(auto_now_add=True)
 
   class Meta:

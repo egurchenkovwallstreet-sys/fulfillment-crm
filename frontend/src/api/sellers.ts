@@ -74,3 +74,32 @@ export function deleteSellerOzonWarehouse(sellerId: number, warehouseId: number)
     { method: 'DELETE' },
   )
 }
+
+export type ExcludedSellerWarehouse = {
+  id: number
+  marketplace: 'wb' | 'ozon' | string
+  warehouse_external_id: number
+  name: string
+  excluded_at: string | null
+}
+
+export function fetchExcludedSellerWarehouses(sellerId: number) {
+  return apiFetch<ExcludedSellerWarehouse[]>(`/api/sellers/${sellerId}/warehouses/excluded/`)
+}
+
+export function restoreSellerWarehouse(
+  sellerId: number,
+  payload: { marketplace: 'wb' | 'ozon'; warehouse_external_id: number },
+) {
+  return apiFetch<{
+    success: boolean
+    detail: string
+    restored: boolean
+    warehouses: SellerWarehouse[]
+    ozon_warehouses: SellerOzonWarehouse[]
+    excluded: ExcludedSellerWarehouse[]
+  }>(`/api/sellers/${sellerId}/warehouses/restore/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}

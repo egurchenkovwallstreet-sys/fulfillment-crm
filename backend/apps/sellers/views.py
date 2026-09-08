@@ -3,12 +3,21 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsManager
+from apps.accounts.permissions import IsAdmin, IsManager
 from apps.accounts.tenant import get_seller_for_user
-from apps.sellers.models import Seller, SellerWarehouse
-from apps.sellers.serializers import SellerWarehouseSerializer, SellerWarehouseToggleSerializer
+from apps.sellers.models import SellerOzonWarehouse, SellerWarehouse
+from apps.sellers.serializers import (
+  SellerOzonWarehouseSerializer,
+  SellerWarehouseSerializer,
+  SellerWarehouseToggleSerializer,
+)
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
-from apps.sellers.services.warehouse_manage import WarehouseManageError, delete_seller_wb_warehouse
+from apps.sellers.services.warehouse_manage import (
+  WarehouseManageError,
+  delete_seller_wb_warehouse,
+  list_excluded_warehouses,
+  restore_excluded_warehouse,
+)
 
 
 class SellerWarehouseListView(APIView):
@@ -71,3 +80,41 @@ class SellerWarehouseToggleView(APIView):
     except WarehouseManageError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({"success": True, **result})
+
+
+class SellerExcludedWarehouseListView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def get(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    return Response(list_excluded_warehouses(seller))
+
+
+class SellerRestoreWarehouseView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    marketplace = str(request.data.get("marketplace") or "")
+    warehouse_external_id = request.data.get("warehouse_external_id")
+    try:
+      result = restore_excluded_warehouse(
+        seller,
+        marketplace=marketplace,
+        warehouse_external_id=warehouse_external_id,
+        user=request.user,
+      )
+    except WarehouseManageError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
+    ozon_warehouses = SellerOzonWarehouse.objects.filter(seller=seller).order_by("name", "ozon_warehouse_id")
+    return Response({
+      "success": True,
+      **result,
+      "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
+      "ozon_warehouses": SellerOzonWarehouseSerializer(ozon_warehouses, many=True).data,
+    })

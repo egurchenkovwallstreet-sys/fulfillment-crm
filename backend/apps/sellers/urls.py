@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+  SellerExcludedWarehouseListView,
+  SellerRestoreWarehouseView,
   SellerWarehouseListView,
   SellerWarehouseSyncView,
   SellerWarehouseToggleView,
@@ -69,6 +71,16 @@ urlpatterns = [
     "<int:seller_id>/warehouses/sync/",
     SellerWarehouseSyncView.as_view(),
     name="seller-warehouse-sync",
+  ),
+  path(
+    "<int:seller_id>/warehouses/excluded/",
+    SellerExcludedWarehouseListView.as_view(),
+    name="seller-warehouse-excluded",
+  ),
+  path(
+    "<int:seller_id>/warehouses/restore/",
+    SellerRestoreWarehouseView.as_view(),
+    name="seller-warehouse-restore",
   ),
   path(
     "<int:seller_id>/warehouses/<int:warehouse_id>/",
