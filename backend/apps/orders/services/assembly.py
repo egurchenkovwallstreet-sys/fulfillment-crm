@@ -931,7 +931,11 @@ def _detach_order_from_pick_list(order: Order) -> None:
 
   pick_list = PickList.objects.filter(pk=pick_list_id).first()
   if pick_list and not pick_list.items.exists():
-    pick_list.delete()
+    still_linked = (
+      Order.objects.filter(pick_list_id=pick_list_id).exclude(pk=order.pk).exists()
+    )
+    if not still_linked:
+      pick_list.delete()
 
 
 def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> dict:

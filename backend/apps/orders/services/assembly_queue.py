@@ -21,9 +21,14 @@ def _assembly_confirm_orders_qs(seller: Seller):
       seller=seller,
       assembly_hidden=False,
       wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
-    ).select_related("product", "product__cell"),
+    ).select_related("product", "product__cell", "pick_list"),
     seller,
   )
+
+
+def order_on_current_pick_list(order: Order) -> bool:
+  """Заказ ещё в текущем листе подбора. Перенесённые в другую поставку снимаются с листа."""
+  return bool(order.pick_list_id)
 
 
 def order_has_chz_error(order: Order) -> bool:
@@ -49,8 +54,10 @@ def order_assembly_ready(order: Order) -> bool:
 
 
 def seller_has_unscanned_marking(seller: Seller) -> bool:
-  """На сборке ещё есть заказы, где ЧЗ не отсканирован."""
+  """На текущем листе ещё есть заказы, где ЧЗ не отсканирован."""
   for order in _assembly_confirm_orders_qs(seller):
+    if not order_on_current_pick_list(order):
+      continue
     if order_has_chz_error(order):
       continue
     if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
@@ -66,7 +73,9 @@ def queue_last_pick_list_marking_verify(seller: Seller) -> bool:
   if seller_has_unscanned_marking(seller):
     return False
   has_pending = any(
-    order_chz_pending_verify(order) for order in _assembly_confirm_orders_qs(seller)
+    order_chz_pending_verify(order)
+    for order in _assembly_confirm_orders_qs(seller)
+    if order_on_current_pick_list(order)
   )
   if not has_pending:
     return False
@@ -102,6 +111,11 @@ def order_in_assembly(order: Order) -> bool:
   )
 
 
+def order_in_current_assembly_list(order: Order) -> bool:
+  """Неотсканированный заказ текущего листа — перенесённые в другую поставку не считаются."""
+  return order_in_assembly(order) and order_on_current_pick_list(order)
+
+
 def get_assembly_queue_status(seller: Seller) -> dict:
   """Счётчики и списки: «На сборке», «Готовые», «Ошибки ЧЗ»."""
   in_assembly: list[Order] = []
@@ -113,7 +127,7 @@ def get_assembly_queue_status(seller: Seller) -> dict:
       errors.append(order)
     elif order_assembly_ready(order):
       ready.append(order)
-    elif order_in_assembly(order):
+    elif order_in_current_assembly_list(order):
       in_assembly.append(order)
 
   return {

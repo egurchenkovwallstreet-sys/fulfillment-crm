@@ -16,7 +16,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError
 from apps.orders.models import Order, PickList, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
-from apps.orders.services.assembly_queue import order_in_assembly
+from apps.orders.services.assembly_queue import order_in_assembly, queue_last_pick_list_marking_verify
 from apps.orders.services.wb_status import (
   WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
@@ -731,6 +731,8 @@ def move_orders_to_new_supply(
         old_supply.orders.remove(order)
         old_supply_ids.add(old_supply.id)
       new_supply.orders.add(order)
+      # Снять с текущего листа: иначе «На сборке» горит, скан может взять перенесённый заказ.
+      _detach_order_from_pick_list(order)
 
     for old_supply_id in old_supply_ids:
       old_supply = Supply.objects.filter(pk=old_supply_id).first()
@@ -743,6 +745,8 @@ def move_orders_to_new_supply(
       "wb_warehouse_id": wb_warehouse_id,
       "orders_moved": len(wh_orders),
     })
+
+  queue_last_pick_list_marking_verify(seller)
 
   AuditLog.objects.create(
     user=user,

@@ -61,7 +61,10 @@ from .services.assembly import (
   scan_order_barcode,
   start_assembly,
 )
-from .services.assembly_queue import get_assembly_queue_status, order_in_assembly
+from .services.assembly_queue import (
+  get_assembly_queue_status,
+  order_in_current_assembly_list,
+)
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
@@ -521,7 +524,7 @@ class AssemblySellerDetailView(APIView):
 
     orders = list(orders_qs.order_by("-created_at")[:300])
     if stage == "confirm":
-      orders = [order for order in orders if order_in_assembly(order)]
+      orders = [order for order in orders if order_in_current_assembly_list(order)]
 
     active_pick_lists = active_wb_pick_lists(seller)
     active_pick_list = active_pick_lists[0] if active_pick_lists else None
