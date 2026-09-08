@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsAdmin, IsManager
+from apps.accounts.permissions import IsManager
 from apps.accounts.tenant import get_seller_for_user
 from apps.orders.services.ozon_counts import refresh_ozon_counts
 from apps.sellers.models import Seller, SellerOzonWarehouse
@@ -14,7 +14,7 @@ from apps.sellers.services.warehouse_manage import WarehouseManageError, delete_
 
 
 class SellerMarketplaceFlagsView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  permission_classes = [IsAuthenticated, IsManager]
 
   def patch(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)
@@ -37,7 +37,7 @@ class SellerMarketplaceFlagsView(APIView):
 
 
 class SellerOzonKeysView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)

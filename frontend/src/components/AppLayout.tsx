@@ -71,6 +71,12 @@ const SIDEBAR_NAV: Array<{
     roles: ['admin', 'manager'],
   },
   {
+    to: '/sellers',
+    label: 'Клиенты',
+    hint: 'Создать клиента, подключить API WB/Ozon и склады FBS',
+    roles: ['admin', 'manager'],
+  },
+  {
     to: '/owner',
     label: 'Кабинет владельца',
     hint: 'Селлеры, сотрудники, тарифы и биллинг',

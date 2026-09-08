@@ -21,6 +21,7 @@ import {
   type SellerOzonWarehouse,
   type SellerWarehouse,
 } from '../api/sellers'
+import { useAuth } from '../context/AuthContext'
 import { copyToClipboard } from '../utils/copyToClipboard'
 import { SellerTariffModal } from '../components/SellerTariffModal'
 import { uiHint } from '../utils/uiHint'
@@ -32,6 +33,7 @@ function inviteUrl(token: string | null): string {
 }
 
 export function SellersManagePage() {
+  const { isAdmin } = useAuth()
   const [sellers, setSellers] = useState<SellerManageItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -200,10 +202,11 @@ export function SellersManagePage() {
       const extra = (created as { token_messages?: string[] }).token_messages?.join(' ')
       setMessage(
         extra
-          ? `Селлер «${created.company_name}» создан. ${extra}`
-          : `Селлер «${created.company_name}» создан. Скопируйте ссылку для регистрации.`,
+          ? `Клиент «${created.company_name}» создан. ${extra}`
+          : `Клиент «${created.company_name}» создан. Откройте карточку, чтобы подключить API и склады.`,
       )
       await load()
+      openEdit(created)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка создания')
     } finally {
@@ -222,27 +225,31 @@ export function SellersManagePage() {
     setError('')
     setMessage('')
     try {
-      await updateSeller(editSeller.id, {
+      let nextSeller = await updateSeller(editSeller.id, {
         company_name: editName.trim(),
         is_active: editSeller.is_active,
         wb_enabled: editWbEnabled,
         ozon_enabled: editOzonEnabled,
       })
+      let detail = 'Клиент сохранён'
       if (editWbEnabled && editWbToken.trim()) {
         const wb = await saveSellerWbToken(editSeller.id, editWbToken.trim())
-        setMessage(wb.detail)
+        nextSeller = wb.seller
+        detail = wb.detail
+        setEditWbToken('')
       }
       if (editOzonEnabled && editOzonClientId.trim() && editOzonApiKey.trim()) {
         const oz = await saveSellerOzonKeys(editSeller.id, {
           client_id: editOzonClientId.trim(),
           api_key: editOzonApiKey.trim(),
         })
-        setMessage(oz.detail)
+        nextSeller = oz.seller
+        detail = oz.detail
+        setEditOzonApiKey('')
       }
-      if (!editWbToken.trim() && !(editOzonApiKey.trim() && editOzonClientId.trim())) {
-        setMessage('Селлер сохранён')
-      }
-      setEditSeller(null)
+      setMessage(detail)
+      setEditSeller(nextSeller)
+      await loadSellerWarehouses(nextSeller)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка сохранения')
@@ -297,8 +304,8 @@ export function SellersManagePage() {
     <>
       <header className="topbar">
         <div>
-          <h1>Селлеры</h1>
-          <p>Создание, API-токены, редактирование и удаление селлеров</p>
+          <h1>Клиенты</h1>
+          <p>Создание клиента, подключение API WB/Ozon и складов FBS</p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить список селлеров и их статусы.')}>
           Обновить
@@ -309,7 +316,7 @@ export function SellersManagePage() {
       {message && <div className="dashboard-sync-msg dashboard-sync-msg--ok">{message}</div>}
 
       <section className="panel sellers-create-panel">
-        <h2 className="section-title">Новый селлер</h2>
+        <h2 className="section-title">Новый клиент</h2>
         <form className="sellers-form" onSubmit={handleCreate}>
           <div className="sellers-form__row">
             <input
@@ -327,7 +334,7 @@ export function SellersManagePage() {
               <input type="checkbox" checked={createOzon} onChange={(e) => setCreateOzon(e.target.checked)} />
               Ozon
             </label>
-            <button type="submit" className="btn btn--primary" disabled={creating} {...uiHint('Создать нового селлера и ссылку для регистрации в личном кабинете.')}>
+            <button type="submit" className="btn btn--primary" disabled={creating} {...uiHint('Создать клиента, подключить API и подтянуть склады из ЛК.')}>
               {creating ? 'Создание…' : 'Создать'}
             </button>
           </div>
@@ -373,9 +380,9 @@ export function SellersManagePage() {
       </section>
 
       <section className="panel">
-        <h2 className="section-title">Список селлеров</h2>
+        <h2 className="section-title">Список клиентов</h2>
         {loading && sellers.length === 0 && <p>Загрузка…</p>}
-        {!loading && sellers.length === 0 && <p>Селлеров пока нет.</p>}
+        {!loading && sellers.length === 0 && <p>Клиентов пока нет.</p>}
         {sellers.length > 0 && (
           <div className="sellers-table-scroll">
             <table className="sellers-table">
@@ -386,7 +393,7 @@ export function SellersManagePage() {
                   <th>Аккаунт</th>
                   <th>WB: новые / сборка / доставка</th>
                   <th>Ozon: новые / сборка / доставка</th>
-                  <th>Тариф</th>
+                  {isAdmin && <th>Тариф</th>}
                   <th>Ссылка</th>
                   <th />
                 </tr>
@@ -423,6 +430,7 @@ export function SellersManagePage() {
                     <td>
                       {seller.ozon_count_new} / {seller.ozon_count_assembly} / {seller.ozon_count_delivery}
                     </td>
+                    {isAdmin && (
                     <td>
                       <button
                         type="button"
@@ -433,6 +441,7 @@ export function SellersManagePage() {
                         Тариф
                       </button>
                     </td>
+                    )}
                     <td>
                       {seller.has_account ? (
                         <span className="sellers-tag sellers-tag--muted">—</span>
@@ -710,6 +719,7 @@ export function SellersManagePage() {
               <button type="button" className="btn btn--ghost" onClick={() => setEditSeller(null)} {...uiHint('Закрыть форму редактирования без сохранения.')}>
                 Отмена
               </button>
+              {isAdmin && (
               <button
                 type="button"
                 className="btn btn--danger-outline"
@@ -719,6 +729,7 @@ export function SellersManagePage() {
               >
                 Удалить селлера
               </button>
+              )}
             </div>
           </form>
         </section>

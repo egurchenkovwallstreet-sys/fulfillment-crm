@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import IsAdmin, IsSeller
+from apps.accounts.permissions import IsAdmin, IsManager, IsSeller
 from apps.accounts.serializers import UserSerializer
 from apps.accounts.tenant import fulfillment_for_staff_user, get_seller_for_user, sellers_for_user
 from apps.sellers.models import Seller
@@ -63,7 +63,7 @@ def _seller_queryset(user):
 
 
 class SellerManageListCreateView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
     sellers = _seller_queryset(request.user).order_by("company_name")
@@ -110,7 +110,10 @@ class SellerManageListCreateView(APIView):
 
 
 class SellerManageDetailView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  def get_permissions(self):
+    if self.request.method == "DELETE":
+      return [IsAuthenticated(), IsAdmin()]
+    return [IsAuthenticated(), IsManager()]
 
   def patch(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)
@@ -135,7 +138,7 @@ class SellerManageDetailView(APIView):
 
 
 class SellerWbTokenView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)
@@ -166,7 +169,7 @@ class SellerWbTokenView(APIView):
 
 
 class SellerInviteView(APIView):
-  permission_classes = [IsAuthenticated, IsAdmin]
+  permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
     seller = get_seller_for_user(request.user, seller_id)

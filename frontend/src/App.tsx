@@ -72,6 +72,7 @@ function AppRoutes() {
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />
             <Route path="/print-agent" element={<PrintAgentPage />} />
             <Route path="/orders" element={<AssemblySellersPage />} />
+            <Route path="/sellers" element={<SellersManagePage />} />
           </Route>
           <Route element={<AdminRoute />}>
             <Route path="/owner" element={<OwnerLayout />}>
@@ -81,7 +82,6 @@ function AppRoutes() {
               <Route path="pricing" element={<OwnerPricingPage />} />
               <Route path="billing" element={<AdminBillingPage />} />
             </Route>
-            <Route path="/sellers" element={<Navigate to="/owner/sellers" replace />} />
             <Route path="/billing" element={<Navigate to="/owner/billing" replace />} />
           </Route>
         </Route>

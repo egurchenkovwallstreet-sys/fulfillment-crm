@@ -7,6 +7,7 @@ from django.db.models.deletion import ProtectedError
 from apps.integrations.wb_crypto import encrypt_token
 from apps.orders.services.ozon_counts import OzonCountsError, ping_seller_ozon, refresh_ozon_counts
 from apps.sellers.models import Seller
+from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
 
 
@@ -56,9 +57,14 @@ def apply_ozon_keys(seller: Seller, client_id: str, api_key: str) -> tuple[bool,
   try:
     ping_seller_ozon(seller)
     refresh_ozon_counts(seller)
-    return True, "Ключи сохранены. API Ozon отвечает."
   except OzonCountsError as exc:
     return False, f"Ключи сохранены, но проверка API не прошла: {exc}"
+
+  try:
+    sync_seller_ozon_warehouses(seller)
+    return True, "Ключи сохранены. API Ozon отвечает, склады синхронизированы."
+  except OzonWarehouseSyncError as exc:
+    return True, f"Ключи сохранены. API отвечает, но склады не подтянулись: {exc}"
 
 
 def clear_ozon_keys(seller: Seller) -> None:
