@@ -33,14 +33,18 @@ echo "=== up db/redis ==="
 docker compose up -d db redis
 
 echo "=== up web (migrations + gunicorn) ==="
-docker compose up -d web
+docker compose up -d --force-recreate web beat
 
 echo "=== wait for backend health ==="
+EXPECTED_BUILD="$(cat backend/BUILD_VERSION)"
 ok=0
 for i in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:8001/api/health/ >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:8001/api/health/" 2>/dev/null | grep -q "\"build\":\"${EXPECTED_BUILD}\""; then
     ok=1
     break
+  fi
+  if curl -fsS http://127.0.0.1:8001/api/health/ >/dev/null 2>&1; then
+    echo "  WARN: backend отвечает, но build != ${EXPECTED_BUILD} (ещё старый контейнер?)"
   fi
   echo "  attempt $i/60..."
   if [[ "$i" -eq 6 || "$i" -eq 12 || "$i" -eq 24 ]]; then
@@ -49,11 +53,12 @@ for i in $(seq 1 60); do
   sleep 5
 done
 if [[ "$ok" -ne 1 ]]; then
-  echo "ERROR: backend did not become healthy in time"
+  echo "ERROR: backend не поднялся с build=${EXPECTED_BUILD}"
   docker compose ps
   docker compose logs web --tail 80
   exit 1
 fi
+echo "OK: backend build=${EXPECTED_BUILD}"
 
 echo "=== up worker + frontend ==="
 docker compose up -d --force-recreate worker frontend
@@ -69,8 +74,10 @@ else
   echo "WARN: в контейнере frontend старый бандл — проверьте docker compose build frontend"
 fi
 
-echo "=== backend version ==="
+echo "=== backend version (8001 и через nginx 8080) ==="
 curl -fsS http://127.0.0.1:8001/api/health/
+echo
+curl -fsS http://127.0.0.1:8080/api/health/ || echo "WARN: nginx 8080 /api/health недоступен"
 echo
 
 echo "=== frontend downloads ==="
