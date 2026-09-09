@@ -1709,14 +1709,14 @@ function WbAssemblySellerPage() {
   const supplyOrderIds = new Set(
     stageSupplies.flatMap((supply) => (supply.orders ?? []).map((order) => order.id)),
   )
-  const confirmStageOrders =
-    stage === 'confirm'
-      ? orders.filter((order) => (order.wb_supplier_status || '').trim() === 'confirm')
-      : orders
   const unassignedOrders = groupedBySupply
-    ? confirmStageOrders.filter((order) => !supplyOrderIds.has(order.id))
+    ? orders.filter((order) => !supplyOrderIds.has(order.id))
     : orders
   const hiddenRestorableOrders = data?.hidden_restorable_orders ?? []
+  const groupedVisibleCount =
+    stageSupplies.reduce((sum, supply) => sum + (supply.orders?.length ?? 0), 0)
+    + unassignedOrders.length
+  const useGroupedLayout = groupedBySupply && groupedVisibleCount > 0
   const tableColSpan = stage === 'confirm' ? 11 : 10
 
   function renderOrderRow(order: AssemblyOrder) {
@@ -2469,7 +2469,7 @@ function WbAssemblySellerPage() {
                         : 'Нет заказов на этой вкладке'}
                   </td>
                 </tr>
-              ) : groupedBySupply ? (
+              ) : useGroupedLayout ? (
                 <>
                   {stageSupplies.map((supply) => {
                     const supplyOrders = supply.orders ?? []
@@ -2545,9 +2545,7 @@ function WbAssemblySellerPage() {
                             </div>
                           </td>
                         </tr>
-                        {supplyOrders
-                          .filter((order) => (order.wb_supplier_status || '').trim() === 'confirm')
-                          .map((order) => renderOrderRow(order))}
+                        {supplyOrders.map((order) => renderOrderRow(order))}
                       </Fragment>
                     )
                   })}

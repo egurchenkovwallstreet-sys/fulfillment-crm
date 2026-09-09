@@ -6,6 +6,8 @@ echo "=== git ==="
 git fetch origin main
 git reset --hard origin/main
 git log -1 --oneline
+git rev-parse --short HEAD > backend/BUILD_VERSION
+echo "BUILD_VERSION=$(cat backend/BUILD_VERSION)"
 
 echo "=== print agent download ==="
 bash scripts/fetch-print-agent.sh || true
@@ -57,7 +59,9 @@ echo "=== up worker + frontend ==="
 docker compose up -d --force-recreate worker frontend
 
 echo "=== frontend bundle check ==="
-if docker compose exec -T frontend sh -c 'grep -rq "Передать на сборку" /usr/share/nginx/html/assets/ 2>/dev/null'; then
+if docker compose exec -T frontend sh -c 'grep -rq "Удалённые из сборки" /usr/share/nginx/html/assets/ 2>/dev/null'; then
+  echo "OK: фронтенд — восстановление скрытых заказов на сборке"
+elif docker compose exec -T frontend sh -c 'grep -rq "Передать на сборку" /usr/share/nginx/html/assets/ 2>/dev/null'; then
   echo "OK: новый фронтенд (сборка FBS — одна кнопка)"
 elif docker compose exec -T frontend sh -c 'grep -rq "Поиск по баркоду" /usr/share/nginx/html/assets/ 2>/dev/null'; then
   echo "WARN: фронтенд частично обновлён (ячейки), но сборка FBS — старая версия"
