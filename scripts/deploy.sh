@@ -9,18 +9,6 @@ git log -1 --oneline
 git rev-parse --short HEAD > backend/BUILD_VERSION
 echo "BUILD_VERSION=$(cat backend/BUILD_VERSION)"
 
-echo "=== print agent download ==="
-bash scripts/fetch-print-agent.sh || true
-
-echo "=== print agent files check ==="
-ZIP="frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip"
-if [[ -f "$ZIP" ]] && unzip -t "$ZIP" >/dev/null 2>&1; then
-  echo "OK: agent zip ready ($(du -h "$ZIP" | cut -f1))"
-else
-  echo "WARN: agent zip missing — после git pull должен быть в репозитории"
-fi
-ls -lh frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip frontend/public/downloads/FulfillmentCRM-PrintAgent-onefile.exe 2>/dev/null || true
-
 echo "=== build ==="
 # Без --no-cache: базовые образы (node/python) берутся из кэша и не упираются в лимит Docker Hub (429).
 if [[ "${FULL_REBUILD:-0}" == "1" ]]; then
@@ -83,6 +71,14 @@ echo
 echo "=== frontend downloads ==="
 curl -fsS -o /dev/null -w "zip HTTP %{http_code} size %{size_download}\n" http://127.0.0.1:8080/downloads/FulfillmentCRM-PrintAgent-portable.zip || true
 curl -fsS -o /dev/null -w "bat HTTP %{http_code}\n" http://127.0.0.1:8080/downloads/install-agent.bat || true
+
+echo "=== print agent (после деплоя CRM, не блокирует обновление) ==="
+if timeout 180 bash scripts/fetch-print-agent.sh; then
+  echo "OK: print agent"
+else
+  echo "WARN: print agent fetch skipped/failed — CRM уже обновлён, zip обычно приходит из git"
+fi
+ls -lh frontend/public/downloads/FulfillmentCRM-PrintAgent-portable.zip 2>/dev/null || true
 
 echo "=== done ==="
 docker compose ps
