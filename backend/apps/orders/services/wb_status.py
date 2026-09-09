@@ -91,6 +91,16 @@ def is_wb_cancelled(supplier_status: str, wb_status: str) -> bool:
   return supplier_status in CANCEL_SUPPLIER_STATUSES or wb_status in CANCEL_WB_STATUSES
 
 
+def is_terminal_cancelled_order(order: Order) -> bool:
+  """Заказ отменён в WB — не блокирует доставку остальных в поставке."""
+  if order.status == Order.Status.CANCELLED:
+    return True
+  return is_wb_cancelled(
+    (order.wb_supplier_status or "").strip(),
+    (order.wb_status or "").strip(),
+  )
+
+
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
   """complete + waiting — вкладка «В доставке» в ЛК WB."""
   supplier_status = (supplier_status or "").strip()

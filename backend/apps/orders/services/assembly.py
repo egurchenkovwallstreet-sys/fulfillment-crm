@@ -1232,7 +1232,14 @@ def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> d
   if order.assembly_hidden:
     raise AssemblyError("Заказ уже удалён из сборки", code="already_hidden")
 
-  if order.marking_code:
+  if (
+    order.marking_code
+    and order.status != Order.Status.CANCELLED
+    and not is_wb_cancelled(
+      (order.wb_supplier_status or "").strip(),
+      (order.wb_status or "").strip(),
+    )
+  ):
     client = _get_client(seller)
     try:
       client.delete_order_meta(order.wb_order_id, key="sgtin")

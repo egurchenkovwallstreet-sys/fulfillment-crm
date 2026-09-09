@@ -590,15 +590,19 @@ function WbAssemblySellerPage() {
   }
 
   function handleDeleteOrder(order: AssemblyOrder) {
+    const cancelled = isOrderCancelled(order)
     setModal({
       kind: 'confirm',
-      title: 'Удалить заказ',
-      message:
-        `Удалить заказ WB #${order.wb_order_id} из сборки?\n\n` +
-        `Баркод: ${order.barcode}\n` +
-        'Заказ скроется из таблицы, но в поставке WB может остаться и блокировать доставку. ' +
-        'Восстановить можно в блоке «Удалённые из сборки».',
-      confirmLabel: 'Удалить',
+      title: cancelled ? 'Удалить отменённый заказ из CRM' : 'Удалить заказ',
+      message: cancelled
+        ? `Заказ WB #${order.wb_order_id} отменён покупателем.\n\n` +
+          `Баркод: ${order.barcode}\n` +
+          'Удалите его из CRM, чтобы убрать из поставки и передать в доставку остальные заказы.'
+        : `Удалить заказ WB #${order.wb_order_id} из сборки?\n\n` +
+          `Баркод: ${order.barcode}\n` +
+          'Заказ скроется из таблицы, но в поставке WB может остаться и блокировать доставку. ' +
+          'Восстановить можно в блоке «Удалённые из сборки».',
+      confirmLabel: cancelled ? 'Удалить из CRM' : 'Удалить',
       onConfirm: () => void runDeleteOrder(order.id),
     })
   }
@@ -1840,7 +1844,15 @@ function WbAssemblySellerPage() {
         </td>
         <td className="assembly-table__actions">
           {cancelled ? (
-            <span className="assembly-cancelled-badge">Отменён в WB</span>
+            <button
+              type="button"
+              className="btn btn--small btn--ghost assembly-order-delete"
+              onClick={() => handleDeleteOrder(order)}
+              disabled={loading}
+              {...uiHint('Убрать отменённый заказ из CRM и из поставки — остальные можно передать в доставку')}
+            >
+              Удалить из CRM
+            </button>
           ) : null}
           {!cancelled && stage === 'confirm' && !order.has_sticker && (
             <button

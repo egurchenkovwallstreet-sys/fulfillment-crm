@@ -25,6 +25,7 @@ from apps.orders.services.wb_status import (
   CANCEL_WB_STATUSES,
   WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
+  is_terminal_cancelled_order,
   WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
@@ -1824,6 +1825,8 @@ def send_orders_to_assembly_bulk(
 
 
 def order_delivery_block_reason(order: Order) -> str | None:
+  if is_terminal_cancelled_order(order):
+    return "Отменён в WB — удалите из CRM"
   if order_can_send_to_delivery(order):
     return None
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
@@ -1850,13 +1853,12 @@ def _supply_orders(supply: Supply) -> list[Order]:
 
 
 def assembly_supply_orders(supply: Supply, seller: Seller) -> list[Order]:
-  """Заказы поставки: включённые склады, не скрытые из сборки."""
-  return list(
-    filter_orders_for_assembly(
-      supply.orders.filter(assembly_hidden=False).select_related("product", "seller"),
-      seller,
-    ),
+  """Заказы поставки для доставки: без скрытых и без отменённых в WB."""
+  orders = filter_orders_for_assembly(
+    supply.orders.filter(assembly_hidden=False).select_related("product", "seller"),
+    seller,
   )
+  return [order for order in orders if not is_terminal_cancelled_order(order)]
 
 
 def refresh_supply_readiness(supply: Supply, *, seller: Seller | None = None) -> Supply:
