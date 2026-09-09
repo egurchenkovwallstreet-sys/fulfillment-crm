@@ -13,11 +13,16 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_LABELS,
   WB_SUPPLIER_NEW,
+  is_wb_cancelled,
   wb_in_delivery_q,
+)
+from apps.sellers.services.warehouse_filter import (
+  filter_orders_for_assembly,
+  get_enabled_wb_warehouse_ids,
+  seller_has_warehouse_config,
 )
 from apps.orders.models import Order, PickList, PickListItem, Supply
 from apps.orders.services.order_sticker import order_sticker_printed_in_crm
-from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
 from apps.sellers.models import Seller
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
@@ -1011,6 +1016,158 @@ def _detach_order_from_pick_list(order: Order) -> None:
       pick_list.delete()
 
 
+def order_is_restorable_in_wb(order: Order) -> bool:
+  """Скрытый заказ ещё жив в ЛК WB (новый или на сборке, не отменён)."""
+  if not order.assembly_hidden:
+    return False
+  if order.status in (
+    Order.Status.CANCELLED,
+    Order.Status.SHIPPED,
+    Order.Status.IN_DELIVERY,
+  ):
+    return False
+  supplier = (order.wb_supplier_status or "").strip()
+  wb_status = (order.wb_status or "").strip()
+  if is_wb_cancelled(supplier, wb_status):
+    return False
+  if supplier not in (WB_SUPPLIER_NEW, WB_SUPPLIER_ASSEMBLY):
+    return False
+  if seller_has_warehouse_config(order.seller):
+    if order.wb_warehouse_id is None:
+      return False
+    if int(order.wb_warehouse_id) not in get_enabled_wb_warehouse_ids(order.seller):
+      return False
+  return True
+
+
+def hidden_restorable_orders_queryset(seller: Seller):
+  qs = Order.objects.filter(seller=seller, assembly_hidden=True)
+  qs = filter_orders_for_assembly(qs, seller)
+  qs = qs.exclude(
+    status__in=[
+      Order.Status.CANCELLED,
+      Order.Status.SHIPPED,
+      Order.Status.IN_DELIVERY,
+    ],
+  )
+  return qs.filter(wb_supplier_status__in=[WB_SUPPLIER_NEW, WB_SUPPLIER_ASSEMBLY])
+
+
+def _relink_order_to_pick_list(order: Order) -> bool:
+  from apps.orders.services.pick_list import _active_wb_pick_list_for_warehouse
+  from apps.warehouse.services.stock_deduction import resolve_order_product
+
+  if not order.wb_warehouse_id:
+    return False
+  pick_list = _active_wb_pick_list_for_warehouse(order.seller, int(order.wb_warehouse_id))
+  if not pick_list:
+    return False
+
+  product = resolve_order_product(order)
+  item_qs = PickListItem.objects.filter(pick_list=pick_list, barcode=order.barcode)
+  if product:
+    item = item_qs.filter(product_id=product.id).first()
+  else:
+    item = item_qs.first()
+
+  if item:
+    item.quantity += 1
+    item.save(update_fields=["quantity"])
+  else:
+    PickListItem.objects.create(
+      pick_list=pick_list,
+      cell=product.cell if product else None,
+      product=product,
+      barcode=order.barcode,
+      quantity=1,
+    )
+
+  order.pick_list = pick_list
+  return True
+
+
+def restore_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
+  """Вернуть ошибочно скрытый заказ в сборку FBS, если он ещё есть в ЛК WB."""
+  from apps.orders.services.supply_flow import get_assembly_stage_counts
+
+  try:
+    order = Order.objects.select_related("product", "product__cell").get(
+      pk=order_id,
+      seller=seller,
+      assembly_hidden=True,
+    )
+  except Order.DoesNotExist as exc:
+    raise AssemblyError(
+      "Скрытый заказ не найден. Обновите заказы из WB.",
+      code="order_not_found",
+    ) from exc
+
+  if not order_is_restorable_in_wb(order):
+    raise AssemblyError(
+      "Заказ нельзя восстановить: в WB отменён, отгружен или уже не на сборке. "
+      "Нажмите «Обновить заказы» и проверьте ЛК WB.",
+      code="not_restorable",
+    )
+
+  order.assembly_hidden = False
+  pick_list_linked = _relink_order_to_pick_list(order)
+  order.save(update_fields=["assembly_hidden", "pick_list", "updated_at"])
+
+  sticker_fetched = 0
+  if (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
+    try:
+      sticker_fetched = fetch_stickers_for_orders(seller, [order], user=user)
+    except Exception:
+      logger.exception("sticker fetch after restore failed for order %s", order.id)
+
+  seller_update_fields: list[str] = []
+  wb_supplier = (order.wb_supplier_status or "").strip()
+  if wb_supplier == WB_SUPPLIER_NEW:
+    wb_new_ids = list(seller.wb_new_order_ids or [])
+    if order.wb_order_id not in wb_new_ids:
+      seller.wb_new_order_ids = [*wb_new_ids, order.wb_order_id]
+      seller.wb_count_new = (seller.wb_count_new or 0) + 1
+      seller_update_fields.extend(["wb_new_order_ids", "wb_count_new"])
+  elif wb_supplier == WB_SUPPLIER_ASSEMBLY:
+    seller.wb_count_assembly = (seller.wb_count_assembly or 0) + 1
+    seller_update_fields.append("wb_count_assembly")
+
+  if seller_update_fields:
+    seller_update_fields.append("updated_at")
+    seller.save(update_fields=seller_update_fields)
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.ASSEMBLY,
+    message=f"Восстановлен в сборке FBS: заказ WB #{order.wb_order_id}",
+    details={
+      "order_id": order.id,
+      "barcode": order.barcode,
+      "pick_list_linked": pick_list_linked,
+      "sticker_fetched": sticker_fetched,
+    },
+  )
+
+  counts = get_assembly_stage_counts(seller)
+  message = f"Заказ WB #{order.wb_order_id} снова в сборке."
+  if pick_list_linked:
+    message += " Добавлен в текущий лист подбора — можно сканировать баркод."
+  elif (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY:
+    message += " Сформируйте лист подбора, если скан не находит баркод."
+  if sticker_fetched:
+    message += " Стикер подтянут из WB."
+
+  return {
+    "order": order,
+    "counts": counts,
+    "assembly_eligible": counts["new"],
+    "pick_list_linked": pick_list_linked,
+    "sticker_fetched": sticker_fetched,
+    "message": message,
+  }
+
+
 def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   """Скрыть заказ из сборки FBS (на любом этапе вкладок)."""
   from apps.orders.services.supply_flow import get_assembly_stage_counts
@@ -1037,7 +1194,11 @@ def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> d
 
   _detach_order_from_pick_list(order)
 
-  for supply in Supply.objects.filter(seller=seller, status=Supply.Status.FORMING, orders=order):
+  for supply in Supply.objects.filter(
+    seller=seller,
+    status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    orders=order,
+  ):
     supply.orders.remove(order)
 
   order.assembly_hidden = True

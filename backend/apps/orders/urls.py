@@ -7,6 +7,7 @@ from .views import (
   AssemblyBindMarkingView,
   AssemblyDeleteOrderView,
   AssemblyDeletePickListView,
+  AssemblyRestoreOrderView,
   AssemblyOzonPickListView,
   AssemblyFetchStickersView,
   AssemblyReprintStickerView,
@@ -83,6 +84,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/delete-order/",
       AssemblyDeleteOrderView.as_view(),
       name="assembly-delete-order",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/restore-order/",
+      AssemblyRestoreOrderView.as_view(),
+      name="assembly-restore-order",
     ),
     path(
       "assembly/sellers/<int:seller_id>/workflow-mode/",

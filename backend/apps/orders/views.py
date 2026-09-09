@@ -61,6 +61,8 @@ from .services.assembly import (
   get_seller_stage_counts,
   get_seller_wb_tab_counts,
   remove_order_from_assembly,
+  restore_order_to_assembly,
+  hidden_restorable_orders_queryset,
   replace_order_item,
   reset_assembly_marking_for_pick_list,
   scan_order_barcode,
@@ -583,6 +585,15 @@ class AssemblySellerDetailView(APIView):
         context={"seller": seller},
       ).data
 
+    hidden_restorable = []
+    if stage == "confirm":
+      hidden_restorable = OrderAssemblySerializer(
+        hidden_restorable_orders_queryset(seller).select_related(
+          "product", "product__cell",
+        ).order_by("-updated_at")[:50],
+        many=True,
+      ).data
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
@@ -591,6 +602,7 @@ class AssemblySellerDetailView(APIView):
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": OrderAssemblySerializer(orders, many=True).data,
+      "hidden_restorable_orders": hidden_restorable,
       "delivery_supplies": delivery_supplies,
       "active_supplies": active_supplies,
       "active_pick_list": (
@@ -697,6 +709,39 @@ class AssemblyDeleteOrderView(APIView):
       "order": OrderAssemblySerializer(order).data,
       "counts": result["counts"],
       "assembly_eligible": result["assembly_eligible"],
+    })
+
+
+class AssemblyRestoreOrderView(APIView):
+  """Вернуть ошибочно скрытый заказ в сборку FBS (если он ещё в ЛК WB)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = OrderActionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+      result = restore_order_to_assembly(
+        seller,
+        serializer.validated_data["order_id"],
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+
+    order = result["order"]
+    return Response({
+      "success": True,
+      "message": result["message"],
+      "order": OrderAssemblySerializer(order).data,
+      "counts": result["counts"],
+      "assembly_eligible": result["assembly_eligible"],
+      "pick_list_linked": result["pick_list_linked"],
+      "sticker_fetched": result["sticker_fetched"],
     })
 
 

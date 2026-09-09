@@ -426,6 +426,16 @@
   margin-bottom: 1rem;
 }
 
+.assembly-hidden-orders {
+  margin-bottom: 1rem;
+  border: 1px solid #fecaca;
+  background: #fff7ed;
+}
+
+.assembly-hidden-orders .section-title {
+  color: #b45309;
+}
+
 .assembly-supply-group-row td {
   background: #f1f5f9;
   border-bottom: 1px solid #cbd5e1;

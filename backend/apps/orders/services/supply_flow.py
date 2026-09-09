@@ -1842,10 +1842,10 @@ def _supply_orders(supply: Supply) -> list[Order]:
 
 
 def assembly_supply_orders(supply: Supply, seller: Seller) -> list[Order]:
-  """Заказы поставки только с включённых складов — чужие склады не блокируют CRM."""
+  """Заказы поставки: включённые склады, не скрытые из сборки."""
   return list(
     filter_orders_for_assembly(
-      supply.orders.select_related("product", "seller"),
+      supply.orders.filter(assembly_hidden=False).select_related("product", "seller"),
       seller,
     ),
   )

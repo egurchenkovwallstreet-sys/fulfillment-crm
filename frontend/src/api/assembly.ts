@@ -80,6 +80,7 @@ export interface AssemblySellerDetail {
   supplies_forming: number
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
+  hidden_restorable_orders?: AssemblyOrder[]
   delivery_supplies?: DeliverySupply[]
   active_supplies?: AssemblySupply[]
   active_pick_list?: PickList | null
@@ -285,6 +286,26 @@ export interface DeleteOrderResult {
 export function deleteAssemblyOrder(sellerId: number, orderId: number) {
   return apiFetch<DeleteOrderResult>(
     `/api/orders/assembly/sellers/${sellerId}/delete-order/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId }),
+    },
+  )
+}
+
+export interface RestoreOrderResult {
+  success: boolean
+  message: string
+  order: AssemblyOrder
+  counts: Record<string, number>
+  assembly_eligible: number
+  pick_list_linked: boolean
+  sticker_fetched: number
+}
+
+export function restoreAssemblyOrder(sellerId: number, orderId: number) {
+  return apiFetch<RestoreOrderResult>(
+    `/api/orders/assembly/sellers/${sellerId}/restore-order/`,
     {
       method: 'POST',
       body: JSON.stringify({ order_id: orderId }),

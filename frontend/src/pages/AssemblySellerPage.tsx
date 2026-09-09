@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import {
   bindMarking,
   deleteAssemblyOrder,
+  restoreAssemblyOrder,
   deliverSupply,
   fetchAssemblySeller,
   fetchAssemblyStickers,
@@ -584,10 +585,41 @@ function WbAssemblySellerPage() {
       message:
         `Удалить заказ WB #${order.wb_order_id} из сборки?\n\n` +
         `Баркод: ${order.barcode}\n` +
-        'Заказ исчезнет из списка на этой вкладке. В Wildberries статус не меняется.',
+        'Заказ скроется из таблицы, но в поставке WB может остаться и блокировать доставку. ' +
+        'Восстановить можно в блоке «Удалённые из сборки».',
       confirmLabel: 'Удалить',
       onConfirm: () => void runDeleteOrder(order.id),
     })
+  }
+
+  function handleRestoreOrder(order: AssemblyOrder) {
+    setModal({
+      kind: 'confirm',
+      title: 'Восстановить заказ',
+      message:
+        `Вернуть заказ WB #${order.wb_order_id} в сборку?\n\n` +
+        `Баркод: ${order.barcode}\n` +
+        'Заказ снова появится в таблице. Если он на сборке в WB — CRM подтянет стикер и добавит в лист подбора.',
+      confirmLabel: 'Восстановить',
+      onConfirm: () => void runRestoreOrder(order.id),
+    })
+  }
+
+  async function runRestoreOrder(orderId: number) {
+    if (!id) return
+    setModal(null)
+    setError('')
+    setLoading(true)
+    try {
+      const result = await restoreAssemblyOrder(id, orderId)
+      noticeOk(result.message, 'Восстановление')
+      await load({ stageKey: 'confirm', silent: false })
+      void refreshMarkingStatus()
+    } catch (err) {
+      noticeFail('Восстановление', err, 'Не удалось восстановить заказ')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function runDeleteOrder(orderId: number) {
@@ -1677,9 +1709,14 @@ function WbAssemblySellerPage() {
   const supplyOrderIds = new Set(
     stageSupplies.flatMap((supply) => (supply.orders ?? []).map((order) => order.id)),
   )
+  const confirmStageOrders =
+    stage === 'confirm'
+      ? orders.filter((order) => (order.wb_supplier_status || '').trim() === 'confirm')
+      : orders
   const unassignedOrders = groupedBySupply
-    ? orders.filter((order) => !supplyOrderIds.has(order.id))
+    ? confirmStageOrders.filter((order) => !supplyOrderIds.has(order.id))
     : orders
+  const hiddenRestorableOrders = data?.hidden_restorable_orders ?? []
   const tableColSpan = stage === 'confirm' ? 11 : 10
 
   function renderOrderRow(order: AssemblyOrder) {
@@ -2341,6 +2378,51 @@ function WbAssemblySellerPage() {
       </section>
 
       <div className={`assembly-grid${stage === 'confirm' ? ' assembly-grid--scan' : ''}`}>
+        {stage === 'confirm' && hiddenRestorableOrders.length > 0 && (
+          <section className="panel assembly-hidden-orders">
+            <h2 className="section-title">
+              Удалённые из сборки ({hiddenRestorableOrders.length})
+            </h2>
+            <p className="assembly-scan-hint">
+              Эти заказы скрыты кнопкой «Удалить», но ещё есть в ЛК WB (новые или на сборке).
+              Восстановите, чтобы снова сканировать баркод и печатать стикер — иначе поставка WB
+              может не уйти в доставку.
+            </p>
+            <table className="assembly-table">
+              <thead>
+                <tr>
+                  <th>WB ID</th>
+                  <th>Баркод</th>
+                  <th>Этап WB</th>
+                  <th>Стикер</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hiddenRestorableOrders.map((order) => (
+                  <tr key={`hidden-${order.id}`}>
+                    <td>{order.wb_order_id}</td>
+                    <td><code>{order.barcode}</code></td>
+                    <td>{order.wb_stage_display || order.status_display}</td>
+                    <td>{order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--small btn--primary"
+                        onClick={() => handleRestoreOrder(order)}
+                        disabled={loading}
+                        {...uiHint('Вернуть заказ в сборку и подтянуть стикер из WB при необходимости')}
+                      >
+                        Восстановить
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
+
         <section className={`panel assembly-orders-panel${ordersBusy ? ' assembly-orders-panel--busy' : ''}`}>
           <h2 className="section-title">
             {groupedBySupply ? `Заказы по поставкам (${stageCount(stage)})` : `Заказы (${stageCount(stage)})`}
@@ -2354,7 +2436,7 @@ function WbAssemblySellerPage() {
           {groupedBySupply && (
             <p className="assembly-scan-hint">
               {stage === 'confirm'
-                ? 'Только включённые склады. Нет товара — «Перенести» у заказа или выделите несколько и нажмите «В новую поставку».'
+                ? 'Только заказы на сборке в WB. Нет товара — «Перенести». Заказы «Новые» — на вкладке «Новые» или «Удалённые из сборки» ниже.'
                 : 'QR поставки — кнопка «Печать QR» в шапке каждой поставки.'}
             </p>
           )}
@@ -2463,7 +2545,9 @@ function WbAssemblySellerPage() {
                             </div>
                           </td>
                         </tr>
-                        {supplyOrders.map((order) => renderOrderRow(order))}
+                        {supplyOrders
+                          .filter((order) => (order.wb_supplier_status || '').trim() === 'confirm')
+                          .map((order) => renderOrderRow(order))}
                       </Fragment>
                     )
                   })}
