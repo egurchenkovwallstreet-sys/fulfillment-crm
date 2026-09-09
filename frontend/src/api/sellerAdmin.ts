@@ -258,6 +258,44 @@ export async function applySellerTariff(
   })
 }
 
+export type SellerProductTariffItem = {
+  id: number
+  barcode: string
+  name: string
+  vendor_code: string
+  tech_size: string
+  cell_number: string
+  quantity: number
+  marketplace: string
+  individual_price: string | null
+  price_group_id: number | null
+  price_group_name: string
+  effective_price: string | null
+}
+
+export type SellerProductTariffsResponse = {
+  seller_id: number
+  company_name: string
+  pricing_mode: 'per_unit' | 'per_liter'
+  items: SellerProductTariffItem[]
+}
+
+export async function fetchSellerProductTariffs(sellerId: number): Promise<SellerProductTariffsResponse> {
+  return apiFetch<SellerProductTariffsResponse>(
+    `/api/warehouse/sellers/${sellerId}/product-tariffs/`,
+  )
+}
+
+export async function applySellerProductTariffs(
+  sellerId: number,
+  updates: { product_id: number; price: string }[],
+): Promise<SellerProductTariffsResponse & { result: { updated: number } }> {
+  return apiFetch(`/api/warehouse/sellers/${sellerId}/product-tariffs/`, {
+    method: 'POST',
+    body: JSON.stringify({ updates }),
+  })
+}
+
 export type AdminBillingSellerRow = {
   seller_id: number
   company_name: string

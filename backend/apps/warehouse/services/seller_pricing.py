@@ -167,3 +167,68 @@ def apply_seller_liter_tariff(
 
   seller.save(update_fields=update_fields)
   return {"pricing_mode": seller.pricing_mode}
+
+
+def list_seller_product_tariffs(seller: Seller) -> list[dict]:
+  """Товары селлера с ячейкой в CRM — для экрана тарифов по баркодам."""
+  products = (
+    Product.objects.filter(seller=seller, cell__isnull=False)
+    .select_related("cell", "price_group")
+    .order_by("cell__number", "barcode")
+  )
+  payload: list[dict] = []
+  for product in products:
+    group = product.price_group
+    payload.append({
+      "id": product.id,
+      "barcode": product.barcode,
+      "name": product.name,
+      "vendor_code": product.vendor_code,
+      "tech_size": product.tech_size or product.wb_size,
+      "cell_number": str(product.cell.number) if product.cell_id else "",
+      "quantity": product.quantity,
+      "marketplace": product.marketplace,
+      "individual_price": product.individual_price,
+      "price_group_id": group.id if group else None,
+      "price_group_name": group.name if group else "",
+      "effective_price": product.processing_price,
+    })
+  return payload
+
+
+@transaction.atomic
+def apply_seller_product_tariffs(
+  seller: Seller,
+  *,
+  updates: list[dict],
+) -> dict:
+  """Задать individual_price выбранным товарам селлера."""
+  if not updates:
+    raise SellerPricingError("Нет товаров для обновления")
+
+  seller.pricing_mode = Seller.PricingMode.PER_UNIT
+  seller.save(update_fields=["pricing_mode", "updated_at"])
+
+  product_ids = [item["product_id"] for item in updates]
+  products = {
+    product.id: product
+    for product in Product.objects.filter(
+      seller=seller,
+      pk__in=product_ids,
+      cell__isnull=False,
+    ).select_for_update()
+  }
+  if len(products) != len(set(product_ids)):
+    raise SellerPricingError("Часть товаров не найдена или без ячейки в CRM")
+
+  updated = 0
+  for item in updates:
+    product = products[item["product_id"]]
+    price = item["price"]
+    if price < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    product.individual_price = price
+    product.save(update_fields=["individual_price", "updated_at"])
+    updated += 1
+
+  return {"updated": updated}

@@ -11,8 +11,10 @@ from apps.warehouse.models import PriceGroup
 from apps.warehouse.services.seller_pricing import (
   SellerPricingError,
   apply_seller_liter_tariff,
+  apply_seller_product_tariffs,
   apply_seller_tariff,
   get_seller_pricing_summary,
+  list_seller_product_tariffs,
 )
 from apps.sellers.services.liter_billing import liter_tariff_payload
 
@@ -107,6 +109,70 @@ class PriceGroupDetailView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
     group.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SellerProductTariffItemSerializer(serializers.Serializer):
+  id = serializers.IntegerField()
+  barcode = serializers.CharField()
+  name = serializers.CharField()
+  vendor_code = serializers.CharField()
+  tech_size = serializers.CharField()
+  cell_number = serializers.CharField()
+  quantity = serializers.IntegerField()
+  marketplace = serializers.CharField()
+  individual_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+  price_group_id = serializers.IntegerField(allow_null=True)
+  price_group_name = serializers.CharField()
+  effective_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+
+
+class SellerProductTariffUpdateSerializer(serializers.Serializer):
+  product_id = serializers.IntegerField()
+  price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"))
+
+
+class SellerProductTariffsApplySerializer(serializers.Serializer):
+  updates = SellerProductTariffUpdateSerializer(many=True, min_length=1)
+
+
+class SellerProductTariffsView(APIView):
+  """Тарифы отгрузки по баркодам — товары с ячейкой в CRM."""
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def get(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    items = list_seller_product_tariffs(seller)
+    return Response({
+      "seller_id": seller.id,
+      "company_name": seller.company_name,
+      "pricing_mode": seller.pricing_mode,
+      "items": SellerProductTariffItemSerializer(items, many=True).data,
+    })
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    serializer = SellerProductTariffsApplySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    updates = [
+      {"product_id": row["product_id"], "price": row["price"]}
+      for row in serializer.validated_data["updates"]
+    ]
+    try:
+      result = apply_seller_product_tariffs(seller, updates=updates)
+    except SellerPricingError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    items = list_seller_product_tariffs(seller)
+    return Response({
+      "result": result,
+      "seller_id": seller.id,
+      "company_name": seller.company_name,
+      "pricing_mode": seller.pricing_mode,
+      "items": SellerProductTariffItemSerializer(items, many=True).data,
+    })
 
 
 class SellerPricingView(APIView):

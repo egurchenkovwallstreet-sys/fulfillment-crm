@@ -29,7 +29,12 @@ from .views import (
   StockDistributeView,
   OzonStocksPushView,
 )
-from .views_pricing import PriceGroupDetailView, PriceGroupListView, SellerPricingView
+from .views_pricing import (
+  PriceGroupDetailView,
+  PriceGroupListView,
+  SellerPricingView,
+  SellerProductTariffsView,
+)
 from .views_xl_intake import (
   XlIntakeCompleteView,
   XlIntakeConnectWbView,
@@ -263,5 +268,10 @@ urlpatterns = [
     "sellers/<int:seller_id>/pricing/",
     SellerPricingView.as_view(),
     name="seller_pricing",
+  ),
+  path(
+    "sellers/<int:seller_id>/product-tariffs/",
+    SellerProductTariffsView.as_view(),
+    name="seller_product_tariffs",
   ),
 ]

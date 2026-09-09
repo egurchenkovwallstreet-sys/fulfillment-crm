@@ -8,6 +8,7 @@ import { AdminBillingPage } from './pages/AdminBillingPage'
 import { OwnerHomePage } from './pages/owner/OwnerHomePage'
 import { OwnerLayout } from './pages/owner/OwnerLayout'
 import { OwnerPricingPage } from './pages/owner/OwnerPricingPage'
+import { OwnerSellerTariffsPage } from './pages/owner/OwnerSellerTariffsPage'
 import { OwnerStaffPage } from './pages/owner/OwnerStaffPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
@@ -83,6 +84,7 @@ function AppRoutes() {
               <Route path="sellers" element={<SellersManagePage />} />
               <Route path="staff" element={<OwnerStaffPage />} />
               <Route path="pricing" element={<OwnerPricingPage />} />
+              <Route path="tariffs" element={<OwnerSellerTariffsPage />} />
               <Route path="billing" element={<AdminBillingPage />} />
             </Route>
             <Route path="/billing" element={<Navigate to="/owner/billing" replace />} />

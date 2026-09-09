@@ -1,0 +1,108 @@
+.owner-tariffs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.owner-tariffs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-end;
+}
+
+.owner-tariffs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 280px;
+}
+
+.owner-tariffs-field span {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.owner-tariffs-field select {
+  min-width: 280px;
+}
+
+.owner-tariffs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.owner-tariffs-meta__mode {
+  color: #4338ca;
+}
+
+.owner-tariffs-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.owner-tariffs-bulk__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+}
+
+.owner-tariffs-bulk__price {
+  width: 180px;
+}
+
+.owner-tariffs-empty {
+  color: #64748b;
+  margin: 0.5rem 0;
+}
+
+.owner-tariffs-table-wrap {
+  overflow-x: auto;
+}
+
+.owner-tariffs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.owner-tariffs-table th,
+.owner-tariffs-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.owner-tariffs-table th {
+  font-size: 0.78rem;
+  color: #64748b;
+  background: #f8fafc;
+  white-space: nowrap;
+}
+
+.owner-tariffs-table__row--dirty {
+  background: #fffbeb;
+}
+
+.owner-tariffs-product-name {
+  font-weight: 500;
+}
+
+.owner-tariffs-product-meta {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.owner-tariffs-row-price {
+  width: 100px;
+}
