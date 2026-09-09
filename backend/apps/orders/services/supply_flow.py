@@ -1616,11 +1616,33 @@ def delivery_stage_supplies_queryset(seller: Seller) -> QuerySet:
   return qs
 
 
-def _cancelled_assembly_orders_qs(base_qs: QuerySet) -> QuerySet:
-  """Отменённые в WB — показываем в списке сборки красной строкой."""
-  return base_qs.filter(status=Order.Status.CANCELLED).filter(
+def _cancelled_orders_in_active_supplies_qs(seller: Seller, base_qs: QuerySet) -> QuerySet:
+  """Отменённые только в активных CRM-поставках — красная строка на «На сборке»."""
+  supplies = filter_supplies_for_assembly(
+    Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ),
+    seller,
+  )
+  if not supplies.exists():
+    return base_qs.none()
+  return base_qs.filter(
+    supplies__in=supplies,
+    status=Order.Status.CANCELLED,
+  ).filter(
+    Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
+  ).distinct()
+
+
+def _cancelled_new_stage_orders_qs(seller: Seller, base_qs: QuerySet) -> QuerySet:
+  """Отменённые в списке новых WB — красная строка на «Новые»."""
+  qs = base_qs.filter(status=Order.Status.CANCELLED).filter(
     Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
   )
+  if seller.wb_new_order_ids:
+    qs = qs.filter(wb_order_id__in=seller.wb_new_order_ids)
+  return qs
 
 
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
@@ -1639,7 +1661,7 @@ def new_stage_orders_queryset(seller: Seller) -> QuerySet:
       Order.Status.IN_DELIVERY,
     ],
   )
-  return active
+  return (active | _cancelled_new_stage_orders_qs(seller, base)).distinct()
 
 
 def orders_at_risk_in_active_supplies(seller: Seller) -> QuerySet:
@@ -1722,7 +1744,7 @@ def picking_stage_orders_queryset(seller: Seller) -> QuerySet:
       Order.Status.SHIPPED,
     ],
   )
-  return (active | _cancelled_assembly_orders_qs(base)).distinct()
+  return (active | _cancelled_orders_in_active_supplies_qs(seller, base)).distinct()
 
 
 def count_picking_orders_for_barcode(seller: Seller, barcode: str) -> int:
