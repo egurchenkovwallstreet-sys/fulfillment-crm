@@ -1616,33 +1616,27 @@ def delivery_stage_supplies_queryset(seller: Seller) -> QuerySet:
   return qs
 
 
-def _cancelled_orders_in_active_supplies_qs(seller: Seller, base_qs: QuerySet) -> QuerySet:
-  """Отменённые только в активных CRM-поставках — красная строка на «На сборке»."""
-  supplies = filter_supplies_for_assembly(
+def _active_assembly_supplies_qs(seller: Seller) -> QuerySet:
+  return filter_supplies_for_assembly(
     Supply.objects.filter(
       seller=seller,
       status__in=(Supply.Status.FORMING, Supply.Status.READY),
     ),
     seller,
   )
-  if not supplies.exists():
-    return base_qs.none()
-  return base_qs.filter(
-    supplies__in=supplies,
-    status=Order.Status.CANCELLED,
-  ).filter(
-    Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
-  ).distinct()
 
 
-def _cancelled_new_stage_orders_qs(seller: Seller, base_qs: QuerySet) -> QuerySet:
-  """Отменённые в списке новых WB — красная строка на «Новые»."""
-  qs = base_qs.filter(status=Order.Status.CANCELLED).filter(
-    Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
-  )
-  if seller.wb_new_order_ids:
-    qs = qs.filter(wb_order_id__in=seller.wb_new_order_ids)
-  return qs
+def _wb_new_order_ids(seller: Seller) -> list[int]:
+  raw = seller.wb_new_order_ids or []
+  if not isinstance(raw, list):
+    return []
+  ids: list[int] = []
+  for item in raw:
+    try:
+      ids.append(int(item))
+    except (TypeError, ValueError):
+      continue
+  return ids
 
 
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
@@ -1651,28 +1645,30 @@ def new_stage_orders_queryset(seller: Seller) -> QuerySet:
     Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
-  qs = base.filter(WB_STAGE_QUERIES["new"]())
-  if seller.wb_new_order_ids:
-    qs = qs.filter(wb_order_id__in=seller.wb_new_order_ids)
-  active = qs.exclude(
-    status__in=[
-      Order.Status.CANCELLED,
-      Order.Status.SHIPPED,
-      Order.Status.IN_DELIVERY,
-    ],
-  )
-  return (active | _cancelled_new_stage_orders_qs(seller, base)).distinct()
+  new_ids = _wb_new_order_ids(seller)
+  terminal_statuses = [
+    Order.Status.CANCELLED,
+    Order.Status.SHIPPED,
+    Order.Status.IN_DELIVERY,
+  ]
+  active_q = Q(wb_supplier_status=WB_SUPPLIER_NEW) & ~Q(status__in=terminal_statuses)
+  if new_ids:
+    active_q &= Q(wb_order_id__in=new_ids)
+    cancelled_q = (
+      Q(wb_order_id__in=new_ids)
+      & Q(status=Order.Status.CANCELLED)
+      & (
+        Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES)
+        | Q(wb_status__in=CANCEL_WB_STATUSES)
+      )
+    )
+    return base.filter(active_q | cancelled_q)
+  return base.filter(active_q)
 
 
 def orders_at_risk_in_active_supplies(seller: Seller) -> QuerySet:
   """Заказы в активных поставках, которые ещё не отменены — для отслеживания отмен при sync."""
-  supplies = filter_supplies_for_assembly(
-    Supply.objects.filter(
-      seller=seller,
-      status__in=(Supply.Status.FORMING, Supply.Status.READY),
-    ),
-    seller,
-  )
+  supplies = _active_assembly_supplies_qs(seller)
   return Order.objects.filter(
     supplies__in=supplies,
     assembly_hidden=False,
@@ -1738,13 +1734,21 @@ def picking_stage_orders_queryset(seller: Seller) -> QuerySet:
     Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
-  active = base.filter(WB_STAGE_QUERIES["confirm"]()).exclude(
-    status__in=[
-      Order.Status.CANCELLED,
-      Order.Status.SHIPPED,
-    ],
+  active_q = Q(wb_supplier_status=WB_SUPPLIER_ASSEMBLY) & ~Q(
+    status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED]
   )
-  return (active | _cancelled_orders_in_active_supplies_qs(seller, base)).distinct()
+  supplies = _active_assembly_supplies_qs(seller)
+  if not supplies.exists():
+    return base.filter(active_q)
+  cancelled_q = (
+    Q(supplies__in=supplies)
+    & Q(status=Order.Status.CANCELLED)
+    & (
+      Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES)
+      | Q(wb_status__in=CANCEL_WB_STATUSES)
+    )
+  )
+  return base.filter(active_q | cancelled_q).distinct()
 
 
 def count_picking_orders_for_barcode(seller: Seller, barcode: str) -> int:

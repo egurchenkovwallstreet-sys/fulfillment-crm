@@ -536,6 +536,13 @@ class AssemblySellerDetailView(APIView):
       else:
         orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
+    if stage == "confirm":
+      order_ids = list(
+        orders_qs.order_by("-created_at").values_list("id", flat=True).distinct()[:500]
+      )
+      orders_qs = Order.objects.filter(id__in=order_ids).select_related(
+        "product", "product__cell",
+      )
     orders = list(orders_qs.order_by("-created_at")[:500])
 
     enabled_orders_qs = filter_orders_for_assembly(
