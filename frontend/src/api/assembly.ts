@@ -56,15 +56,6 @@ export interface AssemblyOrder {
   created_at: string
 }
 
-export interface DeliverySupply {
-  id: number
-  wb_supply_id: string
-  wb_warehouse_id: number | null
-  orders_count: number
-  supply_barcode_printed: boolean
-  created_at: string
-}
-
 export interface AssemblySupply {
   id: number
   wb_supply_id: string
@@ -73,10 +64,13 @@ export interface AssemblySupply {
   status: string
   status_display: string
   orders_count: number
+  orders?: AssemblyOrder[]
   can_deliver: boolean
   supply_barcode_printed: boolean
   created_at: string
 }
+
+export type DeliverySupply = AssemblySupply
 
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }

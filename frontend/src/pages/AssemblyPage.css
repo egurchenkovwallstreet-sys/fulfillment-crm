@@ -426,6 +426,35 @@
   margin-bottom: 1rem;
 }
 
+.assembly-supply-group-row td {
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
+  padding: 0.75rem !important;
+}
+
+.assembly-supply-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+
+.assembly-supply-group-header strong {
+  font-family: ui-monospace, monospace;
+}
+
+.assembly-supply-group-header__meta {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.assembly-supply-group-header__actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .assembly-supply-status {
   font-size: 0.85rem;
   color: #64748b;

@@ -32,6 +32,7 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import (
   filter_orders_for_assembly,
+  filter_supplies_for_assembly,
   get_enabled_wb_warehouse_ids,
   seller_has_warehouse_config,
 )
@@ -858,7 +859,10 @@ def list_move_target_supplies(seller: Seller, order_ids: list[int]) -> list[dict
     raise SupplyFlowError("Не выбраны заказы для переноса", code="empty")
 
   orders = list(
-    Order.objects.filter(seller=seller, pk__in=order_ids).prefetch_related("supplies")
+    filter_orders_for_assembly(
+      Order.objects.filter(seller=seller, pk__in=order_ids).prefetch_related("supplies"),
+      seller,
+    )
   )
   if not orders:
     raise SupplyFlowError("Заказы не найдены", code="not_found")
@@ -871,10 +875,13 @@ def list_move_target_supplies(seller: Seller, order_ids: list[int]) -> list[dict
   }
   crm_by_wb_id = {
     str(supply.wb_supply_id): supply
-    for supply in Supply.objects.filter(
-      seller=seller,
-      status__in=(Supply.Status.FORMING, Supply.Status.READY),
-    ).exclude(wb_supply_id="")
+    for supply in filter_supplies_for_assembly(
+      Supply.objects.filter(
+        seller=seller,
+        status__in=(Supply.Status.FORMING, Supply.Status.READY),
+      ).exclude(wb_supply_id=""),
+      seller,
+    )
     if str(supply.wb_supply_id)
   }
 
@@ -973,11 +980,23 @@ def _resolve_move_target_supply(
 
 
 def order_can_move_to_new_supply(order: Order) -> bool:
+  """Несобранный заказ на обслуживаемом складе — можно перенести в другую поставку."""
   if order.wb_warehouse_id is None:
     return False
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
     return False
-  return order_in_assembly(order)
+  if order.status in (
+    Order.Status.CANCELLED,
+    Order.Status.SHIPPED,
+    Order.Status.IN_DELIVERY,
+  ):
+    return False
+  if order_sticker_printed_in_crm(order):
+    return False
+  if seller_has_warehouse_config(order.seller):
+    if int(order.wb_warehouse_id) not in get_enabled_wb_warehouse_ids(order.seller):
+      return False
+  return True
 
 
 @transaction.atomic
@@ -992,10 +1011,16 @@ def move_orders_to_new_supply(
     raise SupplyFlowError("Не выбраны заказы для переноса", code="empty")
 
   orders = list(
-    Order.objects.filter(seller=seller, pk__in=order_ids).select_related("product", "seller")
+    filter_orders_for_assembly(
+      Order.objects.filter(seller=seller, pk__in=order_ids).select_related("product", "seller"),
+      seller,
+    )
   )
   if len(orders) != len(set(order_ids)):
-    raise SupplyFlowError("Некоторые заказы не найдены", code="not_found")
+    raise SupplyFlowError(
+      "Некоторые заказы не найдены или с выключенного склада",
+      code="not_found",
+    )
 
   movable: list[Order] = []
   skipped: list[dict] = []
@@ -1295,10 +1320,10 @@ def _cleanup_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller)
       pick_list.delete()
 
 
-def _assert_all_supply_orders_ready_for_deliver(supply: Supply) -> None:
-  orders = _supply_orders(supply)
+def _assert_all_supply_orders_ready_for_deliver(supply: Supply, *, seller: Seller) -> None:
+  orders = assembly_supply_orders(supply, seller)
   if not orders:
-    raise SupplyFlowError("В поставке нет заказов", code="not_ready")
+    raise SupplyFlowError("В поставке нет заказов на обслуживаемых складах", code="not_ready")
   not_ready = [order for order in orders if not order_can_send_to_delivery(order)]
   if not_ready:
     sample = not_ready[0]
@@ -1306,7 +1331,7 @@ def _assert_all_supply_orders_ready_for_deliver(supply: Supply) -> None:
     raise SupplyFlowError(
       f"В поставке WB {supply.wb_supply_id} {len(not_ready)} из {len(orders)} "
       f"заказ(ов) ещё не готовы ({reason}). "
-      "Дособерите все заказы или откройте «На сборке» и перенесите неготовые в другую поставку.",
+      "Дособерите все заказы или перенесите неготовые в другую поставку.",
       code="not_ready",
     )
 
@@ -1317,7 +1342,7 @@ def _prepare_supply_orders_for_deliver(
   *,
   user=None,
 ) -> None:
-  for order in _supply_orders(supply):
+  for order in assembly_supply_orders(supply, seller):
     if not order_can_send_to_delivery(order):
       continue
     _ensure_marking_verified_for_delivery(seller, order, user=user)
@@ -1325,7 +1350,7 @@ def _prepare_supply_orders_for_deliver(
       assert_order_stock_deducted_at_print(order)
     except StockDeductionError as exc:
       raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
-  _assert_all_supply_orders_ready_for_deliver(supply)
+  _assert_all_supply_orders_ready_for_deliver(supply, seller=seller)
 
 
 def _finalize_supply_after_wb_deliver(
@@ -1816,10 +1841,21 @@ def _supply_orders(supply: Supply) -> list[Order]:
   )
 
 
-def refresh_supply_readiness(supply: Supply) -> Supply:
+def assembly_supply_orders(supply: Supply, seller: Seller) -> list[Order]:
+  """Заказы поставки только с включённых складов — чужие склады не блокируют CRM."""
+  return list(
+    filter_orders_for_assembly(
+      supply.orders.select_related("product", "seller"),
+      seller,
+    ),
+  )
+
+
+def refresh_supply_readiness(supply: Supply, *, seller: Seller | None = None) -> Supply:
   if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
     return supply
-  orders = _supply_orders(supply)
+  seller = seller or supply.seller
+  orders = assembly_supply_orders(supply, seller)
   if not orders:
     return supply
   all_ready = all(order_can_send_to_delivery(order) for order in orders)
@@ -1830,12 +1866,13 @@ def refresh_supply_readiness(supply: Supply) -> Supply:
   return supply
 
 
-def supply_can_deliver(supply: Supply) -> bool:
+def supply_can_deliver(supply: Supply, *, seller: Seller | None = None) -> bool:
   if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
     return False
   if not supply.wb_supply_id:
     return False
-  orders = _supply_orders(supply)
+  seller = seller or supply.seller
+  orders = assembly_supply_orders(supply, seller)
   return bool(orders) and all(order_can_send_to_delivery(order) for order in orders)
 
 
@@ -1857,11 +1894,19 @@ def send_supply_to_delivery(
   if not supply:
     raise SupplyFlowError("Поставка не найдена", code="not_found")
 
-  refresh_supply_readiness(supply)
-  if not supply_can_deliver(supply):
+  if seller_has_warehouse_config(seller):
+    enabled = get_enabled_wb_warehouse_ids(seller)
+    if supply.wb_warehouse_id is not None and int(supply.wb_warehouse_id) not in enabled:
+      raise SupplyFlowError(
+        "Поставка с выключенного или необслуживаемого склада — включите склад или работайте в ЛК WB.",
+        code="warehouse_disabled",
+      )
+
+  refresh_supply_readiness(supply, seller=seller)
+  if not supply_can_deliver(supply, seller=seller):
     reasons = [
       reason
-      for order in _supply_orders(supply)
+      for order in assembly_supply_orders(supply, seller)
       if (reason := order_delivery_block_reason(order))
     ]
     raise SupplyFlowError(
@@ -1905,10 +1950,11 @@ def send_supply_to_delivery(
       supply.wb_supply_id,
     )
 
+  assembly_orders = assembly_supply_orders(supply, seller)
   primary_order = next(
-    (order for order in _supply_orders(supply) if order_can_send_to_delivery(order)),
+    (order for order in assembly_orders if order_can_send_to_delivery(order)),
     None,
-  ) or (_supply_orders(supply)[0] if _supply_orders(supply) else None)
+  ) or (assembly_orders[0] if assembly_orders else None)
   if primary_order is None:
     raise SupplyFlowError(
       "В поставке нет заказов для передачи в доставку.",
@@ -1943,9 +1989,12 @@ def send_supplies_to_delivery_bulk(
   shipping_date: date | None = None,
   shipping_type: str = "selfShipping",
 ) -> dict:
-  qs = Supply.objects.filter(
-    seller=seller,
-    status__in=(Supply.Status.FORMING, Supply.Status.READY),
+  qs = filter_supplies_for_assembly(
+    Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ),
+    seller,
   ).prefetch_related("orders__product", "orders__seller")
   if supply_ids is not None:
     qs = qs.filter(pk__in=supply_ids)
@@ -1955,8 +2004,8 @@ def send_supplies_to_delivery_bulk(
   barcode_files: list[str] = []
 
   for supply in qs:
-    refresh_supply_readiness(supply)
-    if not supply_can_deliver(supply):
+    refresh_supply_readiness(supply, seller=seller)
+    if not supply_can_deliver(supply, seller=seller):
       continue
     try:
       result = send_supply_to_delivery(

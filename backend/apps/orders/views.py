@@ -1,4 +1,4 @@
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -21,7 +21,11 @@ from apps.orders.services.supply_flow import (
 )
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, wb_active_q
 from .services.supply_sync import sync_supplies_from_wb
-from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, filter_orders_queryset
+from apps.sellers.services.warehouse_filter import (
+  filter_orders_for_assembly,
+  filter_orders_queryset,
+  filter_supplies_for_assembly,
+)
 
 from .models import Order, PickList, Supply
 from .serializers import (
@@ -528,43 +532,56 @@ class AssemblySellerDetailView(APIView):
       else:
         orders_qs = orders_qs.filter(wb_active_q()).exclude(status=Order.Status.CANCELLED)
 
-    orders = list(orders_qs.order_by("-created_at")[:300])
-    if stage == "confirm":
-      orders = [order for order in orders if order_in_assembly(order)]
+    orders = list(orders_qs.order_by("-created_at")[:500])
+
+    enabled_orders_qs = filter_orders_for_assembly(
+      Order.objects.filter(seller=seller, assembly_hidden=False),
+      seller,
+    ).select_related("product", "product__cell", "seller")
 
     active_pick_lists = active_wb_pick_lists(seller)
     active_pick_list = active_pick_lists[0] if active_pick_lists else None
 
-    supplies_forming = Supply.objects.filter(
-      seller=seller,
-      status=Supply.Status.FORMING,
+    supplies_forming = filter_supplies_for_assembly(
+      Supply.objects.filter(seller=seller, status=Supply.Status.FORMING),
+      seller,
     ).count()
 
     warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
 
     delivery_supplies = []
     if stage == "complete":
-      delivery_supplies = DeliverySupplySerializer(
+      supplies_qs = (
         delivery_stage_supplies_queryset(seller)
-        .annotate(orders_count=Count("orders"))
-        .order_by("-created_at")[:200],
+        .prefetch_related(Prefetch("orders", queryset=enabled_orders_qs))
+        .order_by("-created_at")[:200]
+      )
+      delivery_supplies = SupplySerializer(
+        supplies_qs,
         many=True,
+        context={"seller": seller},
       ).data
 
     active_supplies = []
     if stage == "confirm":
       supplies_qs = (
-        Supply.objects.filter(
-          seller=seller,
-          status__in=(Supply.Status.FORMING, Supply.Status.READY),
+        filter_supplies_for_assembly(
+          Supply.objects.filter(
+            seller=seller,
+            status__in=(Supply.Status.FORMING, Supply.Status.READY),
+          ),
+          seller,
         )
-        .prefetch_related("orders__product", "orders__seller")
-        .annotate(orders_count=Count("orders"))
+        .prefetch_related(Prefetch("orders", queryset=enabled_orders_qs))
         .order_by("wb_warehouse_id", "-created_at")[:100]
       )
       for supply in supplies_qs:
-        refresh_supply_readiness(supply)
-      active_supplies = SupplySerializer(supplies_qs, many=True).data
+        refresh_supply_readiness(supply, seller=seller)
+      active_supplies = SupplySerializer(
+        supplies_qs,
+        many=True,
+        context={"seller": seller},
+      ).data
 
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},

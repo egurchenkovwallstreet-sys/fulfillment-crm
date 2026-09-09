@@ -73,6 +73,16 @@ def filter_orders_for_assembly(qs: QuerySet, seller: Seller) -> QuerySet:
   return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
 
 
+def filter_supplies_for_assembly(qs: QuerySet, seller: Seller) -> QuerySet:
+  """Поставки только включённых FBS-складов — сборка и доставка в CRM."""
+  if not seller_has_warehouse_config(seller):
+    return qs.filter(seller=seller)
+  enabled = get_enabled_wb_warehouse_ids(seller)
+  if not enabled:
+    return qs.none()
+  return qs.filter(seller=seller, wb_warehouse_id__in=enabled)
+
+
 def filter_orders_for_seller_cabinet(qs: QuerySet, seller: Seller) -> QuerySet:
   """Кабинет селлера: все FBS-склады селлера."""
   return qs.filter(seller=seller)

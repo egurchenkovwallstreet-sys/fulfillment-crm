@@ -405,7 +405,7 @@ class SupplySerializer(serializers.ModelSerializer):
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   warehouse_name = serializers.SerializerMethodField()
-  orders = SupplyOrderSerializer(many=True, read_only=True)
+  orders = serializers.SerializerMethodField()
   orders_count = serializers.SerializerMethodField()
   can_deliver = serializers.SerializerMethodField()
 
@@ -441,12 +441,24 @@ class SupplySerializer(serializers.ModelSerializer):
       return warehouse.name
     return f"Склад #{obj.wb_warehouse_id}"
 
+  def _assembly_orders_qs(self, obj):
+    from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
+    seller = self.context.get("seller") or obj.seller
+    return filter_orders_for_assembly(
+      obj.orders.select_related("product", "product__cell", "seller"),
+      seller,
+    )
+
+  def get_orders(self, obj):
+    return OrderAssemblySerializer(self._assembly_orders_qs(obj), many=True).data
+
   def get_orders_count(self, obj):
-    return obj.orders.count()
+    return self._assembly_orders_qs(obj).count()
 
   def get_can_deliver(self, obj):
     from apps.orders.services.supply_flow import supply_can_deliver
-    return supply_can_deliver(obj)
+    seller = self.context.get("seller") or obj.seller
+    return supply_can_deliver(obj, seller=seller)
 
 
 class DeliverySupplySerializer(serializers.ModelSerializer):

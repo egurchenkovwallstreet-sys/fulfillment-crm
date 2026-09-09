@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -1667,6 +1667,155 @@ function WbAssemblySellerPage() {
           ? markingStatus.in_assembly
           : []
 
+  const stageSupplies: AssemblySupply[] =
+    stage === 'confirm'
+      ? activeSupplies
+      : stage === 'complete'
+        ? deliverySupplies
+        : []
+  const groupedBySupply = stage === 'confirm' || stage === 'complete'
+  const supplyOrderIds = new Set(
+    stageSupplies.flatMap((supply) => (supply.orders ?? []).map((order) => order.id)),
+  )
+  const unassignedOrders = groupedBySupply
+    ? orders.filter((order) => !supplyOrderIds.has(order.id))
+    : orders
+  const tableColSpan = stage === 'confirm' ? 11 : 10
+
+  function renderOrderRow(order: AssemblyOrder) {
+    const blockReason = orderBlockReason(order)
+    return (
+      <tr key={order.id}>
+        {stage === 'confirm' && (
+          <td>
+            {order.can_move_to_new_supply ? (
+              <input
+                type="checkbox"
+                checked={selectedMoveIds.has(order.id)}
+                onChange={() => toggleMoveOrder(order.id)}
+                disabled={loading}
+                aria-label={`Выбрать заказ WB #${order.wb_order_id} для переноса`}
+              />
+            ) : null}
+          </td>
+        )}
+        <td>{order.wb_order_id}</td>
+        <td><code>{order.barcode}</code></td>
+        <td>
+          <ProductPhotoThumb
+            url={order.photo_url ?? ''}
+            alt={order.barcode || String(order.wb_order_id)}
+          />
+        </td>
+        <td>
+          <strong className="assembly-order-size">
+            {order.tech_size || '—'}
+          </strong>
+        </td>
+        <td>{order.cell_number || '—'}</td>
+        <td>
+          {order.requires_marking ? (
+            order.marking_verify_status === 'pending' ? (
+              <span className="marking-badge marking-badge--pending" title="Проверка ЧЗ в WB">⏳</span>
+            ) : order.marking_verify_status === 'error' ? (
+              <span
+                className="marking-badge marking-badge--error"
+                title={appendStickerHint(
+                  order.marking_verify_error || 'ЧЗ отклонён',
+                  order,
+                )}
+              >
+                ✕
+              </span>
+            ) : order.marking_bound ? (
+              <span className="marking-badge marking-badge--ok">✓</span>
+            ) : (
+              <span className="marking-badge marking-badge--required">ЧЗ</span>
+            )
+          ) : '—'}
+        </td>
+        <td>
+          {order.warehouse_quantity != null ? (
+            <span className={order.warehouse_quantity < 1 ? 'assembly-stock--low' : ''}>
+              {order.warehouse_quantity} шт.
+            </span>
+          ) : '—'}
+        </td>
+        <td>
+          <div>{order.wb_stage_display || order.status_display}</div>
+          {blockReason && stage === 'confirm' && (
+            <div className="assembly-block-reason">{blockReason}</div>
+          )}
+        </td>
+        <td>
+          {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
+        </td>
+        <td className="assembly-table__actions">
+          {orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
+            <button
+              type="button"
+              className="btn btn--small btn--ghost"
+              onClick={() => confirmReprintSticker(order)}
+              disabled={loading}
+              {...uiHint('Напечатать тот же стикер ещё раз. Остаток CRM не списывается.')}
+            >
+              Печать стикера повторно
+            </button>
+          )}
+          {showAssemblyButton(order) && stage !== 'complete' && (
+            <button
+              type="button"
+              className="btn btn--small btn--primary"
+              onClick={() => handleSendToAssembly(order.id)}
+              disabled={loading}
+              {...uiHint('Перевести один заказ в статус «На сборке» в WB')}
+            >
+              На сборку
+            </button>
+          )}
+          {orderCanDeliver(order) && stage === 'confirm' && (
+            <span
+              {...hintWrapProps(
+                markingQueueBlocked
+                  ? 'Сначала закройте ошибки ЧЗ'
+                  : 'Добавить заказ в поставку WB',
+              )}
+            >
+              <button
+                type="button"
+                className="btn btn--small btn--deliver-ready"
+                onClick={() => handleSendToDelivery(order)}
+                disabled={loading || markingQueueBlocked}
+              >
+                В доставку
+              </button>
+            </span>
+          )}
+          {order.can_move_to_new_supply && stage === 'confirm' && (
+            <button
+              type="button"
+              className="btn btn--small btn--ghost"
+              onClick={() => handleMoveSingleOrder(order)}
+              disabled={loading}
+              {...uiHint('Создать новую поставку WB и перенести неотсканированный заказ')}
+            >
+              Новая поставка
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn--small btn--ghost assembly-order-delete"
+            onClick={() => handleDeleteOrder(order)}
+            disabled={loading}
+            {...uiHint('Убрать заказ из текущей сборки в CRM (не отмена на WB)')}
+          >
+            Удалить
+          </button>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <>
       <header className="topbar">
@@ -1886,58 +2035,6 @@ function WbAssemblySellerPage() {
           errorsCount={markingStatus.errors_count}
           onOpenList={setMarkingListKind}
         />
-      )}
-
-      {stage === 'confirm' && activeSupplies.length > 0 && (
-        <section className="panel assembly-active-supplies">
-          <h2 className="section-title">Поставки на сборке ({activeSupplies.length})</h2>
-          <p className="assembly-scan-hint">
-            Если товара нет в остатках — откройте «На сборке» и нажмите «Перенести». CRM предложит
-            другую поставку из ЛК WB или создаст новую. Собранные заказы остаются в текущей поставке
-            и уходят в доставку.
-          </p>
-          <table className="assembly-table">
-            <thead>
-              <tr>
-                <th>ID WB</th>
-                <th>Склад</th>
-                <th>Заказов</th>
-                <th>Статус</th>
-                <th>Действие</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeSupplies.map((supply) => (
-                <tr key={supply.id}>
-                  <td><code>{supply.wb_supply_id}</code></td>
-                  <td>{supply.warehouse_name || `Склад #${supply.wb_warehouse_id ?? '—'}`}</td>
-                  <td>{supply.orders_count}</td>
-                  <td>
-                    {supply.can_deliver ? (
-                      <span className="assembly-supply-status assembly-supply-status--ready">Готова</span>
-                    ) : (
-                      <span className="assembly-supply-status">На сборке</span>
-                    )}
-                  </td>
-                  <td>
-                    {supply.can_deliver ? (
-                      <button
-                        type="button"
-                        className="btn btn--small btn--deliver-ready"
-                        onClick={() => handleDeliverSupply(supply)}
-                        disabled={loading || markingQueueBlocked}
-                      >
-                        В доставку
-                      </button>
-                    ) : (
-                      <span className="assembly-muted">Ждёт сборки / ЧЗ</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
       )}
 
       <section className="assembly-pipeline">
@@ -2243,53 +2340,10 @@ function WbAssemblySellerPage() {
         )}
       </section>
 
-      {stage === 'complete' && (
-        <section className="panel assembly-delivery-supplies">
-          <h2 className="section-title">Поставки в доставке ({deliverySupplies.length})</h2>
-          <p className="assembly-scan-hint">
-            QR поставки нужен для приёмки на складе WB. Если при передаче в доставку окно печати
-            закрылось без стикера — нажмите «Печать QR» для нужной поставки.
-          </p>
-          {deliverySupplies.length === 0 ? (
-            <p className="assembly-warehouses__empty">Нет поставок, ожидающих сканирования на складе WB</p>
-          ) : (
-            <table className="assembly-table">
-              <thead>
-                <tr>
-                  <th>ID поставки WB</th>
-                  <th>Заказов</th>
-                  <th>Создана</th>
-                  <th>Действие</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliverySupplies.map((supply) => (
-                  <tr key={supply.id}>
-                    <td><code>{supply.wb_supply_id}</code></td>
-                    <td>{supply.orders_count}</td>
-                    <td>{new Date(supply.created_at).toLocaleString('ru-RU')}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn--small btn--primary"
-                        onClick={() => void handlePrintSupplyBarcode(supply.id, supply.wb_supply_id)}
-                        disabled={loading}
-                      >
-                        Печать QR
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      )}
-
       <div className={`assembly-grid${stage === 'confirm' ? ' assembly-grid--scan' : ''}`}>
         <section className={`panel assembly-orders-panel${ordersBusy ? ' assembly-orders-panel--busy' : ''}`}>
           <h2 className="section-title">
-            Заказы ({stageCount(stage)})
+            {groupedBySupply ? `Заказы по поставкам (${stageCount(stage)})` : `Заказы (${stageCount(stage)})`}
             {stage === 'confirm' && movableOrdersCount > 0 && (
               <span className="assembly-orders-panel__hint">
                 {' '}· можно перенести: {movableOrdersCount}
@@ -2297,6 +2351,13 @@ function WbAssemblySellerPage() {
             )}
             {ordersBusy && <span className="assembly-orders-panel__status">обновление…</span>}
           </h2>
+          {groupedBySupply && (
+            <p className="assembly-scan-hint">
+              {stage === 'confirm'
+                ? 'Только включённые склады. Нет товара — «Перенести» у заказа или выделите несколько и нажмите «В новую поставку».'
+                : 'QR поставки — кнопка «Печать QR» в шапке каждой поставки.'}
+            </p>
+          )}
           <table className="assembly-table">
             <thead>
               <tr>
@@ -2316,7 +2377,7 @@ function WbAssemblySellerPage() {
             <tbody>
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={stage === 'confirm' ? 11 : 10} className="assembly-table__empty">
+                  <td colSpan={tableColSpan} className="assembly-table__empty">
                     {refreshing || syncing
                       ? 'Загрузка заказов…'
                       : stage === 'confirm'
@@ -2326,139 +2387,103 @@ function WbAssemblySellerPage() {
                         : 'Нет заказов на этой вкладке'}
                   </td>
                 </tr>
-              ) : orders.map((order) => {
-                const blockReason = orderBlockReason(order)
-                return (
-                <tr key={order.id}>
-                  {stage === 'confirm' && (
-                    <td>
-                      {order.can_move_to_new_supply ? (
-                        <input
-                          type="checkbox"
-                          checked={selectedMoveIds.has(order.id)}
-                          onChange={() => toggleMoveOrder(order.id)}
-                          disabled={loading}
-                          aria-label={`Выбрать заказ WB #${order.wb_order_id} для переноса`}
-                        />
-                      ) : null}
-                    </td>
-                  )}
-                  <td>{order.wb_order_id}</td>
-                  <td><code>{order.barcode}</code></td>
-                    <td>
-                      <ProductPhotoThumb
-                        url={order.photo_url ?? ''}
-                        alt={order.barcode || String(order.wb_order_id)}
-                      />
-                    </td>
-                    <td>
-                      <strong className="assembly-order-size">
-                        {order.tech_size || '—'}
-                      </strong>
-                    </td>
-                  <td>{order.cell_number || '—'}</td>
-                  <td>
-                    {order.requires_marking ? (
-                        order.marking_verify_status === 'pending' ? (
-                          <span className="marking-badge marking-badge--pending" title="Проверка ЧЗ в WB">⏳</span>
-                        ) : order.marking_verify_status === 'error' ? (
-                          <span
-                            className="marking-badge marking-badge--error"
-                            title={appendStickerHint(
-                              order.marking_verify_error || 'ЧЗ отклонён',
-                              order,
-                            )}
-                          >
-                            ✕
+              ) : groupedBySupply ? (
+                <>
+                  {stageSupplies.map((supply) => {
+                    const supplyOrders = supply.orders ?? []
+                    const movableIds = supplyOrders
+                      .filter((order) => order.can_move_to_new_supply)
+                      .map((order) => order.id)
+                    return (
+                      <Fragment key={`supply-${supply.id}`}>
+                        <tr className="assembly-supply-group-row">
+                          <td colSpan={tableColSpan}>
+                            <div className="assembly-supply-group-header">
+                              <div>
+                                <strong>{supply.wb_supply_id}</strong>
+                                <span className="assembly-supply-group-header__meta">
+                                  {' · '}
+                                  {supply.warehouse_name || `Склад #${supply.wb_warehouse_id ?? '—'}`}
+                                  {' · '}
+                                  {supply.orders_count} зак.
+                                  {stage === 'confirm' && (
+                                    supply.can_deliver ? (
+                                      <span className="assembly-supply-status assembly-supply-status--ready">
+                                        {' · '}Готова к доставке
+                                      </span>
+                                    ) : (
+                                      <span className="assembly-supply-status">
+                                        {' · '}На сборке
+                                      </span>
+                                    )
+                                  )}
+                                </span>
+                              </div>
+                              <div className="assembly-supply-group-header__actions">
+                                {stage === 'confirm' && supply.can_deliver && (
+                                  <span
+                                    {...hintWrapProps(
+                                      markingQueueBlocked
+                                        ? 'Сначала закройте ошибки ЧЗ'
+                                        : 'Передать всю поставку в доставку на WB',
+                                    )}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="btn btn--small btn--deliver-ready"
+                                      onClick={() => handleDeliverSupply(supply)}
+                                      disabled={loading || markingQueueBlocked}
+                                    >
+                                      В доставку
+                                    </button>
+                                  </span>
+                                )}
+                                {stage === 'confirm' && movableIds.length > 0 && (
+                                  <button
+                                    type="button"
+                                    className="btn btn--small btn--ghost"
+                                    onClick={() => void startMoveOrders(movableIds)}
+                                    disabled={loading}
+                                    {...uiHint('Перенести все неготовые заказы поставки в другую пустую поставку WB')}
+                                  >
+                                    Перенести неготовые ({movableIds.length})
+                                  </button>
+                                )}
+                                {stage === 'complete' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn--small btn--primary"
+                                    onClick={() => void handlePrintSupplyBarcode(supply.id, supply.wb_supply_id)}
+                                    disabled={loading}
+                                  >
+                                    Печать QR
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                        {supplyOrders.map((order) => renderOrderRow(order))}
+                      </Fragment>
+                    )
+                  })}
+                  {unassignedOrders.length > 0 && (
+                    <>
+                      <tr className="assembly-supply-group-row">
+                        <td colSpan={tableColSpan}>
+                          <strong>Вне поставок</strong>
+                          <span className="assembly-supply-group-header__meta">
+                            {' '}({unassignedOrders.length})
                           </span>
-                        ) : order.marking_bound ? (
-                        <span className="marking-badge marking-badge--ok">✓</span>
-                      ) : (
-                        <span className="marking-badge marking-badge--required">ЧЗ</span>
-                      )
-                      ) : '—'}
-                    </td>
-                    <td>
-                      {order.warehouse_quantity != null ? (
-                        <span className={order.warehouse_quantity < 1 ? 'assembly-stock--low' : ''}>
-                          {order.warehouse_quantity} шт.
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      <div>{order.wb_stage_display || order.status_display}</div>
-                      {blockReason && stage === 'confirm' && (
-                        <div className="assembly-block-reason">{blockReason}</div>
-                    )}
-                  </td>
-                    <td>
-                      {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
-                    </td>
-                  <td className="assembly-table__actions">
-                      {orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
-                      <button
-                        type="button"
-                        className="btn btn--small btn--ghost"
-                        onClick={() => confirmReprintSticker(order)}
-                        disabled={loading}
-                        {...uiHint('Напечатать тот же стикер ещё раз. Остаток CRM не списывается.')}
-                      >
-                        Печать стикера повторно
-                      </button>
-                    )}
-                      {showAssemblyButton(order) && stage !== 'complete' && (
-                      <button
-                        type="button"
-                        className="btn btn--small btn--primary"
-                        onClick={() => handleSendToAssembly(order.id)}
-                        disabled={loading}
-                        {...uiHint('Перевести один заказ в статус «На сборке» в WB')}
-                      >
-                        На сборку
-                      </button>
-                    )}
-                      {orderCanDeliver(order) && stage === 'confirm' && (
-                      <span
-                        {...hintWrapProps(
-                          markingQueueBlocked
-                            ? 'Сначала закройте ошибки ЧЗ'
-                            : 'Добавить заказ в поставку WB',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          className="btn btn--small btn--deliver-ready"
-                          onClick={() => handleSendToDelivery(order)}
-                          disabled={loading || markingQueueBlocked}
-                        >
-                          В доставку
-                        </button>
-                      </span>
-                    )}
-                      {order.can_move_to_new_supply && stage === 'confirm' && (
-                        <button
-                          type="button"
-                          className="btn btn--small btn--ghost"
-                          onClick={() => handleMoveSingleOrder(order)}
-                          disabled={loading}
-                          {...uiHint('Создать новую поставку WB и перенести неотсканированный заказ')}
-                        >
-                          Новая поставка
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn--small btn--ghost assembly-order-delete"
-                        onClick={() => handleDeleteOrder(order)}
-                        disabled={loading}
-                        {...uiHint('Убрать заказ из текущей сборки в CRM (не отмена на WB)')}
-                      >
-                        Удалить
-                      </button>
-                  </td>
-                </tr>
-                )
-              })}
+                        </td>
+                      </tr>
+                      {unassignedOrders.map((order) => renderOrderRow(order))}
+                    </>
+                  )}
+                </>
+              ) : (
+                orders.map((order) => renderOrderRow(order))
+              )}
             </tbody>
           </table>
         </section>
