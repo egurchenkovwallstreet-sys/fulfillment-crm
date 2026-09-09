@@ -65,7 +65,10 @@ export function WeeklyShipmentsPanel({
           <strong className="seller-weekly-shipments__total-value">
             {formatMoney(selectedWeek.total_amount)}
           </strong>
-          <span className="seller-weekly-shipments__total-orders">{selectedWeek.total} заказов</span>
+          <span className="seller-weekly-shipments__total-orders">
+            {selectedWeek.total} заказов отгружено
+            {selectedWeek.supplies_count > 0 ? ` · ${selectedWeek.supplies_count} поставок` : ''}
+          </span>
         </div>
       </div>
 

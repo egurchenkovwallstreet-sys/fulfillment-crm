@@ -55,12 +55,14 @@ export function AdminBillingPage() {
 
   const weekTotals = useMemo(() => {
     const ok = sellerRows.filter((row) => !row.error && row.weekly_shipments)
+    const combinedWeek = data?.combined?.weeks[weekIndex]
     return {
       sellers: ok.length,
       orders: ok.reduce((sum, row) => sum + row.weekOrders, 0),
+      supplies: combinedWeek?.supplies_count ?? ok.reduce((sum, row) => sum + row.weekSupplies, 0),
       amount: ok.reduce((sum, row) => sum + Number(row.weekAmount), 0),
     }
-  }, [sellerRows])
+  }, [sellerRows, data?.combined?.weeks, weekIndex])
 
   const isOzon = marketplace === 'ozon'
 
@@ -136,7 +138,9 @@ export function AdminBillingPage() {
           <div className="admin-billing-sellers__head">
             <h2 className="section-title">По селлерам</h2>
             <p className="admin-billing-sellers__meta">
-              {weekTotals.sellers} селлеров · {weekTotals.orders} {isOzon ? 'единиц' : 'заказов'} ·{' '}
+              {weekTotals.sellers} селлеров ·{' '}
+              {weekTotals.orders} {isOzon ? 'единиц отгружено' : 'заказов отгружено'} ·{' '}
+              {weekTotals.supplies} {isOzon ? 'отгрузок' : 'поставок'} ·{' '}
               {formatMoney(weekTotals.amount)}
             </p>
           </div>
@@ -147,7 +151,8 @@ export function AdminBillingPage() {
                 <tr>
                   <th>Селлер</th>
                   <th>Режим</th>
-                  <th>{isOzon ? 'Единиц' : 'Заказов'}</th>
+                  <th>{isOzon ? 'Единиц отгружено' : 'Заказов отгружено'}</th>
+                  <th>{isOzon ? 'Отгрузок' : 'Поставок'}</th>
                   <th>Отгрузка</th>
                   <th>Хранение</th>
                   <th>Статус</th>
@@ -193,6 +198,7 @@ function SellerBillingRow({
       <td><strong>{row.company_name}</strong></td>
       <td>{modeLabel}</td>
       <td>{row.weekOrders}</td>
+      <td>{row.weekSupplies}</td>
       <td>{formatMoney(row.weekAmount)}</td>
       <td>{formatMoney(row.weekStorageAmount)}</td>
       <td><span className="sellers-tag sellers-tag--ok">OK</span></td>
