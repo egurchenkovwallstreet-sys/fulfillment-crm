@@ -43,6 +43,23 @@
   padding: 2rem !important;
 }
 
+.orders-table__row--cancelled {
+  background: #fef2f2;
+}
+
+.orders-table__row--cancelled:hover {
+  background: #fee2e2;
+}
+
+.orders-table__row--cancelled td {
+  color: #991b1b;
+}
+
+.orders-table__row--cancelled code {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
 .orders-table code {
   font-size: 0.85em;
   background: #f1f5f9;

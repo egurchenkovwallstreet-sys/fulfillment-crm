@@ -71,6 +71,19 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
 
   def get_wb_stage_display(self, obj):
     from apps.orders.services.assembly import get_wb_stage_label
+    from apps.orders.services.wb_status import get_wb_status_label, is_wb_cancelled
+
+    if obj.status == Order.Status.CANCELLED or is_wb_cancelled(
+      obj.wb_supplier_status,
+      obj.wb_status,
+    ):
+      wb_label = get_wb_status_label(obj.wb_status)
+      if wb_label and wb_label not in ("—", obj.wb_status):
+        return wb_label
+      supplier_label = get_wb_stage_label(obj.wb_supplier_status)
+      if supplier_label and supplier_label not in ("—", obj.wb_supplier_status):
+        return supplier_label
+      return "Отменён"
     return get_wb_stage_label(obj.wb_supplier_status)
 
   def get_requires_marking(self, obj):

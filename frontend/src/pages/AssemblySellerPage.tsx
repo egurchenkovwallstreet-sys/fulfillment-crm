@@ -1762,10 +1762,18 @@ function WbAssemblySellerPage() {
   const useGroupedLayout = groupedBySupply && groupedVisibleCount > 0
   const tableColSpan = stage === 'confirm' ? 11 : 10
 
+  function isOrderCancelled(order: AssemblyOrder): boolean {
+    return order.status === 'cancelled'
+  }
+
   function renderOrderRow(order: AssemblyOrder) {
     const blockReason = orderBlockReason(order)
+    const cancelled = isOrderCancelled(order)
     return (
-      <tr key={order.id}>
+      <tr
+        key={order.id}
+        className={cancelled ? 'assembly-table__row--cancelled' : undefined}
+      >
         {stage === 'confirm' && (
           <td>
             {order.can_move_to_new_supply ? (
@@ -1831,7 +1839,10 @@ function WbAssemblySellerPage() {
           {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
         </td>
         <td className="assembly-table__actions">
-          {stage === 'confirm' && !order.has_sticker && (
+          {cancelled ? (
+            <span className="assembly-cancelled-badge">Отменён в WB</span>
+          ) : null}
+          {!cancelled && stage === 'confirm' && !order.has_sticker && (
             <button
               type="button"
               className="btn btn--small btn--primary"
@@ -1842,7 +1853,7 @@ function WbAssemblySellerPage() {
               {stickerFetchingOrderId === order.id ? 'Стикер…' : 'Подтянуть стикер'}
             </button>
           )}
-          {orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
+          {!cancelled && orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
             <button
               type="button"
               className="btn btn--small btn--ghost"
@@ -1853,7 +1864,7 @@ function WbAssemblySellerPage() {
               Печать стикера повторно
             </button>
           )}
-          {showAssemblyButton(order) && stage !== 'complete' && (
+          {!cancelled && showAssemblyButton(order) && stage !== 'complete' && (
             <button
               type="button"
               className="btn btn--small btn--primary"
@@ -1864,7 +1875,7 @@ function WbAssemblySellerPage() {
               На сборку
             </button>
           )}
-          {orderCanDeliver(order) && stage === 'confirm' && (
+          {!cancelled && orderCanDeliver(order) && stage === 'confirm' && (
             <span
               {...hintWrapProps(
                 markingQueueBlocked
@@ -1882,7 +1893,7 @@ function WbAssemblySellerPage() {
               </button>
             </span>
           )}
-          {order.can_move_to_new_supply && stage === 'confirm' && (
+          {!cancelled && order.can_move_to_new_supply && stage === 'confirm' && (
             <button
               type="button"
               className="btn btn--small btn--ghost"
@@ -1893,15 +1904,17 @@ function WbAssemblySellerPage() {
               Новая поставка
             </button>
           )}
-          <button
-            type="button"
-            className="btn btn--small btn--ghost assembly-order-delete"
-            onClick={() => handleDeleteOrder(order)}
-            disabled={loading}
-            {...uiHint('Убрать заказ из текущей сборки в CRM (не отмена на WB)')}
-          >
-            Удалить
-          </button>
+          {!cancelled && (
+            <button
+              type="button"
+              className="btn btn--small btn--ghost assembly-order-delete"
+              onClick={() => handleDeleteOrder(order)}
+              disabled={loading}
+              {...uiHint('Убрать заказ из текущей сборки в CRM (не отмена на WB)')}
+            >
+              Удалить
+            </button>
+          )}
         </td>
       </tr>
     )

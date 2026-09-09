@@ -27,6 +27,31 @@
   padding: 2rem !important;
 }
 
+.assembly-table__row--cancelled {
+  background: #fef2f2;
+}
+
+.assembly-table__row--cancelled:hover {
+  background: #fee2e2;
+}
+
+.assembly-table__row--cancelled td {
+  color: #991b1b;
+}
+
+.assembly-table__row--cancelled code {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.assembly-cancelled-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #b91c1c;
+  white-space: nowrap;
+}
+
 .assembly-row--fulfillment-our {
   background: #ecfdf5;
 }

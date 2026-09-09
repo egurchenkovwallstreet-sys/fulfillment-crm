@@ -9,7 +9,7 @@ from datetime import date
 
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -22,6 +22,7 @@ from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stic
 from apps.orders.services.assembly_queue import order_in_assembly, queue_last_pick_list_marking_verify
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
+  CANCEL_WB_STATUSES,
   WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
   WB_SUPPLIER_ASSEMBLY,
@@ -1611,22 +1612,30 @@ def delivery_stage_supplies_queryset(seller: Seller) -> QuerySet:
   return qs
 
 
+def _cancelled_assembly_orders_qs(base_qs: QuerySet) -> QuerySet:
+  """Отменённые в WB — показываем в списке сборки красной строкой."""
+  return base_qs.filter(status=Order.Status.CANCELLED).filter(
+    Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES) | Q(wb_status__in=CANCEL_WB_STATUSES)
+  )
+
+
 def new_stage_orders_queryset(seller: Seller) -> QuerySet:
   """Заказы вкладки «Новые» на странице сборки — как в ЛК WB + готовые к отправке."""
-  qs = filter_orders_for_assembly(
+  base = filter_orders_for_assembly(
     Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
-  qs = qs.filter(WB_STAGE_QUERIES["new"]())
+  qs = base.filter(WB_STAGE_QUERIES["new"]())
   if seller.wb_new_order_ids:
     qs = qs.filter(wb_order_id__in=seller.wb_new_order_ids)
-  return qs.exclude(
+  active = qs.exclude(
     status__in=[
       Order.Status.CANCELLED,
       Order.Status.SHIPPED,
       Order.Status.IN_DELIVERY,
     ],
   )
+  return (active | _cancelled_assembly_orders_qs(base)).distinct()
 
 
 def count_new_orders_for_barcode(seller: Seller, barcode: str) -> int:
@@ -1654,18 +1663,17 @@ def count_new_orders_for_barcode_on_warehouse(
 
 def picking_stage_orders_queryset(seller: Seller) -> QuerySet:
   """Заказы вкладки «На сборке» (confirm) на странице сборки."""
-  qs = filter_orders_for_assembly(
-    Order.objects.filter(seller=seller, assembly_hidden=False).filter(
-      WB_STAGE_QUERIES["confirm"](),
-    ),
+  base = filter_orders_for_assembly(
+    Order.objects.filter(seller=seller, assembly_hidden=False),
     seller,
   )
-  return qs.exclude(
+  active = base.filter(WB_STAGE_QUERIES["confirm"]()).exclude(
     status__in=[
       Order.Status.CANCELLED,
       Order.Status.SHIPPED,
     ],
   )
+  return (active | _cancelled_assembly_orders_qs(base)).distinct()
 
 
 def count_picking_orders_for_barcode(seller: Seller, barcode: str) -> int:

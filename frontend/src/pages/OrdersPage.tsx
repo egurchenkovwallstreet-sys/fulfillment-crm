@@ -194,7 +194,10 @@ export function OrdersPage() {
                   </tr>
                 )}
                 {orders.map((order) => (
-                  <tr key={order.id}>
+                  <tr
+                    key={order.id}
+                    className={order.status === 'cancelled' ? 'orders-table__row--cancelled' : undefined}
+                  >
                     <td>{order.wb_order_id}</td>
                     <td><code>{order.barcode}</code></td>
                     <td>{order.cell_number || '—'}</td>
