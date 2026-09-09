@@ -100,8 +100,9 @@ export type SellerBarcodeDetail = SellerBarcodeItem & {
   sales_lookback_days: number
 }
 
-export async function fetchSellerCabinet(): Promise<SellerCabinetResponse> {
-  return apiFetch<SellerCabinetResponse>('/api/sellers/cabinet/')
+export async function fetchSellerCabinet(marketplace?: string): Promise<SellerCabinetResponse> {
+  const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ''
+  return apiFetch<SellerCabinetResponse>(`/api/sellers/cabinet/${query}`)
 }
 
 export async function fetchSellerBarcodeDetail(barcode: string): Promise<SellerBarcodeDetail> {

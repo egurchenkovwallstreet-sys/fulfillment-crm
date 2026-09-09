@@ -430,11 +430,20 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
   successful_payloads: list[dict] = []
 
   def _liter_billing_fields(seller: Seller) -> dict:
-    fields = {"pricing_mode": seller.pricing_mode}
+    fields = {
+      "pricing_mode": seller.pricing_mode,
+      "liter_storage_chart": load_weekly_storage_charges(seller, marketplace=mp),
+    }
     if seller_uses_liter_pricing(seller):
-      fields["liter_storage_chart"] = load_weekly_storage_charges(seller, marketplace=mp)
       fields["liter_shipments_chart"] = load_weekly_liter_shipment_charges(seller, marketplace=mp)
     return fields
+
+  def _weekly_shipments_for_seller(seller: Seller):
+    if seller_uses_liter_pricing(seller):
+      return None
+    if is_ozon:
+      return load_weekly_ozon_shipped_orders(seller)
+    return load_weekly_shipped_orders(seller)
 
   for seller in sellers:
     if is_ozon:
@@ -448,8 +457,9 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
         })
         continue
       try:
-        shipments = load_weekly_ozon_shipped_orders(seller)
-        successful_payloads.append(shipments)
+        shipments = _weekly_shipments_for_seller(seller)
+        if shipments is not None:
+          successful_payloads.append(shipments)
         seller_rows.append({
           "seller_id": seller.id,
           "company_name": seller.company_name,
@@ -477,8 +487,9 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
       })
       continue
     try:
-      shipments = load_weekly_shipped_orders(seller)
-      successful_payloads.append(shipments)
+      shipments = _weekly_shipments_for_seller(seller)
+      if shipments is not None:
+        successful_payloads.append(shipments)
       seller_rows.append({
         "seller_id": seller.id,
         "company_name": seller.company_name,
@@ -496,9 +507,16 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
       })
 
   combined = merge_weekly_shipments_payloads(successful_payloads)
+  storage_payloads = [
+    row["liter_storage_chart"]
+    for row in seller_rows
+    if row.get("liter_storage_chart")
+  ]
+  combined_storage = merge_weekly_shipments_payloads(storage_payloads) if storage_payloads else None
   return {
     "today": combined["today"],
     "marketplace": mp,
     "combined": combined,
+    "combined_storage": combined_storage,
     "sellers": seller_rows,
   }

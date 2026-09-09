@@ -92,8 +92,6 @@ def record_shipment_liter_charge_for_ozon_posting(posting: OzonPosting, *, selle
 
 @transaction.atomic
 def accrue_daily_storage_for_seller(seller: Seller, charge_date=None) -> int:
-  if not seller_uses_liter_pricing(seller):
-    return 0
   if charge_date is None:
     charge_date = today_local()
 
@@ -128,7 +126,7 @@ def accrue_daily_storage_all_sellers() -> dict:
   charge_date = today_local()
   total = 0
   sellers = 0
-  for seller in Seller.objects.filter(is_active=True, pricing_mode=Seller.PricingMode.PER_LITER):
+  for seller in Seller.objects.filter(is_active=True):
     try:
       count = accrue_daily_storage_for_seller(seller, charge_date)
       total += count
@@ -200,8 +198,6 @@ def _aggregate_charges_by_week(
 
 
 def load_weekly_storage_charges(seller: Seller, *, marketplace: str = WB) -> dict:
-  if not seller_uses_liter_pricing(seller):
-    return _empty_week_chart()
   mp = normalize_marketplace(marketplace)
   today = today_local()
   week_start, _ = calendar_week_bounds_offset(3, today)

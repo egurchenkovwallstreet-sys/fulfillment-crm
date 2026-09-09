@@ -76,9 +76,19 @@ def apply_seller_tariff(
   price: Decimal,
   price_group_id: int | None = None,
   assign_group: bool = False,
+  storage_tariff_per_liter_month: Decimal | None = None,
 ) -> dict:
   if price < 0:
     raise SellerPricingError("Тариф не может быть отрицательным")
+
+  seller.pricing_mode = Seller.PricingMode.PER_UNIT
+  seller_update_fields = ["pricing_mode", "updated_at"]
+  if storage_tariff_per_liter_month is not None:
+    if storage_tariff_per_liter_month < 0:
+      raise SellerPricingError("Тариф не может быть отрицательным")
+    seller.storage_tariff_per_liter_month = storage_tariff_per_liter_month
+    seller_update_fields.append("storage_tariff_per_liter_month")
+  seller.save(update_fields=seller_update_fields)
 
   products = Product.objects.filter(seller=seller).select_for_update()
 
@@ -98,6 +108,9 @@ def apply_seller_tariff(
 
   if assign_group:
     products.filter(price_group__isnull=True).update(price_group=group)
+
+  group.processing_price = price
+  group.save(update_fields=["processing_price"])
 
   qs = products.filter(price_group=group)
   updated = qs.update(individual_price=price)

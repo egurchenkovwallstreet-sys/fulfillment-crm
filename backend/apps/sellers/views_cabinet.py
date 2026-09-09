@@ -268,15 +268,15 @@ class SellerCabinetView(APIView):
         "items": SellerBarcodeAnalyticsSerializer(items, many=True).data,
         "meta": meta,
       }
+      payload["liter_tariffs"] = liter_tariff_payload(seller)
+      payload["liter_storage_chart"] = SellerWeeklyShipmentsSerializer(
+        load_weekly_storage_charges(seller, marketplace=marketplace),
+      ).data
+      payload["storage_by_barcode"] = load_storage_by_barcode(seller, marketplace=marketplace)
       if seller_uses_liter_pricing(seller):
-        payload["liter_tariffs"] = liter_tariff_payload(seller)
-        payload["liter_storage_chart"] = SellerWeeklyShipmentsSerializer(
-          load_weekly_storage_charges(seller, marketplace=marketplace),
-        ).data
         payload["liter_shipments_chart"] = SellerWeeklyShipmentsSerializer(
           load_weekly_liter_shipment_charges(seller, marketplace=marketplace),
         ).data
-        payload["storage_by_barcode"] = load_storage_by_barcode(seller, marketplace=marketplace)
       return Response(payload)
     except SellerAnalyticsError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

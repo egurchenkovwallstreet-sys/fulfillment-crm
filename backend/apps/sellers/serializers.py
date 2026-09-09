@@ -257,6 +257,7 @@ class AdminBillingDashboardSerializer(serializers.Serializer):
   today = serializers.DateField()
   marketplace = serializers.CharField(required=False)
   combined = SellerWeeklyShipmentsSerializer()
+  combined_storage = SellerWeeklyShipmentsSerializer(required=False, allow_null=True)
   sellers = AdminBillingSellerSerializer(many=True)
 
 

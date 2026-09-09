@@ -112,7 +112,8 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
   async function handleSubmitUnit(e: FormEvent) {
     e.preventDefault()
     const normalized = parseDecimal(price, 'тариф')
-    if (!normalized) return
+    const storage = parseDecimal(storageTariff, 'хранение за литр/мес')
+    if (!normalized || !storage) return
     if (scope === 'group' && !priceGroupId) {
       setError('Выберите ценовую группу')
       return
@@ -126,6 +127,7 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
         price: normalized,
         price_group_id: scope === 'group' ? Number(priceGroupId) : undefined,
         assign_group: scope === 'group' ? assignGroup : undefined,
+        storage_tariff_per_liter_month: storage,
       })
       setSummary(response.summary)
       const label =
@@ -236,7 +238,7 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
 
                 {priceGroups.length === 0 && (
                   <p className="seller-tariff-modal__hint">
-                    Сначала создайте ценовые группы в Django-админке (раздел «Ценовые группы»).
+                    Сначала создайте ценовые группы в разделе «Тарифы» (/owner/pricing).
                   </p>
                 )}
 
@@ -279,7 +281,7 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
                   )}
 
                   <label className="seller-tariff-modal__field">
-                    <span>Тариф за единицу, ₽</span>
+                    <span>Тариф за единицу отгрузки, ₽</span>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -287,6 +289,17 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
                       onChange={(event) => setPrice(event.target.value)}
                       placeholder="например, 35"
                       required
+                    />
+                  </label>
+
+                  <label className="seller-tariff-modal__field">
+                    <span>Хранение, ₽/л/мес</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={storageTariff}
+                      onChange={(event) => setStorageTariff(event.target.value)}
+                      {...uiHint('Начисляется ежедневно по остатку для товаров с заполненными габаритами.')}
                     />
                   </label>
 
@@ -305,9 +318,9 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
 
                   <p className="seller-tariff-modal__hint">
                     {scope === 'all'
-                      ? `Будет обновлено товаров: ${affectedCount}.`
+                      ? `Будет обновлено товаров: ${affectedCount}. Режим отгрузки: по штукам.`
                       : groupSummary
-                        ? `В группе сейчас ${groupSummary.product_count} товар(ов).`
+                        ? `В группе ${groupSummary.product_count} товар(ов) — каждый по указанной цене за единицу.`
                         : 'В этой группе пока нет товаров.'}
                   </p>
 
@@ -322,13 +335,13 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
             ) : (
               <form className="seller-tariff-modal__form" onSubmit={handleSubmitLiter}>
                 <label className="seller-tariff-modal__field">
-                  <span>Режим тарификации</span>
+                  <span>Режим отгрузки (на все баркоды селлера)</span>
                   <select
                     value={pricingMode}
                     onChange={(event) => setPricingMode(event.target.value as 'per_unit' | 'per_liter')}
                   >
-                    <option value="per_unit">По штукам (система 1)</option>
-                    <option value="per_liter">По литражу (система 2)</option>
+                    <option value="per_liter">По объёму (литры)</option>
+                    <option value="per_unit">По штукам — на вкладке «По штукам»</option>
                   </select>
                 </label>
 
@@ -352,8 +365,8 @@ export function SellerTariffModal({ seller, onClose, onApplied }: Props) {
                 </div>
 
                 <p className="seller-tariff-modal__hint">
-                  Объём: (Д×Ш×В)/1000, округление вверх до 0,1 л. Хранение начисляется ежедневно по остатку в ячейке.
-                  Отгрузка: 1-й литр + доп. литры (хвост ≤0,5 л → 0,5 л, иначе целый литр вверх).
+                  Отгрузка по объёму: (Д×Ш×В)/1000, 1-й литр + доп. литры. Хранение — отдельно, ежедневно по остатку
+                  для товаров с габаритами (не зависит от режима отгрузки).
                 </p>
 
                 <div className="seller-tariff-modal__actions">

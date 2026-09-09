@@ -61,7 +61,7 @@ export function SellerCabinetPage() {
     setLoading(true)
     setError('')
     try {
-      setData(await fetchSellerCabinet())
+      setData(await fetchSellerCabinet(marketplace))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
@@ -95,6 +95,9 @@ export function SellerCabinetPage() {
           <p>
             {data?.seller.company_name ?? `${mpName} · остатки на фулфилменте`}
             {isOzon ? ' · Seller API Ozon' : ' · Statistics API WB'}
+            {data?.liter_tariffs && (
+              <> · Отгрузка: {isLiterPricing ? 'по объёму' : 'за единицу'}</>
+            )}
           </p>
         </div>
         <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить остатки, заказы и статистику отгрузок.')}>
@@ -228,12 +231,12 @@ export function SellerCabinetPage() {
             </section>
           )}
 
-          {isLiterPricing && data.liter_storage_chart && (
+          {data.liter_storage_chart && (
             <>
               <WeeklyShipmentsPanel
                 data={data.liter_storage_chart}
                 title="Хранение"
-                hint={`Ежедневное начисление по остатку в ячейке × литры × (${data.liter_tariffs?.storage_tariff_per_liter_month ?? '1'} ₽/л/мес ÷ дней в месяце).`}
+                hint={`Ежедневное начисление по остатку × литры (только товары с габаритами) × (${data.liter_tariffs?.storage_tariff_per_liter_month ?? '1'} ₽/л/мес ÷ дней в месяце).`}
                 weekIndex={storageWeekIndex}
                 onWeekIndexChange={setStorageWeekIndex}
               />

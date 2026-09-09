@@ -227,6 +227,7 @@ export type SellerTariffApplyPayload = {
   price: string
   price_group_id?: number
   assign_group?: boolean
+  storage_tariff_per_liter_month?: string
 }
 
 export async function fetchPriceGroups(): Promise<PriceGroupItem[]> {
@@ -271,6 +272,7 @@ export type AdminBillingResponse = {
   today: string
   marketplace?: string
   combined: SellerWeeklyShipments
+  combined_storage?: SellerWeeklyShipments | null
   sellers: AdminBillingSellerRow[]
 }
 

@@ -47,6 +47,9 @@ class SellerTariffApplySerializer(serializers.Serializer):
   price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"))
   price_group_id = serializers.IntegerField(required=False, allow_null=True)
   assign_group = serializers.BooleanField(default=False)
+  storage_tariff_per_liter_month = serializers.DecimalField(
+    max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False,
+  )
 
   def validate(self, attrs):
     if attrs["scope"] == "group" and not attrs.get("price_group_id"):
@@ -156,6 +159,7 @@ class SellerPricingView(APIView):
         price=data["price"],
         price_group_id=data.get("price_group_id"),
         assign_group=data.get("assign_group", False),
+        storage_tariff_per_liter_month=data.get("storage_tariff_per_liter_month"),
       )
     except SellerPricingError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

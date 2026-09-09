@@ -38,15 +38,19 @@ export function AdminBillingPage() {
     if (!data) return []
     return data.sellers
       .map((row) => {
-        const week = row.weekly_shipments?.weeks[weekIndex]
+        const shipWeek = row.weekly_shipments?.weeks[weekIndex]
+        const storageWeek = row.liter_storage_chart?.weeks[weekIndex]
+        const literShipWeek = row.liter_shipments_chart?.weeks[weekIndex]
+        const isLiter = row.pricing_mode === 'per_liter'
         return {
           ...row,
-          weekOrders: week?.total ?? 0,
-          weekAmount: week?.total_amount ?? '0',
-          weekSupplies: week?.supplies_count ?? 0,
+          weekOrders: isLiter ? (literShipWeek?.total ?? 0) : (shipWeek?.total ?? 0),
+          weekAmount: isLiter ? (literShipWeek?.total_amount ?? '0') : (shipWeek?.total_amount ?? '0'),
+          weekSupplies: shipWeek?.supplies_count ?? 0,
+          weekStorageAmount: storageWeek?.total_amount ?? '0',
         }
       })
-      .sort((a, b) => Number(b.weekAmount) - Number(a.weekAmount))
+      .sort((a, b) => Number(b.weekAmount) + Number(b.weekStorageAmount) - Number(a.weekAmount) - Number(a.weekStorageAmount))
   }, [data, weekIndex])
 
   const weekTotals = useMemo(() => {
@@ -106,12 +110,22 @@ export function AdminBillingPage() {
       {data?.combined && (
         <WeeklyShipmentsPanel
           data={data.combined}
-          title={isOzon ? 'Все селлеры Ozon — итого' : 'Все селлеры — итого'}
+          title={isOzon ? 'Отгрузки Ozon — по штукам (итого)' : 'Отгрузки WB — по штукам (итого)'}
           hint={
             isOzon
-              ? 'Отправления, переданные к отгрузке через CRM (ship). Сумма — по тарифу обработки за единицу.'
-              : 'Заказы из поставок WB (done) только с включённых FBS-складов фулфилмента, в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.'
+              ? 'Селлеры с режимом «за единицу». Сумма — тариф × количество отгруженных единиц.'
+              : 'Селлеры с режимом «за единицу». Заказы из поставок WB (done) × тариф за единицу.'
           }
+          weekIndex={weekIndex}
+          onWeekIndexChange={setWeekIndex}
+        />
+      )}
+
+      {data?.combined_storage && (
+        <WeeklyShipmentsPanel
+          data={data.combined_storage}
+          title="Хранение — все селлеры (итого)"
+          hint="Ежедневные начисления по остатку × литры (товары с габаритами). Не зависит от режима отгрузки."
           weekIndex={weekIndex}
           onWeekIndexChange={setWeekIndex}
         />
@@ -132,9 +146,10 @@ export function AdminBillingPage() {
               <thead>
                 <tr>
                   <th>Селлер</th>
+                  <th>Режим</th>
                   <th>{isOzon ? 'Единиц' : 'Заказов'}</th>
-                  <th>Сумма</th>
-                  <th>{isOzon ? 'Отгрузок' : 'Поставок'}</th>
+                  <th>Отгрузка</th>
+                  <th>Хранение</th>
                   <th>Статус</th>
                 </tr>
               </thead>
@@ -158,24 +173,28 @@ function SellerBillingRow({
     weekOrders: number
     weekAmount: string
     weekSupplies: number
+    weekStorageAmount: string
   }
 }) {
   if (row.error) {
     return (
       <tr>
         <td><strong>{row.company_name}</strong></td>
-        <td colSpan={3}>—</td>
+        <td colSpan={5}>—</td>
         <td><span className="sellers-tag sellers-tag--warn">{row.error}</span></td>
       </tr>
     )
   }
 
+  const modeLabel = row.pricing_mode === 'per_liter' ? 'Объём' : 'Штуки'
+
   return (
     <tr>
       <td><strong>{row.company_name}</strong></td>
+      <td>{modeLabel}</td>
       <td>{row.weekOrders}</td>
       <td>{formatMoney(row.weekAmount)}</td>
-      <td>{row.weekSupplies}</td>
+      <td>{formatMoney(row.weekStorageAmount)}</td>
       <td><span className="sellers-tag sellers-tag--ok">OK</span></td>
     </tr>
   )
