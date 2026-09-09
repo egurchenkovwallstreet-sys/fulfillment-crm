@@ -18,6 +18,7 @@ import {
   fetchSellerOzonWarehouses,
   fetchSellerWarehouses,
   restoreSellerWarehouse,
+  resetSellerWarehouseStocks,
   syncSellerOzonWarehouses,
   syncSellerWarehouses,
   type ExcludedSellerWarehouse,
@@ -65,6 +66,8 @@ export function SellersManagePage() {
   const [warehouseDeletingId, setWarehouseDeletingId] = useState<number | null>(null)
   const [excludedWarehouses, setExcludedWarehouses] = useState<ExcludedSellerWarehouse[]>([])
   const [warehouseRestoringId, setWarehouseRestoringId] = useState<number | null>(null)
+  const [resetWarehouseIds, setResetWarehouseIds] = useState<number[]>([])
+  const [resetStocksLoading, setResetStocksLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -93,8 +96,53 @@ export function SellersManagePage() {
     setWbWarehouses([])
     setOzonWarehouses([])
     setExcludedWarehouses([])
+    setResetWarehouseIds([])
     setError('')
     void loadSellerWarehouses(seller)
+  }
+
+  function toggleResetWarehouse(warehouseId: number, checked: boolean) {
+    setResetWarehouseIds((prev) => {
+      if (checked) return [...prev, warehouseId]
+      return prev.filter((id) => id !== warehouseId)
+    })
+  }
+
+  async function handleResetWarehouseStocks() {
+    if (!editSeller || resetWarehouseIds.length === 0) return
+    const enabledWarehouses = wbWarehouses.filter(
+      (warehouse) => warehouse.is_enabled && resetWarehouseIds.includes(warehouse.id),
+    )
+    if (enabledWarehouses.length === 0) {
+      setError('Выберите хотя бы один обслуживаемый FBS-склад WB')
+      return
+    }
+    const names = enabledWarehouses
+      .map((warehouse) => warehouse.name || `Склад #${warehouse.wb_warehouse_id}`)
+      .join(', ')
+    if (
+      !window.confirm(
+        `Обнулить остатки WB и CRM на складах:\n${names}\n\n`
+          + 'В ЛК WB будут выставлены нули по всем баркодам с остатком > 0. '
+          + 'Остатки CRM на этих складах тоже станут 0. Операция необратима.',
+      )
+    ) {
+      return
+    }
+    setResetStocksLoading(true)
+    setError('')
+    try {
+      const result = await resetSellerWarehouseStocks(
+        editSeller.id,
+        enabledWarehouses.map((warehouse) => warehouse.id),
+      )
+      setMessage(result.message)
+      setResetWarehouseIds([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обнулить остатки')
+    } finally {
+      setResetStocksLoading(false)
+    }
   }
 
   async function loadSellerWarehouses(seller: SellerManageItem) {
@@ -687,30 +735,74 @@ export function SellersManagePage() {
                             Нет складов. Подключите токен WB и нажмите «Обновить из ЛК».
                           </p>
                         ) : (
-                          <ul className="sellers-warehouses-list">
-                            {wbWarehouses.map((warehouse) => (
-                              <li key={warehouse.id} className="sellers-warehouses-list__item">
-                                <div>
-                                  <strong>{warehouse.name || `Склад #${warehouse.wb_warehouse_id}`}</strong>
-                                  {warehouse.address && (
-                                    <span className="sellers-warehouses-list__meta">{warehouse.address}</span>
-                                  )}
-                                  {!warehouse.is_enabled && (
-                                    <span className="sellers-tag sellers-tag--muted">выключен в сборке</span>
-                                  )}
-                                </div>
+                          <>
+                            <ul className="sellers-warehouses-list">
+                              {wbWarehouses.map((warehouse) => (
+                                <li key={warehouse.id} className="sellers-warehouses-list__item">
+                                  <div>
+                                    <strong>{warehouse.name || `Склад #${warehouse.wb_warehouse_id}`}</strong>
+                                    {warehouse.address && (
+                                      <span className="sellers-warehouses-list__meta">{warehouse.address}</span>
+                                    )}
+                                    {!warehouse.is_enabled && (
+                                      <span className="sellers-tag sellers-tag--muted">выключен в сборке</span>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn--danger-outline btn--sm"
+                                    disabled={warehouseDeletingId === warehouse.id || savingEdit}
+                                    onClick={() => void handleDeleteWarehouse('wb', warehouse)}
+                                    {...uiHint('Удалить склад из CRM. Вернуть сможет только владелец.')}
+                                  >
+                                    {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                            {isAdmin && wbWarehouses.some((warehouse) => warehouse.is_enabled) && (
+                              <div className="sellers-stock-reset">
+                                <strong>Обнуление остатков WB и CRM</strong>
+                                <p className="sellers-ozon-hint">
+                                  Только обслуживаемые склады (включены в сборке). В ЛК WB — нули по всем
+                                  баркодам каталога с остатком &gt; 0; в CRM — остатки на выбранных складах.
+                                </p>
+                                <ul className="sellers-stock-reset__list">
+                                  {wbWarehouses
+                                    .filter((warehouse) => warehouse.is_enabled)
+                                    .map((warehouse) => (
+                                      <li key={`reset-${warehouse.id}`}>
+                                        <label className="sellers-stock-reset__label">
+                                          <input
+                                            type="checkbox"
+                                            checked={resetWarehouseIds.includes(warehouse.id)}
+                                            onChange={(e) => toggleResetWarehouse(warehouse.id, e.target.checked)}
+                                            disabled={resetStocksLoading || savingEdit}
+                                          />
+                                          {warehouse.name || `Склад #${warehouse.wb_warehouse_id}`}
+                                        </label>
+                                      </li>
+                                    ))}
+                                </ul>
                                 <button
                                   type="button"
                                   className="btn btn--danger-outline btn--sm"
-                                  disabled={warehouseDeletingId === warehouse.id || savingEdit}
-                                  onClick={() => void handleDeleteWarehouse('wb', warehouse)}
-                                  {...uiHint('Удалить склад из CRM. Вернуть сможет только владелец.')}
+                                  disabled={
+                                    resetStocksLoading
+                                    || savingEdit
+                                    || resetWarehouseIds.length === 0
+                                    || !editSeller.has_wb_token
+                                  }
+                                  onClick={() => void handleResetWarehouseStocks()}
+                                  {...uiHint('Обнулить остатки в ЛК WB и в CRM на выбранных FBS-складах.')}
                                 >
-                                  {warehouseDeletingId === warehouse.id ? '…' : 'Удалить'}
+                                  {resetStocksLoading
+                                    ? 'Обнуление…'
+                                    : `Обнулить остатки (${resetWarehouseIds.length})`}
                                 </button>
-                              </li>
-                            ))}
-                          </ul>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}

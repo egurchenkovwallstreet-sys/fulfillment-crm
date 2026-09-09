@@ -32,6 +32,14 @@ class SellerWarehouseToggleSerializer(serializers.Serializer):
   is_enabled = serializers.BooleanField()
 
 
+class SellerWarehouseResetStocksSerializer(serializers.Serializer):
+  warehouse_ids = serializers.ListField(
+    child=serializers.IntegerField(min_value=1),
+    allow_empty=False,
+    max_length=50,
+  )
+
+
 class SellerOzonWarehouseSerializer(serializers.ModelSerializer):
   class Meta:
     model = SellerOzonWarehouse

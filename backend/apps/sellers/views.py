@@ -8,6 +8,7 @@ from apps.accounts.tenant import get_seller_for_user
 from apps.sellers.models import SellerOzonWarehouse, SellerWarehouse
 from apps.sellers.serializers import (
   SellerOzonWarehouseSerializer,
+  SellerWarehouseResetStocksSerializer,
   SellerWarehouseSerializer,
   SellerWarehouseToggleSerializer,
 )
@@ -18,6 +19,7 @@ from apps.sellers.services.warehouse_manage import (
   list_excluded_warehouses,
   restore_excluded_warehouse,
 )
+from apps.warehouse.services.wb_stock_reset import WBStockResetError, reset_wb_and_crm_stocks
 
 
 class SellerWarehouseListView(APIView):
@@ -90,6 +92,29 @@ class SellerExcludedWarehouseListView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
     return Response(list_excluded_warehouses(seller))
+
+
+class SellerWarehouseResetStocksView(APIView):
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+    if not seller.wb_enabled:
+      return Response({"detail": "У селлера не подключён WB"}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = SellerWarehouseResetStocksSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+      result = reset_wb_and_crm_stocks(
+        seller,
+        serializer.validated_data["warehouse_ids"],
+        user=request.user,
+      )
+    except WBStockResetError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
 
 
 class SellerRestoreWarehouseView(APIView):

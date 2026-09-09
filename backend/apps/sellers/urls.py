@@ -4,6 +4,7 @@ from .views import (
   SellerExcludedWarehouseListView,
   SellerRestoreWarehouseView,
   SellerWarehouseListView,
+  SellerWarehouseResetStocksView,
   SellerWarehouseSyncView,
   SellerWarehouseToggleView,
 )
@@ -81,6 +82,11 @@ urlpatterns = [
     "<int:seller_id>/warehouses/restore/",
     SellerRestoreWarehouseView.as_view(),
     name="seller-warehouse-restore",
+  ),
+  path(
+    "<int:seller_id>/warehouses/reset-stocks/",
+    SellerWarehouseResetStocksView.as_view(),
+    name="seller-warehouse-reset-stocks",
   ),
   path(
     "<int:seller_id>/warehouses/<int:warehouse_id>/",

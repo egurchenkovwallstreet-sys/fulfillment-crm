@@ -28,6 +28,32 @@ export function deleteSellerWarehouse(sellerId: number, warehouseId: number) {
   )
 }
 
+export type ResetWarehouseStocksResult = {
+  success: boolean
+  message: string
+  wb_barcodes_zeroed: number
+  wb_units_before: number
+  crm_rows_zeroed: number
+  products_recalculated: number
+  warehouses: Array<{
+    warehouse_id: number
+    warehouse_name: string
+    wb_warehouse_id: number
+    wb_barcodes_zeroed: number
+    wb_units_before: number
+  }>
+}
+
+export function resetSellerWarehouseStocks(sellerId: number, warehouseIds: number[]) {
+  return apiFetch<ResetWarehouseStocksResult>(
+    `/api/sellers/${sellerId}/warehouses/reset-stocks/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ warehouse_ids: warehouseIds }),
+    },
+  )
+}
+
 export function toggleSellerWarehouse(sellerId: number, warehouseId: number, isEnabled: boolean) {
   return apiFetch<{ success: boolean; warehouse: SellerWarehouse }>(
     `/api/sellers/${sellerId}/warehouses/${warehouseId}/`,
