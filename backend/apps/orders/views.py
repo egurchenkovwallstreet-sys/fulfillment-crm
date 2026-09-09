@@ -1114,6 +1114,7 @@ class AssemblyFetchStickersView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
 
     order_ids = None
+    force = False
     if isinstance(request.data, dict):
       raw_ids = request.data.get("order_ids")
       if isinstance(raw_ids, list) and raw_ids:
@@ -1121,12 +1122,14 @@ class AssemblyFetchStickersView(APIView):
           order_ids = [int(item) for item in raw_ids]
         except (TypeError, ValueError):
           return Response({"detail": "order_ids должны быть числами"}, status=400)
+      force = bool(request.data.get("force"))
 
     try:
       result = fetch_missing_assembly_stickers(
         seller,
         order_ids=order_ids,
         user=request.user,
+        force=force,
       )
     except AssemblyError as exc:
       return _assembly_error_response(exc)

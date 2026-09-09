@@ -472,33 +472,60 @@ def fetch_missing_assembly_stickers(
   *,
   order_ids: list[int] | None = None,
   user=None,
+  force: bool = False,
 ) -> dict:
   """Подтянуть стикеры WB для заказов на сборке, переданных через ЛК WB (не через CRM)."""
-  qs = filter_orders_for_assembly(
-    Order.objects.filter(
-      seller=seller,
-      assembly_hidden=False,
-      wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+  if force and order_ids:
+    qs = filter_orders_for_assembly(
+      Order.objects.filter(seller=seller, pk__in=order_ids)
+      .exclude(
+        status__in=[
+          Order.Status.CANCELLED,
+          Order.Status.SHIPPED,
+          Order.Status.IN_DELIVERY,
+        ],
+      )
+      .filter(
+        wb_supplier_status__in=[WB_SUPPLIER_ASSEMBLY, WB_SUPPLIER_NEW],
+      ),
+      seller,
     )
-    .exclude(
-      status__in=[
-        Order.Status.CANCELLED,
-        Order.Status.SHIPPED,
-        Order.Status.IN_DELIVERY,
-      ],
+    orders = list(qs.order_by("wb_order_id"))
+    if not orders:
+      raise AssemblyError(
+        "Заказ не найден, склад отключён или заказ не на этапе «Новый»/«На сборке» в WB",
+        code="order_not_found",
+      )
+    for order in orders:
+      if not (order.sticker_file or "").strip():
+        order.has_sticker = False
+        order.save(update_fields=["has_sticker", "updated_at"])
+  else:
+    qs = filter_orders_for_assembly(
+      Order.objects.filter(
+        seller=seller,
+        assembly_hidden=False,
+        wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+      )
+      .exclude(
+        status__in=[
+          Order.Status.CANCELLED,
+          Order.Status.SHIPPED,
+          Order.Status.IN_DELIVERY,
+        ],
+      )
+      .filter(has_sticker=False),
+      seller,
     )
-    .filter(has_sticker=False),
-    seller,
-  )
-  if order_ids:
-    qs = qs.filter(pk__in=order_ids)
+    if order_ids:
+      qs = qs.filter(pk__in=order_ids)
 
-  orders = list(qs.order_by("wb_order_id"))
-  if not orders:
-    raise AssemblyError(
-      "Все заказы на сборке уже со стикерами в CRM",
-      code="no_missing_stickers",
-    )
+    orders = list(qs.order_by("wb_order_id"))
+    if not orders:
+      raise AssemblyError(
+        "Все заказы на сборке уже со стикерами в CRM",
+        code="no_missing_stickers",
+      )
 
   requested = len(orders)
   fetched = fetch_stickers_for_orders(seller, orders, user=user)
@@ -508,12 +535,17 @@ def fetch_missing_assembly_stickers(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.ASSEMBLY,
-    message=f"Подгрузка стикеров WB: {fetched} из {requested} (заказы с ЛК WB)",
+    message=(
+      f"Принудительная подгрузка стикеров WB: {fetched} из {requested}"
+      if force
+      else f"Подгрузка стикеров WB: {fetched} из {requested} (заказы с ЛК WB)"
+    ),
     details={
       "requested": requested,
       "fetched": fetched,
       "still_missing": still_missing,
       "order_ids": [order.id for order in orders],
+      "force": force,
     },
   )
 

@@ -193,6 +193,8 @@ function WbAssemblySellerPage() {
   const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const [pickListDownloading, setPickListDownloading] = useState(false)
   const [stickersFetching, setStickersFetching] = useState(false)
+  const [stickerFetchingOrderId, setStickerFetchingOrderId] = useState<number | null>(null)
+  const [buildVersion, setBuildVersion] = useState('')
   const [selectedMoveIds, setSelectedMoveIds] = useState<Set<number>>(new Set())
   const bgSyncSellerRef = useRef<number | null>(null)
 
@@ -263,6 +265,15 @@ function WbAssemblySellerPage() {
         setBridgePrinter(health.printer || '')
       })
       .catch(() => setBridgeOk(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/health/')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload: { build?: string } | null) => {
+        if (payload?.build) setBuildVersion(payload.build)
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -687,6 +698,38 @@ function WbAssemblySellerPage() {
       noticeFail('Лента стикеров', err, 'Не удалось подготовить ленту стикеров')
     } finally {
       setRibbonPrinting(false)
+    }
+  }
+
+  async function handleFetchOrderSticker(order: AssemblyOrder) {
+    if (!id) return
+    setStickerFetchingOrderId(order.id)
+    try {
+      const result = await fetchAssemblyStickers(id, [order.id], true)
+      await load({ silent: false, stageKey: stage })
+      if (result.fetched > 0 && result.still_missing === 0) {
+        showSuccess(
+          'Стикер загружен',
+          result.message || `Стикер для #${order.wb_order_id} подтянут из WB. Можно сканировать.`,
+        )
+      } else if (result.fetched > 0) {
+        showError(
+          'Стикер не полный',
+          result.message || `WB вернул данные, но файл стикера для #${order.wb_order_id} пуст.`,
+        )
+      } else {
+        showError(
+          'Стикер не получен',
+          result.message || `WB не вернул стикер для #${order.wb_order_id}. Проверьте, что заказ на сборке в ЛК WB.`,
+        )
+      }
+    } catch (err) {
+      showError(
+        'Ошибка стикера',
+        err instanceof Error ? err.message : `Не удалось подтянуть стикер для #${order.wb_order_id}`,
+      )
+    } finally {
+      setStickerFetchingOrderId(null)
     }
   }
 
@@ -1788,6 +1831,17 @@ function WbAssemblySellerPage() {
           {order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}
         </td>
         <td className="assembly-table__actions">
+          {stage === 'confirm' && !order.has_sticker && (
+            <button
+              type="button"
+              className="btn btn--small btn--primary"
+              onClick={() => void handleFetchOrderSticker(order)}
+              disabled={loading || stickerFetchingOrderId === order.id}
+              {...uiHint('Принудительно запросить стикер FBS из WB для этого заказа')}
+            >
+              {stickerFetchingOrderId === order.id ? 'Стикер…' : 'Подтянуть стикер'}
+            </button>
+          )}
           {orderStickerPrinted(order) && (stage === 'confirm' || stage === 'complete') && (
             <button
               type="button"
@@ -1875,6 +1929,11 @@ function WbAssemblySellerPage() {
             {bridgeOk === false && isKioskPrintMode() && (
               <span className="assembly-bridge assembly-bridge--ok">
                 {' '}· Печать: Chrome (автопечать)
+              </span>
+            )}
+            {buildVersion && (
+              <span className="assembly-build-version" title="Версия сервера после деплоя">
+                {' '}· build {buildVersion}
               </span>
             )}
             {bridgeOk === false && !isKioskPrintMode() && (
@@ -2406,9 +2465,20 @@ function WbAssemblySellerPage() {
                     <td>{order.wb_stage_display || order.status_display}</td>
                     <td>{order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}</td>
                     <td>
+                      {!order.has_sticker && (
+                        <button
+                          type="button"
+                          className="btn btn--small btn--primary"
+                          onClick={() => void handleFetchOrderSticker(order)}
+                          disabled={loading || stickerFetchingOrderId === order.id}
+                          {...uiHint('Принудительно запросить стикер FBS из WB')}
+                        >
+                          {stickerFetchingOrderId === order.id ? 'Стикер…' : 'Подтянуть стикер'}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className="btn btn--small btn--primary"
+                        className="btn btn--small btn--ghost"
                         onClick={() => handleRestoreOrder(order)}
                         disabled={loading}
                         {...uiHint('Вернуть заказ в сборку и подтянуть стикер из WB при необходимости')}

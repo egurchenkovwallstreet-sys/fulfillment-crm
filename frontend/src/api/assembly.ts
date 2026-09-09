@@ -496,12 +496,15 @@ export type FetchAssemblyStickersResult = {
   message: string
 }
 
-export function fetchAssemblyStickers(sellerId: number, orderIds?: number[]) {
+export function fetchAssemblyStickers(sellerId: number, orderIds?: number[], force = false) {
+  const body: { order_ids?: number[]; force?: boolean } = {}
+  if (orderIds?.length) body.order_ids = orderIds
+  if (force) body.force = true
   return apiFetch<FetchAssemblyStickersResult>(
     `/api/orders/assembly/sellers/${sellerId}/fetch-stickers/`,
     {
       method: 'POST',
-      body: JSON.stringify(orderIds?.length ? { order_ids: orderIds } : {}),
+      body: JSON.stringify(body),
     },
   )
 }
