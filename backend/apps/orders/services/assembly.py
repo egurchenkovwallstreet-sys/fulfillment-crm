@@ -3,6 +3,7 @@ import re
 import time
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -272,6 +273,33 @@ def _assembly_orders_qs(seller: Seller):
   )
 
 
+def _scannable_orders_qs(seller: Seller):
+  """
+  Заказы, доступные для скана на «На сборке».
+  В WB уже confirm, но CRM-статус ещё «Новый» — типичный случай после sync без листа.
+  """
+  return _assembly_orders_qs(seller).filter(
+    Q(status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED])
+    | Q(wb_supplier_status=WB_SUPPLIER_ASSEMBLY, status=Order.Status.NEW)
+  )
+
+
+def _prepare_order_for_scan(order: Order, pick_list: PickList | None) -> None:
+  update_fields: list[str] = []
+  if pick_list and not order.pick_list_id:
+    order.pick_list = pick_list
+    update_fields.append("pick_list")
+  if (
+    order.status == Order.Status.NEW
+    and (order.wb_supplier_status or "").strip() == WB_SUPPLIER_ASSEMBLY
+  ):
+    order.status = Order.Status.IN_PICKING
+    update_fields.append("status")
+  if update_fields:
+    update_fields.append("updated_at")
+    order.save(update_fields=update_fields)
+
+
 def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
   pick_list = _find_pick_list_for_scan(seller, scan_value)
   if pick_list:
@@ -279,17 +307,11 @@ def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
 
   active_lists = _get_active_pick_lists(seller)
   if active_lists:
-    active_qs = _assembly_orders_qs(seller).filter(
-      status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
-    )
-    if _match_order_by_scan(active_qs, scan_value):
+    if _match_order_by_scan(_scannable_orders_qs(seller), scan_value):
       return
     raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
-  active_qs = _assembly_orders_qs(seller).filter(
-    status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
-  )
-  if _match_order_by_scan(active_qs, scan_value):
+  if _match_order_by_scan(_scannable_orders_qs(seller), scan_value):
     return
 
 
@@ -300,10 +322,7 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
 
   base_qs = _assembly_orders_qs(seller)
 
-  active_qs = base_qs.filter(
-    status__in=[Order.Status.IN_PICKING, Order.Status.ASSEMBLED],
-  )
-  order = _match_order_by_scan(active_qs, scan_value)
+  order = _match_order_by_scan(_scannable_orders_qs(seller), scan_value)
   if order:
     return order
 
@@ -559,6 +578,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
 
   _assert_scan_in_pick_list(seller, scan_value)
   order = _find_active_order(seller, scan_value)
+  _prepare_order_for_scan(order, _find_pick_list_for_scan(seller, scan_value))
 
   if order_sticker_printed_in_crm(order) and not _is_marking_retry_order(order):
     raise AssemblyError(
