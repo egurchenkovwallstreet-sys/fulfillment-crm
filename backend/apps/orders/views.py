@@ -90,11 +90,13 @@ from .services.supply_flow import (
 from .services.pick_list import (
   PickListError,
   active_wb_pick_lists,
+  archived_wb_pick_lists,
   delete_active_pick_list,
   generate_pick_lists,
   preview_pick_list,
   preview_pick_lists,
 )
+from .services.supply_flow import cancelled_orders_in_active_supplies
 from .services.batch_assembly import (
   bind_ozon_batch_scan,
   bind_wb_batch_scan,
@@ -594,6 +596,35 @@ class AssemblySellerDetailView(APIView):
         many=True,
       ).data
 
+    cancelled_in_supplies = []
+    if stage == "confirm":
+      from apps.orders.services.wb_status import CANCEL_SUPPLIER_STATUSES, CANCEL_WB_STATUSES
+      from django.db.models import Q
+
+      active_supply_qs = filter_supplies_for_assembly(
+        Supply.objects.filter(
+          seller=seller,
+          status__in=(Supply.Status.FORMING, Supply.Status.READY),
+        ),
+        seller,
+      )
+      cancelled_order_ids = list(
+        Order.objects.filter(
+          supplies__in=active_supply_qs,
+          assembly_hidden=False,
+          status=Order.Status.CANCELLED,
+        )
+        .filter(
+          Q(wb_supplier_status__in=CANCEL_SUPPLIER_STATUSES)
+          | Q(wb_status__in=CANCEL_WB_STATUSES)
+        )
+        .values_list("id", flat=True)
+      )
+      cancelled_in_supplies = cancelled_orders_in_active_supplies(
+        seller,
+        cancelled_order_ids,
+      )
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
@@ -609,6 +640,7 @@ class AssemblySellerDetailView(APIView):
         PickListSerializer(active_pick_list).data if active_pick_list else None
       ),
       "active_pick_lists": PickListSerializer(active_pick_lists, many=True).data,
+      "cancelled_in_supplies": cancelled_in_supplies,
     })
 
 
@@ -657,6 +689,21 @@ class AssemblyPickListPreviewView(APIView):
       "success": True,
       "pick_lists": previews,
       "pick_list": previews[0] if len(previews) == 1 else preview_pick_list(seller, stage=stage, user=request.user),
+    })
+
+
+class AssemblyPickListArchiveView(APIView):
+  """Архив листов подбора за последние 10 дней."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    pick_lists = archived_wb_pick_lists(seller, days=10)
+    return Response({
+      "pick_lists": PickListSerializer(pick_lists, many=True).data,
     })
 
 

@@ -27,6 +27,18 @@
   padding: 2rem !important;
 }
 
+.assembly-table__row--ready {
+  background: #ecfdf5;
+}
+
+.assembly-table__row--ready:hover {
+  background: #d1fae5;
+}
+
+.assembly-table__row--ready td {
+  color: #065f46;
+}
+
 .assembly-table__row--cancelled {
   background: #fef2f2;
 }

@@ -7,7 +7,9 @@ import {
   restoreAssemblyOrder,
   deliverSupply,
   fetchAssemblySeller,
+  fetchPickListArchive,
   fetchAssemblyStickers,
+  type CancelledInSupplyNotice,
   fetchBatchRibbon,
   fetchMarkingStatus,
   fetchMoveSupplyTargets,
@@ -35,7 +37,7 @@ import {
   type MoveSupplyTarget,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
-import { syncOrders, generatePickList } from '../api/orders'
+import { syncOrders, generatePickList, fetchPickList } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
@@ -106,6 +108,41 @@ const STAGE_HINTS: Record<(typeof STAGES)[number]['key'], string> = {
   new: 'Новые заказы WB — лист подбора и передача на сборку',
   confirm: 'Скан баркода, ЧЗ и печать стикеров FBS',
   complete: 'Заказы в поставке, ожидают сканирования на складе WB',
+}
+
+function formatSupplyCreatedAt(iso: string): string {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
+function sortAssemblyOrders(list: AssemblyOrder[]): AssemblyOrder[] {
+  return [...list].sort((a, b) => {
+    const rank = (order: AssemblyOrder) => {
+      if (order.status === 'cancelled') return 0
+      if (orderCanDeliver(order)) return 1
+      if (orderStickerPrinted(order)) return 2
+      return 3
+    }
+    const diff = rank(a) - rank(b)
+    if (diff !== 0) return diff
+    return b.wb_order_id - a.wb_order_id
+  })
+}
+
+function assemblyOrderRowClass(order: AssemblyOrder): string | undefined {
+  if (order.status === 'cancelled') return 'assembly-table__row--cancelled'
+  if (orderCanDeliver(order)) return 'assembly-table__row--ready'
+  return undefined
 }
 
 function showAssemblyButton(order: AssemblyOrder): boolean {
@@ -196,7 +233,11 @@ function WbAssemblySellerPage() {
   const [stickerFetchingOrderId, setStickerFetchingOrderId] = useState<number | null>(null)
   const [buildVersion, setBuildVersion] = useState('')
   const [selectedMoveIds, setSelectedMoveIds] = useState<Set<number>>(new Set())
+  const [pickListArchiveOpen, setPickListArchiveOpen] = useState(false)
+  const [pickListArchive, setPickListArchive] = useState<PickList[]>([])
+  const [pickListArchiveLoading, setPickListArchiveLoading] = useState(false)
   const bgSyncSellerRef = useRef<number | null>(null)
+  const cancelledNoticeShownRef = useRef(false)
 
   const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
     if (!id) return
@@ -231,20 +272,34 @@ function WbAssemblySellerPage() {
     }
   }, [id, stage, showError])
 
+  const notifyCancelledInSupplies = useCallback((items: CancelledInSupplyNotice[]) => {
+    if (!items.length) return
+    const sample = items[0]
+    const more = items.length > 1 ? ` и ещё ${items.length - 1}` : ''
+    showError(
+      'Отмена в поставке',
+      `Покупатель отменил заказ WB #${sample.wb_order_id} в поставке ${sample.wb_supply_id}${more}. `
+        + 'Строка подсветится красным — удалите из CRM вручную.',
+    )
+  }, [showError])
+
   const runBackgroundSync = useCallback(async () => {
     if (!id || syncInFlightRef.current) return
     syncInFlightRef.current = true
     setSyncing(true)
     try {
-      await syncOrders(id, 'quick')
+      const result = await syncOrders(id, 'quick')
       await load({ silent: true })
+      if (result.cancelled_in_supplies?.length) {
+        notifyCancelledInSupplies(result.cancelled_in_supplies)
+      }
     } catch {
       // Фоновая синхронизация WB — не блокируем экран
     } finally {
       syncInFlightRef.current = false
       setSyncing(false)
     }
-  }, [id, load])
+  }, [id, load, notifyCancelledInSupplies])
 
   const applySavedPickList = useCallback((fresh: AssemblySellerDetail | null) => {
     if (fresh?.active_pick_lists?.length) {
@@ -309,6 +364,17 @@ function WbAssemblySellerPage() {
       cancelled = true
     }
   }, [id, stage, applySavedPickList])
+
+  useEffect(() => {
+    cancelledNoticeShownRef.current = false
+  }, [id])
+
+  useEffect(() => {
+    if (stage !== 'confirm' || !data?.cancelled_in_supplies?.length) return
+    if (cancelledNoticeShownRef.current) return
+    cancelledNoticeShownRef.current = true
+    notifyCancelledInSupplies(data.cancelled_in_supplies)
+  }, [data?.cancelled_in_supplies, stage, notifyCancelledInSupplies])
 
   useEffect(() => {
     if (!id) return
@@ -948,14 +1014,46 @@ function WbAssemblySellerPage() {
     syncInFlightRef.current = true
     setSyncing(true)
     try {
-      await syncOrders(id, 'quick')
+      const result = await syncOrders(id, 'quick')
       await load({ silent: true })
-      noticeOk('Заказы обновлены', 'Синхронизация WB')
+      if (result.cancelled_in_supplies?.length) {
+        notifyCancelledInSupplies(result.cancelled_in_supplies)
+      } else {
+        noticeOk('Заказы обновлены', 'Синхронизация WB')
+      }
     } catch (err) {
       noticeFail('Синхронизация WB', err, 'Ошибка синхронизации с WB')
     } finally {
       syncInFlightRef.current = false
       setSyncing(false)
+    }
+  }
+
+  async function handleOpenPickListArchive() {
+    if (!id) return
+    setPickListArchiveLoading(true)
+    try {
+      const result = await fetchPickListArchive(id)
+      setPickListArchive(result.pick_lists)
+      setPickListArchiveOpen(true)
+    } catch (err) {
+      noticeFail('Архив листов', err, 'Не удалось загрузить архив листов подбора')
+    } finally {
+      setPickListArchiveLoading(false)
+    }
+  }
+
+  async function handleDownloadArchivePickList(pickListId: number) {
+    setPickListArchiveLoading(true)
+    try {
+      const pickList = await fetchPickList(pickListId)
+      if (!downloadPickListPdf(pickList)) {
+        showError('PDF листа подбора', 'Не удалось открыть PDF — разрешите всплывающие окна в браузере')
+      }
+    } catch (err) {
+      noticeFail('PDF листа подбора', err, 'Не удалось скачать лист подбора')
+    } finally {
+      setPickListArchiveLoading(false)
     }
   }
 
@@ -1703,7 +1801,7 @@ function WbAssemblySellerPage() {
   const hasPickLists = displayPickLists.some((list) => list.items?.length)
   const pickListStageOrders =
     stage === 'confirm'
-      ? counts.in_picking ?? 0
+      ? displayPickListTotal
       : assemblyEligible ?? counts.new ?? 0
   const canDownloadPickList =
     (stage === 'new' || stage === 'confirm') && (hasPickLists || pickListStageOrders > 0)
@@ -1763,7 +1861,7 @@ function WbAssemblySellerPage() {
   const groupedVisibleCount =
     stageSupplies.reduce((sum, supply) => sum + (supply.orders?.length ?? 0), 0)
     + unassignedOrders.length
-  const useGroupedLayout = groupedBySupply && groupedVisibleCount > 0
+  const useGroupedLayout = groupedBySupply && stageSupplies.length > 1 && groupedVisibleCount > 0
   const tableColSpan = stage === 'confirm' ? 11 : 10
 
   function isOrderCancelled(order: AssemblyOrder): boolean {
@@ -1776,7 +1874,7 @@ function WbAssemblySellerPage() {
     return (
       <tr
         key={order.id}
-        className={cancelled ? 'assembly-table__row--cancelled' : undefined}
+        className={assemblyOrderRowClass(order)}
       >
         {stage === 'confirm' && (
           <td>
@@ -2047,6 +2145,17 @@ function WbAssemblySellerPage() {
                   : `Скачать PDF (A4) · ${pickListStageOrders} зак.`}
             </button>
           ) : null}
+          {(stage === 'new' || stage === 'confirm') && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => void handleOpenPickListArchive()}
+              disabled={loading || pickListArchiveLoading}
+              {...uiHint('Архив листов подбора за последние 10 дней — скачать PDF повторно')}
+            >
+              {pickListArchiveLoading ? 'Архив…' : 'Листы подбора (архив)'}
+            </button>
+          )}
           {stage === 'new' && bulkAssemblyCount > 0 && (
             <button
               type="button"
@@ -2567,7 +2676,7 @@ function WbAssemblySellerPage() {
               ) : useGroupedLayout ? (
                 <>
                   {stageSupplies.map((supply) => {
-                    const supplyOrders = supply.orders ?? []
+                    const supplyOrders = sortAssemblyOrders(supply.orders ?? [])
                     const movableIds = supplyOrders
                       .filter((order) => order.can_move_to_new_supply)
                       .map((order) => order.id)
@@ -2578,6 +2687,12 @@ function WbAssemblySellerPage() {
                             <div className="assembly-supply-group-header">
                               <div>
                                 <strong>{supply.wb_supply_id}</strong>
+                                {supply.created_at && (
+                                  <span className="assembly-supply-group-header__meta">
+                                    {' · '}
+                                    {formatSupplyCreatedAt(supply.created_at)}
+                                  </span>
+                                )}
                                 <span className="assembly-supply-group-header__meta">
                                   {' · '}
                                   {supply.warehouse_name || `Склад #${supply.wb_warehouse_id ?? '—'}`}
@@ -2654,12 +2769,12 @@ function WbAssemblySellerPage() {
                           </span>
                         </td>
                       </tr>
-                      {unassignedOrders.map((order) => renderOrderRow(order))}
+                      {sortAssemblyOrders(unassignedOrders).map((order) => renderOrderRow(order))}
                     </>
                   )}
                 </>
               ) : (
-                orders.map((order) => renderOrderRow(order))
+                sortAssemblyOrders(orders).map((order) => renderOrderRow(order))
               )}
             </tbody>
           </table>
@@ -2787,6 +2902,65 @@ function WbAssemblySellerPage() {
                 onClick={() => setMovePicker(null)}
               >
                 Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pickListArchiveOpen && (
+        <div className="assembly-modal-backdrop" role="presentation" onClick={() => setPickListArchiveOpen(false)}>
+          <div
+            className="assembly-modal panel"
+            role="dialog"
+            aria-labelledby="pick-list-archive-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="pick-list-archive-title" className="section-title">Листы подбора — архив (10 дней)</h2>
+            {pickListArchive.length === 0 ? (
+              <p className="assembly-scan-hint">За последние 10 дней завершённых листов нет.</p>
+            ) : (
+              <table className="assembly-table">
+                <thead>
+                  <tr>
+                    <th>№</th>
+                    <th>Склад</th>
+                    <th>Дата</th>
+                    <th>Позиций</th>
+                    <th>Заказов</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {pickListArchive.map((pickList) => (
+                    <tr key={pickList.id}>
+                      <td>{pickList.id}</td>
+                      <td>{pickList.warehouse_name || `Склад #${pickList.wb_warehouse_id ?? '—'}`}</td>
+                      <td>{formatSupplyCreatedAt(pickList.created_at)}</td>
+                      <td>{pickList.items_count}</td>
+                      <td>{pickList.total_quantity}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn--small btn--secondary"
+                          onClick={() => void handleDownloadArchivePickList(pickList.id)}
+                          disabled={pickListArchiveLoading}
+                        >
+                          PDF
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="assembly-modal__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setPickListArchiveOpen(false)}
+              >
+                Закрыть
               </button>
             </div>
           </div>

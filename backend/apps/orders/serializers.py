@@ -241,6 +241,7 @@ class PickListSerializer(serializers.ModelSerializer):
 class PickListBriefSerializer(serializers.ModelSerializer):
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
   items_count = serializers.SerializerMethodField()
+  total_quantity = serializers.SerializerMethodField()
 
   class Meta:
     model = PickList
@@ -248,13 +249,19 @@ class PickListBriefSerializer(serializers.ModelSerializer):
       "id",
       "seller",
       "seller_name",
+      "warehouse_name",
+      "wb_warehouse_id",
       "is_completed",
       "created_at",
       "items_count",
+      "total_quantity",
     )
 
   def get_items_count(self, obj):
     return obj.items.count()
+
+  def get_total_quantity(self, obj):
+    return sum(item.quantity for item in obj.items.all())
 
 
 class SellerAssemblyCountersSerializer(serializers.Serializer):

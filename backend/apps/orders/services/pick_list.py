@@ -1,12 +1,17 @@
 from collections import defaultdict
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
 
-from apps.orders.models import Order, PickList, PickListItem
+from apps.orders.models import Order, PickList, PickListItem, Supply
 from apps.orders.services.wb_status import WB_STAGE_QUERIES, WB_SUPPLIER_NEW
 from apps.sellers.models import Seller, SellerWarehouse
-from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, get_enabled_wb_warehouse_ids
+from apps.sellers.services.warehouse_filter import (
+  filter_orders_for_assembly,
+  filter_supplies_for_assembly,
+  get_enabled_wb_warehouse_ids,
+)
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 
@@ -71,6 +76,21 @@ def active_wb_pick_lists(seller: Seller) -> list[PickList]:
   )
 
 
+def archived_wb_pick_lists(seller: Seller, *, days: int = 10) -> list[PickList]:
+  """Завершённые листы подбора за последние N дней."""
+  since = timezone.now() - timedelta(days=days)
+  return list(
+    PickList.objects.filter(
+      seller=seller,
+      is_completed=True,
+      marketplace=MARKETPLACE_WB,
+      created_at__gte=since,
+    )
+    .prefetch_related("items__cell", "items__product")
+    .order_by("-created_at")
+  )
+
+
 def _active_wb_pick_list_for_warehouse(
   seller: Seller,
   wb_warehouse_id: int,
@@ -88,13 +108,35 @@ def _active_wb_pick_list_for_warehouse(
   )
 
 
+def _crm_assembly_supply_order_ids(seller: Seller) -> set[int]:
+  """Заказы в активных поставках CRM — только они попадают в лист «На сборке»."""
+  supplies = filter_supplies_for_assembly(
+    Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ),
+    seller,
+  )
+  return set(
+    Order.objects.filter(
+      supplies__in=supplies,
+      assembly_hidden=False,
+    ).values_list("id", flat=True)
+  )
+
+
 def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
   if stage == "confirm":
+    crm_order_ids = _crm_assembly_supply_order_ids(seller)
+    if not crm_order_ids:
+      return []
     qs = (
       filter_orders_for_assembly(
-        Order.objects.filter(seller=seller, assembly_hidden=False).filter(
-          WB_STAGE_QUERIES["confirm"](),
-        ),
+        Order.objects.filter(
+          seller=seller,
+          assembly_hidden=False,
+          id__in=crm_order_ids,
+        ).filter(WB_STAGE_QUERIES["confirm"]()),
         seller,
       )
       .exclude(

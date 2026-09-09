@@ -62,9 +62,12 @@ export interface PickListBrief {
   id: number
   seller: number
   seller_name: string
+  warehouse_name?: string
+  wb_warehouse_id?: number | null
   is_completed: boolean
   created_at: string
   items_count: number
+  total_quantity?: number
 }
 
 export interface SyncResult {
@@ -93,6 +96,12 @@ export interface SyncResult {
     shipped_missing?: number
     delivery_status_breakdown?: Record<string, number>
   }
+  cancelled_in_supplies?: {
+    order_id: number
+    wb_order_id: number
+    wb_supply_id: string
+    supply_id: number
+  }[]
   results?: SyncResult[]
   errors?: { seller_id: number; error: string }[]
   dashboard_stats?: DashboardStats

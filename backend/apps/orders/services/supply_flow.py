@@ -1308,8 +1308,8 @@ def _detach_order_from_pick_list(order: Order) -> None:
   order.save(update_fields=["pick_list", "updated_at"])
 
 
-def _cleanup_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller) -> None:
-  """Удалить пустые листы подбора склада после передачи поставки в доставку."""
+def _complete_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller) -> None:
+  """Архивировать листы подбора склада после передачи поставки в доставку."""
   qs = PickList.objects.filter(
     seller=seller,
     is_completed=False,
@@ -1318,7 +1318,10 @@ def _cleanup_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller)
   if supply.wb_warehouse_id is not None:
     qs = qs.filter(wb_warehouse_id=supply.wb_warehouse_id)
   for pick_list in qs:
-    if not pick_list.items.exists():
+    if pick_list.items.exists():
+      pick_list.is_completed = True
+      pick_list.save(update_fields=["is_completed"])
+    else:
       pick_list.delete()
 
 
@@ -1380,7 +1383,7 @@ def _finalize_supply_after_wb_deliver(
       user=user,
     )
     last_order = order
-  _cleanup_pick_lists_after_supply_delivery(supply, seller=seller)
+  _complete_pick_lists_after_supply_delivery(supply, seller=seller)
   if last_order is None:
     raise SupplyFlowError("В поставке нет заказов для CRM", code="not_ready")
   return last_order, last_stock
@@ -1636,7 +1639,52 @@ def new_stage_orders_queryset(seller: Seller) -> QuerySet:
       Order.Status.IN_DELIVERY,
     ],
   )
-  return (active | _cancelled_assembly_orders_qs(base)).distinct()
+  return active
+
+
+def orders_at_risk_in_active_supplies(seller: Seller) -> QuerySet:
+  """Заказы в активных поставках, которые ещё не отменены — для отслеживания отмен при sync."""
+  supplies = filter_supplies_for_assembly(
+    Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ),
+    seller,
+  )
+  return Order.objects.filter(
+    supplies__in=supplies,
+    assembly_hidden=False,
+  ).exclude(status=Order.Status.CANCELLED).distinct()
+
+
+def cancelled_orders_in_active_supplies(seller: Seller, order_ids: list[int]) -> list[dict]:
+  """Отменённые заказы из списка id, которые остались в активных поставках."""
+  if not order_ids:
+    return []
+  active_statuses = (Supply.Status.FORMING, Supply.Status.READY)
+  payload: list[dict] = []
+  orders = (
+    Order.objects.filter(
+      seller=seller,
+      id__in=order_ids,
+      status=Order.Status.CANCELLED,
+    )
+    .prefetch_related("supplies")
+  )
+  for order in orders:
+    supply = next(
+      (item for item in order.supplies.all() if item.status in active_statuses),
+      None,
+    )
+    if not supply:
+      continue
+    payload.append({
+      "order_id": order.id,
+      "wb_order_id": order.wb_order_id,
+      "wb_supply_id": supply.wb_supply_id,
+      "supply_id": supply.id,
+    })
+  return payload
 
 
 def count_new_orders_for_barcode(seller: Seller, barcode: str) -> int:

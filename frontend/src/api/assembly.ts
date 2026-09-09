@@ -72,6 +72,13 @@ export interface AssemblySupply {
 
 export type DeliverySupply = AssemblySupply
 
+export interface CancelledInSupplyNotice {
+  order_id: number
+  wb_order_id: number
+  wb_supply_id: string
+  supply_id: number
+}
+
 export interface AssemblySellerDetail {
   seller: { id: number; company_name: string }
   assembly_workflow_mode?: 'scan' | 'batch'
@@ -86,6 +93,7 @@ export interface AssemblySellerDetail {
   active_pick_list?: PickList | null
   active_pick_lists?: PickList[]
   pick_list?: PickList | null
+  cancelled_in_supplies?: CancelledInSupplyNotice[]
   marketplace?: string
   ozon_assembly_ready?: boolean
   message?: string
@@ -121,6 +129,12 @@ export function previewPickList(sellerId: number, stage: 'new' | 'confirm' = 'ne
       method: 'POST',
       body: JSON.stringify({ stage }),
     },
+  )
+}
+
+export function fetchPickListArchive(sellerId: number) {
+  return apiFetch<{ pick_lists: PickList[] }>(
+    `/api/orders/assembly/sellers/${sellerId}/pick-list-archive/`,
   )
 }
 

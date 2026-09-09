@@ -172,9 +172,18 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   wb_orders = fetch_result.orders
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
   status_error = ""
+  cancelled_in_supplies: list[dict] = []
   new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)]
   enabled_new_total = sum(
     1 for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)
+  )
+  from apps.orders.services.supply_flow import (
+    cancelled_orders_in_active_supplies,
+    orders_at_risk_in_active_supplies,
+  )
+
+  at_risk_supply_order_ids = list(
+    orders_at_risk_in_active_supplies(seller).values_list("id", flat=True)
   )
   try:
     status_result = sync_order_statuses_for_seller(
@@ -189,6 +198,11 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     )
   except WBApiError as exc:
     status_error = str(exc)
+
+  cancelled_in_supplies = cancelled_orders_in_active_supplies(
+    seller,
+    at_risk_supply_order_ids,
+  )
 
   try:
     from apps.orders.services.supply_sync import sync_supplies_from_wb, sync_supply_scan_dates
@@ -233,6 +247,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
       "delivery_recent": status_result.get("delivery_recent"),
       "delivery_breakdown": status_result.get("delivery_breakdown"),
       "reconcile": status_result.get("reconcile", {}),
+      "cancelled_in_supplies": cancelled_in_supplies,
       "synced_at": timezone.now().isoformat(),
       "sync_mode": mode,
     },
@@ -262,6 +277,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     "delivery_recent": status_result.get("delivery_recent"),
     "delivery_breakdown": status_result.get("delivery_breakdown"),
     "reconcile": status_result.get("reconcile", {}),
+    "cancelled_in_supplies": cancelled_in_supplies,
     "supply_sync": supply_sync_result,
     "supply_scan": supply_scan_result,
   }
