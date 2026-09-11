@@ -250,12 +250,16 @@ export interface DeliveryShippingParams {
   shipping_type?: 'selfShipping' | 'transportCompany'
 }
 
+export type ShippingPointKind = 'sc' | 'pp'
+
 export interface ShippingPointsResult {
   success: boolean
   city: string
   scope?: string
   cargo_type: number
   shipping_points: ShippingPoint[]
+  shipping_points_sc?: ShippingPoint[]
+  shipping_points_pp?: ShippingPoint[]
 }
 
 export function fetchAssemblySellers() {

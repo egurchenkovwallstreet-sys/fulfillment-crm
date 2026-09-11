@@ -181,8 +181,8 @@ def fetch_seller_shipping_points(
   city: str,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
-) -> tuple[list[dict], int]:
-  """Пункты отгрузки WB для модалки «В доставку»."""
+) -> tuple[list[dict], list[dict], int]:
+  """Пункты отгрузки WB для модалки «В доставку» (СЦ и ППТ отдельно)."""
   city = (city or "").strip()
   if not city:
     raise SupplyFlowError("Укажите город для поиска пунктов отгрузки", code="invalid_city")
@@ -203,7 +203,8 @@ def fetch_seller_shipping_points(
     ) from exc
   points = _merge_pinned_shipping_points(client, resolved_cargo, points)
   points = _filter_delivery_office_points(points)
-  return points, resolved_cargo
+  sc_points, pp_points = _split_shipping_points(points)
+  return _sort_sc_points(sc_points), _sort_pp_points(pp_points), resolved_cargo
 
 
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
@@ -365,9 +366,13 @@ def _is_sc_office_type(point: dict) -> bool:
   return _normalize_text(point.get("officeType")) in ("sc", "sw")
 
 
+def _is_pp_office_type(point: dict) -> bool:
+  return _normalize_text(point.get("officeType")) == "pp"
+
+
 def _is_delivery_office_type(point: dict) -> bool:
-  """СЦ и склады WB для FBS-отгрузки (без ПВЗ)."""
-  return _is_sc_office_type(point)
+  """СЦ, склады WB и ППТ (ПВЗ) для FBS-отгрузки."""
+  return _is_sc_office_type(point) or _is_pp_office_type(point)
 
 
 def _filter_delivery_office_points(points: list[dict]) -> list[dict]:
@@ -375,6 +380,42 @@ def _filter_delivery_office_points(points: list[dict]) -> list[dict]:
     point for point in points
     if isinstance(point, dict) and _is_delivery_office_type(point)
   ]
+
+
+def _split_shipping_points(points: list[dict]) -> tuple[list[dict], list[dict]]:
+  """Разделить пункты отгрузки: СЦ/склады и ППТ (ПВЗ)."""
+  sc_points: list[dict] = []
+  pp_points: list[dict] = []
+  for point in points:
+    if not isinstance(point, dict):
+      continue
+    if _is_pp_office_type(point):
+      pp_points.append(point)
+    elif _is_sc_office_type(point) or _is_pinned_sc_point(point):
+      sc_points.append(point)
+  return sc_points, pp_points
+
+
+def _sort_sc_points(points: list[dict]) -> list[dict]:
+  return sorted(
+    points,
+    key=lambda point: (
+      0 if _matches_veshki_lipkinskoe(point) else 1,
+      _normalize_text(point.get("city")),
+      _normalize_text(point.get("name")),
+    ),
+  )
+
+
+def _sort_pp_points(points: list[dict]) -> list[dict]:
+  return sorted(
+    points,
+    key=lambda point: (
+      _normalize_text(point.get("city")),
+      _normalize_text(point.get("name")),
+      _normalize_text(point.get("address")),
+    ),
+  )
 
 
 def _veshki_env_fallback_point() -> dict | None:
@@ -415,18 +456,21 @@ def fetch_moscow_region_sc_shipping_points(
   *,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
-) -> tuple[list[dict], int]:
-  """СЦ и склады WB: только Москва и Московская область (кеш 1 ч)."""
+) -> tuple[list[dict], list[dict], int]:
+  """СЦ/склады и ППТ WB: Москва и Московская область (кеш 1 ч)."""
   client = _get_client(seller)
   resolved_cargo = _resolve_shipping_cargo_type(
     client,
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:v5:moscow:{seller.id}:{resolved_cargo}"
+  cache_key = f"wb_sc_points:v6:moscow:{seller.id}:{resolved_cargo}"
   cached = cache.get(cache_key)
-  if isinstance(cached, list) and cached:
-    return cached, resolved_cargo
+  if isinstance(cached, dict):
+    sc_cached = cached.get("sc")
+    pp_cached = cached.get("pp")
+    if isinstance(sc_cached, list) and isinstance(pp_cached, list):
+      return sc_cached, pp_cached, resolved_cargo
 
   merged: dict[int, dict] = {}
   fetch_cities = _all_sc_fetch_cities()
@@ -452,14 +496,16 @@ def fetch_moscow_region_sc_shipping_points(
 
   points = _merge_pinned_shipping_points(client, resolved_cargo, list(merged.values()))
   points = _filter_delivery_office_points(points)
-  points.sort(key=lambda point: (
-    0 if _matches_veshki_lipkinskoe(point) else 1,
-    _normalize_text(point.get("city")),
-    _normalize_text(point.get("name")),
-  ))
-  if points:
-    cache.set(cache_key, points, ALL_SC_SHIPPING_CACHE_TTL)
-  return points, resolved_cargo
+  sc_points, pp_points = _split_shipping_points(points)
+  sc_points = _sort_sc_points(sc_points)
+  pp_points = _sort_pp_points(pp_points)
+  if sc_points or pp_points:
+    cache.set(
+      cache_key,
+      {"sc": sc_points, "pp": pp_points},
+      ALL_SC_SHIPPING_CACHE_TTL,
+    )
+  return sc_points, pp_points, resolved_cargo
 
 
 def fetch_all_russia_sc_shipping_points(
@@ -467,8 +513,8 @@ def fetch_all_russia_sc_shipping_points(
   *,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
-) -> tuple[list[dict], int]:
-  """Обратная совместимость scope=all_sc → только Москва и МО."""
+) -> tuple[list[dict], list[dict], int]:
+  """Обратная совместимость scope=all_sc → Москва и МО (СЦ + ППТ)."""
   return fetch_moscow_region_sc_shipping_points(
     seller,
     cargo_type=cargo_type,

@@ -1240,14 +1240,14 @@ class AssemblyShippingPointsView(APIView):
 
     try:
       if scope == "all_sc":
-        points, resolved_cargo = fetch_all_russia_sc_shipping_points(
+        sc_points, pp_points, resolved_cargo = fetch_all_russia_sc_shipping_points(
           seller,
           cargo_type=cargo_type,
           wb_supply_id=wb_supply_id,
         )
         city = "Москва и Московская область"
       else:
-        points, resolved_cargo = fetch_seller_shipping_points(
+        sc_points, pp_points, resolved_cargo = fetch_seller_shipping_points(
           seller,
           city=city,
           cargo_type=cargo_type,
@@ -1261,7 +1261,9 @@ class AssemblyShippingPointsView(APIView):
       "city": city,
       "scope": scope,
       "cargo_type": resolved_cargo,
-      "shipping_points": points,
+      "shipping_points": sc_points,
+      "shipping_points_sc": sc_points,
+      "shipping_points_pp": pp_points,
     })
 
 
