@@ -10,9 +10,11 @@ from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOpe
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, first_free_cell, refresh_cell_occupied
 from apps.warehouse.services.catalog_fetch import CatalogError
-from apps.warehouse.services.catalog_groups import find_group_by_barcode
 from apps.warehouse.services.liter_pricing import apply_product_dimensions
-from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
+from apps.warehouse.services.product_catalog import (
+  create_kwargs_for_new_product,
+  try_enrich_product_from_catalog,
+)
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_new_orders,
@@ -199,6 +201,7 @@ def perform_intake(
     if product:
       product.quantity = crm_quantity_after
       product.save(update_fields=["quantity", "updated_at"])
+      try_enrich_product_from_catalog(product, seller)
       is_new = False
     else:
       cell = _assign_cell(
@@ -208,15 +211,22 @@ def perform_intake(
         mp,
         sequential=sync_variant == "scan",
       )
-      marking = lookup_marking_for_barcode(seller, barcode)
+      try:
+        catalog_kwargs = create_kwargs_for_new_product(
+          seller,
+          barcode,
+          mp,
+          name_override=name.strip(),
+        )
+      except CatalogError as exc:
+        raise IntakeError(str(exc)) from exc
       product = Product.objects.create(
         seller=seller,
         barcode=barcode,
-        name=name.strip() or marking.title,
         cell=cell,
         quantity=crm_quantity_after,
         marketplace=mp,
-        requires_marking=marking.requires_marking if marking.wb_found else False,
+        **catalog_kwargs,
       )
       refresh_cell_occupied(cell)
       is_new = True
@@ -224,40 +234,27 @@ def perform_intake(
     crm_quantity_after = crm_quantity_before + intake_quantity
     product.quantity = crm_quantity_after
     product.save(update_fields=["quantity", "updated_at"])
+    try_enrich_product_from_catalog(product, seller)
     is_new = False
   else:
     crm_quantity_after = intake_quantity
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
-    product_name = name.strip()
-    requires_marking = False
-    vendor_code = ""
-    wb_nm_id = None
-    tech_size = ""
-    if mp == WB:
-      marking = lookup_marking_for_barcode(seller, barcode)
-      product_name = product_name or marking.title
-      requires_marking = marking.requires_marking if marking.wb_found else False
-    else:
-      try:
-        anchor, _, _ = find_group_by_barcode(seller, mp, barcode)
-        product_name = product_name or anchor.title
-        requires_marking = anchor.requires_marking
-        vendor_code = anchor.vendor_code or ""
-        wb_nm_id = anchor.wb_nm_id or None
-        tech_size = anchor.tech_size or ""
-      except CatalogError as exc:
-        raise IntakeError(str(exc)) from exc
+    try:
+      catalog_kwargs = create_kwargs_for_new_product(
+        seller,
+        barcode,
+        mp,
+        name_override=name.strip(),
+      )
+    except CatalogError as exc:
+      raise IntakeError(str(exc)) from exc
     product = Product.objects.create(
       seller=seller,
       barcode=barcode,
-      name=product_name,
       cell=cell,
       quantity=crm_quantity_after,
       marketplace=mp,
-      requires_marking=requires_marking,
-      vendor_code=vendor_code,
-      wb_nm_id=wb_nm_id,
-      tech_size=tech_size,
+      **catalog_kwargs,
     )
     refresh_cell_occupied(cell)
     is_new = True

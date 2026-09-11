@@ -12,7 +12,11 @@ from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import refresh_cell_occupied
 from apps.warehouse.services.intake import IntakeError, _assign_cell
-from apps.warehouse.services.marking_lookup import lookup_marking_for_barcode
+from apps.warehouse.services.catalog_fetch import CatalogError
+from apps.warehouse.services.product_catalog import (
+  create_kwargs_for_new_product,
+  try_enrich_product_from_catalog,
+)
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_new_orders,
@@ -270,20 +274,28 @@ def perform_inventory(
   if product:
     product.quantity = crm_quantity_after
     product.save(update_fields=["quantity", "updated_at"])
+    try_enrich_product_from_catalog(product, seller)
     is_new = False
   else:
     if physical_quantity == 0 and not restock_required:
       raise IntakeError("Новый баркод нельзя инвентаризировать с нулевым количеством")
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
-    marking = lookup_marking_for_barcode(seller, barcode) if mp == WB else None
+    try:
+      catalog_kwargs = create_kwargs_for_new_product(
+        seller,
+        barcode,
+        mp,
+        name_override=name.strip(),
+      )
+    except CatalogError as exc:
+      raise IntakeError(str(exc)) from exc
     product = Product.objects.create(
       seller=seller,
       barcode=barcode,
-      name=name.strip() or (marking.title if marking else ""),
       cell=cell,
       quantity=crm_quantity_after,
       marketplace=mp,
-      requires_marking=(marking.requires_marking if marking and marking.wb_found else False),
+      **catalog_kwargs,
     )
     refresh_cell_occupied(cell)
     is_new = True

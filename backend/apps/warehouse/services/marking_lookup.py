@@ -99,13 +99,25 @@ def lookup_intake_catalog_info(seller: Seller, barcode: str, marketplace: str) -
 
 
 def refresh_product_marking(product: Product, seller: Seller) -> MarkingLookupResult:
-  """Обновить название и requires_marking у товара из WB."""
+  """Обновить карточку товара из МП (название, фото, размер, маркировка)."""
+  from apps.warehouse.services.product_catalog import try_enrich_product_from_catalog
+
   if product.marketplace == OZON:
+    updated = try_enrich_product_from_catalog(product, seller)
+    return MarkingLookupResult(
+      requires_marking=product.requires_marking,
+      wb_found=updated or bool(product.name),
+      title=product.name,
+    )
+
+  updated = try_enrich_product_from_catalog(product, seller)
+  if updated:
     return MarkingLookupResult(
       requires_marking=product.requires_marking,
       wb_found=True,
       title=product.name,
     )
+
   result = lookup_marking_for_barcode(seller, product.barcode)
   if result.wb_found:
     update_fields = ["requires_marking", "updated_at"]

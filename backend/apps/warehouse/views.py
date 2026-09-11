@@ -172,7 +172,7 @@ class SellerProductsView(APIView):
 
 
 class SellerProductsRefreshView(APIView):
-  """Подтянуть названия и маркировку всех товаров селлера из WB."""
+  """Подтянуть карточки всех товаров селлера из каталога МП."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):
@@ -193,7 +193,7 @@ class SellerProductsRefreshView(APIView):
 
     message = f"Обновлено {result.updated} из {result.total} товаров"
     if result.not_found:
-      message += f", не найдено на WB: {result.not_found}"
+      message += f", не найдено в каталоге МП: {result.not_found}"
 
     products = (
       Product.objects.filter(seller=seller)

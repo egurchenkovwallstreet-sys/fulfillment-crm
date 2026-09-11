@@ -20,6 +20,7 @@ from apps.warehouse.services.catalog_groups import (
   serialize_group_preview,
 )
 from apps.warehouse.services.cells import _next_cell_number, refresh_cell_occupied
+from apps.warehouse.services.product_catalog import try_enrich_product_from_catalog
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
   fetch_wb_stock_for_barcode,
@@ -745,6 +746,7 @@ def increment_product(
   if not product:
     raise ArticleIntakeError("Баркод не найден в этой приёмке")
   product = _add_product_stock(product, 1, user, "Приёмка по артикулам: +1 шт. (скан)")
+  try_enrich_product_from_catalog(product, session.seller)
   session.scan_count += 1
   session.total_units += 1
   session.active_group_key = product.article_group_key or session.active_group_key

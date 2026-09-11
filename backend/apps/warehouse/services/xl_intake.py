@@ -19,6 +19,10 @@ from apps.warehouse.models import Product, StockOperation, XlIntakeLine, XlIntak
 from apps.warehouse.services.catalog_fetch import CatalogError, fetch_seller_catalog_items
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
+from apps.warehouse.services.product_catalog import (
+  create_kwargs_for_new_product,
+  try_enrich_product_from_catalog,
+)
 
 try:
   from openpyxl import Workbook
@@ -189,6 +193,7 @@ def _bind_product_on_scan(
   if product:
     product.quantity += 1
     product.save(update_fields=["quantity", "updated_at"])
+    try_enrich_product_from_catalog(product, session.seller)
     _record_xl_intake_stock(product=product, session=session, user=user)
     cell_number = product.cell.number
     if line.cell_number != cell_number:
@@ -197,12 +202,18 @@ def _bind_product_on_scan(
     return product, False
 
   cell = create_cell_with_next_number(session.seller, session.marketplace or WB)
+  mp = session.marketplace or WB
+  try:
+    catalog_kwargs = create_kwargs_for_new_product(session.seller, barcode, mp)
+  except CatalogError:
+    catalog_kwargs = {"name": ""}
   product = Product.objects.create(
     seller=session.seller,
     barcode=barcode,
     cell=cell,
     quantity=1,
-    marketplace=session.marketplace or WB,
+    marketplace=mp,
+    **catalog_kwargs,
   )
   refresh_cell_occupied(cell)
   _record_xl_intake_stock(product=product, session=session, user=user)

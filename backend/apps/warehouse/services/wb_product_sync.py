@@ -1,11 +1,20 @@
-"""Синхронизация названий и маркировки товаров из WB Content API."""
+"""Синхронизация карточек товаров из WB/Ozon в CRM."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from apps.integrations.marketplace import OZON, WB
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product
-from apps.warehouse.services.marking_lookup import MarkingLookupError, lookup_marking_for_barcode
+from apps.warehouse.services.catalog_fetch import (
+  CatalogError,
+  barcode_lookup_variants,
+  build_seller_catalog_index,
+)
+from apps.warehouse.services.product_catalog import (
+  apply_catalog_item_to_product,
+  build_ozon_catalog_index,
+)
 
 
 @dataclass
@@ -28,36 +37,28 @@ class SellerProductsRefreshResult:
   error: str = ""
 
 
-def refresh_product_from_wb(product: Product, seller: Seller) -> ProductRefreshResult:
-  """Обновить название и requires_marking одного товара из WB."""
-  try:
-    marking = lookup_marking_for_barcode(seller, product.barcode)
-  except MarkingLookupError as exc:
+def _lookup_in_index(index: dict, barcode: str, marketplace: str):
+  for variant in barcode_lookup_variants(barcode, marketplace):
+    item = index.get(variant)
+    if item:
+      return item
+  return None
+
+
+def _refresh_product_from_index(product: Product, index: dict, marketplace: str) -> ProductRefreshResult:
+  item = _lookup_in_index(index, product.barcode, marketplace)
+  if not item:
     return ProductRefreshResult(
       product_id=product.id,
       barcode=product.barcode,
       wb_found=False,
-      warning=str(exc),
     )
 
-  if not marking.wb_found:
-    return ProductRefreshResult(
-      product_id=product.id,
-      barcode=product.barcode,
-      wb_found=False,
-      warning=marking.warning,
-    )
+  changed = apply_catalog_item_to_product(product, item)
+  name_updated = "name" in changed
+  if changed:
+    product.save(update_fields=[*changed, "updated_at"])
 
-  update_fields = ["requires_marking", "updated_at"]
-  product.requires_marking = marking.requires_marking
-  name_updated = False
-
-  if marking.title:
-    product.name = marking.title
-    update_fields.append("name")
-    name_updated = True
-
-  product.save(update_fields=update_fields)
   return ProductRefreshResult(
     product_id=product.id,
     barcode=product.barcode,
@@ -66,37 +67,62 @@ def refresh_product_from_wb(product: Product, seller: Seller) -> ProductRefreshR
   )
 
 
-def _is_token_error(warning: str) -> bool:
-  lower = warning.lower()
-  return "токен" in lower or "контент" in lower
-
-
 def refresh_seller_products_from_wb(seller: Seller) -> SellerProductsRefreshResult:
-  """Обновить все товары селлера из WB."""
+  """Обновить все товары селлера из каталога МП (фото, размеры, название)."""
   result = SellerProductsRefreshResult(seller_id=seller.id)
+  products = list(Product.objects.filter(seller=seller).order_by("id"))
+  result.total = len(products)
+  if not products:
+    return result
 
-  for product in Product.objects.filter(seller=seller).order_by("id"):
-    item = refresh_product_from_wb(product, seller)
-    result.items.append(item)
-    result.total += 1
+  wb_products = [p for p in products if p.marketplace == WB]
+  ozon_products = [p for p in products if p.marketplace == OZON]
 
-    if item.warning and _is_token_error(item.warning):
-      result.error = item.warning
-      result.errors += 1
-      break
+  wb_index: dict | None = None
+  ozon_index: dict | None = None
 
-    if item.wb_found:
+  if wb_products:
+    try:
+      wb_index = build_seller_catalog_index(seller)
+    except CatalogError as exc:
+      result.error = str(exc)
+      result.errors = len(wb_products)
+      return result
+
+  if ozon_products and seller.ozon_enabled:
+    try:
+      ozon_index = build_ozon_catalog_index(seller)
+    except CatalogError as exc:
+      if not result.error:
+        result.error = str(exc)
+      result.errors += len(ozon_products)
+      ozon_index = None
+
+  for product in products:
+    if product.marketplace == WB:
+      if wb_index is None:
+        continue
+      item_result = _refresh_product_from_index(product, wb_index, WB)
+    elif product.marketplace == OZON:
+      if ozon_index is None:
+        result.not_found += 1
+        continue
+      item_result = _refresh_product_from_index(product, ozon_index, OZON)
+    else:
+      result.not_found += 1
+      continue
+
+    result.items.append(item_result)
+    if item_result.wb_found:
       result.updated += 1
     else:
       result.not_found += 1
-      if item.warning:
-        result.errors += 1
 
   return result
 
 
 def refresh_all_sellers_products_from_wb() -> dict:
-  """Ежедневная синхронизация товаров всех активных селлеров."""
+  """Ежедневная синхронизация карточек всех активных селлеров."""
   results: list[dict] = []
   errors: list[dict] = []
 

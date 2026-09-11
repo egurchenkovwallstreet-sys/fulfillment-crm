@@ -27,7 +27,7 @@ def sync_wb_stocks(seller_id: int):
 
 @shared_task
 def sync_wb_product_cards():
-  """Ежедневное обновление названий и маркировки товаров из WB Content API."""
+  """Ежедневное обновление карточек товаров (фото, размеры, название) из WB/Ozon."""
   from apps.warehouse.services.wb_product_sync import refresh_all_sellers_products_from_wb
 
   result = refresh_all_sellers_products_from_wb()

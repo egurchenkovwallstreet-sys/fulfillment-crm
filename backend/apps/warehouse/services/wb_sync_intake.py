@@ -11,11 +11,16 @@ from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, StockOperation
 from apps.warehouse.services.catalog_fetch import (
   CATALOG_MODE_WITH_STOCK,
+  CatalogBarcodeItem,
   CatalogError,
   build_onboarding_preview,
 )
 from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
+from apps.warehouse.services.product_catalog import (
+  catalog_item_to_create_kwargs,
+  try_enrich_product_from_catalog,
+)
 from apps.warehouse.services.wb_stocks import WBStockError, get_seller_warehouse
 
 
@@ -32,6 +37,11 @@ class WbSyncPreviewItem:
   cell_number: str
   already_in_crm: bool
   requires_marking: bool
+  wb_size: str = ""
+  vendor_code: str = ""
+  wb_nm_id: int | None = None
+  photo_url: str = ""
+  color_label: str = ""
   product_id: int | None = None
   crm_quantity: int | None = None
 
@@ -93,6 +103,11 @@ def preview_wb_sync_intake(seller: Seller, warehouse_pk: int) -> WbSyncPreviewRe
         barcode=barcode,
         title=str(row.get("title") or ""),
         tech_size=str(row.get("tech_size") or row.get("size_label") or ""),
+        wb_size=str(row.get("wb_size") or ""),
+        vendor_code=str(row.get("vendor_code") or ""),
+        wb_nm_id=int(row["wb_nm_id"]) if row.get("wb_nm_id") else None,
+        photo_url=str(row.get("photo_url") or ""),
+        color_label=str(row.get("color_label") or ""),
         wb_stock=wb_stock,
         cell_number=str(row.get("cell_number") or ""),
         already_in_crm=bool(row.get("already_in_crm")),
@@ -163,6 +178,7 @@ def apply_wb_sync_auto(
     if product:
       product.quantity = item.wb_stock
       product.save(update_fields=["quantity", "updated_at"])
+      try_enrich_product_from_catalog(product, seller)
       StockOperation.objects.create(
         product=product,
         operation_type=StockOperation.OperationType.ADJUSTMENT,
@@ -188,15 +204,24 @@ def apply_wb_sync_auto(
     else:
       cell = create_cell_with_next_number(seller, WB)
 
+    catalog_item = CatalogBarcodeItem(
+      barcode=item.barcode,
+      wb_nm_id=int(item.wb_nm_id or 0),
+      vendor_code=item.vendor_code,
+      title=item.title,
+      tech_size=item.tech_size,
+      wb_size=item.wb_size,
+      photo_url=item.photo_url,
+      requires_marking=item.requires_marking,
+      color_label=item.color_label,
+    )
     product = Product.objects.create(
       seller=seller,
       marketplace=WB,
       barcode=item.barcode,
-      name=item.title,
       cell=cell,
       quantity=item.wb_stock,
-      requires_marking=item.requires_marking,
-      tech_size=item.tech_size,
+      **catalog_item_to_create_kwargs(catalog_item),
     )
     refresh_cell_occupied(cell)
     StockOperation.objects.create(
