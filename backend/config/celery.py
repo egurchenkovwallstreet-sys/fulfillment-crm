@@ -45,4 +45,8 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.accrue_daily_storage_charges",
         "schedule": crontab(hour=0, minute=5),
     },
+    "refresh-admin-billing-cache": {
+        "task": "apps.integrations.tasks.refresh_all_admin_billing_caches",
+        "schedule": crontab(minute="*/10"),
+    },
 }

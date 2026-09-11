@@ -4,10 +4,12 @@ from __future__ import annotations
 import re
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db import close_old_connections
 from django.utils import timezone
 
 from apps.integrations.wb_client import REQUEST_INTERVAL_SEC, WBApiError, WBClient
@@ -405,15 +407,97 @@ def merge_weekly_shipments_payloads(
   }
 
 
-def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -> dict:
-  """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
-  from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+def _liter_billing_fields(seller: Seller, *, marketplace: str) -> dict:
   from apps.sellers.services.liter_billing import (
     load_weekly_liter_shipment_charges,
     load_weekly_storage_charges,
   )
+  from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
+
+  fields = {
+    "pricing_mode": seller.pricing_mode,
+    "liter_storage_chart": load_weekly_storage_charges(seller, marketplace=marketplace),
+  }
+  if seller_uses_liter_pricing(seller):
+    fields["liter_shipments_chart"] = load_weekly_liter_shipment_charges(seller, marketplace=marketplace)
+  return fields
+
+
+def _weekly_shipments_for_seller(seller: Seller, *, is_ozon: bool):
   from apps.sellers.services.ozon_billing_stats import load_weekly_ozon_shipped_orders
   from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
+
+  if seller_uses_liter_pricing(seller):
+    return None
+  if is_ozon:
+    return load_weekly_ozon_shipped_orders(seller)
+  return load_weekly_shipped_orders(seller)
+
+
+def _build_admin_billing_seller_row(seller: Seller, *, is_ozon: bool, marketplace: str) -> tuple[dict, dict | None]:
+  close_old_connections()
+  if is_ozon:
+    if not (seller.ozon_client_id and seller.ozon_api_key_encrypted):
+      return {
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": None,
+        "error": "Ключи Ozon не настроены",
+        **_liter_billing_fields(seller, marketplace=marketplace),
+      }, None
+    try:
+      shipments = _weekly_shipments_for_seller(seller, is_ozon=True)
+      return {
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": shipments,
+        "error": None,
+        **_liter_billing_fields(seller, marketplace=marketplace),
+      }, shipments
+    except SellerAnalyticsError as exc:
+      return {
+        "seller_id": seller.id,
+        "company_name": seller.company_name,
+        "weekly_shipments": None,
+        "error": str(exc),
+        **_liter_billing_fields(seller, marketplace=marketplace),
+      }, None
+
+  if not seller.wb_api_token_encrypted:
+    return {
+      "seller_id": seller.id,
+      "company_name": seller.company_name,
+      "weekly_shipments": None,
+      "error": "Токен WB не настроен",
+      **_liter_billing_fields(seller, marketplace=marketplace),
+    }, None
+  try:
+    shipments = _weekly_shipments_for_seller(seller, is_ozon=False)
+    return {
+      "seller_id": seller.id,
+      "company_name": seller.company_name,
+      "weekly_shipments": shipments,
+      "error": None,
+      **_liter_billing_fields(seller, marketplace=marketplace),
+    }, shipments
+  except SellerAnalyticsError as exc:
+    return {
+      "seller_id": seller.id,
+      "company_name": seller.company_name,
+      "weekly_shipments": None,
+      "error": str(exc),
+      **_liter_billing_fields(seller, marketplace=marketplace),
+    }, None
+
+
+def load_admin_billing_dashboard(
+  *,
+  fulfillment=None,
+  marketplace: str = "wb",
+  parallel: bool = False,
+) -> dict:
+  """Отгрузки и суммы по тарифу: по каждому селлеру и общий итог."""
+  from apps.integrations.marketplace import OZON, normalize_marketplace
 
   mp = normalize_marketplace(marketplace)
   is_ozon = mp == OZON
@@ -425,86 +509,28 @@ def load_admin_billing_dashboard(*, fulfillment=None, marketplace: str = "wb") -
     sellers = sellers.filter(ozon_enabled=True)
   else:
     sellers = sellers.filter(wb_enabled=True)
-  sellers = sellers.order_by("company_name")
+  seller_list = list(sellers.order_by("company_name"))
   seller_rows: list[dict] = []
   successful_payloads: list[dict] = []
 
-  def _liter_billing_fields(seller: Seller) -> dict:
-    fields = {
-      "pricing_mode": seller.pricing_mode,
-      "liter_storage_chart": load_weekly_storage_charges(seller, marketplace=mp),
-    }
-    if seller_uses_liter_pricing(seller):
-      fields["liter_shipments_chart"] = load_weekly_liter_shipment_charges(seller, marketplace=mp)
-    return fields
-
-  def _weekly_shipments_for_seller(seller: Seller):
-    if seller_uses_liter_pricing(seller):
-      return None
-    if is_ozon:
-      return load_weekly_ozon_shipped_orders(seller)
-    return load_weekly_shipped_orders(seller)
-
-  for seller in sellers:
-    if is_ozon:
-      if not (seller.ozon_client_id and seller.ozon_api_key_encrypted):
-        seller_rows.append({
-          "seller_id": seller.id,
-          "company_name": seller.company_name,
-          "weekly_shipments": None,
-          "error": "Ключи Ozon не настроены",
-          **_liter_billing_fields(seller),
-        })
-        continue
-      try:
-        shipments = _weekly_shipments_for_seller(seller)
+  if parallel and len(seller_list) > 1:
+    with ThreadPoolExecutor(max_workers=4) as pool:
+      futures = {
+        pool.submit(_build_admin_billing_seller_row, seller, is_ozon=is_ozon, marketplace=mp): seller
+        for seller in seller_list
+      }
+      for future in as_completed(futures):
+        row, shipments = future.result()
+        seller_rows.append(row)
         if shipments is not None:
           successful_payloads.append(shipments)
-        seller_rows.append({
-          "seller_id": seller.id,
-          "company_name": seller.company_name,
-          "weekly_shipments": shipments,
-          "error": None,
-          **_liter_billing_fields(seller),
-        })
-      except SellerAnalyticsError as exc:
-        seller_rows.append({
-          "seller_id": seller.id,
-          "company_name": seller.company_name,
-          "weekly_shipments": None,
-          "error": str(exc),
-          **_liter_billing_fields(seller),
-        })
-      continue
-
-    if not seller.wb_api_token_encrypted:
-      seller_rows.append({
-        "seller_id": seller.id,
-        "company_name": seller.company_name,
-        "weekly_shipments": None,
-        "error": "Токен WB не настроен",
-        **_liter_billing_fields(seller),
-      })
-      continue
-    try:
-      shipments = _weekly_shipments_for_seller(seller)
+    seller_rows.sort(key=lambda row: str(row.get("company_name") or ""))
+  else:
+    for seller in seller_list:
+      row, shipments = _build_admin_billing_seller_row(seller, is_ozon=is_ozon, marketplace=mp)
+      seller_rows.append(row)
       if shipments is not None:
         successful_payloads.append(shipments)
-      seller_rows.append({
-        "seller_id": seller.id,
-        "company_name": seller.company_name,
-        "weekly_shipments": shipments,
-        "error": None,
-        **_liter_billing_fields(seller),
-      })
-    except SellerAnalyticsError as exc:
-      seller_rows.append({
-        "seller_id": seller.id,
-        "company_name": seller.company_name,
-        "weekly_shipments": None,
-        "error": str(exc),
-        **_liter_billing_fields(seller),
-      })
 
   combined = merge_weekly_shipments_payloads(successful_payloads)
   storage_payloads = [

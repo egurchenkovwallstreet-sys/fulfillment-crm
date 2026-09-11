@@ -136,3 +136,35 @@ def accrue_daily_storage_charges():
   result = accrue_daily_storage_all_sellers()
   logger.info("Daily liter storage accrual: %s", result)
   return result
+
+
+@shared_task
+def refresh_admin_billing_cache(fulfillment_id: int | None, marketplace: str = "wb"):
+  """Пересчитать кеш статистики отгрузок для кабинета владельца."""
+  from apps.sellers.services.admin_billing_cache import rebuild_admin_billing_cache
+
+  result = rebuild_admin_billing_cache(
+    fulfillment_id=fulfillment_id,
+    marketplace=marketplace,
+  )
+  logger.info("Admin billing cache refresh: %s", result)
+  return result
+
+
+@shared_task
+def refresh_all_admin_billing_caches():
+  """Пересчитать кеш статистики для всех фулфилментов и маркетплейсов."""
+  from apps.accounts.models import Fulfillment
+  from apps.sellers.services.admin_billing_cache import rebuild_admin_billing_cache
+
+  results = []
+  for fulfillment in Fulfillment.objects.all().order_by("id"):
+    for marketplace in ("wb", "ozon"):
+      results.append(
+        rebuild_admin_billing_cache(
+          fulfillment_id=fulfillment.id,
+          marketplace=marketplace,
+        )
+      )
+  logger.info("Admin billing cache refresh all: %s jobs", len(results))
+  return {"jobs": len(results), "results": results}

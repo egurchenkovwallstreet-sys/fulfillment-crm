@@ -307,14 +307,50 @@ export type AdminBillingSellerRow = {
 }
 
 export type AdminBillingResponse = {
-  today: string
+  today?: string
   marketplace?: string
-  combined: SellerWeeklyShipments
+  combined?: SellerWeeklyShipments
   combined_storage?: SellerWeeklyShipments | null
-  sellers: AdminBillingSellerRow[]
+  sellers?: AdminBillingSellerRow[]
+  status?: 'pending'
+  detail?: string
+  cached_at?: string | null
+  refreshing?: boolean
 }
 
-export async function fetchAdminBilling(marketplace: 'wb' | 'ozon' = 'wb'): Promise<AdminBillingResponse> {
-  const query = marketplace === 'ozon' ? '?marketplace=ozon' : ''
-  return apiFetch<AdminBillingResponse>(`/api/sellers/admin/billing/${query}`)
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function fetchAdminBilling(
+  marketplace: 'wb' | 'ozon' = 'wb',
+  options?: { refresh?: boolean; poll?: boolean },
+): Promise<AdminBillingResponse> {
+  const params = new URLSearchParams()
+  if (marketplace === 'ozon') params.set('marketplace', 'ozon')
+  if (options?.refresh) params.set('refresh', '1')
+  const query = params.toString()
+  const path = `/api/sellers/admin/billing/${query ? `?${query}` : ''}`
+
+  if (!options?.poll) {
+    return apiFetch<AdminBillingResponse>(path)
+  }
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const pollParams = new URLSearchParams()
+    if (marketplace === 'ozon') pollParams.set('marketplace', 'ozon')
+    if (options?.refresh && attempt === 0) pollParams.set('refresh', '1')
+    const pollQuery = pollParams.toString()
+    const pollPath = `/api/sellers/admin/billing/${pollQuery ? `?${pollQuery}` : ''}`
+    const result = await apiFetch<AdminBillingResponse>(pollPath)
+    if (result.status !== 'pending' && result.combined) {
+      return result
+    }
+    if (attempt === 39) {
+      return result
+    }
+    await sleep(3000)
+  }
+
+  return { status: 'pending', detail: 'Статистика всё ещё загружается' }
 }

@@ -12,7 +12,6 @@ from apps.accounts.serializers import UserSerializer
 from apps.accounts.tenant import fulfillment_for_staff_user, get_seller_for_user, sellers_for_user
 from apps.sellers.models import Seller
 from apps.sellers.serializers import (
-  AdminBillingDashboardSerializer,
   SellerBarcodeAnalyticsSerializer,
   SellerBarcodeDetailSerializer,
   SellerCabinetSummarySerializer,
@@ -46,7 +45,11 @@ from apps.sellers.services.liter_billing import (
 )
 from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
-from apps.sellers.services.seller_billing_stats import load_admin_billing_dashboard
+from apps.sellers.services.admin_billing_cache import (
+  get_cached_admin_billing,
+  is_cache_stale,
+  queue_admin_billing_refresh,
+)
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.utils import seller_has_user_account, seller_username
 
@@ -313,11 +316,39 @@ class AdminBillingDashboardView(APIView):
   def get(self, request):
     try:
       marketplace = parse_marketplace(request)
-      payload = load_admin_billing_dashboard(
-        fulfillment=fulfillment_for_staff_user(request.user),
+      fulfillment = fulfillment_for_staff_user(request.user)
+      fulfillment_id = fulfillment.id if fulfillment else None
+      force_refresh = request.query_params.get("refresh") == "1"
+
+      data, meta = get_cached_admin_billing(
+        fulfillment_id=fulfillment_id,
         marketplace=marketplace,
       )
-      return Response(AdminBillingDashboardSerializer(payload).data)
+      stale = is_cache_stale(meta)
+      refreshing = False
+
+      if force_refresh or data is None or stale:
+        refreshing = queue_admin_billing_refresh(
+          fulfillment_id=fulfillment_id,
+          marketplace=marketplace,
+        )
+
+      if data is None:
+        return Response(
+          {
+            "status": "pending",
+            "detail": "Статистика загружается в фоне — повторите запрос через несколько секунд",
+            "refreshing": True,
+          },
+          status=status.HTTP_202_ACCEPTED,
+        )
+
+      response_payload = {
+        **data,
+        "cached_at": meta.get("cached_at") if meta else None,
+        "refreshing": refreshing or stale,
+      }
+      return Response(response_payload)
     except Exception as exc:
       logger.exception("admin billing dashboard failed")
       return Response(

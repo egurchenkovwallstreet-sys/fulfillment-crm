@@ -13,12 +13,24 @@ export function AdminBillingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [weekIndex, setWeekIndex] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { refresh?: boolean }) => {
     setLoading(true)
     setError('')
     try {
-      setData(await fetchAdminBilling(marketplace))
+      const result = await fetchAdminBilling(marketplace, {
+        refresh: options?.refresh,
+        poll: true,
+      })
+      if (result.status === 'pending' || !result.combined) {
+        setError(result.detail || 'Статистика загружается — попробуйте обновить через минуту')
+        setData(null)
+        setRefreshing(Boolean(result.refreshing))
+        return
+      }
+      setData(result)
+      setRefreshing(Boolean(result.refreshing))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
@@ -36,7 +48,7 @@ export function AdminBillingPage() {
 
   const sellerRows = useMemo(() => {
     if (!data) return []
-    return data.sellers
+    return data.sellers ?? []
       .map((row) => {
         const shipWeek = row.weekly_shipments?.weeks[weekIndex]
         const storageWeek = row.liter_storage_chart?.weeks[weekIndex]
@@ -98,15 +110,31 @@ export function AdminBillingPage() {
               Ozon
             </button>
           </div>
-          <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить данные отгрузок и суммы по тарифам.')}>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => void load({ refresh: true })}
+            disabled={loading}
+            {...uiHint('Запросить пересчёт статистики в фоне. Пока идёт расчёт, показываются последние сохранённые данные.')}
+          >
             {loading ? 'Обновление…' : 'Обновить'}
           </button>
         </div>
       </header>
 
       {error && <div className="dashboard-sync-msg dashboard-sync-msg--error">{error}</div>}
+      {refreshing && !error && (
+        <div className="dashboard-sync-msg">
+          Статистика пересчитывается в фоне
+          {data?.cached_at ? ` · последние данные от ${new Date(data.cached_at).toLocaleString('ru-RU')}` : ''}
+        </div>
+      )}
       {loading && !data && (
-        <p>{isOzon ? 'Загрузка…' : 'Загрузка… (запросы к WB могут занять 1–2 минуты)'}</p>
+        <p>
+          {isOzon
+            ? 'Загрузка… (данные считаются в фоне, это может занять до 2 минут)'
+            : 'Загрузка… (данные считаются в фоне, запросы к WB могут занять несколько минут)'}
+        </p>
       )}
 
       {data?.combined && (
