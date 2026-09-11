@@ -48,7 +48,7 @@ export function AdminBillingPage() {
 
   const sellerRows = useMemo(() => {
     if (!data) return []
-    return data.sellers ?? []
+    return (data.sellers ?? [])
       .map((row) => {
         const shipWeek = row.weekly_shipments?.weeks[weekIndex]
         const storageWeek = row.liter_storage_chart?.weeks[weekIndex]
