@@ -1,6 +1,8 @@
 """Тексты сводки по остаткам для UI."""
 from __future__ import annotations
 
+from apps.warehouse.services.stock_balance import RESERVED_ORDERS_LABEL
+
 
 def stock_balance_breakdown_message(
   *,
@@ -12,7 +14,7 @@ def stock_balance_breakdown_message(
   restock_required: bool = False,
   physical_quantity: int | None = None,
   intake_quantity: int | None = None,
-  reserved_label: str = "«Новые»",
+  reserved_label: str = RESERVED_ORDERS_LABEL,
 ) -> str:
   parts = [
     f"CRM: было {crm_quantity_before} → стало {crm_quantity_after} шт.",

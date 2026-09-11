@@ -41,6 +41,7 @@ from .services.inventory import (
   force_rewrite_inventory,
   perform_inventory,
 )
+from .services.stock_balance import RESERVED_ORDERS_LABEL
 from .services.stock_balance_messages import stock_balance_breakdown_message
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
@@ -422,6 +423,7 @@ class IntakeView(APIView):
         restock_required=result.restock_required,
         physical_quantity=result.physical_quantity,
         intake_quantity=result.intake_quantity if result.stock_mode == "intake" else None,
+        reserved_label=RESERVED_ORDERS_LABEL,
       )
 
     response_payload = {
@@ -519,6 +521,7 @@ def _intake_balance_response(result) -> dict:
     "wb_quantity_target": result.wb_quantity_target,
     "wb_quantity_actual": result.wb_quantity_actual,
     "reserved_new_orders": result.reserved_new_orders,
+    "reserved_label": RESERVED_ORDERS_LABEL,
     "intake_quantity": result.intake_quantity,
     "physical_quantity": result.physical_quantity,
     "warehouse_name": result.warehouse_name,
@@ -531,12 +534,13 @@ def _intake_balance_response(result) -> dict:
       restock_required=result.restock_required,
       physical_quantity=result.physical_quantity,
       intake_quantity=result.intake_quantity if result.stock_mode == "intake" else None,
+      reserved_label=RESERVED_ORDERS_LABEL,
     ),
   }
 
 
 def _inventory_response(result) -> dict:
-  reserved_label = "«Новые» + «На сборке»" if result.distribute else "«Новые»"
+  reserved_label = RESERVED_ORDERS_LABEL
   return {
     "success": True,
     "verified": result.verified,

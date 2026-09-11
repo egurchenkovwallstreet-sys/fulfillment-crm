@@ -365,7 +365,7 @@ export function InventoryPage() {
           <p>
             {isOzon
               ? 'Скан баркода → факт на полке в CRM.'
-              : 'Обычная: факт в CRM, в WB минус «Новые» по выбранным складам. С распределением: все рабочие склады, резерв «Новые»+«На сборке», свободное делится поровну.'}
+              : 'Факт в CRM; в WB — минус «Новые» и «На сборке». С распределением: все рабочие склады, свободное делится поровну.'}
           </p>
         </div>
         <Link to="/warehouse" className="btn btn--secondary inventory-btn" {...uiHint('Вернуться на главную страницу склада.')}>
@@ -595,7 +595,7 @@ export function InventoryPage() {
                 )}
 
                 <label className="inventory-field">
-                  Факт на полке{distributeMode ? ' (включая товар под «Новые» и «На сборке»)' : ' (включая товар под заказы «Новые»)'}
+                  Факт на полке (включая товар под «Новые» и «На сборке»)
                   <input
                     ref={quantityRef}
                     className="inventory-control inventory-control--quantity"

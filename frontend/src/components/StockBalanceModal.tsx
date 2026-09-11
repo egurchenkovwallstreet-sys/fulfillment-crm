@@ -71,7 +71,7 @@ export function StockBalanceModal({ data, loading = false, onConfirm }: StockBal
               <td>{data.crmQuantityBefore} → <strong>{data.crmQuantityAfter}</strong> шт.</td>
             </tr>
             <tr>
-              <th>{data.reservedLabel || '«Новые»'}</th>
+              <th>{data.reservedLabel || '«Новые» + «На сборке»'}</th>
               <td>{data.reservedNewOrders} шт.</td>
             </tr>
             <tr>

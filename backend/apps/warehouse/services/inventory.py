@@ -18,8 +18,8 @@ from apps.warehouse.services.product_catalog import (
   try_enrich_product_from_catalog,
 )
 from apps.warehouse.services.stock_balance import (
+  RESERVED_ORDERS_LABEL,
   compute_wb_amount_from_crm,
-  count_reserved_new_orders,
   count_reserved_open_orders,
 )
 from apps.warehouse.services.stock_balance_messages import stock_balance_breakdown_message
@@ -96,7 +96,7 @@ def _inventory_breakdown_message(
   wb_target_quantity: int,
   verified: bool,
   restock_required: bool = False,
-  reserved_label: str = "«Новые»",
+  reserved_label: str = RESERVED_ORDERS_LABEL,
 ) -> str:
   return stock_balance_breakdown_message(
     physical_quantity=physical_quantity,
@@ -249,12 +249,11 @@ def perform_inventory(
   if distribute and mp == OZON:
     raise IntakeError("Инвентаризация с распределением только для Wildberries")
 
+  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
   if distribute:
-    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
     warehouses = _working_warehouses(seller)
     warehouse_ids = [wh.id for wh in warehouses]
   else:
-    reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
     warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
 
   crm_quantity_after = physical_quantity
@@ -304,7 +303,7 @@ def perform_inventory(
     f"{wh.name or wh.wb_warehouse_id}"
     for wh in warehouses
   )
-  reserved_label = "«Новые» + «На сборке»" if distribute else "«Новые»"
+  reserved_label = RESERVED_ORDERS_LABEL
   if restock_required:
     reserve_note = f", {reserved_label} {reserved_new_orders} шт. — недостаток"
   elif reserved_new_orders:
@@ -425,12 +424,11 @@ def force_rewrite_inventory(
     raise IntakeError("Товар не найден — сначала выполните инвентаризацию")
 
   crm_quantity_before = product.quantity
+  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
   if distribute:
-    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
     warehouses = _working_warehouses(seller)
     warehouse_ids = [wh.id for wh in warehouses]
   else:
-    reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
     warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
   wb_target_quantity, restock_required = compute_wb_amount_from_crm(
     crm_quantity,

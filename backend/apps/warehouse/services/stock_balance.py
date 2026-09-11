@@ -1,7 +1,9 @@
-"""Единая логика CRM vs ЛК WB с учётом заказов «Новые»."""
+"""Единая логика CRM vs ЛК WB с учётом резерва под заказы."""
 from __future__ import annotations
 
 from apps.integrations.marketplace import OZON, WB, normalize_marketplace
+
+RESERVED_ORDERS_LABEL = "«Новые» + «На сборке»"
 from apps.orders.services.supply_flow import (
   count_new_orders_for_barcode,
   count_new_orders_for_barcode_on_warehouse,
@@ -40,7 +42,7 @@ def count_reserved_new_orders_on_warehouse(
 
 
 def compute_wb_amount_from_crm(crm_quantity: int, reserved_new: int) -> tuple[int, bool]:
-  """Возвращает (остаток для ЛК WB, нужна_догрузка)."""
+  """Возвращает (остаток для ЛК WB, нужна_догрузка). reserved_new — резерв «Новые» + «На сборке»."""
   crm_quantity = max(0, int(crm_quantity))
   reserved_new = max(0, int(reserved_new))
   if reserved_new > crm_quantity:

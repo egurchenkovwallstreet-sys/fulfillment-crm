@@ -17,7 +17,7 @@ from apps.warehouse.services.product_catalog import (
 )
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
-  count_reserved_new_orders,
+  count_reserved_open_orders,
 )
 from apps.warehouse.services.wb_stocks import (
   STOCK_MODE_INTAKE,
@@ -288,7 +288,7 @@ def perform_intake(
   )
 
   if stock_mode in (STOCK_MODE_INTAKE, STOCK_MODE_SET_ACTUAL) and mp != OZON and warehouse is not None:
-    reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
     try:
       wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (
         _write_wb_balance_for_intake(
@@ -403,7 +403,7 @@ def force_rewrite_intake(
   product.quantity = crm_quantity
   product.save(update_fields=["quantity", "updated_at"])
 
-  reserved_new_orders = count_reserved_new_orders(seller, barcode, marketplace=mp)
+  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
   wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (
     _write_wb_balance_for_intake(
       seller=seller,

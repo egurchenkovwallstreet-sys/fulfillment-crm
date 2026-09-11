@@ -180,6 +180,7 @@ export function IntakePage() {
       crmQuantityBefore: result.crm_quantity_before ?? 0,
       crmQuantityAfter: result.crm_quantity_after,
       reservedNewOrders: result.reserved_new_orders ?? 0,
+      reservedLabel: result.reserved_label ?? '«Новые» + «На сборке»',
       wbQuantityBefore: result.wb_quantity_before,
       wbQuantityTarget: result.wb_quantity_target ?? 0,
       wbQuantityActual: result.wb_quantity_actual,
@@ -578,7 +579,7 @@ export function IntakePage() {
                   checked={stockMode === 'intake'}
                   onChange={() => handleStockModeChange('intake')}
                 />
-                <strong>Приёмка</strong> — CRM: было + принято; ЛК WB: CRM − «Новые»
+                <strong>Приёмка</strong> — CRM: было + принято; ЛК WB: CRM − «Новые» − «На сборке»
               </label>
               <label>
                 <input
@@ -596,7 +597,7 @@ export function IntakePage() {
                   checked={stockMode === 'set_actual'}
                   onChange={() => handleStockModeChange('set_actual')}
                 />
-                <strong>Факт на полке</strong> — CRM = пересчёт; ЛК WB = CRM − «Новые»
+                <strong>Факт на полке</strong> — CRM = пересчёт; ЛК WB = CRM − «Новые» − «На сборке»
               </label>
             </fieldset>
             )}
@@ -838,7 +839,7 @@ export function IntakePage() {
             {lookup && isSetActualMode && (
               <div className="intake-info intake-info--new">
                 <p>
-                  CRM получит введённый факт на полке; в ЛК WB — этот факт минус заказы «Новые»
+                  CRM получит введённый факт на полке; в ЛК WB — этот факт минус «Новые» и «На сборке»
                   {lookup.product ? ` (сейчас в CRM: ${lookup.product.quantity} шт.)` : ''}.
                 </p>
               </div>

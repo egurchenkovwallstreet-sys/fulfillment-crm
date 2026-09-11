@@ -151,6 +151,7 @@ export type IntakeResponse = {
   wb_quantity_target?: number
   wb_quantity_actual?: number | null
   reserved_new_orders?: number
+  reserved_label?: string
   intake_quantity?: number
   physical_quantity?: number | null
   warehouse_name?: string
