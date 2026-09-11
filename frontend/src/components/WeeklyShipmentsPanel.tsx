@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { SellerWeeklyShipmentWeek, SellerWeeklyShipments } from '../api/sellerCabinet'
 import { uiHint, hintWrapProps } from '../utils/uiHint'
 
-function formatShortDate(iso: string): string {
+export function formatShortDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 

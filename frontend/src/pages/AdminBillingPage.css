@@ -58,3 +58,143 @@
   font-weight: 600;
   color: #1d4ed8;
 }
+
+.admin-billing-sellers__week {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.admin-billing-sellers__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.admin-billing-sellers__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.admin-billing-btn--compact {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.admin-billing-btn--active {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.admin-billing-expand {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.admin-billing-table__row--expanded td {
+  background: #f8fafc;
+}
+
+.admin-billing-table__detail-row td {
+  padding: 0;
+  background: #f8fafc;
+  border-top: 0;
+}
+
+.admin-billing-daily-wrap {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.admin-billing-daily__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: #334155;
+}
+
+.admin-billing-daily {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin-billing-daily th,
+.admin-billing-daily td {
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-billing-daily th {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.admin-billing-daily__row--today td {
+  background: #eff6ff;
+}
+
+.admin-billing-daily__row--total td {
+  font-weight: 600;
+  background: #f1f5f9;
+  border-bottom: 0;
+}
+
+.admin-billing-daily__empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.admin-billing-matrix-wrap {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.admin-billing-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.admin-billing-matrix th,
+.admin-billing-matrix td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.admin-billing-matrix th:first-child,
+.admin-billing-matrix td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.admin-billing-matrix__date {
+  display: block;
+  font-weight: 400;
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.admin-billing-matrix__sub {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.admin-billing-matrix__today {
+  background: #eff6ff;
+}
