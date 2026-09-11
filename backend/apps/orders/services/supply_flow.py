@@ -1842,14 +1842,10 @@ def count_orders_ready_for_assembly(seller: Seller) -> int:
 def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
   """Счётчики вкладок сборки FBS (без скрытых заказов)."""
   confirm_qs = picking_stage_orders_queryset(seller)
-  in_delivery = filter_orders_for_assembly(
-    Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
-    seller,
-  ).count()
   return {
     "new": new_stage_orders_queryset(seller).count(),
     "in_picking": confirm_qs.count(),
-    "in_delivery": in_delivery,
+    "in_delivery": count_delivery_stage_orders(seller),
   }
 
 
