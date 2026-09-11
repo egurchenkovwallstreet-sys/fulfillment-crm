@@ -76,6 +76,49 @@
   color: #64748b;
 }
 
+.cell-detail-facts__wb {
+  grid-column: 1 / -1;
+}
+
+.cell-wb-stocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cell-wb-stocks--compact {
+  gap: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.cell-wb-stocks li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cell-wb-stocks__name {
+  color: #334155;
+}
+
+.cell-wb-stocks__qty {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cell-wb-stocks--muted {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.cell-wb-stocks--error {
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
 .cell-detail-facts dd {
   margin: 0;
   font-size: 1rem;

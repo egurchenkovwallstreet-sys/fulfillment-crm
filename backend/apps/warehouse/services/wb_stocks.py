@@ -111,8 +111,86 @@ def push_wb_stock_absolute(
 
 def get_enabled_seller_warehouses(seller: Seller) -> list[SellerWarehouse]:
   return list(
-    SellerWarehouse.objects.filter(seller=seller).order_by("name", "id")
+    SellerWarehouse.objects.filter(seller=seller, is_enabled=True).order_by("name", "id")
   )
+
+
+def build_wb_stock_lines(
+  seller: Seller,
+  barcode: str,
+  *,
+  warehouses: list[SellerWarehouse] | None = None,
+) -> tuple[list[dict], str | None]:
+  """Остатки баркода на включённых FBS-складах WB (для экрана «Ячейки»)."""
+  barcode = barcode.strip()
+  if not barcode:
+    return [], None
+
+  wh_list = warehouses if warehouses is not None else get_enabled_seller_warehouses(seller)
+  if not wh_list:
+    return [], "Нет включённых FBS-складов WB"
+
+  try:
+    stock_map = fetch_wb_stocks_for_warehouses(seller, wh_list, [barcode])
+  except WBStockError as exc:
+    return [], str(exc)
+
+  by_wh = (stock_map.get(barcode) or {}).get("by_warehouse") or {}
+  lines = [
+    {
+      "warehouse_id": wh.id,
+      "warehouse_name": wh.name or f"Склад #{wh.wb_warehouse_id}",
+      "wb_warehouse_id": wh.wb_warehouse_id,
+      "quantity": int(by_wh.get(wh.id, 0)),
+    }
+    for wh in wh_list
+  ]
+  return lines, None
+
+
+def build_wb_stock_lines_batch(
+  seller: Seller,
+  barcodes: list[str],
+  *,
+  max_barcodes: int = 50,
+) -> tuple[dict[str, list[dict]], str | None]:
+  """Остатки нескольких баркодов — один проход по складам."""
+  normalized: list[str] = []
+  seen: set[str] = set()
+  for value in barcodes:
+    code = str(value or "").strip()
+    if not code or code in seen:
+      continue
+    seen.add(code)
+    normalized.append(code)
+    if len(normalized) >= max_barcodes:
+      break
+
+  if not normalized:
+    return {}, None
+
+  wh_list = get_enabled_seller_warehouses(seller)
+  if not wh_list:
+    return {code: [] for code in normalized}, "Нет включённых FBS-складов WB"
+
+  try:
+    stock_map = fetch_wb_stocks_for_warehouses(seller, wh_list, normalized)
+  except WBStockError as exc:
+    return {code: [] for code in normalized}, str(exc)
+
+  result: dict[str, list[dict]] = {}
+  for barcode in normalized:
+    by_wh = (stock_map.get(barcode) or {}).get("by_warehouse") or {}
+    result[barcode] = [
+      {
+        "warehouse_id": wh.id,
+        "warehouse_name": wh.name or f"Склад #{wh.wb_warehouse_id}",
+        "wb_warehouse_id": wh.wb_warehouse_id,
+        "quantity": int(by_wh.get(wh.id, 0)),
+      }
+      for wh in wh_list
+    ]
+  return result, None
 
 
 def _parse_stock_amount(item: dict) -> int:

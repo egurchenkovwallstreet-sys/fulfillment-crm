@@ -32,9 +32,26 @@ export type Product = {
   volume_liters?: string | null
 }
 
+export type WbWarehouseStockLine = {
+  warehouse_id: number
+  warehouse_name: string
+  wb_warehouse_id: number
+  quantity: number
+}
+
 export type CellDetail = {
   cell: Cell
   product: Product | null
+  wb_stocks?: WbWarehouseStockLine[]
+  wb_stocks_error?: string
+}
+
+export type ProductWbStocksResult = {
+  success: boolean
+  barcode?: string
+  wb_stocks?: WbWarehouseStockLine[]
+  wb_stocks_by_barcode: Record<string, WbWarehouseStockLine[]>
+  wb_stocks_error?: string
 }
 
 export type StockMode = 'intake' | 'sync_from_wb' | 'set_actual'
@@ -187,6 +204,20 @@ export function fetchCellDetail(sellerId: number, cellNumber: string) {
 
 export function fetchSellerProducts(sellerId: number) {
   return apiFetch<Product[]>(`/api/warehouse/sellers/${sellerId}/products/`)
+}
+
+export function fetchProductWbStocks(sellerId: number, barcodes: string[]) {
+  const unique = [...new Set(barcodes.map((code) => code.trim()).filter(Boolean))]
+  if (unique.length === 1) {
+    const params = new URLSearchParams({ barcode: unique[0] })
+    return apiFetch<ProductWbStocksResult>(
+      `/api/warehouse/sellers/${sellerId}/products/wb-stocks/?${params.toString()}`,
+    )
+  }
+  const params = new URLSearchParams({ barcodes: unique.join(',') })
+  return apiFetch<ProductWbStocksResult>(
+    `/api/warehouse/sellers/${sellerId}/products/wb-stocks/?${params.toString()}`,
+  )
 }
 
 export function refreshSellerProductsFromWb(sellerId: number) {

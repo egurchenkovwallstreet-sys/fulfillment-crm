@@ -20,6 +20,7 @@ from .views import (
   ProductMoveCellView,
   SellerListView,
   SellerProductsRefreshView,
+  SellerProductWbStocksView,
   SellerProductsView,
   StockFileApplyView,
   StockFilePreviewView,
@@ -69,6 +70,11 @@ from .views_wb_fact_intake import (
 urlpatterns = [
   path("sellers/", SellerListView.as_view(), name="warehouse_sellers"),
   path("sellers/<int:seller_id>/products/", SellerProductsView.as_view(), name="warehouse_seller_products"),
+  path(
+    "sellers/<int:seller_id>/products/wb-stocks/",
+    SellerProductWbStocksView.as_view(),
+    name="warehouse_seller_product_wb_stocks",
+  ),
   path(
     "sellers/<int:seller_id>/products/refresh-from-wb/",
     SellerProductsRefreshView.as_view(),

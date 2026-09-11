@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin, IsManager
 from apps.accounts.tenant import get_cell_for_user, get_product_for_user, get_seller_for_user, sellers_for_user, stock_operations_for_user
-from apps.integrations.marketplace import OZON, filter_sellers_qs, parse_marketplace
+from apps.integrations.marketplace import OZON, WB, filter_sellers_qs, parse_marketplace
 from apps.sellers.models import Seller
 
 from .models import Cell, Product, StockOperation
@@ -55,7 +55,13 @@ from .services.stock_transfer import (
   perform_stock_transfer,
   transfer_stocks_bulk,
 )
-from .services.wb_stocks import WBStockError, fetch_wb_stock_for_barcode, get_seller_warehouse
+from .services.wb_stocks import (
+  WBStockError,
+  build_wb_stock_lines,
+  build_wb_stock_lines_batch,
+  fetch_wb_stock_for_barcode,
+  get_seller_warehouse,
+)
 from .services.wb_sync_intake import (
   WbSyncIntakeError,
   apply_wb_sync_auto,
@@ -129,7 +135,55 @@ class CellDetailView(APIView):
       .select_related("cell", "seller")
       .first()
     )
-    return Response(CellDetailSerializer({"cell": cell, "product": product}).data)
+    payload = CellDetailSerializer({"cell": cell, "product": product}).data
+    if product and marketplace == WB:
+      wb_stocks, wb_stocks_error = build_wb_stock_lines(seller, product.barcode)
+      payload["wb_stocks"] = wb_stocks
+      if wb_stocks_error:
+        payload["wb_stocks_error"] = wb_stocks_error
+    return Response(payload)
+
+
+class SellerProductWbStocksView(APIView):
+  """Остатки баркода(ов) на включённых FBS-складах WB — экран «Ячейки»."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request, seller_id):
+    seller = _require_seller(request, seller_id)
+    marketplace = parse_marketplace(request)
+    if marketplace != WB:
+      return Response({"success": True, "wb_stocks_by_barcode": {}})
+
+    barcode = (request.query_params.get("barcode") or "").strip()
+    barcodes_raw = (request.query_params.get("barcodes") or "").strip()
+    if barcode:
+      lines, error = build_wb_stock_lines(seller, barcode)
+      payload = {
+        "success": True,
+        "barcode": barcode,
+        "wb_stocks": lines,
+        "wb_stocks_by_barcode": {barcode: lines},
+      }
+      if error:
+        payload["wb_stocks_error"] = error
+      return Response(payload)
+
+    barcodes = [
+      part.strip()
+      for part in barcodes_raw.replace(";", ",").split(",")
+      if part.strip()
+    ]
+    if not barcodes:
+      return Response(
+        {"detail": "Укажите barcode или barcodes"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    by_barcode, error = build_wb_stock_lines_batch(seller, barcodes)
+    payload = {"success": True, "wb_stocks_by_barcode": by_barcode}
+    if error:
+      payload["wb_stocks_error"] = error
+    return Response(payload)
 
 
 class CellDeleteView(APIView):

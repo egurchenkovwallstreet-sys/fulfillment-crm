@@ -4,6 +4,7 @@ import {
   fetchAllCells,
   fetchCellDetail,
   fetchProductCellLabel,
+  fetchProductWbStocks,
   fetchSellerProducts,
   fetchSellers,
   moveProductToCell,
@@ -13,11 +14,13 @@ import {
   type CellLabelData,
   type Product,
   type Seller,
+  type WbWarehouseStockLine,
 } from '../api/warehouse'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { useAuth } from '../context/AuthContext'
 import { useCrmNotice } from '../context/CrmNoticeContext'
+import { useMarketplace } from '../context/MarketplaceContext'
 import { printCellLabel } from '../utils/cellLabelPrint'
 import { hintWrapProps, uiHint } from '../utils/uiHint'
 import './CellInventoryPage.css'
@@ -28,8 +31,42 @@ type DeleteCellTarget = {
   product: Product | null
 }
 
+function WbStocksLines({
+  lines,
+  error,
+  loading = false,
+  compact = false,
+}: {
+  lines?: WbWarehouseStockLine[]
+  error?: string
+  loading?: boolean
+  compact?: boolean
+}) {
+  if (loading) {
+    return <span className="cell-wb-stocks cell-wb-stocks--muted">WB…</span>
+  }
+  if (error) {
+    return <span className="cell-wb-stocks cell-wb-stocks--error">{error}</span>
+  }
+  if (!lines || lines.length === 0) {
+    return <span className="cell-wb-stocks cell-wb-stocks--muted">WB: —</span>
+  }
+  return (
+    <ul className={`cell-wb-stocks${compact ? ' cell-wb-stocks--compact' : ''}`}>
+      {lines.map((line) => (
+        <li key={line.warehouse_id}>
+          <span className="cell-wb-stocks__name">{line.warehouse_name}</span>
+          <span className="cell-wb-stocks__qty">{line.quantity} шт.</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function CellInventoryPage() {
   const { isAdmin } = useAuth()
+  const { marketplace } = useMarketplace()
+  const isWb = marketplace === 'wb'
   const { showSuccess, showError } = useCrmNotice()
   const [sellers, setSellers] = useState<Seller[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
@@ -46,6 +83,11 @@ export function CellInventoryPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DeleteCellTarget | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [wbStocksByBarcode, setWbStocksByBarcode] = useState<
+    Record<string, WbWarehouseStockLine[]>
+  >({})
+  const [wbStocksLoading, setWbStocksLoading] = useState(false)
+  const [wbStocksError, setWbStocksError] = useState('')
 
   useEffect(() => {
     fetchSellers()
@@ -180,6 +222,43 @@ export function CellInventoryPage() {
     return products.filter((product) => product.barcode.includes(query))
   }, [products, barcodeQuery])
 
+  useEffect(() => {
+    if (!isWb || !sellerId || !barcodeQuery.trim() || filteredProducts.length === 0) {
+      setWbStocksByBarcode({})
+      setWbStocksError('')
+      setWbStocksLoading(false)
+      return
+    }
+
+    const barcodes = filteredProducts.map((product) => product.barcode)
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setWbStocksLoading(true)
+      setWbStocksError('')
+      fetchProductWbStocks(Number(sellerId), barcodes)
+        .then((result) => {
+          if (cancelled) return
+          setWbStocksByBarcode(result.wb_stocks_by_barcode || {})
+          setWbStocksError(result.wb_stocks_error || '')
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setWbStocksByBarcode({})
+          setWbStocksError(err instanceof Error ? err.message : 'Ошибка остатков WB')
+        })
+        .finally(() => {
+          if (!cancelled) setWbStocksLoading(false)
+        })
+    }, 350)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [isWb, sellerId, barcodeQuery, filteredProducts])
+
+  const showWbStocksInTable = isWb && barcodeQuery.trim().length > 0
+
   return (
     <>
       <header className="topbar">
@@ -301,9 +380,20 @@ export function CellInventoryPage() {
                   <dd>{cellDetail.product.name || '—'}</dd>
                 </div>
                 <div>
-                  <dt>Остаток</dt>
+                  <dt>Остаток CRM</dt>
                   <dd>{cellDetail.product.quantity} шт.</dd>
                 </div>
+                {isWb && (
+                  <div className="cell-detail-facts__wb">
+                    <dt>Остатки WB (FBS)</dt>
+                    <dd>
+                      <WbStocksLines
+                        lines={cellDetail.wb_stocks}
+                        error={cellDetail.wb_stocks_error}
+                      />
+                    </dd>
+                  </div>
+                )}
                 {cellDetail.product.wb_nm_id && (
                   <div>
                     <dt>nmID WB</dt>
@@ -351,7 +441,8 @@ export function CellInventoryPage() {
                 <th>Артикул</th>
                 <th>Размер</th>
                 <th>Название</th>
-                <th>Остаток</th>
+                <th>Остаток CRM</th>
+                {showWbStocksInTable && <th>Остатки WB</th>}
                 <th>Действия</th>
               </tr>
             </thead>
@@ -371,6 +462,16 @@ export function CellInventoryPage() {
                   </td>
                   <td>{product.name || '—'}</td>
                   <td>{product.quantity} шт.</td>
+                  {showWbStocksInTable && (
+                    <td>
+                      <WbStocksLines
+                        compact
+                        loading={wbStocksLoading}
+                        error={wbStocksError || undefined}
+                        lines={wbStocksByBarcode[product.barcode]}
+                      />
+                    </td>
+                  )}
                   <td className="cell-inventory-actions">
                     <button
                       type="button"
