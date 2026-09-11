@@ -271,6 +271,26 @@ export type SellerProductTariffItem = {
   price_group_id: number | null
   price_group_name: string
   effective_price: string | null
+  length_cm?: string | null
+  width_cm?: string | null
+  height_cm?: string | null
+  volume_liters?: string | null
+}
+
+export type SellerProductTariffsApplyPayload = {
+  updates?: { product_id: number; price: string }[]
+  dimension_updates?: {
+    product_id: number
+    length_cm: string
+    width_cm: string
+    height_cm: string
+  }[]
+  dimension_bulk?: {
+    product_ids: number[]
+    length_cm: string
+    width_cm: string
+    height_cm: string
+  }
 }
 
 export type SellerProductTariffsResponse = {
@@ -288,11 +308,11 @@ export async function fetchSellerProductTariffs(sellerId: number): Promise<Selle
 
 export async function applySellerProductTariffs(
   sellerId: number,
-  updates: { product_id: number; price: string }[],
-): Promise<SellerProductTariffsResponse & { result: { updated: number } }> {
+  payload: SellerProductTariffsApplyPayload,
+): Promise<SellerProductTariffsResponse & { result: Record<string, { updated: number }> }> {
   return apiFetch(`/api/warehouse/sellers/${sellerId}/product-tariffs/`, {
     method: 'POST',
-    body: JSON.stringify({ updates }),
+    body: JSON.stringify(payload),
   })
 }
 

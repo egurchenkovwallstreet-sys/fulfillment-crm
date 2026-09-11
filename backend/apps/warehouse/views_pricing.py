@@ -11,6 +11,7 @@ from apps.warehouse.models import PriceGroup
 from apps.warehouse.services.seller_pricing import (
   SellerPricingError,
   apply_seller_liter_tariff,
+  apply_seller_product_dimensions,
   apply_seller_product_tariffs,
   apply_seller_tariff,
   get_seller_pricing_summary,
@@ -124,6 +125,10 @@ class SellerProductTariffItemSerializer(serializers.Serializer):
   price_group_id = serializers.IntegerField(allow_null=True)
   price_group_name = serializers.CharField()
   effective_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+  length_cm = serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True)
+  width_cm = serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True)
+  height_cm = serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True)
+  volume_liters = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
 
 
 class SellerProductTariffUpdateSerializer(serializers.Serializer):
@@ -131,8 +136,32 @@ class SellerProductTariffUpdateSerializer(serializers.Serializer):
   price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"))
 
 
+class SellerProductDimensionUpdateSerializer(serializers.Serializer):
+  product_id = serializers.IntegerField()
+  length_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+  width_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+  height_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+
+
+class SellerProductDimensionBulkSerializer(serializers.Serializer):
+  product_ids = serializers.ListField(
+    child=serializers.IntegerField(min_value=1),
+    min_length=1,
+  )
+  length_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+  width_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+  height_cm = serializers.DecimalField(max_digits=8, decimal_places=1, min_value=Decimal("0.1"))
+
+
 class SellerProductTariffsApplySerializer(serializers.Serializer):
-  updates = SellerProductTariffUpdateSerializer(many=True, min_length=1)
+  updates = SellerProductTariffUpdateSerializer(many=True, required=False)
+  dimension_updates = SellerProductDimensionUpdateSerializer(many=True, required=False)
+  dimension_bulk = SellerProductDimensionBulkSerializer(required=False)
+
+  def validate(self, attrs):
+    if not attrs.get("updates") and not attrs.get("dimension_updates") and not attrs.get("dimension_bulk"):
+      raise serializers.ValidationError("Укажите updates, dimension_updates или dimension_bulk")
+    return attrs
 
 
 class SellerProductTariffsView(APIView):
@@ -157,12 +186,39 @@ class SellerProductTariffsView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
     serializer = SellerProductTariffsApplySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    updates = [
-      {"product_id": row["product_id"], "price": row["price"]}
-      for row in serializer.validated_data["updates"]
-    ]
+    data = serializer.validated_data
+    result: dict = {}
     try:
-      result = apply_seller_product_tariffs(seller, updates=updates)
+      if data.get("updates"):
+        price_updates = [
+          {"product_id": row["product_id"], "price": row["price"]}
+          for row in data["updates"]
+        ]
+        result["prices"] = apply_seller_product_tariffs(seller, updates=price_updates)
+      if data.get("dimension_updates") or data.get("dimension_bulk"):
+        dimension_updates = [
+          {
+            "product_id": row["product_id"],
+            "length_cm": row["length_cm"],
+            "width_cm": row["width_cm"],
+            "height_cm": row["height_cm"],
+          }
+          for row in (data.get("dimension_updates") or [])
+        ]
+        bulk = data.get("dimension_bulk")
+        bulk_payload = None
+        if bulk:
+          bulk_payload = {
+            "product_ids": bulk["product_ids"],
+            "length_cm": bulk["length_cm"],
+            "width_cm": bulk["width_cm"],
+            "height_cm": bulk["height_cm"],
+          }
+        result["dimensions"] = apply_seller_product_dimensions(
+          seller,
+          updates=dimension_updates or None,
+          bulk=bulk_payload,
+        )
     except SellerPricingError as exc:
       return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     items = list_seller_product_tariffs(seller)

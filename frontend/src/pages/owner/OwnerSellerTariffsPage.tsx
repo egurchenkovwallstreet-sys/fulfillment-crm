@@ -5,14 +5,26 @@ import {
   fetchSellersManage,
   type SellerManageItem,
   type SellerProductTariffItem,
+  type SellerProductTariffsApplyPayload,
 } from '../../api/sellerAdmin'
 import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
 import './OwnerSellerTariffsPage.css'
 
+type DimensionDraft = {
+  length: string
+  width: string
+  height: string
+}
+
 function formatPrice(value: string | null | undefined): string {
   if (!value) return '—'
   return `${Number(value).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽`
+}
+
+function formatDimension(value: string | null | undefined): string {
+  if (!value) return ''
+  return String(Number(value))
 }
 
 function priceDraft(item: SellerProductTariffItem): string {
@@ -25,6 +37,22 @@ function priceDraft(item: SellerProductTariffItem): string {
   return ''
 }
 
+function dimensionDraftFromItem(item: SellerProductTariffItem): DimensionDraft {
+  return {
+    length: formatDimension(item.length_cm),
+    width: formatDimension(item.width_cm),
+    height: formatDimension(item.height_cm),
+  }
+}
+
+function dimensionsMatch(item: SellerProductTariffItem, draft: DimensionDraft): boolean {
+  return (
+    formatDimension(item.length_cm) === draft.length.trim()
+    && formatDimension(item.width_cm) === draft.width.trim()
+    && formatDimension(item.height_cm) === draft.height.trim()
+  )
+}
+
 export function OwnerSellerTariffsPage() {
   const [sellers, setSellers] = useState<SellerManageItem[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
@@ -32,8 +60,12 @@ export function OwnerSellerTariffsPage() {
   const [pricingMode, setPricingMode] = useState<'per_unit' | 'per_liter'>('per_unit')
   const [companyName, setCompanyName] = useState('')
   const [drafts, setDrafts] = useState<Record<number, string>>({})
+  const [dimensionDrafts, setDimensionDrafts] = useState<Record<number, DimensionDraft>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPrice, setBulkPrice] = useState('')
+  const [bulkLength, setBulkLength] = useState('')
+  const [bulkWidth, setBulkWidth] = useState('')
+  const [bulkHeight, setBulkHeight] = useState('')
   const [loadingSellers, setLoadingSellers] = useState(true)
   const [loadingItems, setLoadingItems] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -62,34 +94,45 @@ export function OwnerSellerTariffsPage() {
     }
   }, [])
 
+  const applyItemsResponse = useCallback((data: Awaited<ReturnType<typeof fetchSellerProductTariffs>>) => {
+    setItems(data.items)
+    setPricingMode(data.pricing_mode)
+    setCompanyName(data.company_name)
+    const nextDrafts: Record<number, string> = {}
+    const nextDimensions: Record<number, DimensionDraft> = {}
+    for (const item of data.items) {
+      nextDrafts[item.id] = priceDraft(item)
+      nextDimensions[item.id] = dimensionDraftFromItem(item)
+    }
+    setDrafts(nextDrafts)
+    setDimensionDrafts(nextDimensions)
+    setSelected(new Set())
+    setBulkPrice('')
+    setBulkLength('')
+    setBulkWidth('')
+    setBulkHeight('')
+  }, [])
+
   const loadItems = useCallback(async (id: number) => {
     setLoadingItems(true)
     setError('')
     setMessage('')
     try {
       const data = await fetchSellerProductTariffs(id)
-      setItems(data.items)
-      setPricingMode(data.pricing_mode)
-      setCompanyName(data.company_name)
-      const nextDrafts: Record<number, string> = {}
-      for (const item of data.items) {
-        nextDrafts[item.id] = priceDraft(item)
-      }
-      setDrafts(nextDrafts)
-      setSelected(new Set())
-      setBulkPrice('')
+      applyItemsResponse(data)
     } catch (err) {
       setItems([])
       setError(err instanceof Error ? err.message : 'Не удалось загрузить товары')
     } finally {
       setLoadingItems(false)
     }
-  }, [])
+  }, [applyItemsResponse])
 
   useEffect(() => {
     if (!sellerId) {
       setItems([])
       setDrafts({})
+      setDimensionDrafts({})
       setSelected(new Set())
       return
     }
@@ -98,13 +141,20 @@ export function OwnerSellerTariffsPage() {
 
   const allSelected = items.length > 0 && selected.size === items.length
 
-  const dirtyIds = useMemo(() => {
+  const dirtyPriceIds = useMemo(() => {
     return items.filter((item) => {
       const draft = (drafts[item.id] ?? '').trim()
       const saved = item.individual_price ?? ''
       return draft !== String(saved)
     }).map((item) => item.id)
   }, [items, drafts])
+
+  const dirtyDimensionIds = useMemo(() => {
+    return items.filter((item) => {
+      const draft = dimensionDrafts[item.id] ?? dimensionDraftFromItem(item)
+      return !dimensionsMatch(item, draft)
+    }).map((item) => item.id)
+  }, [items, dimensionDrafts])
 
   function toggleAll(checked: boolean) {
     if (!checked) {
@@ -127,25 +177,27 @@ export function OwnerSellerTariffsPage() {
     setDrafts((prev) => ({ ...prev, [id]: value }))
   }
 
-  async function saveUpdates(updates: { product_id: number; price: string }[], successMsg: string) {
-    if (!sellerId || !updates.length) return
+  function setDimensionDraft(id: number, field: keyof DimensionDraft, value: string) {
+    setDimensionDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] ?? { length: '', width: '', height: '' }),
+        [field]: value,
+      },
+    }))
+  }
+
+  async function savePayload(payload: SellerProductTariffsApplyPayload, successMsg: string) {
+    if (!sellerId) return
     setSaving(true)
     setError('')
     setMessage('')
     try {
-      const result = await applySellerProductTariffs(sellerId, updates)
-      setItems(result.items)
-      setPricingMode(result.pricing_mode)
-      const nextDrafts: Record<number, string> = {}
-      for (const item of result.items) {
-        nextDrafts[item.id] = priceDraft(item)
-      }
-      setDrafts(nextDrafts)
-      setSelected(new Set())
-      setBulkPrice('')
+      const result = await applySellerProductTariffs(sellerId, payload)
+      applyItemsResponse(result)
       setMessage(successMsg)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сохранить тарифы')
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить')
     } finally {
       setSaving(false)
     }
@@ -160,7 +212,29 @@ export function OwnerSellerTariffsPage() {
     return normalized
   }
 
-  async function handleBulkApply() {
+  function parseDimension(value: string, label: string): string | null {
+    const normalized = value.replace(',', '.').trim()
+    if (!normalized || Number.isNaN(Number(normalized)) || Number(normalized) <= 0) {
+      setError(`Укажите корректный габарит: ${label}`)
+      return null
+    }
+    return normalized
+  }
+
+  function buildDimensionUpdate(productId: number, draft: DimensionDraft) {
+    const length = parseDimension(draft.length, 'длина')
+    const width = parseDimension(draft.width, 'ширина')
+    const height = parseDimension(draft.height, 'высота')
+    if (!length || !width || !height) return null
+    return {
+      product_id: productId,
+      length_cm: length,
+      width_cm: width,
+      height_cm: height,
+    }
+  }
+
+  async function handleBulkApplyPrice() {
     if (!selected.size) {
       setError('Отметьте товары галочками')
       return
@@ -168,36 +242,79 @@ export function OwnerSellerTariffsPage() {
     const price = parsePrice(bulkPrice, 'для выбранных')
     if (!price) return
     const updates = [...selected].map((product_id) => ({ product_id, price }))
-    await saveUpdates(updates, `Тариф ${formatPrice(price)} применён к ${updates.length} товарам`)
+    await savePayload({ updates }, `Тариф ${formatPrice(price)} применён к ${updates.length} товарам`)
   }
 
-  async function handleSaveRow(item: SellerProductTariffItem) {
+  async function handleBulkApplyDimensions() {
+    if (!selected.size) {
+      setError('Отметьте товары галочками')
+      return
+    }
+    const length = parseDimension(bulkLength, 'длина')
+    const width = parseDimension(bulkWidth, 'ширина')
+    const height = parseDimension(bulkHeight, 'высота')
+    if (!length || !width || !height) return
+    await savePayload(
+      {
+        dimension_bulk: {
+          product_ids: [...selected],
+          length_cm: length,
+          width_cm: width,
+          height_cm: height,
+        },
+      },
+      `Габариты ${length}×${width}×${height} см применены к ${selected.size} товарам`,
+    )
+  }
+
+  async function handleSaveRowPrice(item: SellerProductTariffItem) {
     const price = parsePrice(drafts[item.id] ?? '', item.barcode)
     if (!price) return
-    await saveUpdates([{ product_id: item.id, price }], `Тариф для ${item.barcode} сохранён`)
+    await savePayload({ updates: [{ product_id: item.id, price }] }, `Тариф для ${item.barcode} сохранён`)
   }
 
-  async function handleSaveDirty() {
-    const updates = dirtyIds
+  async function handleSaveRowDimensions(item: SellerProductTariffItem) {
+    const draft = dimensionDrafts[item.id] ?? dimensionDraftFromItem(item)
+    const update = buildDimensionUpdate(item.id, draft)
+    if (!update) return
+    await savePayload(
+      { dimension_updates: [update] },
+      `Габариты для ${item.barcode} сохранены`,
+    )
+  }
+
+  async function handleSaveDirtyPrices() {
+    const updates = dirtyPriceIds
       .map((id) => {
         const price = parsePrice(drafts[id] ?? '', `#${id}`)
         return price ? { product_id: id, price } : null
       })
       .filter(Boolean) as { product_id: number; price: string }[]
     if (!updates.length) {
-      setError('Нет изменений для сохранения')
+      setError('Нет изменений тарифов для сохранения')
       return
     }
-    await saveUpdates(updates, `Сохранено тарифов: ${updates.length}`)
+    await savePayload({ updates }, `Сохранено тарифов: ${updates.length}`)
+  }
+
+  async function handleSaveDirtyDimensions() {
+    const dimension_updates = dirtyDimensionIds
+      .map((id) => buildDimensionUpdate(id, dimensionDrafts[id] ?? dimensionDraftFromItem(items.find((item) => item.id === id)!)))
+      .filter(Boolean) as NonNullable<ReturnType<typeof buildDimensionUpdate>>[]
+    if (!dimension_updates.length) {
+      setError('Нет изменений габаритов для сохранения')
+      return
+    }
+    await savePayload({ dimension_updates }, `Сохранено габаритов: ${dimension_updates.length}`)
   }
 
   return (
     <>
       <header className="topbar">
         <div>
-          <h1>Тарифы по товарам</h1>
+          <h1>Тарифы и габариты</h1>
           <p>
-            Тариф отгрузки за единицу по каждому баркоду. Показаны только товары с ячейкой в CRM.
+            Тариф отгрузки и габариты для хранения (литры) по каждому баркоду. Можно задать одни габариты сразу нескольким товарам.
           </p>
         </div>
       </header>
@@ -235,45 +352,102 @@ export function OwnerSellerTariffsPage() {
         </div>
 
         {sellerId && (
-          <div className="owner-tariffs-bulk">
-            <label className="owner-tariffs-bulk__check">
+          <>
+            <div className="owner-tariffs-bulk">
+              <label className="owner-tariffs-bulk__check">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(event) => toggleAll(event.target.checked)}
+                  disabled={!items.length || saving}
+                />
+                <span>Выбрать все</span>
+              </label>
               <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={(event) => toggleAll(event.target.checked)}
-                disabled={!items.length || saving}
+                type="text"
+                inputMode="decimal"
+                className="owner-tariffs-bulk__price"
+                placeholder="Цена для выбранных, ₽"
+                value={bulkPrice}
+                onChange={(event) => setBulkPrice(event.target.value)}
+                disabled={saving}
               />
-              <span>Выбрать все</span>
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              className="owner-tariffs-bulk__price"
-              placeholder="Цена для выбранных, ₽"
-              value={bulkPrice}
-              onChange={(event) => setBulkPrice(event.target.value)}
-              disabled={saving}
-            />
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => void handleBulkApply()}
-              disabled={saving || selected.size === 0}
-              {...uiHint('Применить одну цену ко всем отмеченным товарам')}
-            >
-              {saving ? 'Сохранение…' : `Применить к выбранным (${selected.size})`}
-            </button>
-            {dirtyIds.length > 0 && (
               <button
                 type="button"
-                className="btn btn--primary"
-                onClick={() => void handleSaveDirty()}
-                disabled={saving}
+                className="btn btn--secondary"
+                onClick={() => void handleBulkApplyPrice()}
+                disabled={saving || selected.size === 0}
+                {...uiHint('Применить одну цену ко всем отмеченным товарам')}
               >
-                Сохранить изменения ({dirtyIds.length})
+                {saving ? 'Сохранение…' : `Тариф (${selected.size})`}
               </button>
-            )}
-          </div>
+              {dirtyPriceIds.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handleSaveDirtyPrices()}
+                  disabled={saving}
+                >
+                  Сохранить тарифы ({dirtyPriceIds.length})
+                </button>
+              )}
+            </div>
+
+            <div className="owner-tariffs-bulk owner-tariffs-bulk--dimensions">
+              <span className="owner-tariffs-bulk__label">Габариты для выбранных, см:</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="owner-tariffs-dim-input"
+                placeholder="Д"
+                value={bulkLength}
+                onChange={(event) => setBulkLength(event.target.value)}
+                disabled={saving}
+                aria-label="Длина"
+              />
+              <span className="owner-tariffs-dim-sep">×</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="owner-tariffs-dim-input"
+                placeholder="Ш"
+                value={bulkWidth}
+                onChange={(event) => setBulkWidth(event.target.value)}
+                disabled={saving}
+                aria-label="Ширина"
+              />
+              <span className="owner-tariffs-dim-sep">×</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="owner-tariffs-dim-input"
+                placeholder="В"
+                value={bulkHeight}
+                onChange={(event) => setBulkHeight(event.target.value)}
+                disabled={saving}
+                aria-label="Высота"
+              />
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void handleBulkApplyDimensions()}
+                disabled={saving || selected.size === 0}
+                {...uiHint('Применить одни габариты ко всем отмеченным баркодам — для начисления хранения')}
+              >
+                {saving ? 'Сохранение…' : `Габариты (${selected.size})`}
+              </button>
+              {dirtyDimensionIds.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handleSaveDirtyDimensions()}
+                  disabled={saving}
+                >
+                  Сохранить габариты ({dirtyDimensionIds.length})
+                </button>
+              )}
+            </div>
+          </>
         )}
 
         {!sellerId && !loadingSellers && (
@@ -296,17 +470,27 @@ export function OwnerSellerTariffsPage() {
                   <th>Баркод</th>
                   <th>Товар</th>
                   <th>Размер</th>
-                  <th>Группа</th>
-                  <th>Текущий тариф</th>
-                  <th>Новая цена, ₽</th>
+                  <th>Д, см</th>
+                  <th>Ш, см</th>
+                  <th>В, см</th>
+                  <th>Литры</th>
+                  <th>Тариф</th>
+                  <th>Цена, ₽</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => {
-                  const isDirty = dirtyIds.includes(item.id)
+                  const isPriceDirty = dirtyPriceIds.includes(item.id)
+                  const isDimensionDirty = dirtyDimensionIds.includes(item.id)
+                  const dim = dimensionDrafts[item.id] ?? dimensionDraftFromItem(item)
                   return (
-                    <tr key={item.id} className={isDirty ? 'owner-tariffs-table__row--dirty' : undefined}>
+                    <tr
+                      key={item.id}
+                      className={
+                        isPriceDirty || isDimensionDirty ? 'owner-tariffs-table__row--dirty' : undefined
+                      }
+                    >
                       <td>
                         <input
                           type="checkbox"
@@ -325,7 +509,39 @@ export function OwnerSellerTariffsPage() {
                         ) : null}
                       </td>
                       <td>{item.tech_size || '—'}</td>
-                      <td>{item.price_group_name || '—'}</td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="owner-tariffs-dim-input"
+                          value={dim.length}
+                          onChange={(event) => setDimensionDraft(item.id, 'length', event.target.value)}
+                          disabled={saving}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="owner-tariffs-dim-input"
+                          value={dim.width}
+                          onChange={(event) => setDimensionDraft(item.id, 'width', event.target.value)}
+                          disabled={saving}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="owner-tariffs-dim-input"
+                          value={dim.height}
+                          onChange={(event) => setDimensionDraft(item.id, 'height', event.target.value)}
+                          disabled={saving}
+                        />
+                      </td>
+                      <td className="owner-tariffs-volume">
+                        {item.volume_liters ? `${item.volume_liters} л` : '—'}
+                      </td>
                       <td>{formatPrice(item.effective_price)}</td>
                       <td>
                         <input
@@ -337,21 +553,29 @@ export function OwnerSellerTariffsPage() {
                           onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                               event.preventDefault()
-                              void handleSaveRow(item)
+                              void handleSaveRowPrice(item)
                             }
                           }}
                           disabled={saving}
                           placeholder="0"
                         />
                       </td>
-                      <td>
+                      <td className="owner-tariffs-actions">
                         <button
                           type="button"
                           className="btn btn--small btn--ghost"
-                          onClick={() => void handleSaveRow(item)}
-                          disabled={saving || !isDirty}
+                          onClick={() => void handleSaveRowDimensions(item)}
+                          disabled={saving || !isDimensionDirty}
                         >
-                          Сохранить
+                          Габ.
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--small btn--ghost"
+                          onClick={() => void handleSaveRowPrice(item)}
+                          disabled={saving || !isPriceDirty}
+                        >
+                          ₽
                         </button>
                       </td>
                     </tr>

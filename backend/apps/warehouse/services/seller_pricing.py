@@ -7,6 +7,7 @@ from django.db import transaction
 
 from apps.sellers.models import Seller
 from apps.warehouse.models import PriceGroup, Product
+from apps.warehouse.services.liter_pricing import apply_product_dimensions
 
 
 class SellerPricingError(Exception):
@@ -192,6 +193,10 @@ def list_seller_product_tariffs(seller: Seller) -> list[dict]:
       "price_group_id": group.id if group else None,
       "price_group_name": group.name if group else "",
       "effective_price": product.processing_price,
+      "length_cm": product.length_cm,
+      "width_cm": product.width_cm,
+      "height_cm": product.height_cm,
+      "volume_liters": product.volume_liters,
     })
   return payload
 
@@ -230,5 +235,72 @@ def apply_seller_product_tariffs(
     product.individual_price = price
     product.save(update_fields=["individual_price", "updated_at"])
     updated += 1
+
+  return {"updated": updated}
+
+
+def _seller_products_by_ids(seller: Seller, product_ids: list[int]) -> dict[int, Product]:
+  products = {
+    product.id: product
+    for product in Product.objects.filter(
+      seller=seller,
+      pk__in=product_ids,
+      cell__isnull=False,
+    ).select_for_update()
+  }
+  if len(products) != len(set(product_ids)):
+    raise SellerPricingError("Часть товаров не найдена или без ячейки в CRM")
+  return products
+
+
+def _validate_dimensions(length_cm: Decimal, width_cm: Decimal, height_cm: Decimal) -> None:
+  if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
+    raise SellerPricingError("Габариты должны быть больше 0")
+
+
+@transaction.atomic
+def apply_seller_product_dimensions(
+  seller: Seller,
+  *,
+  updates: list[dict] | None = None,
+  bulk: dict | None = None,
+) -> dict:
+  """Задать габариты (Д×Ш×В) для начисления хранения по литрам."""
+  updates = updates or []
+  if not updates and not bulk:
+    raise SellerPricingError("Нет товаров для обновления габаритов")
+
+  updated = 0
+  if bulk:
+    product_ids = bulk["product_ids"]
+    length_cm = bulk["length_cm"]
+    width_cm = bulk["width_cm"]
+    height_cm = bulk["height_cm"]
+    _validate_dimensions(length_cm, width_cm, height_cm)
+    products = _seller_products_by_ids(seller, product_ids)
+    for product_id in product_ids:
+      apply_product_dimensions(
+        products[product_id],
+        length_cm=length_cm,
+        width_cm=width_cm,
+        height_cm=height_cm,
+      )
+      updated += 1
+
+  if updates:
+    product_ids = [item["product_id"] for item in updates]
+    products = _seller_products_by_ids(seller, product_ids)
+    for item in updates:
+      length_cm = item["length_cm"]
+      width_cm = item["width_cm"]
+      height_cm = item["height_cm"]
+      _validate_dimensions(length_cm, width_cm, height_cm)
+      apply_product_dimensions(
+        products[item["product_id"]],
+        length_cm=length_cm,
+        width_cm=width_cm,
+        height_cm=height_cm,
+      )
+      updated += 1
 
   return {"updated": updated}

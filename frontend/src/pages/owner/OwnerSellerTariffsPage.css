@@ -106,3 +106,35 @@
 .owner-tariffs-row-price {
   width: 100px;
 }
+
+.owner-tariffs-bulk--dimensions {
+  border-bottom: 0;
+}
+
+.owner-tariffs-bulk__label {
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.owner-tariffs-dim-input {
+  width: 64px;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.owner-tariffs-dim-sep {
+  color: #94a3b8;
+  user-select: none;
+}
+
+.owner-tariffs-volume {
+  white-space: nowrap;
+  color: #4338ca;
+  font-weight: 500;
+}
+
+.owner-tariffs-actions {
+  display: flex;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
