@@ -103,6 +103,12 @@ class Product(models.Model):
     db_index=True,
   )
   quantity = models.PositiveIntegerField("Остаток", default=0)
+  positive_stock_since = models.DateField(
+    "Остаток > 0 с даты",
+    null=True,
+    blank=True,
+    help_text="Первый день текущего непрерывного периода с положительным остатком",
+  )
   length_cm = models.DecimalField("Длина, см", max_digits=8, decimal_places=2, null=True, blank=True)
   width_cm = models.DecimalField("Ширина, см", max_digits=8, decimal_places=2, null=True, blank=True)
   height_cm = models.DecimalField("Высота, см", max_digits=8, decimal_places=2, null=True, blank=True)
@@ -136,6 +142,29 @@ class Product(models.Model):
     if self.price_group:
       return self.price_group.processing_price
     return None
+
+
+class ProductDailyQuantity(models.Model):
+  """Снимок CRM-остатка на конец календарного дня (Europe/Moscow)."""
+
+  product = models.ForeignKey(
+    Product,
+    on_delete=models.CASCADE,
+    related_name="daily_quantities",
+  )
+  date = models.DateField("Дата")
+  quantity = models.PositiveIntegerField("Остаток CRM", default=0)
+
+  class Meta:
+    verbose_name = "Остаток товара по дням"
+    verbose_name_plural = "Остатки товаров по дням"
+    unique_together = [("product", "date")]
+    indexes = [
+      models.Index(fields=["product", "date"]),
+    ]
+
+  def __str__(self):
+    return f"{self.product.barcode} @ {self.date}: {self.quantity}"
 
 
 class ProductWarehouseStock(models.Model):

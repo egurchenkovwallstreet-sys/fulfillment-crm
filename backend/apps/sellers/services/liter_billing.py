@@ -13,12 +13,17 @@ from apps.integrations.marketplace import OZON, WB, normalize_marketplace
 from apps.orders.models import Order, OzonPosting
 from apps.sellers.models import DailyStorageCharge, Seller, ShipmentLiterCharge
 from apps.sellers.services.calendar_periods import calendar_week_bounds_offset, iter_week_days, today_local
-from apps.warehouse.models import Product
+from apps.warehouse.models import Product, ProductDailyQuantity
 from apps.warehouse.services.liter_pricing import (
   daily_storage_cost,
   product_volume_liters,
   seller_uses_liter_pricing,
   shipment_liter_cost,
+)
+from apps.warehouse.services.storage_stock_tracking import (
+  first_positive_quantity_date,
+  iter_positive_quantity_days,
+  record_product_daily_quantity,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,36 +95,109 @@ def record_shipment_liter_charge_for_ozon_posting(posting: OzonPosting, *, selle
   )
 
 
+def _upsert_daily_storage_charge(
+  *,
+  seller: Seller,
+  product: Product,
+  charge_date,
+  quantity: int,
+  volume,
+) -> bool:
+  amount = daily_storage_cost(quantity, volume, seller=seller, charge_date=charge_date)
+  _, was_created = DailyStorageCharge.objects.update_or_create(
+    seller=seller,
+    product=product,
+    charge_date=charge_date,
+    defaults={
+      "quantity": quantity,
+      "volume_liters": volume,
+      "amount": amount,
+    },
+  )
+  return was_created
+
+
+def sync_storage_charges_for_product(
+  product: Product,
+  *,
+  seller: Seller | None = None,
+  from_date=None,
+  to_date=None,
+  force_recalc: bool = False,
+) -> int:
+  """Начислить хранение за все дни с положительным CRM-остатком."""
+  seller = seller or product.seller
+  volume = product_volume_liters(product)
+  if volume <= ZERO:
+    return 0
+
+  to_date = to_date or today_local()
+  if from_date is None:
+    from_date = first_positive_quantity_date(product)
+  if from_date is None or from_date > to_date:
+    return 0
+
+  existing_dates: set = set()
+  if not force_recalc:
+    existing_dates = set(
+      DailyStorageCharge.objects.filter(
+        seller=seller,
+        product=product,
+        charge_date__gte=from_date,
+        charge_date__lte=to_date,
+      ).values_list("charge_date", flat=True)
+    )
+
+  positive_days = iter_positive_quantity_days(product, from_date, to_date)
+  positive_dates = {charge_date for charge_date, _ in positive_days}
+
+  touched = 0
+  for charge_date, quantity in positive_days:
+    if not force_recalc and charge_date in existing_dates:
+      continue
+    _upsert_daily_storage_charge(
+      seller=seller,
+      product=product,
+      charge_date=charge_date,
+      quantity=quantity,
+      volume=volume,
+    )
+    touched += 1
+
+  deleted, _ = DailyStorageCharge.objects.filter(
+    seller=seller,
+    product=product,
+    charge_date__gte=from_date,
+    charge_date__lte=to_date,
+  ).exclude(charge_date__in=positive_dates).delete()
+  return touched + deleted
+
+
 @transaction.atomic
 def accrue_daily_storage_for_seller(seller: Seller, charge_date=None) -> int:
   if charge_date is None:
     charge_date = today_local()
 
-  created = 0
-  products = Product.objects.filter(seller=seller, quantity__gt=0)
-  for product in products:
-    volume = product_volume_liters(product)
-    if volume <= ZERO:
-      continue
-    amount = daily_storage_cost(
-      product.quantity,
-      volume,
+  touched = 0
+  product_ids = set(
+    Product.objects.filter(seller=seller, quantity__gt=0).values_list("id", flat=True)
+  )
+  product_ids.update(
+    ProductDailyQuantity.objects.filter(
+      product__seller=seller,
+      quantity__gt=0,
+      date__lte=charge_date,
+    ).values_list("product_id", flat=True)
+  )
+
+  for product in Product.objects.filter(seller=seller, id__in=product_ids):
+    record_product_daily_quantity(product, on_date=charge_date)
+    touched += sync_storage_charges_for_product(
+      product,
       seller=seller,
-      charge_date=charge_date,
+      to_date=charge_date,
     )
-    _, was_created = DailyStorageCharge.objects.update_or_create(
-      seller=seller,
-      product=product,
-      charge_date=charge_date,
-      defaults={
-        "quantity": product.quantity,
-        "volume_liters": volume,
-        "amount": amount,
-      },
-    )
-    if was_created:
-      created += 1
-  return created
+  return touched
 
 
 def accrue_daily_storage_all_sellers() -> dict:

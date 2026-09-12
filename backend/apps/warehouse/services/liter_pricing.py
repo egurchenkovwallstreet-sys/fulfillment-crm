@@ -113,6 +113,10 @@ def apply_product_dimensions(
     update_fields.append("volume_liters")
   if update_fields:
     product.save(update_fields=[*update_fields, "updated_at"])
+  if volume > ZERO:
+    from apps.sellers.services.liter_billing import sync_storage_charges_for_product
+
+    sync_storage_charges_for_product(product, force_recalc=True)
   return volume
 
 
