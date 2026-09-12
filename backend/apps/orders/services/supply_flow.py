@@ -208,7 +208,7 @@ def fetch_seller_shipping_points(
 
 
 SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
-SHIPPING_POINTS_CACHE_VERSION = "v7"
+SHIPPING_POINTS_CACHE_VERSION = "v8"
 
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
   "Липкинское",
@@ -336,6 +336,23 @@ MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
   "Peresvet",
   "Iksha",
   "Elektroizolyator",
+  "Лыткарино",
+  "Дzerzhinsky",
+  "Сходня",
+  "г.о. Мытищи",
+  "г.о. Пушкино",
+  "г.о. Люберцы",
+  "г.о. Балашиха",
+  "г.о. Химки",
+  "г.о. Домодедово",
+  "г.о. Подольск",
+  "г.о. Королёv",
+  "г.о. Одинцovo",
+  "г.о. Кrasnogorsk",
+  "г.о. Видное",
+  "г.о. Рamenskoe",
+  "г.о. Жуковский",
+  "г.о. Щёлковo",
 )
 
 
@@ -478,20 +495,23 @@ def _veshki_env_fallback_point() -> dict | None:
 
 
 def _resolve_veshki_shipping_point(client, cargo_type: int) -> dict | None:
+  pool: list[dict] = []
   cargo_types = list(PINNED_SHIPPING_CARGO_TYPES)
   if cargo_type not in cargo_types:
     cargo_types.append(cargo_type)
   for fetch_city in VESHKI_SEARCH_CITIES:
     for fetch_cargo in cargo_types:
       try:
-        batch = client.fetch_shipping_points(fetch_city, fetch_cargo)
+        pool.extend(client.fetch_shipping_points(fetch_city, fetch_cargo))
       except WBApiError:
         continue
-      for point in batch:
-        if not isinstance(point, dict) or point.get("id") is None:
-          continue
-        if _matches_veshki_lipkinskoe(point):
-          return _normalize_pinned_point(point)
+  best = _pick_best_matching_point(
+    pool,
+    _matches_veshki_lipkinskoe,
+    scorer=_veshki_lipkinskoe_score,
+  )
+  if best:
+    return _normalize_pinned_point(best)
   return _veshki_env_fallback_point()
 
 
@@ -646,15 +666,54 @@ def _is_visible_sc_point(point: dict) -> bool:
   return _is_sc_office_type(point)
 
 
-def _matches_veshki_lipkinskoe(point: dict) -> bool:
+def _veshki_lipkinskoe_score(point: dict) -> int:
+  """Чем выше — тем ближе к СЦ Вёшки (Липкинское ш., 2-й км)."""
   haystack = _point_haystack(point)
+  score = 0
   if "липкин" in haystack:
-    return True
-  if "2" in haystack and "км" in haystack and ("липкин" in haystack or "веш" in haystack):
-    return True
-  if "веш" in haystack and ("москва" in haystack or "мытищ" in haystack or "москов" in haystack):
-    return True
-  return "вешки" in haystack or "veshki" in haystack
+    score += 100
+  if "2" in haystack and "км" in haystack:
+    score += 50
+  if "вешки" in haystack or "вёшки" in haystack:
+    score += 25
+  if "москва (веш" in haystack or "москва (вёш" in haystack:
+    score += 40
+  if "мытищ" in haystack:
+    score += 10
+  return score
+
+
+def _matches_veshki_lipkinskoe(point: dict) -> bool:
+  """Только СЦ/склад Вёшки на Липкинском — не любая точка с «веш» в названии."""
+  haystack = _point_haystack(point)
+  if "липкин" not in haystack:
+    return False
+  return (
+    "веш" in haystack
+    or "2" in haystack and "км" in haystack
+    or "вешки" in haystack
+    or "вёшки" in haystack
+  )
+
+
+def _pick_best_matching_point(
+  points: list[dict],
+  matcher,
+  *,
+  scorer=None,
+) -> dict | None:
+  best: dict | None = None
+  best_score = -1
+  for point in points:
+    if not isinstance(point, dict) or point.get("id") is None:
+      continue
+    if not matcher(point):
+      continue
+    score = scorer(point) if scorer else 0
+    if score > best_score:
+      best_score = score
+      best = point
+  return best
 
 
 def _matches_pushkino_sc(point: dict) -> bool:
@@ -772,27 +831,38 @@ def _merge_pinned_shipping_points(
     for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
       if key in found_keys:
         continue
-      for point in pool:
-        if not isinstance(point, dict) or point.get("id") is None:
-          continue
-        if not matcher(point):
-          continue
-        point_id = int(point["id"])
-        if point_id in known_ids:
-          found_keys.add(key)
-          break
-        merged.append(_normalize_pinned_point(point))
-        known_ids.add(point_id)
+      scorer = _veshki_lipkinskoe_score if key == "veshki_lipkinskoe" else None
+      point = _pick_best_matching_point(pool, matcher, scorer=scorer)
+      if not point:
+        continue
+      point_id = int(point["id"])
+      if point_id in known_ids:
         found_keys.add(key)
-        break
+        continue
+      merged.append(_normalize_pinned_point(point))
+      known_ids.add(point_id)
+      found_keys.add(key)
 
-  if not any(_matches_veshki_lipkinskoe(point) for point in merged if isinstance(point, dict)):
-    veshki = _resolve_veshki_shipping_point(client, cargo_type)
-    if veshki:
-      point_id = int(veshki["id"])
-      if point_id not in known_ids:
-        merged.insert(0, veshki)
-        known_ids.add(point_id)
+  veshki = _resolve_veshki_shipping_point(client, cargo_type)
+  if veshki:
+    veshki_id = int(veshki["id"])
+    merged = [
+      point
+      for point in merged
+      if not (
+        isinstance(point, dict)
+        and _matches_veshki_lipkinskoe(point)
+        and int(point.get("id") or 0) != veshki_id
+      )
+    ]
+    known_ids = {
+      int(point["id"])
+      for point in merged
+      if isinstance(point, dict) and point.get("id") is not None
+    }
+    merged = [point for point in merged if not (isinstance(point, dict) and int(point.get("id") or 0) == veshki_id)]
+    merged.insert(0, veshki)
+    known_ids.add(veshki_id)
 
   if not any(_matches_vnukovo_sc(point) for point in merged if isinstance(point, dict)):
     vnukovo = _resolve_vnukovo_shipping_point(client, cargo_type)

@@ -28,7 +28,7 @@ type Props = {
   loading?: boolean
 }
 
-const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v4-${sellerId}`
+const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v5-${sellerId}`
 
 const DEFAULT_PREFS: DeliveryDestinationPrefs = {
   city: 'Москва и Московская область',
@@ -81,7 +81,18 @@ function formatShippingDate(offset: DeliveryDateOffset): string {
 
 function formatPointLabel(point: ShippingPoint): string {
   const city = point.city ? `${point.city}, ` : ''
-  return `${city}${point.name} — ${point.address}`
+  return `#${point.id} · ${city}${point.name} — ${point.address}`
+}
+
+function isVeshkiLipkinskoe(point: ShippingPoint): boolean {
+  const haystack = normalizeSearch(`${point.city} ${point.name} ${point.address}`)
+  if (!haystack.includes('липкин')) return false
+  return (
+    haystack.includes('веш') ||
+    (haystack.includes('2') && haystack.includes('км')) ||
+    haystack.includes('вешки') ||
+    haystack.includes('вёшки')
+  )
 }
 
 function pickPointId(
@@ -89,16 +100,16 @@ function pickPointId(
   preferredId: number | null | undefined,
 ): number | '' {
   if (points.length === 0) return ''
+  const veshki = points.find(isVeshkiLipkinskoe)
   if (
     preferredId != null &&
     points.some((point) => point.id === preferredId)
   ) {
-    return preferredId
+    const preferred = points.find((point) => point.id === preferredId)
+    if (preferred && (!veshki || !isVeshkiLipkinskoe(preferred) || preferred.id === veshki.id)) {
+      return preferredId
+    }
   }
-  const veshki = points.find((point) => {
-    const haystack = `${point.city} ${point.name} ${point.address}`.toLowerCase()
-    return haystack.includes('липкин') || haystack.includes('веш')
-  })
   if (veshki) return veshki.id
   return points[0].id
 }

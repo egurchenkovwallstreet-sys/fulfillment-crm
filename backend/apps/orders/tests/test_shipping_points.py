@@ -6,16 +6,34 @@ from apps.orders.services.supply_flow import (
   _is_ppt_shipment_point,
   _matches_vnukovo_sc,
   _matches_veshki_lipkinskoe,
+  _pick_best_matching_point,
   _point_supports_any_cargo,
   _split_shipping_points,
   _union_shipping_point,
+  _veshki_lipkinskoe_score,
 )
 
 
 class ShippingPointMatchersTests(SimpleTestCase):
-  def test_veshki_matcher(self):
-    point = {"name": "Москва (Вёшки)", "address": "Липкинское ш.", "city": "Мытищи"}
+  def test_veshki_matcher_requires_lipkinskoe(self):
+    point = {"name": "Москва (Вёшки)", "address": "Липкинское ш., 2-й км", "city": "Мытищи"}
     self.assertTrue(_matches_veshki_lipkinskoe(point))
+
+  def test_loose_vesh_name_without_lipkinskoe_rejected(self):
+    point = {"name": "СЦ Москва Запад", "address": "Москва, Вешковский пер.", "city": "Москва"}
+    self.assertFalse(_matches_veshki_lipkinskoe(point))
+
+  def test_pick_best_veshki_point(self):
+    points = [
+      {"id": 1, "name": "СЦ Коледино", "address": "Софьино", "city": "Московская область"},
+      {"id": 2, "name": "Москва (Вёшки)", "address": "Липкинское ш., 2-й км", "city": "Мытищи"},
+    ]
+    best = _pick_best_matching_point(
+      points,
+      _matches_veshki_lipkinskoe,
+      scorer=_veshki_lipkinskoe_score,
+    )
+    self.assertEqual(best["id"], 2)
 
   def test_vnukovo_matcher(self):
     point = {"name": "СЦ Внуково", "address": "Москва", "city": "Москва"}
