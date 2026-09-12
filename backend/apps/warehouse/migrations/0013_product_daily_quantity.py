@@ -1,14 +1,6 @@
 from django.db import migrations, models
 
 
-def rebuild_daily_quantities(apps, schema_editor):
-  Product = apps.get_model("warehouse", "Product")
-  from apps.warehouse.services.storage_stock_tracking import rebuild_product_daily_quantities
-
-  for product in Product.objects.all().iterator():
-    rebuild_product_daily_quantities(product)
-
-
 class Migration(migrations.Migration):
 
   dependencies = [
@@ -48,5 +40,4 @@ class Migration(migrations.Migration):
         "unique_together": {("product", "date")},
       },
     ),
-    migrations.RunPython(rebuild_daily_quantities, migrations.RunPython.noop),
   ]
