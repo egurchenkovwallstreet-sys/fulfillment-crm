@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
       options={
         "verbose_name": "Остаток товара по дням",
         "verbose_name_plural": "Остатки товаров по дням",
-        "indexes": [models.Index(fields=["product", "date"])],
+        "indexes": [models.Index(fields=["product", "date"], name="warehouse_p_product_dq_idx")],
         "unique_together": {("product", "date")},
       },
     ),

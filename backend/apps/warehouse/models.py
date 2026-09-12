@@ -160,7 +160,7 @@ class ProductDailyQuantity(models.Model):
     verbose_name_plural = "Остатки товаров по дням"
     unique_together = [("product", "date")]
     indexes = [
-      models.Index(fields=["product", "date"]),
+      models.Index(fields=["product", "date"], name="warehouse_p_product_dq_idx"),
     ]
 
   def __str__(self):
