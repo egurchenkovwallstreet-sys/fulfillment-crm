@@ -195,7 +195,7 @@ def fetch_seller_shipping_points(
   )
 
   try:
-    points = client.fetch_shipping_points(city, resolved_cargo)
+    points = _fetch_city_shipping_points(client, city, SC_LIST_CARGO_TYPES)
   except WBApiError as exc:
     raise SupplyFlowError(
       f"Не удалось загрузить пункты отгрузки WB: {exc}",
@@ -207,11 +207,16 @@ def fetch_seller_shipping_points(
   return _sort_sc_points(sc_points), _sort_pp_points(pp_points), resolved_cargo
 
 
+SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
+SHIPPING_POINTS_CACHE_VERSION = "v7"
+
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
   "Липкинское",
   "Вёшки",
   "Вешки",
   "г.о. Мытищи",
+  "Внуково",
+  "Рассказовка",
 )
 
 VESHKI_SEARCH_CITIES: tuple[str, ...] = (
@@ -226,12 +231,21 @@ VESHKI_SEARCH_CITIES: tuple[str, ...] = (
   "Королёv",
 )
 
+VNUKOVO_SEARCH_CITIES: tuple[str, ...] = (
+  "Москва",
+  "Внуково",
+  "Рассказовка",
+  "Московская область",
+)
+
 # Города, посёлки и сёла Москвы и МО (~100 км). WB API — только city.
 MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
   "Москва",
   "Московская область",
   "Мытищи",
   "Вешки",
+  "Внуково",
+  "Рассказовка",
   "Пушкино",
   "Подольск",
   "Балашиха",
@@ -370,9 +384,31 @@ def _is_pp_office_type(point: dict) -> bool:
   return _normalize_text(point.get("officeType")) == "pp"
 
 
+def _is_consumer_pvz_point(point: dict) -> bool:
+  """ПВЗ для выдачи покупателям — не для FBS-отгрузки."""
+  haystack = _point_haystack(point)
+  return any(
+    marker in haystack
+    for marker in (
+      "пвз",
+      "пункт выдачи",
+      "выдачи заказ",
+      "pickup point",
+    )
+  )
+
+
+def _is_ppt_shipment_point(point: dict) -> bool:
+  if not _is_pp_office_type(point):
+    return False
+  return not _is_consumer_pvz_point(point)
+
+
 def _is_delivery_office_type(point: dict) -> bool:
-  """СЦ, склады WB и ППТ (ПВЗ) для FBS-отгрузки."""
-  return _is_sc_office_type(point) or _is_pp_office_type(point)
+  """СЦ, склады WB и ППТ для FBS-отгрузки."""
+  if _is_sc_office_type(point) or _is_pinned_sc_point(point):
+    return True
+  return _is_ppt_shipment_point(point)
 
 
 def _filter_delivery_office_points(points: list[dict]) -> list[dict]:
@@ -383,24 +419,32 @@ def _filter_delivery_office_points(points: list[dict]) -> list[dict]:
 
 
 def _split_shipping_points(points: list[dict]) -> tuple[list[dict], list[dict]]:
-  """Разделить пункты отгрузки: СЦ/склады и ППТ (ПВЗ)."""
+  """Разделить пункты отгрузки: СЦ/склады и ППТ."""
   sc_points: list[dict] = []
   pp_points: list[dict] = []
   for point in points:
     if not isinstance(point, dict):
       continue
-    if _is_pp_office_type(point):
+    if _is_ppt_shipment_point(point):
       pp_points.append(point)
     elif _is_sc_office_type(point) or _is_pinned_sc_point(point):
       sc_points.append(point)
   return sc_points, pp_points
 
 
+def _sc_sort_rank(point: dict) -> int:
+  if _matches_veshki_lipkinskoe(point):
+    return 0
+  if _matches_vnukovo_sc(point):
+    return 1
+  return 2
+
+
 def _sort_sc_points(points: list[dict]) -> list[dict]:
   return sorted(
     points,
     key=lambda point: (
-      0 if _matches_veshki_lipkinskoe(point) else 1,
+      _sc_sort_rank(point),
       _normalize_text(point.get("city")),
       _normalize_text(point.get("name")),
     ),
@@ -464,7 +508,7 @@ def fetch_moscow_region_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:v6:moscow:{seller.id}:{resolved_cargo}"
+  cache_key = f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:{seller.id}"
   cached = cache.get(cache_key)
   if isinstance(cached, dict):
     sc_cached = cached.get("sc")
@@ -474,24 +518,28 @@ def fetch_moscow_region_sc_shipping_points(
 
   merged: dict[int, dict] = {}
   fetch_cities = _all_sc_fetch_cities()
-  # Сначала города с закреплёнными точками (Вёшки, Пушкино)
-  priority = _dedupe_shipping_cities(VESHKI_SEARCH_CITIES, ("Пушкино",))
+  # Сначала города с закреплёнными точками (Вёшки, Внуково, Пушкино)
+  priority = _dedupe_shipping_cities(
+    VESHKI_SEARCH_CITIES,
+    VNUKOVO_SEARCH_CITIES,
+    ("Пушкино",),
+  )
   rest = tuple(city for city in fetch_cities if city not in priority)
   ordered_cities = _dedupe_shipping_cities(priority, rest)
 
   for fetch_city in ordered_cities:
-    try:
-      batch = client.fetch_shipping_points(fetch_city, resolved_cargo)
-    except WBApiError:
-      continue
-    for point in batch:
+    for point in _fetch_city_shipping_points(client, fetch_city, SC_LIST_CARGO_TYPES):
       if not isinstance(point, dict) or point.get("id") is None:
         continue
       if not _is_delivery_office_type(point):
         continue
-      if not _point_supports_cargo(point, resolved_cargo):
+      if _is_sc_office_type(point) and not _point_supports_any_cargo(point, SC_LIST_CARGO_TYPES):
         continue
-      merged[int(point["id"])] = point
+      point_id = int(point["id"])
+      if point_id in merged:
+        merged[point_id] = _union_shipping_point(merged[point_id], point)
+      else:
+        merged[point_id] = point
     time.sleep(0.08)
 
   points = _merge_pinned_shipping_points(client, resolved_cargo, list(merged.values()))
@@ -533,6 +581,50 @@ def _point_supports_cargo(point: dict, cargo_type: int) -> bool:
   return int(cargo_type) in {int(item) for item in cargo_types}
 
 
+def _point_supports_any_cargo(point: dict, cargo_types: tuple[int, ...]) -> bool:
+  supported = point.get("cargoTypes") or []
+  if not supported:
+    return True
+  allowed = {int(item) for item in supported}
+  return any(int(cargo_type) in allowed for cargo_type in cargo_types)
+
+
+def _union_shipping_point(left: dict, right: dict) -> dict:
+  merged = dict(left)
+  cargo_types: set[int] = set()
+  for source in (left, right):
+    for item in source.get("cargoTypes") or []:
+      cargo_types.add(int(item))
+  if cargo_types:
+    merged["cargoTypes"] = sorted(cargo_types)
+  for key in ("name", "address", "city", "officeType"):
+    if not merged.get(key) and right.get(key):
+      merged[key] = right[key]
+  return merged
+
+
+def _fetch_city_shipping_points(
+  client,
+  city: str,
+  cargo_types: tuple[int, ...],
+) -> list[dict]:
+  merged: dict[int, dict] = {}
+  for cargo_type in cargo_types:
+    try:
+      batch = client.fetch_shipping_points(city, cargo_type)
+    except WBApiError:
+      continue
+    for point in batch:
+      if not isinstance(point, dict) or point.get("id") is None:
+        continue
+      point_id = int(point["id"])
+      if point_id in merged:
+        merged[point_id] = _union_shipping_point(merged[point_id], point)
+      else:
+        merged[point_id] = dict(point)
+  return list(merged.values())
+
+
 def _point_haystack(point: dict) -> str:
   return " ".join(
     _normalize_text(point.get(key))
@@ -541,7 +633,11 @@ def _point_haystack(point: dict) -> str:
 
 
 def _is_pinned_sc_point(point: dict) -> bool:
-  return _matches_veshki_lipkinskoe(point) or _matches_pushkino_sc(point)
+  return (
+    _matches_veshki_lipkinskoe(point)
+    or _matches_vnukovo_sc(point)
+    or _matches_pushkino_sc(point)
+  )
 
 
 def _is_visible_sc_point(point: dict) -> bool:
@@ -565,14 +661,26 @@ def _matches_pushkino_sc(point: dict) -> bool:
   return "пушкино" in _point_haystack(point)
 
 
+def _matches_vnukovo_sc(point: dict) -> bool:
+  haystack = _point_haystack(point)
+  if "внуков" in haystack or "vnukovo" in haystack:
+    return True
+  return "сц" in haystack and "рассказов" in haystack
+
+
 PINNED_SHIPPING_POINT_MATCHERS = (
   ("veshki_lipkinskoe", _matches_veshki_lipkinskoe),
+  ("vnukovo_sc", _matches_vnukovo_sc),
   ("pushkino_sc", _matches_pushkino_sc),
 )
 
-PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = VESHKI_SEARCH_CITIES + ("Пушкино",)
+PINNED_SHIPPING_POINT_FETCH_CITIES: tuple[str, ...] = _dedupe_shipping_cities(
+  VESHKI_SEARCH_CITIES,
+  VNUKOVO_SEARCH_CITIES,
+  ("Пушкино",),
+)
 
-PINNED_SHIPPING_CARGO_TYPES: tuple[int, ...] = (1, 2, 3)
+PINNED_SHIPPING_CARGO_TYPES: tuple[int, ...] = SC_LIST_CARGO_TYPES
 
 
 def _fetch_pinned_shipping_pool(client, cargo_type: int) -> list[dict]:
@@ -603,12 +711,44 @@ def _normalize_pinned_point(point: dict) -> dict:
   return normalized
 
 
+def _vnukovo_env_fallback_point() -> dict | None:
+  raw = (os.environ.get("WB_VNUKOVO_SHIPPING_POINT_ID") or "").strip()
+  if not raw.isdigit():
+    return None
+  return {
+    "id": int(raw),
+    "name": "СЦ Внуково",
+    "address": "Москва, СЦ Внуково",
+    "city": "Москва",
+    "officeType": "sc",
+    "cargoTypes": list(SC_LIST_CARGO_TYPES),
+  }
+
+
+def _resolve_vnukovo_shipping_point(client, cargo_type: int) -> dict | None:
+  cargo_types = list(PINNED_SHIPPING_CARGO_TYPES)
+  if cargo_type not in cargo_types:
+    cargo_types.append(cargo_type)
+  for fetch_city in VNUKOVO_SEARCH_CITIES:
+    for fetch_cargo in cargo_types:
+      try:
+        batch = client.fetch_shipping_points(fetch_city, fetch_cargo)
+      except WBApiError:
+        continue
+      for point in batch:
+        if not isinstance(point, dict) or point.get("id") is None:
+          continue
+        if _matches_vnukovo_sc(point):
+          return _normalize_pinned_point(point)
+  return _vnukovo_env_fallback_point()
+
+
 def _merge_pinned_shipping_points(
   client,
   cargo_type: int,
   points: list[dict],
 ) -> list[dict]:
-  """Всегда добавить в список СЦ Вешки (Липкинское) и СЦ Пушкино."""
+  """Всегда добавить в список СЦ Вешки, Внуково и Пушкино."""
   merged = list(points or [])
   known_ids = {
     int(point["id"])
@@ -652,6 +792,14 @@ def _merge_pinned_shipping_points(
       point_id = int(veshki["id"])
       if point_id not in known_ids:
         merged.insert(0, veshki)
+        known_ids.add(point_id)
+
+  if not any(_matches_vnukovo_sc(point) for point in merged if isinstance(point, dict)):
+    vnukovo = _resolve_vnukovo_shipping_point(client, cargo_type)
+    if vnukovo:
+      point_id = int(vnukovo["id"])
+      if point_id not in known_ids:
+        merged.append(vnukovo)
         known_ids.add(point_id)
 
   return merged

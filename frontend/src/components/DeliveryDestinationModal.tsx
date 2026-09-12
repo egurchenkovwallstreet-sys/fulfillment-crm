@@ -253,7 +253,7 @@ export function DeliveryDestinationModal({
     { offset: 2, label: 'Послезавтра' },
   ]
 
-  const listTitle = pointKind === 'pp' ? 'ППТ (ПВЗ)' : 'СЦ / склад'
+  const listTitle = pointKind === 'pp' ? 'ППТ' : 'СЦ / склад'
 
   return (
     <div className="assembly-modal-backdrop" role="presentation" onClick={onClose}>
@@ -267,8 +267,8 @@ export function DeliveryDestinationModal({
         <p className="assembly-modal__message delivery-destination-modal__message">{message}</p>
 
         <p className="delivery-destination-modal__hint">
-          Москва и Московская область: СЦ/склады — {scPoints.length}, ППТ — {ppPoints.length}.
-          Поиск: «липкин», «веш», «пушкино»…
+          Москва и Московская область: СЦ/склады (МГТ и КГТ) — {scPoints.length}, ППТ — {ppPoints.length}.
+          Поиск: «липкин», «веш», «внуков», «пушкино»…
         </p>
 
         <div className="delivery-destination-modal__field">
@@ -292,7 +292,7 @@ export function DeliveryDestinationModal({
               disabled={loading || pointsLoading}
               onClick={() => switchPointKind('pp')}
             >
-              ППТ / ПВЗ ({ppPoints.length})
+              ППТ ({ppPoints.length})
             </button>
           </div>
         </div>
