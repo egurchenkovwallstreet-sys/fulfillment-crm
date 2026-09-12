@@ -163,7 +163,11 @@ def quantity_on_date(product: Product, target_date: date) -> int:
     return int(exact)
 
   first_date = first_snapshot_date(product)
-  if first_date is None or target_date < first_date:
+  if first_date is None:
+    if target_date == today_local() and product.quantity > 0:
+      return int(product.quantity)
+    return 0
+  if target_date < first_date:
     return 0
 
   previous = (

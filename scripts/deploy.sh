@@ -48,11 +48,11 @@ if [[ "$ok" -ne 1 ]]; then
 fi
 echo "OK: backend build=${EXPECTED_BUILD}"
 
-echo "=== storage daily quantities (фон, не блокирует деплой) ==="
+echo "=== storage snapshots + accruals ==="
 if docker compose exec -T web python manage.py rebuild_storage_daily_quantities; then
-  echo "OK: storage snapshots"
+  echo "OK: storage snapshots and accruals"
 else
-  echo "WARN: rebuild_storage_daily_quantities failed — nightly task догонит пробелы"
+  echo "WARN: rebuild_storage_daily_quantities failed — run manually on server"
 fi
 
 echo "=== up worker + frontend ==="
