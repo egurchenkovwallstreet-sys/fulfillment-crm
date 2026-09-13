@@ -359,6 +359,10 @@
   margin-bottom: 0.5rem;
 }
 
+.assembly-sticker-preview__reprint {
+  margin-top: 0.25rem;
+}
+
 .pick-list-table td strong {
   font-size: 1.1rem;
 }

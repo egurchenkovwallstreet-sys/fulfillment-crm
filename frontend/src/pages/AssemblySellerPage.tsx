@@ -600,6 +600,10 @@ function WbAssemblySellerPage() {
     const printWin = openPrintHolder()
     try {
       const result = await reprintOrderSticker(id, orderId, true)
+      const file = (result.order.sticker_file || '').trim()
+      if (file) {
+        setStickerPreview(file)
+      }
       await printSticker(result.order.sticker_file, printWin)
       flashPrintOk()
       onDone?.()
@@ -2506,6 +2510,17 @@ function WbAssemblySellerPage() {
           {stickerPreview && (
             <div className="assembly-sticker-preview">
               <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
+              {(lastPrintedFresh || lastPrinted) && (
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--small assembly-sticker-preview__reprint"
+                  onClick={() => confirmReprintSticker((lastPrintedFresh || lastPrinted)!)}
+                  disabled={loading}
+                  {...uiHint('Напечатать этот стикер ещё раз — остаток не списывается')}
+                >
+                  Повторная печать
+                </button>
+              )}
             </div>
           )}
         </section>
