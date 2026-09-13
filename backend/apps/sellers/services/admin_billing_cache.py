@@ -121,6 +121,13 @@ def rebuild_admin_billing_cache(
     cache.delete(lock_key)
 
 
+def invalidate_admin_billing_for_fulfillment(fulfillment_id: int | None) -> None:
+  """Сбросить кеш отгрузок фулфилмента и поставить пересчёт WB и Ozon."""
+  for marketplace in ("wb", "ozon"):
+    cache.delete(billing_cache_key(fulfillment_id=fulfillment_id, marketplace=marketplace))
+    queue_admin_billing_refresh(fulfillment_id=fulfillment_id, marketplace=marketplace)
+
+
 def queue_admin_billing_refresh(
   *,
   fulfillment_id: int | None,

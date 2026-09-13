@@ -6,6 +6,7 @@ import {
   type SellerManageItem,
   type SellerProductTariffItem,
   type SellerProductTariffsApplyPayload,
+  type TariffApplyMode,
 } from '../../api/sellerAdmin'
 import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
@@ -71,6 +72,10 @@ export function OwnerSellerTariffsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [pendingPriceSave, setPendingPriceSave] = useState<{
+    payload: SellerProductTariffsApplyPayload
+    successMsg: string
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -195,12 +200,29 @@ export function OwnerSellerTariffsPage() {
     try {
       const result = await applySellerProductTariffs(sellerId, payload)
       applyItemsResponse(result)
-      setMessage(successMsg)
+      const billing = result.result?.billing_policy as { mode?: string; total?: number } | undefined
+      const billingNote = billing?.mode === 'recalculate_all'
+        ? ' Пересчитаны все отгрузки за последние 4 недели.'
+        : billing?.mode === 'from_today'
+          ? ' Новый тариф применён с сегодняшнего дня.'
+          : ''
+      setMessage(`${successMsg}${billingNote}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить')
     } finally {
       setSaving(false)
     }
+  }
+
+  function requestPriceSave(payload: SellerProductTariffsApplyPayload, successMsg: string) {
+    setPendingPriceSave({ payload, successMsg })
+  }
+
+  async function confirmPriceSave(mode: TariffApplyMode) {
+    if (!pendingPriceSave) return
+    const { payload, successMsg } = pendingPriceSave
+    setPendingPriceSave(null)
+    await savePayload({ ...payload, tariff_apply_mode: mode }, successMsg)
   }
 
   function parsePrice(value: string, label: string): string | null {
@@ -242,7 +264,7 @@ export function OwnerSellerTariffsPage() {
     const price = parsePrice(bulkPrice, 'для выбранных')
     if (!price) return
     const updates = [...selected].map((product_id) => ({ product_id, price }))
-    await savePayload({ updates }, `Тариф ${formatPrice(price)} применён к ${updates.length} товарам`)
+    requestPriceSave({ updates }, `Тариф ${formatPrice(price)} применён к ${updates.length} товарам`)
   }
 
   async function handleBulkApplyDimensions() {
@@ -270,7 +292,7 @@ export function OwnerSellerTariffsPage() {
   async function handleSaveRowPrice(item: SellerProductTariffItem) {
     const price = parsePrice(drafts[item.id] ?? '', item.barcode)
     if (!price) return
-    await savePayload({ updates: [{ product_id: item.id, price }] }, `Тариф для ${item.barcode} сохранён`)
+    requestPriceSave({ updates: [{ product_id: item.id, price }] }, `Тариф для ${item.barcode} сохранён`)
   }
 
   async function handleSaveRowDimensions(item: SellerProductTariffItem) {
@@ -294,7 +316,7 @@ export function OwnerSellerTariffsPage() {
       setError('Нет изменений тарифов для сохранения')
       return
     }
-    await savePayload({ updates }, `Сохранено тарифов: ${updates.length}`)
+    requestPriceSave({ updates }, `Сохранено тарифов: ${updates.length}`)
   }
 
   async function handleSaveDirtyDimensions() {
@@ -586,6 +608,56 @@ export function OwnerSellerTariffsPage() {
           </div>
         )}
       </section>
+
+      {pendingPriceSave && (
+        <div
+          className="owner-tariffs-modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingPriceSave(null)}
+        >
+          <div
+            className="owner-tariffs-modal"
+            role="dialog"
+            aria-labelledby="owner-tariffs-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="owner-tariffs-modal-title">Как применить новый тариф?</h2>
+            <p>
+              Тарифы сохранятся сразу. Выберите, как пересчитать суммы в отчёте по отгрузкам.
+            </p>
+            <div className="owner-tariffs-modal__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => void confirmPriceSave('recalculate_all')}
+                disabled={saving}
+              >
+                Пересчитать все отгрузки
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => void confirmPriceSave('from_today')}
+                disabled={saving}
+              >
+                Тариф с сегодня
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setPendingPriceSave(null)}
+                disabled={saving}
+              >
+                Отмена
+              </button>
+            </div>
+            <p className="owner-tariffs-modal__hint">
+              «Пересчитать все» — за последние 4 недели по новым тарифам.
+              «С сегодня» — старые суммы не меняются, новый тариф только для сегодняшних и будущих отгрузок.
+            </p>
+          </div>
+        </div>
+      )}
     </>
   )
 }

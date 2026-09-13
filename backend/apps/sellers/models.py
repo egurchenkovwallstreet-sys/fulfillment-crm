@@ -282,3 +282,64 @@ class ShipmentLiterCharge(models.Model):
 
   def __str__(self):
     return f"{self.charge_date} {self.barcode} {self.amount}₽"
+
+
+class ShipmentUnitCharge(models.Model):
+  """Зафиксированное начисление отгрузки по тарифу за единицу."""
+
+  seller = models.ForeignKey(
+    Seller,
+    on_delete=models.CASCADE,
+    related_name="shipment_unit_charges",
+  )
+  product = models.ForeignKey(
+    "warehouse.Product",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="shipment_unit_charges",
+  )
+  barcode = models.CharField("Баркод", max_length=100, db_index=True)
+  marketplace = models.CharField("Маркетплейс", max_length=8, default="wb")
+  order = models.ForeignKey(
+    "orders.Order",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="unit_shipment_charges",
+  )
+  wb_order_id = models.BigIntegerField("ID заказа WB", null=True, blank=True, db_index=True)
+  ozon_posting = models.ForeignKey(
+    "orders.OzonPosting",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="unit_shipment_charges",
+  )
+  charge_date = models.DateField("Дата")
+  quantity = models.PositiveIntegerField("Количество", default=1)
+  unit_price = models.DecimalField("Тариф за ед., ₽", max_digits=10, decimal_places=2)
+  amount = models.DecimalField("Сумма, ₽", max_digits=12, decimal_places=2)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    verbose_name = "Отгрузка по тарифу (шт)"
+    verbose_name_plural = "Отгрузки по тарифу (шт)"
+    indexes = [
+      models.Index(fields=["seller", "charge_date"]),
+    ]
+    constraints = [
+      models.UniqueConstraint(
+        fields=["seller", "wb_order_id"],
+        condition=models.Q(wb_order_id__isnull=False),
+        name="sellers_unit_charge_wb_order_uniq",
+      ),
+      models.UniqueConstraint(
+        fields=["ozon_posting"],
+        condition=models.Q(ozon_posting__isnull=False),
+        name="sellers_unit_charge_ozon_posting_uniq",
+      ),
+    ]
+
+  def __str__(self):
+    return f"{self.charge_date} {self.barcode} ×{self.quantity} {self.amount}₽"

@@ -333,6 +333,62 @@ def load_storage_by_barcode(seller: Seller, *, marketplace: str = WB, days: int 
   ]
 
 
+def recalculate_liter_shipment_charges(seller: Seller, *, mode: str) -> dict:
+  """Пересчитать зафиксированные начисления отгрузки по литражу после смены тарифа."""
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+  from apps.sellers.services.unit_billing import (
+    TARIFF_APPLY_FROM_TODAY,
+    TARIFF_APPLY_MODES,
+    TARIFF_APPLY_RECALCULATE_ALL,
+    TariffBillingError,
+  )
+
+  if not seller_uses_liter_pricing(seller):
+    return {"updated": 0, "total": 0}
+  if mode not in TARIFF_APPLY_MODES:
+    raise TariffBillingError("Неизвестный режим применения тарифа")
+
+  today = today_local()
+  oldest_week_start, _ = calendar_week_bounds_offset(SHIPMENTS_WEEKS_HISTORY - 1, today)
+  from_date = oldest_week_start if mode == TARIFF_APPLY_RECALCULATE_ALL else today
+
+  updated = 0
+  qs = ShipmentLiterCharge.objects.filter(
+    seller=seller,
+    charge_date__gte=from_date,
+  ).select_related("product", "ozon_posting")
+
+  for charge in qs.iterator():
+    product = charge.product
+    if product is None and charge.barcode:
+      product = Product.objects.filter(
+        seller=seller,
+        barcode=charge.barcode,
+        marketplace=charge.marketplace,
+      ).first()
+    if product is None:
+      continue
+
+    volume = product_volume_liters(product)
+    if volume <= ZERO:
+      continue
+
+    unit_amount = shipment_liter_cost(volume, has_marking=charge.has_marking, seller=seller)
+    if charge.ozon_posting_id and charge.ozon_posting is not None:
+      qty = max(1, charge.ozon_posting.quantity or 1)
+      amount = unit_amount * Decimal(qty)
+    else:
+      amount = unit_amount
+
+    if charge.volume_liters != volume or charge.amount != amount:
+      charge.volume_liters = volume
+      charge.amount = amount
+      charge.save(update_fields=["volume_liters", "amount"])
+      updated += 1
+
+  return {"updated": updated, "total": updated}
+
+
 def liter_tariff_payload(seller: Seller) -> dict:
   return {
     "pricing_mode": seller.pricing_mode,

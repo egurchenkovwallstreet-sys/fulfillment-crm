@@ -138,3 +138,45 @@
   gap: 0.25rem;
   white-space: nowrap;
 }
+
+.owner-tariffs-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.owner-tariffs-modal {
+  width: min(100%, 480px);
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+}
+
+.owner-tariffs-modal h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.owner-tariffs-modal p {
+  margin: 0 0 1rem;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.owner-tariffs-modal__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.owner-tariffs-modal__hint {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}

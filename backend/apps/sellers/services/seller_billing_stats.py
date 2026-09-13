@@ -16,7 +16,7 @@ from apps.integrations.wb_client import REQUEST_INTERVAL_SEC, WBApiError, WBClie
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order, Supply
 from apps.orders.services.supply_sync import _parse_wb_datetime
-from apps.sellers.models import Seller
+from apps.sellers.models import Seller, ShipmentUnitCharge
 from apps.sellers.services.calendar_periods import (
   calendar_week_bounds,
   calendar_week_bounds_offset,
@@ -199,6 +199,14 @@ def _sum_shipped_orders(
   if not wb_order_ids:
     return 0, Decimal("0")
 
+  charge_amounts = {
+    row["wb_order_id"]: row["amount"]
+    for row in ShipmentUnitCharge.objects.filter(
+      seller=seller,
+      wb_order_id__in=wb_order_ids,
+    ).values("wb_order_id", "amount")
+  }
+
   count = 0
   amount = Decimal("0")
   seen: set[int] = set()
@@ -212,13 +220,7 @@ def _sum_shipped_orders(
       continue
 
     count += 1
-    unit_price = _resolve_unit_price(
-      meta,
-      price_by_barcode=price_by_barcode,
-      fallback_tariff=fallback_tariff,
-    )
-    if unit_price is not None:
-      amount += unit_price
+    amount += charge_amounts.get(wb_order_id, Decimal("0"))
 
   return count, amount
 

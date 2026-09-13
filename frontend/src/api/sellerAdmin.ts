@@ -277,7 +277,10 @@ export type SellerProductTariffItem = {
   volume_liters?: string | null
 }
 
+export type TariffApplyMode = 'recalculate_all' | 'from_today'
+
 export type SellerProductTariffsApplyPayload = {
+  tariff_apply_mode?: TariffApplyMode
   updates?: { product_id: number; price: string }[]
   dimension_updates?: {
     product_id: number

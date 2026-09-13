@@ -350,11 +350,13 @@ def ship_ozon_posting(seller, posting_id: int, *, user=None) -> dict:
   posting.save(update_fields=update_fields)
   try:
     from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_ozon_posting
+    from apps.sellers.services.unit_billing import record_shipment_unit_charge_for_ozon_posting
 
     record_shipment_liter_charge_for_ozon_posting(posting, seller=seller)
+    record_shipment_unit_charge_for_ozon_posting(posting, seller=seller)
   except Exception:
     import logging
-    logging.getLogger(__name__).exception("liter shipment charge failed for ozon posting %s", posting.id)
+    logging.getLogger(__name__).exception("shipment charge failed for ozon posting %s", posting.id)
   counts = _save_seller_counts(seller)
   return {
     "success": True,

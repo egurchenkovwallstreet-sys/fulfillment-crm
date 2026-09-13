@@ -18,6 +18,7 @@ from apps.warehouse.services.seller_pricing import (
   list_seller_product_tariffs,
 )
 from apps.sellers.services.liter_billing import liter_tariff_payload
+from apps.sellers.services.unit_billing import TariffBillingError, apply_tariff_billing_policy
 
 
 class PriceGroupSerializer(serializers.ModelSerializer):
@@ -157,10 +158,18 @@ class SellerProductTariffsApplySerializer(serializers.Serializer):
   updates = SellerProductTariffUpdateSerializer(many=True, required=False)
   dimension_updates = SellerProductDimensionUpdateSerializer(many=True, required=False)
   dimension_bulk = SellerProductDimensionBulkSerializer(required=False)
+  tariff_apply_mode = serializers.ChoiceField(
+    choices=["recalculate_all", "from_today"],
+    required=False,
+  )
 
   def validate(self, attrs):
     if not attrs.get("updates") and not attrs.get("dimension_updates") and not attrs.get("dimension_bulk"):
       raise serializers.ValidationError("Укажите updates, dimension_updates или dimension_bulk")
+    if attrs.get("updates") and not attrs.get("tariff_apply_mode"):
+      raise serializers.ValidationError({
+        "tariff_apply_mode": "Укажите режим применения тарифа: recalculate_all или from_today",
+      })
     return attrs
 
 
@@ -195,6 +204,13 @@ class SellerProductTariffsView(APIView):
           for row in data["updates"]
         ]
         result["prices"] = apply_seller_product_tariffs(seller, updates=price_updates)
+        try:
+          result["billing_policy"] = apply_tariff_billing_policy(
+            seller,
+            data["tariff_apply_mode"],
+          )
+        except TariffBillingError as exc:
+          return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
       if data.get("dimension_updates") or data.get("dimension_bulk"):
         dimension_updates = [
           {
