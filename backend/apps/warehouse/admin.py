@@ -10,6 +10,8 @@ from .models import (
   WbFactIntakeSession,
   XlIntakeLine,
   XlIntakeSession,
+  XlListLine,
+  XlListSession,
 )
 from .services.cell_delete import force_delete_cells
 
@@ -94,6 +96,20 @@ class XlIntakeSessionAdmin(admin.ModelAdmin):
   list_filter = ("status", "marketplace")
   search_fields = ("seller__company_name",)
   inlines = [XlIntakeLineInline]
+
+
+class XlListLineInline(admin.TabularInline):
+  model = XlListLine
+  extra = 0
+  readonly_fields = ("barcode", "quantity", "sort_order")
+
+
+@admin.register(XlListSession)
+class XlListSessionAdmin(admin.ModelAdmin):
+  list_display = ("id", "title", "fulfillment", "status", "created_at", "completed_at")
+  list_filter = ("status",)
+  search_fields = ("title",)
+  inlines = [XlListLineInline]
 
 
 @admin.register(ArticleIntakeSession)

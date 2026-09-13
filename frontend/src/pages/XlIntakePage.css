@@ -296,3 +296,66 @@
   border: 1px solid #cbd5e1;
   border-radius: 8px;
 }
+
+.xl-mode-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding: 0.35rem;
+  background: #f1f5f9;
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.xl-mode-tabs__tab {
+  padding: 0.55rem 1rem;
+  border-radius: 9px;
+  color: #475569;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.xl-mode-tabs__tab--active {
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.xl-list-intro {
+  max-width: 52rem;
+  color: #64748b;
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+
+.xl-manual-add {
+  margin: 1.25rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.xl-manual-add h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+.xl-manual-add__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.xl-manual-add__barcode {
+  flex: 1 1 220px;
+  margin-bottom: 0;
+}
+
+.xl-manual-add__qty {
+  flex: 0 0 120px;
+  margin-bottom: 0;
+}

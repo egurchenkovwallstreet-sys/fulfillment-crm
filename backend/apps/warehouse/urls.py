@@ -47,6 +47,16 @@ from .views_xl_intake import (
   XlIntakeSessionDetailView,
   XlIntakeSessionListCreateView,
 )
+from .views_xl_list_intake import (
+  XlListAddLineView,
+  XlListCompleteView,
+  XlListExcelView,
+  XlListLineDeleteView,
+  XlListLineUpdateView,
+  XlListScanView,
+  XlListSessionDetailView,
+  XlListSessionListCreateView,
+)
 from .views_article_intake import (
   ArticleIntakeCompleteView,
   ArticleIntakeConfirmGroupView,
@@ -188,6 +198,42 @@ urlpatterns = [
     "xl-intake/sessions/<int:session_id>/complete/",
     XlIntakeCompleteView.as_view(),
     name="xl_intake_complete",
+  ),
+  path("xl-list/sessions/", XlListSessionListCreateView.as_view(), name="xl_list_sessions"),
+  path(
+    "xl-list/sessions/<int:session_id>/",
+    XlListSessionDetailView.as_view(),
+    name="xl_list_session_detail",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/scan/",
+    XlListScanView.as_view(),
+    name="xl_list_scan",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/add-line/",
+    XlListAddLineView.as_view(),
+    name="xl_list_add_line",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/update-line/",
+    XlListLineUpdateView.as_view(),
+    name="xl_list_update_line",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/delete-line/",
+    XlListLineDeleteView.as_view(),
+    name="xl_list_delete_line",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/excel/",
+    XlListExcelView.as_view(),
+    name="xl_list_excel",
+  ),
+  path(
+    "xl-list/sessions/<int:session_id>/complete/",
+    XlListCompleteView.as_view(),
+    name="xl_list_complete",
   ),
   path(
     "article-intake/sessions/",

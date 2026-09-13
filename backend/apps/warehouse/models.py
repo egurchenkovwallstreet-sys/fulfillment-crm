@@ -423,3 +423,61 @@ class WbFactIntakeLine(models.Model):
 
   def __str__(self):
     return f"{self.barcode} × {self.fact_quantity}"
+
+
+class XlListSession(models.Model):
+  """Простой сбор баркодов в Excel без ячеек, CRM и WB."""
+
+  class Status(models.TextChoices):
+    ACTIVE = "active", "Сбор списка"
+    COMPLETED = "completed", "Завершена"
+
+  title = models.CharField("Название", max_length=200, blank=True, default="")
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.ACTIVE,
+    db_index=True,
+  )
+  fulfillment = models.ForeignKey(
+    "accounts.Fulfillment",
+    on_delete=models.CASCADE,
+    related_name="xl_list_sessions",
+  )
+  created_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    related_name="xl_list_sessions",
+  )
+  created_at = models.DateTimeField(auto_now_add=True)
+  completed_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "XL-список (Excel)"
+    verbose_name_plural = "XL-списки (Excel)"
+    ordering = ["-created_at"]
+
+  def __str__(self):
+    label = (self.title or "").strip() or f"Список #{self.pk}"
+    return label
+
+
+class XlListLine(models.Model):
+  session = models.ForeignKey(
+    XlListSession,
+    on_delete=models.CASCADE,
+    related_name="lines",
+  )
+  barcode = models.CharField("Баркод", max_length=100)
+  quantity = models.PositiveIntegerField("Количество", default=0)
+  sort_order = models.PositiveIntegerField("Порядковый номер баркода")
+
+  class Meta:
+    verbose_name = "Строка XL-списка"
+    verbose_name_plural = "Строки XL-списка"
+    unique_together = [("session", "barcode")]
+    ordering = ["sort_order"]
+
+  def __str__(self):
+    return f"{self.barcode} × {self.quantity}"

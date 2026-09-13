@@ -24,7 +24,7 @@ import { SellerCabinetPage } from './pages/SellerCabinetPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
 import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
-import { XlIntakePage } from './pages/XlIntakePage'
+import { XlIntakeHub } from './pages/XlIntakeHub'
 import { ArticleIntakePage } from './pages/ArticleIntakePage'
 import { WbFactIntakePage } from './pages/WbFactIntakePage'
 import { initKioskPrintMode } from './utils/printMode'
@@ -65,8 +65,10 @@ function AppRoutes() {
             <Route path="/warehouse" element={<WarehouseHubPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/intake" element={<IntakePage />} />
-            <Route path="/intake-xl" element={<XlIntakePage />} />
-            <Route path="/intake-xl/:sessionId" element={<XlIntakePage />} />
+            <Route path="/intake-xl/list/:sessionId" element={<XlIntakeHub />} />
+            <Route path="/intake-xl/list" element={<XlIntakeHub />} />
+            <Route path="/intake-xl/:sessionId" element={<XlIntakeHub />} />
+            <Route path="/intake-xl" element={<XlIntakeHub />} />
             <Route path="/intake-article" element={<ArticleIntakePage />} />
             <Route path="/intake-article/:sessionId" element={<ArticleIntakePage />} />
             <Route path="/intake-cards" element={<WbFactIntakePage />} />
