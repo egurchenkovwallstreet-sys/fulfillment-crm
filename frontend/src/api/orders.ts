@@ -40,6 +40,7 @@ export interface PickListItem {
   wb_nm_id?: number | null
   wb_article?: string
   tech_size?: string
+  color_label?: string
   quantity: number
   picked_quantity: number
 }

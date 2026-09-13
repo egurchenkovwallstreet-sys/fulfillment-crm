@@ -1,6 +1,11 @@
 import type { PickList } from '../api/orders'
 
-const ROWS_PER_PAGE = 25
+/** Меньше 25 — последняя строка не попадает в непечатаемую зону между листами. */
+const ROWS_PER_PAGE = 24
+const SHEET_PADDING_TOP = '8mm'
+const SHEET_PADDING_BOTTOM = '14mm'
+const SHEET_HEADER_RESERVE = '14mm'
+const TABLE_HEAD_HEIGHT = '5mm'
 
 function escapeHtml(value: string): string {
   return value
@@ -18,6 +23,11 @@ function formatDate(iso: string): string {
   }
 }
 
+function formatColor(value: string | undefined): string {
+  const trimmed = (value || '').trim()
+  return trimmed || '—'
+}
+
 function rowHtml(item: PickList['items'][number]): string {
   const cell = escapeHtml(item.cell_number || '—')
   const qty = escapeHtml(String(item.quantity))
@@ -26,6 +36,7 @@ function rowHtml(item: PickList['items'][number]): string {
     item.wb_article || (item.wb_nm_id != null ? String(item.wb_nm_id) : '—'),
   )
   const size = escapeHtml(item.tech_size || '—')
+  const color = escapeHtml(formatColor(item.color_label))
   const name = escapeHtml(item.product_name || '—')
   return `
     <tr>
@@ -34,6 +45,7 @@ function rowHtml(item: PickList['items'][number]): string {
       <td class="col-barcode"><div class="row-text">${barcode}</div></td>
       <td class="col-article"><div class="row-text">${article}</div></td>
       <td class="col-size"><div class="row-text">${size}</div></td>
+      <td class="col-color"><div class="row-text">${color}</div></td>
       <td class="col-name"><div class="row-text">${name}</div></td>
       <td class="col-check"><span class="check-box" aria-label="Отметка"></span></td>
     </tr>`
@@ -49,6 +61,7 @@ function tableHtml(items: PickList['items']): string {
           <th class="col-barcode">Баркод</th>
           <th class="col-article">Арт. WB</th>
           <th class="col-size">Размер</th>
+          <th class="col-color">Цвет</th>
           <th class="col-name">Название</th>
           <th class="col-check">Собрано</th>
         </tr>
@@ -104,10 +117,11 @@ const PRINT_STYLES = `
     width: 210mm;
     min-height: 297mm;
     height: 297mm;
-    padding: 8mm 10mm 6mm;
-    --pick-row-h: calc((297mm - 8mm - 6mm - 14mm - 5mm) / 25);
+    padding: ${SHEET_PADDING_TOP} 10mm ${SHEET_PADDING_BOTTOM};
+    --pick-row-h: calc((297mm - ${SHEET_PADDING_TOP} - ${SHEET_PADDING_BOTTOM} - ${SHEET_HEADER_RESERVE} - ${TABLE_HEAD_HEIGHT}) / ${ROWS_PER_PAGE});
     overflow: hidden;
     page-break-after: always;
+    page-break-inside: avoid;
   }
   .sheet:last-child { page-break-after: auto; }
   .sheet-header {
@@ -154,13 +168,14 @@ const PRINT_STYLES = `
     padding: 0 1mm 1.5mm;
     border-bottom: 1px solid #cbd5e1;
     vertical-align: bottom;
-    height: 5mm;
+    height: ${TABLE_HEAD_HEIGHT};
   }
   .pick-table tbody tr {
     border-bottom: 1px solid #e2e8f0;
     height: var(--pick-row-h);
     max-height: var(--pick-row-h);
     min-height: var(--pick-row-h);
+    page-break-inside: avoid;
   }
   .pick-table tbody tr:last-child { border-bottom: none; }
   .pick-table td {
@@ -168,12 +183,13 @@ const PRINT_STYLES = `
     vertical-align: middle;
     overflow: hidden;
   }
-  .col-cell { width: 9%; }
-  .col-qty { width: 7%; text-align: center; }
-  .col-barcode { width: 18%; }
-  .col-article { width: 11%; }
-  .col-size { width: 8%; }
-  .col-name { width: 35%; }
+  .col-cell { width: 8%; }
+  .col-qty { width: 6%; text-align: center; }
+  .col-barcode { width: 16%; }
+  .col-article { width: 10%; }
+  .col-size { width: 7%; }
+  .col-color { width: 10%; }
+  .col-name { width: 31%; }
   .col-check { width: 12%; text-align: center; }
   .row-text {
     font-family: Arial, Helvetica, sans-serif;

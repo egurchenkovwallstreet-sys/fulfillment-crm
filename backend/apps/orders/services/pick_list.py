@@ -246,6 +246,7 @@ def _group_orders_for_pick_list(
       "wb_nm_id": product.wb_nm_id if product else None,
       "wb_article": _product_wb_article(product) or "—",
       "tech_size": _product_size_label(product) or "—",
+      "color_label": (product.color_label or "").strip() if product else "",
       "quantity": data["quantity"],
       "picked_quantity": 0,
       "order_ids": data["order_ids"],

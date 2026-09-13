@@ -165,6 +165,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
   wb_nm_id = serializers.SerializerMethodField()
   wb_article = serializers.SerializerMethodField()
   tech_size = serializers.SerializerMethodField()
+  color_label = serializers.SerializerMethodField()
 
   class Meta:
     model = PickListItem
@@ -176,6 +177,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "wb_nm_id",
       "wb_article",
       "tech_size",
+      "color_label",
       "quantity",
       "picked_quantity",
     )
@@ -208,6 +210,11 @@ class PickListItemSerializer(serializers.ModelSerializer):
       return "—"
     product = obj.product
     return (product.tech_size or product.wb_size or "").strip() or "—"
+
+  def get_color_label(self, obj):
+    if not obj.product_id:
+      return ""
+    return (obj.product.color_label or "").strip()
 
 
 class PickListSerializer(serializers.ModelSerializer):
