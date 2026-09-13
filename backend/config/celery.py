@@ -37,6 +37,10 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.scan_off_crm_shipments",
         "schedule": crontab(hour=4, minute=0),
     },
+    "reconcile-stuck-delivery": {
+        "task": "apps.integrations.tasks.reconcile_stuck_delivery_orders",
+        "schedule": crontab(hour=4, minute=0),
+    },
     "clear-daily-marking-codes": {
         "task": "apps.integrations.tasks.clear_daily_marking_codes",
         "schedule": crontab(hour=23, minute=59),

@@ -76,6 +76,22 @@ def scan_off_crm_shipments():
 
 
 @shared_task
+def reconcile_stuck_delivery_orders():
+  """Ежедневно в 4:00 — закрыть «зависшие» во «В доставке» после scanDt на WB."""
+  from apps.orders.services.supply_sync import reconcile_stuck_in_delivery_all_sellers
+
+  result = reconcile_stuck_in_delivery_all_sellers()
+  if result["errors"]:
+    logger.warning("Stuck delivery reconcile errors: %s", result["errors"])
+  logger.info(
+    "Stuck delivery reconcile done: stuck=%s closed=%s",
+    result["totals"].get("stuck_supplies"),
+    result["totals"].get("orders_closed"),
+  )
+  return result
+
+
+@shared_task
 def verify_seller_marking_codes(seller_id: int):
   """Опросить WB по pending ЧЗ одного селлера (после последнего скана листа)."""
   from apps.orders.services.assembly import AssemblyError
