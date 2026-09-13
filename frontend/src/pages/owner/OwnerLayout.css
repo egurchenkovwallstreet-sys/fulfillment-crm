@@ -128,3 +128,72 @@
   background: #ecfdf5;
   color: #047857;
 }
+
+.owner-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.owner-card {
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--panel-bg, #fff);
+  margin-bottom: 1rem;
+}
+
+.owner-shipping-meta p {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--text-muted, #64748b);
+}
+
+.owner-shipping-meta p:last-child {
+  margin-bottom: 0;
+}
+
+.owner-shipping-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.owner-shipping-search {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.owner-table-wrap {
+  overflow-x: auto;
+}
+
+.owner-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.owner-table th,
+.owner-table td {
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  text-align: left;
+  vertical-align: top;
+}
+
+.owner-shipping-row--pinned {
+  background: #f8fafc;
+}
+
+.owner-error {
+  color: #b91c1c;
+  margin-bottom: 1rem;
+}
+
+.owner-muted {
+  color: var(--text-muted, #64748b);
+  font-size: 0.9rem;
+}

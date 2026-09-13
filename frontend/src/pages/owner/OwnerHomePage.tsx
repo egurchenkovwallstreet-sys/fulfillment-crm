@@ -28,6 +28,11 @@ const CARDS = [
     title: 'Статистика отгрузок',
     desc: 'Отгрузки WB и Ozon по всем селлерам и суммы по тарифам',
   },
+  {
+    to: '/owner/shipping-points',
+    title: 'Пункты отгрузки WB',
+    desc: 'Справочник СЦ, складов и ППТ — проверка без отправки в доставку',
+  },
 ] as const
 
 export function OwnerHomePage() {

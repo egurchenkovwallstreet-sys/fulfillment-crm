@@ -52,6 +52,7 @@ from .views_off_crm import (
   OffCrmShipmentSkipView,
   OffCrmShipmentSummaryView,
 )
+from .views_owner_shipping import OwnerShippingPointsView
 
 urlpatterns = [
     path("", OrderListView.as_view(), name="order-list"),
@@ -235,5 +236,10 @@ urlpatterns = [
       "off-crm-shipments/<int:shipment_id>/skip/",
       OffCrmShipmentSkipView.as_view(),
       name="off-crm-shipment-skip",
+    ),
+    path(
+      "owner/shipping-points/",
+      OwnerShippingPointsView.as_view(),
+      name="owner-shipping-points",
     ),
 ]

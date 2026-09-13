@@ -28,7 +28,7 @@ type Props = {
   loading?: boolean
 }
 
-const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v5-${sellerId}`
+const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v6-${sellerId}`
 
 const DEFAULT_PREFS: DeliveryDestinationPrefs = {
   city: 'Москва и Московская область',
@@ -100,16 +100,10 @@ function pickPointId(
   preferredId: number | null | undefined,
 ): number | '' {
   if (points.length === 0) return ''
-  const veshki = points.find(isVeshkiLipkinskoe)
-  if (
-    preferredId != null &&
-    points.some((point) => point.id === preferredId)
-  ) {
-    const preferred = points.find((point) => point.id === preferredId)
-    if (preferred && (!veshki || !isVeshkiLipkinskoe(preferred) || preferred.id === veshki.id)) {
-      return preferredId
-    }
+  if (preferredId != null && points.some((point) => point.id === preferredId)) {
+    return preferredId
   }
+  const veshki = points.find(isVeshkiLipkinskoe)
   if (veshki) return veshki.id
   return points[0].id
 }

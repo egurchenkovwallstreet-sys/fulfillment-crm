@@ -2,15 +2,19 @@ from django.test import SimpleTestCase
 
 from apps.orders.services.supply_flow import (
   SC_LIST_CARGO_TYPES,
+  SHIPPING_POINTS_CACHE_VERSION,
+  _fulfillment_shipping_cache_key,
   _is_consumer_pvz_point,
   _is_ppt_shipment_point,
   _matches_vnukovo_sc,
   _matches_veshki_lipkinskoe,
   _pick_best_matching_point,
   _point_supports_any_cargo,
+  _shipping_point_zone_label,
   _split_shipping_points,
   _union_shipping_point,
   _veshki_lipkinskoe_score,
+  _vnukovo_sc_score,
 )
 
 
@@ -72,6 +76,27 @@ class ShippingPointMatchersTests(SimpleTestCase):
     merged = _union_shipping_point(left, right)
     self.assertEqual(merged["cargoTypes"], [1, 3])
     self.assertEqual(merged["address"], "addr")
+
+  def test_fulfillment_cache_key_shared(self):
+    key = _fulfillment_shipping_cache_key(42)
+    self.assertIn(f"ff:42", key)
+    self.assertIn(SHIPPING_POINTS_CACHE_VERSION, key)
+
+  def test_vnukovo_zone_label(self):
+    point = {"name": "СЦ Внуково", "address": "Москва", "city": "Москва"}
+    self.assertEqual(_shipping_point_zone_label(point), "Запад/Юг")
+
+  def test_veshki_zone_label(self):
+    point = {"name": "Москва (Вёшки)", "address": "Липкинское ш., 2-й км", "city": "Мытищи"}
+    self.assertEqual(_shipping_point_zone_label(point), "Север")
+
+  def test_vnukovo_score_prefers_vnukovo_name(self):
+    points = [
+      {"id": 1, "name": "СЦ Рассказовка", "address": "Рассказовка", "city": "Москва"},
+      {"id": 2, "name": "СЦ Внуково", "address": "Внуково", "city": "Москва"},
+    ]
+    best = _pick_best_matching_point(points, _matches_vnukovo_sc, scorer=_vnukovo_sc_score)
+    self.assertEqual(best["id"], 2)
 
   def test_split_sc_and_ppt(self):
     points = [

@@ -208,7 +208,7 @@ def fetch_seller_shipping_points(
 
 
 SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
-SHIPPING_POINTS_CACHE_VERSION = "v8"
+SHIPPING_POINTS_CACHE_VERSION = "v9"
 
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
   "Липкинское",
@@ -238,8 +238,8 @@ VNUKOVO_SEARCH_CITIES: tuple[str, ...] = (
   "Московская область",
 )
 
-# Города, посёлки и сёла Москвы и МО (~100 км). WB API — только city.
-MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
+# Москва и МО в радиусе ~50 км. WB API — только city.
+MOSCOW_REGION_50KM_CITIES: tuple[str, ...] = (
   "Москва",
   "Московская область",
   "Мытищи",
@@ -262,26 +262,10 @@ MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
   "Жуковский",
   "Ногинск",
   "Электросталь",
-  "Коломна",
   "Зеленоград",
-  "Истра",
-  "Чехов",
-  "Ступино",
-  "Сергиев Посад",
-  "Дмитров",
   "Лобня",
   "Реутов",
   "Фрязино",
-  "Орехово-Зуево",
-  "Серпухов",
-  "Клин",
-  "Наро-Фоминск",
-  "Егорьевск",
-  "Дубна",
-  "Павловский Посад",
-  "Солнечногorsk",
-  "Чашниково",
-  "Обухово",
   "Софьино",
   "Коледино",
   "Белые Столбы",
@@ -289,53 +273,19 @@ MOSCOW_REGION_100KM_CITIES: tuple[str, ...] = (
   "Вёшки",
   "Липкинское",
   "Апрелевка",
-  "Бronницы",
-  "Верея",
-  "Вolokolamsk",
-  "Вoskresensk",
-  "Гoliцыno",
   "Дedovsk",
-  "Зvenigorod",
   "Иvanтеevka",
   "Кotельники",
-  "Прotvino",
-  "Тaldom",
-  "Chernogolovka",
-  "Эlektrogorsk",
-  "Monino",
-  "Nakhabino",
   "Tomilino",
   "Kommunarka",
   "Troitsk",
   "Shcherbinka",
-  "Zhavoronki",
-  "Razvilka",
-  "Sosensky",
   "Klimovsk",
-  "Skolkovo",
-  "Protvino",
-  "Pushchino",
-  "Roshal",
-  "Ruza",
-  "Hotkovo",
-  "Yasnogorsk",
-  "Elektrougli",
-  "Shatura",
   "Bykovo",
-  "Kraskovo",
-  "Mikhnevo",
-  "Marushkino",
-  "Andreevka",
-  "Saburovo",
+  "Malakhovka",
   "Yubileyny",
   "Vatutinki",
-  "Krekshino",
-  "Rumyantsevo",
-  "Ashukino",
-  "Malakhovka",
-  "Peresvet",
-  "Iksha",
-  "Elektroizolyator",
+  "Kraskovo",
   "Лыткарино",
   "Дzerzhinsky",
   "Сходня",
@@ -370,7 +320,33 @@ def _dedupe_shipping_cities(*groups: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _all_sc_fetch_cities() -> tuple[str, ...]:
-  return _dedupe_shipping_cities(MOSCOW_REGION_100KM_CITIES, PINNED_SHIPPING_EXTRA_CITIES)
+  return _dedupe_shipping_cities(MOSCOW_REGION_50KM_CITIES, PINNED_SHIPPING_EXTRA_CITIES)
+
+
+def _fulfillment_shipping_cache_key(fulfillment_id: int) -> str:
+  return f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:ff:{fulfillment_id}"
+
+
+def _reference_wb_seller_for_fulfillment(user) -> Seller:
+  from apps.accounts.tenant import get_user_fulfillment, sellers_for_user
+
+  fulfillment = get_user_fulfillment(user)
+  if not fulfillment:
+    raise SupplyFlowError("Фулфилмент не определён", code="no_fulfillment")
+  seller = (
+    sellers_for_user(user)
+    .filter(is_active=True)
+    .exclude(wb_api_token_encrypted="")
+    .order_by("id")
+    .first()
+  )
+  if not seller or not seller.wb_api_token_encrypted:
+    raise SupplyFlowError(
+      "Нет активного селлера с токеном WB для загрузки пунктов отгрузки",
+      code="no_wb_token",
+    )
+  return seller
+
 
 ALL_SC_SHIPPING_CACHE_TTL = 3600
 
@@ -520,21 +496,25 @@ def fetch_moscow_region_sc_shipping_points(
   *,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
+  force_refresh: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
-  """СЦ/склады и ППТ WB: Москва и Московская область (кеш 1 ч)."""
+  """СЦ/склады и ППТ WB: Москва и МО ~50 км (общий кеш фулфилмента, 1 ч)."""
+  if not seller.fulfillment_id:
+    raise SupplyFlowError("У селлера не указан фулфилмент", code="no_fulfillment")
   client = _get_client(seller)
   resolved_cargo = _resolve_shipping_cargo_type(
     client,
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:{seller.id}"
-  cached = cache.get(cache_key)
-  if isinstance(cached, dict):
-    sc_cached = cached.get("sc")
-    pp_cached = cached.get("pp")
-    if isinstance(sc_cached, list) and isinstance(pp_cached, list):
-      return sc_cached, pp_cached, resolved_cargo
+  cache_key = _fulfillment_shipping_cache_key(seller.fulfillment_id)
+  if not force_refresh:
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+      sc_cached = cached.get("sc")
+      pp_cached = cached.get("pp")
+      if isinstance(sc_cached, list) and isinstance(pp_cached, list) and (sc_cached or pp_cached):
+        return sc_cached, pp_cached, resolved_cargo
 
   merged: dict[int, dict] = {}
   fetch_cities = _all_sc_fetch_cities()
@@ -570,10 +550,68 @@ def fetch_moscow_region_sc_shipping_points(
   if sc_points or pp_points:
     cache.set(
       cache_key,
-      {"sc": sc_points, "pp": pp_points},
+      {
+        "sc": sc_points,
+        "pp": pp_points,
+        "cached_at": timezone.now().isoformat(),
+        "reference_seller_id": seller.id,
+      },
       ALL_SC_SHIPPING_CACHE_TTL,
     )
   return sc_points, pp_points, resolved_cargo
+
+
+def fetch_fulfillment_shipping_points_catalog(
+  user,
+  *,
+  seller: Seller | None = None,
+  cargo_type: int | None = None,
+  wb_supply_id: str | None = None,
+  force_refresh: bool = False,
+) -> dict:
+  """Справочник пунктов отгрузки WB для фулфилмента (без отправки в доставку)."""
+  from apps.accounts.tenant import get_user_fulfillment
+
+  fulfillment = get_user_fulfillment(user)
+  if not fulfillment:
+    raise SupplyFlowError("Фулфилмент не определён", code="no_fulfillment")
+
+  reference = seller
+  if not reference or not reference.wb_api_token_encrypted:
+    reference = _reference_wb_seller_for_fulfillment(user)
+
+  cache_key = _fulfillment_shipping_cache_key(fulfillment.id)
+  cached_before = cache.get(cache_key) if not force_refresh else None
+  from_cache = (
+    isinstance(cached_before, dict)
+    and isinstance(cached_before.get("sc"), list)
+    and not force_refresh
+  )
+
+  sc_points, pp_points, resolved_cargo = fetch_moscow_region_sc_shipping_points(
+    reference,
+    cargo_type=cargo_type,
+    wb_supply_id=wb_supply_id,
+    force_refresh=force_refresh,
+  )
+  cached_after = cache.get(cache_key)
+  cached_at = cached_after.get("cached_at") if isinstance(cached_after, dict) else None
+
+  return {
+    "success": True,
+    "city": "Москва и Московская область (~50 км)",
+    "scope": "all_sc",
+    "cargo_type": resolved_cargo,
+    "fulfillment_id": fulfillment.id,
+    "reference_seller_id": reference.id,
+    "reference_seller_name": reference.company_name,
+    "from_cache": from_cache,
+    "cached_at": cached_at,
+    "cache_ttl_sec": ALL_SC_SHIPPING_CACHE_TTL,
+    "shipping_points_sc": [_serialize_shipping_point_for_api(item) for item in sc_points],
+    "shipping_points_pp": [_serialize_shipping_point_for_api(item) for item in pp_points],
+    "shipping_points": [_serialize_shipping_point_for_api(item) for item in sc_points],
+  }
 
 
 def fetch_all_russia_sc_shipping_points(
@@ -727,6 +765,47 @@ def _matches_vnukovo_sc(point: dict) -> bool:
   return "сц" in haystack and "рассказов" in haystack
 
 
+def _vnukovo_sc_score(point: dict) -> int:
+  haystack = _point_haystack(point)
+  score = 0
+  if "внуков" in haystack or "vnukovo" in haystack:
+    score += 100
+  if "рассказов" in haystack:
+    score += 40
+  return score
+
+
+def _shipping_point_zone_label(point: dict) -> str:
+  if _matches_veshki_lipkinskoe(point):
+    return "Север"
+  if _matches_vnukovo_sc(point):
+    return "Запад/Юг"
+  if _matches_pushkino_sc(point):
+    return "Север"
+  haystack = _point_haystack(point)
+  if any(token in haystack for token in ("коледино", "софьино")):
+    return "Юг"
+  if any(token in haystack for token in ("электросталь", "ногинск", "балаших")):
+    return "Восток"
+  if any(token in haystack for token in ("химки", "красногорск", "одинц")):
+    return "Запад"
+  return ""
+
+
+def _serialize_shipping_point_for_api(point: dict) -> dict:
+  cargo_types = point.get("cargoTypes") or []
+  return {
+    "id": int(point["id"]),
+    "name": str(point.get("name") or ""),
+    "address": str(point.get("address") or ""),
+    "city": str(point.get("city") or ""),
+    "officeType": str(point.get("officeType") or ""),
+    "cargoTypes": [int(item) for item in cargo_types],
+    "zone_label": _shipping_point_zone_label(point),
+    "is_pinned": _is_pinned_sc_point(point),
+  }
+
+
 PINNED_SHIPPING_POINT_MATCHERS = (
   ("veshki_lipkinskoe", _matches_veshki_lipkinskoe),
   ("vnukovo_sc", _matches_vnukovo_sc),
@@ -785,20 +864,19 @@ def _vnukovo_env_fallback_point() -> dict | None:
 
 
 def _resolve_vnukovo_shipping_point(client, cargo_type: int) -> dict | None:
+  pool: list[dict] = []
   cargo_types = list(PINNED_SHIPPING_CARGO_TYPES)
   if cargo_type not in cargo_types:
     cargo_types.append(cargo_type)
   for fetch_city in VNUKOVO_SEARCH_CITIES:
     for fetch_cargo in cargo_types:
       try:
-        batch = client.fetch_shipping_points(fetch_city, fetch_cargo)
+        pool.extend(client.fetch_shipping_points(fetch_city, fetch_cargo))
       except WBApiError:
         continue
-      for point in batch:
-        if not isinstance(point, dict) or point.get("id") is None:
-          continue
-        if _matches_vnukovo_sc(point):
-          return _normalize_pinned_point(point)
+  best = _pick_best_matching_point(pool, _matches_vnukovo_sc, scorer=_vnukovo_sc_score)
+  if best:
+    return _normalize_pinned_point(best)
   return _vnukovo_env_fallback_point()
 
 
@@ -831,7 +909,12 @@ def _merge_pinned_shipping_points(
     for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
       if key in found_keys:
         continue
-      scorer = _veshki_lipkinskoe_score if key == "veshki_lipkinskoe" else None
+      if key == "veshki_lipkinskoe":
+        scorer = _veshki_lipkinskoe_score
+      elif key == "vnukovo_sc":
+        scorer = _vnukovo_sc_score
+      else:
+        scorer = None
       point = _pick_best_matching_point(pool, matcher, scorer=scorer)
       if not point:
         continue

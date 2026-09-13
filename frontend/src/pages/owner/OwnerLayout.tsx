@@ -34,6 +34,11 @@ const NAV = [
     label: 'Статистика',
     hint: 'Отгрузки и суммы к оплате по селлерам и неделям',
   },
+  {
+    to: '/owner/shipping-points',
+    label: 'Склады WB',
+    hint: 'Справочник пунктов отгрузки WB — просмотр и обновление кеша',
+  },
 ] as const
 
 export function OwnerLayout() {
