@@ -17,7 +17,9 @@ from apps.sellers.services.calendar_periods import (
 )
 from apps.sellers.services.seller_billing_stats import (
   SHIPMENTS_WEEKS_HISTORY,
+  _barcode_price_map,
   _build_week_payload,
+  _seller_fallback_tariff,
   _week_start_for,
 )
 
@@ -43,6 +45,8 @@ def load_weekly_ozon_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WE
       charge_date__lte=current_week_end,
     ).values_list("ozon_posting_id", "amount")
   )
+  price_by_barcode = _barcode_price_map(seller, marketplace=OZON)
+  fallback_tariff = _seller_fallback_tariff(seller, marketplace=OZON)
 
   qs = OzonPosting.objects.filter(
     seller=seller,
@@ -55,7 +59,12 @@ def load_weekly_ozon_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WE
     ship_date = timezone.localtime(posting.shipped_at).date()
     qty = max(1, posting.quantity or 1)
     daily_counts[ship_date] += qty
-    daily_amounts[ship_date] += charge_amounts.get(posting.id, Decimal("0"))
+    if posting.id in charge_amounts:
+      daily_amounts[ship_date] += charge_amounts[posting.id]
+    else:
+      unit_price = price_by_barcode.get((posting.barcode or "").strip()) or fallback_tariff
+      if unit_price is not None:
+        daily_amounts[ship_date] += unit_price * qty
     if posting.carriage_id:
       carriages_per_week[_week_start_for(ship_date)].add(int(posting.carriage_id))
 

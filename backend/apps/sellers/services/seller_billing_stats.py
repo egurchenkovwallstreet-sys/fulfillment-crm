@@ -220,7 +220,17 @@ def _sum_shipped_orders(
       continue
 
     count += 1
-    amount += charge_amounts.get(wb_order_id, Decimal("0"))
+    if wb_order_id in charge_amounts:
+      amount += charge_amounts[wb_order_id]
+    else:
+      # Старые отгрузки без зафиксированного начисления — считаем по текущему тарифу.
+      unit_price = _resolve_unit_price(
+        meta,
+        price_by_barcode=price_by_barcode,
+        fallback_tariff=fallback_tariff,
+      )
+      if unit_price is not None:
+        amount += unit_price
 
   return count, amount
 

@@ -58,6 +58,20 @@ class TariffBillingTests(TestCase):
     self.assertEqual(charge.amount, Decimal("100.00"))
     self.assertEqual(charge.unit_price, Decimal("50.00"))
 
+  def test_billing_stats_fallback_to_tariff_without_charge(self):
+    old_date = timezone.localdate() - timedelta(days=3)
+    OzonPosting.objects.create(
+      seller=self.seller,
+      posting_number="123-fallback",
+      ozon_status="awaiting_deliver",
+      barcode=self.product.barcode,
+      quantity=2,
+      shipped_at=timezone.make_aware(datetime.combine(old_date, datetime.min.time())),
+    )
+    payload = load_weekly_ozon_shipped_orders(self.seller)
+    total_amount = sum(week["total_amount"] for week in payload["weeks"])
+    self.assertEqual(total_amount, Decimal("100.00"))
+
   def test_billing_stats_use_persisted_charges(self):
     old_date = timezone.localdate() - timedelta(days=10)
     posting = OzonPosting.objects.create(
