@@ -13,7 +13,11 @@ from apps.integrations.wb_client import REQUEST_INTERVAL_SEC, WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client
 from apps.orders.services.supply_flow import refresh_supply_readiness
-from apps.orders.services.wb_status import WB_STATUS_AFTER_DELIVER, WB_SUPPLIER_DELIVERY
+from apps.orders.services.wb_status import (
+  WB_STATUS_AFTER_DELIVER,
+  WB_SUPPLIER_DELIVERY,
+  order_accepted_at_wb_sc,
+)
 from apps.sellers.models import Seller
 
 logger = logging.getLogger(__name__)
@@ -65,9 +69,40 @@ def _fetch_supply_order_wb_ids(client, wb_supply: dict) -> list[int]:
   return ids
 
 
+def close_order_accepted_at_wb_sc(
+  order: Order,
+  *,
+  seller: Seller,
+  supplier_status: str | None = None,
+  wb_status: str | None = None,
+  record_charges: bool = True,
+) -> bool:
+  """Закрыть заказ, уже принятый на СЦ WB поштучно (без scanDt поставки)."""
+  update_fields: list[str] = []
+  supplier = (supplier_status or order.wb_supplier_status or WB_SUPPLIER_DELIVERY).strip()
+  wb = (wb_status or order.wb_status or "sorted").strip()
+  if order.wb_supplier_status != supplier:
+    order.wb_supplier_status = supplier
+    update_fields.append("wb_supplier_status")
+  if order.wb_status != wb:
+    order.wb_status = wb
+    update_fields.append("wb_status")
+  if order.status != Order.Status.SHIPPED:
+    order.status = Order.Status.SHIPPED
+    update_fields.append("status")
+  changed = bool(update_fields)
+  if changed:
+    update_fields.append("updated_at")
+    order.save(update_fields=update_fields)
+  if record_charges:
+    record_shipment_charges_for_orders([order], seller=seller)
+  return changed
+
+
 def _sync_crm_orders_delivery_status(
   orders: list[Order],
   *,
+  seller: Seller | None = None,
   scanned_at: datetime | None = None,
 ) -> int:
   """Привести CRM-статус заказов к «в доставке» (complete + waiting) или SHIPPED после scanDt."""
@@ -85,6 +120,11 @@ def _sync_crm_orders_delivery_status(
         order.in_delivery_at = scanned_at
         update_fields.append("in_delivery_at")
     else:
+      if order_accepted_at_wb_sc(order):
+        if seller is not None and order.status != Order.Status.SHIPPED:
+          if close_order_accepted_at_wb_sc(order, seller=seller):
+            updated += 1
+        continue
       if order.wb_status != WB_STATUS_AFTER_DELIVER:
         order.wb_status = WB_STATUS_AFTER_DELIVER
         update_fields.append("wb_status")
@@ -102,7 +142,7 @@ def _sync_crm_orders_delivery_status(
   return updated
 
 
-def _record_shipment_charges_for_orders(orders: list[Order], *, seller: Seller) -> None:
+def record_shipment_charges_for_orders(orders: list[Order], *, seller: Seller) -> None:
   try:
     from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_order
     from apps.sellers.services.unit_billing import record_shipment_unit_charge_for_order
@@ -130,9 +170,9 @@ def _finalize_supply_scan(
     supply.wb_scanned_at = scanned_at
     supply.save(update_fields=["wb_scanned_at", "updated_at"])
 
-  closed = _sync_crm_orders_delivery_status(orders, scanned_at=scanned_at)
+  closed = _sync_crm_orders_delivery_status(orders, seller=seller, scanned_at=scanned_at)
   if closed or stuck_orders:
-    _record_shipment_charges_for_orders(orders, seller=seller)
+    record_shipment_charges_for_orders(orders, seller=seller)
   return closed
 
 
@@ -222,6 +262,7 @@ def _process_wb_supply(
         stats["premature_scan_reverted"] = stats.get("premature_scan_reverted", 0) + 1
       stats["orders_status_updated"] += _sync_crm_orders_delivery_status(
         crm_orders,
+        seller=seller,
         scanned_at=None,
       )
   else:
@@ -337,8 +378,13 @@ def _revert_premature_supply_scans(seller: Seller, wb_supplies: list[dict]) -> i
       continue
     supply.wb_scanned_at = None
     supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    orders_to_reopen = [
+      order for order in supply.orders.all()
+      if not order_accepted_at_wb_sc(order)
+    ]
     reopened += _sync_crm_orders_delivery_status(
-      list(supply.orders.all()),
+      orders_to_reopen,
+      seller=seller,
       scanned_at=None,
     )
   return reopened

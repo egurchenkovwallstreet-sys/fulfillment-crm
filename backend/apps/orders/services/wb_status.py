@@ -124,6 +124,22 @@ def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
   return wb_status == WB_DELIVERY_TAB_WB_STATUS
 
 
+def order_accepted_at_wb_sc(order: Order) -> bool:
+  """
+  Заказ уже принят/отсортирован на СЦ WB поштучно (wbStatus ≠ waiting).
+  Не путать с SHIPPED в CRM после ошибочного закрытия поставки по closedAt.
+  """
+  supplier = (order.wb_supplier_status or "").strip()
+  wb = (order.wb_status or "").strip()
+  if supplier != WB_SUPPLIER_DELIVERY:
+    return False
+  if is_wb_cancelled(supplier, wb):
+    return False
+  if wb in WB_DELIVERED_WB_STATUSES:
+    return True
+  return bool(wb) and wb != WB_STATUS_AFTER_DELIVER
+
+
 def get_wb_status_label(wb_status: str) -> str:
   wb_status = (wb_status or "").strip()
   return WB_STATUS_LABELS.get(wb_status, wb_status or "—")

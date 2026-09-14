@@ -204,15 +204,25 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     at_risk_supply_order_ids,
   )
 
+  stale_after_supply = {"stale_delivery_cleared": 0}
+  individual_after_supply = {"individually_accepted_closed": 0}
   try:
     from apps.orders.services.supply_sync import sync_supplies_from_wb, sync_supply_scan_dates
+    from apps.orders.services.sync_statuses import (
+      reconcile_individually_accepted_delivery_orders,
+      reconcile_stale_delivery_orders,
+    )
 
     supply_sync_result = sync_supplies_from_wb(seller, include_closed=True)
     supply_scan_result = sync_supply_scan_dates(seller, client=client)
+    stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
+    individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
   except Exception:
     pass
 
   reconciled = status_result.get("reconciled", 0)
+  reconciled += stale_after_supply.get("stale_delivery_cleared", 0)
+  reconciled += individual_after_supply.get("individually_accepted_closed", 0)
 
   AuditLog.objects.create(
     user=user,

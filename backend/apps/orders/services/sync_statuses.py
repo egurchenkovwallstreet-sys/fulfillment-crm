@@ -5,6 +5,10 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
+from apps.orders.services.supply_sync import (
+  close_order_accepted_at_wb_sc,
+  record_shipment_charges_for_orders,
+)
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -17,13 +21,14 @@ from apps.orders.services.wb_status import (
   apply_wb_status_to_order,
   compute_live_wb_counts,
   is_wb_in_delivery,
+  order_accepted_at_wb_sc,
   save_wb_counts_to_seller,
   wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_seller
 
-SYNC_VERSION = "delivery-v14"
+SYNC_VERSION = "delivery-v15"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]
@@ -220,15 +225,41 @@ def reconcile_stale_delivery_orders(
       wb = (data.get("wbStatus") or "").strip()
       if apply_wb_status_to_order(order, supplier, wb):
         cleared += 1
+        if order.status == Order.Status.SHIPPED:
+          record_shipment_charges_for_orders([order], seller=seller)
       continue
 
     order.wb_supplier_status = WB_SUPPLIER_DELIVERY
     order.wb_status = "sorted"
     order.status = Order.Status.SHIPPED
     order.save(update_fields=["wb_supplier_status", "wb_status", "status", "updated_at"])
+    record_shipment_charges_for_orders([order], seller=seller)
     cleared += 1
 
   return {"stale_delivery_cleared": cleared}
+
+
+def reconcile_individually_accepted_delivery_orders(seller: Seller) -> dict:
+  """
+  Закрыть заказы, уже принятые на СЦ WB поштучно (sorted и пр.), даже без scanDt поставки.
+  Остальные заказы поставки с wbStatus=waiting не трогаем.
+  """
+  accepted_orders = list(
+    filter_orders_for_seller(
+      Order.objects.filter(
+        seller=seller,
+        assembly_hidden=False,
+        status=Order.Status.IN_DELIVERY,
+      ),
+      seller,
+    ).only("id", "wb_order_id", "wb_supplier_status", "wb_status", "status")
+  )
+  accepted_orders = [order for order in accepted_orders if order_accepted_at_wb_sc(order)]
+  closed = 0
+  for order in accepted_orders:
+    if close_order_accepted_at_wb_sc(order, seller=seller):
+      closed += 1
+  return {"individually_accepted_closed": closed}
 
 
 def reconcile_stale_new_orders(
@@ -306,14 +337,25 @@ def reconcile_wb_orders_for_seller(
     wb_status__in=WB_DELIVERED_WB_STATUSES,
   ).exclude(status=Order.Status.SHIPPED).update(status=Order.Status.SHIPPED, updated_at=now)
 
-  shipped_not_waiting = Order.objects.filter(
-    seller=seller,
-    wb_supplier_status=WB_SUPPLIER_DELIVERY,
-  ).exclude(wb_status=WB_DELIVERY_TAB_WB_STATUS).exclude(
-    wb_status__in=WB_TERMINAL_WB_STATUSES,
-  ).exclude(wb_status="").exclude(
-    status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
-  ).update(status=Order.Status.SHIPPED, updated_at=now)
+  shipped_not_waiting = 0
+  not_waiting_orders = list(
+    Order.objects.filter(
+      seller=seller,
+      wb_supplier_status=WB_SUPPLIER_DELIVERY,
+    ).exclude(wb_status=WB_DELIVERY_TAB_WB_STATUS).exclude(
+      wb_status__in=WB_TERMINAL_WB_STATUSES,
+    ).exclude(wb_status="").exclude(
+      status__in=[Order.Status.SHIPPED, Order.Status.CANCELLED],
+    )
+  )
+  for order in not_waiting_orders:
+    if close_order_accepted_at_wb_sc(
+      order,
+      seller=seller,
+      supplier_status=WB_SUPPLIER_DELIVERY,
+      wb_status=order.wb_status or "sorted",
+    ):
+      shipped_not_waiting += 1
 
   delivery_waiting = sum(
     1
