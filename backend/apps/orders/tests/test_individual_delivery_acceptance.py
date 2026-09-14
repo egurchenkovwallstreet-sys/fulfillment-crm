@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from django.test import TestCase
 from django.utils import timezone
@@ -65,8 +65,7 @@ class IndividualDeliveryAcceptanceTests(TestCase):
     self.assertNotIn(self.accepted.id, visible_ids)
     self.assertIn(self.waiting.id, visible_ids)
 
-  @patch("apps.orders.services.sync_statuses.record_shipment_charges_for_orders")
-  def test_reconcile_stale_delivery_closes_sorted_order_from_wb(self, record_mock):
+  def test_reconcile_stale_delivery_closes_sorted_order_from_wb(self):
     client = MagicMock()
     status_map = {
       self.waiting.wb_order_id: {
@@ -82,4 +81,3 @@ class IndividualDeliveryAcceptanceTests(TestCase):
     self.assertEqual(result["stale_delivery_cleared"], 1)
     self.assertEqual(self.waiting.status, Order.Status.SHIPPED)
     self.assertEqual(self.waiting.wb_status, "sorted")
-    record_mock.assert_called_once()

@@ -92,20 +92,6 @@ class ReconcileStuckDeliveryTests(TestCase):
     self.assertEqual(self.order.status, Order.Status.SHIPPED)
     self.assertIsNotNone(self.supply.wb_scanned_at)
 
-  @patch("apps.orders.services.supply_sync._record_shipment_charges_for_orders")
-  @patch("apps.orders.services.supply_sync._get_client")
-  def test_reconcile_records_billing_charges(self, get_client_mock, record_mock):
-    client = MagicMock()
-    client.fetch_supplies.return_value = [{
-      "id": "WB-SUP-1",
-      "done": True,
-      "scanDt": "2026-09-10T08:00:00Z",
-    }]
-    get_client_mock.return_value = client
-
-    reconcile_stuck_in_delivery_supplies(self.seller, client=client)
-    record_mock.assert_called_once()
-
   @patch("apps.orders.services.supply_sync._get_client")
   def test_sync_reopens_supply_closed_by_closed_at_only(self, get_client_mock):
     scanned_at = timezone.now()

@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 ZERO = Decimal("0")
 
 
-def record_shipment_liter_charge_for_order(order: Order, *, seller: Seller) -> ShipmentLiterCharge | None:
+def record_shipment_liter_charge_for_order(
+  order: Order,
+  *,
+  seller: Seller,
+  charge_date=None,
+) -> ShipmentLiterCharge | None:
   if not seller_uses_liter_pricing(seller):
     return None
   if ShipmentLiterCharge.objects.filter(order=order).exists():
@@ -46,7 +51,10 @@ def record_shipment_liter_charge_for_order(order: Order, *, seller: Seller) -> S
 
   has_marking = bool(product.requires_marking and (order.marking_bound or order.marking_code))
   amount = shipment_liter_cost(volume, has_marking=has_marking, seller=seller)
-  charge_date = (order.in_delivery_at or timezone.now()).date()
+  if charge_date is None:
+    charge_date = (order.in_delivery_at or timezone.now()).date()
+  elif hasattr(charge_date, "date"):
+    charge_date = timezone.localtime(charge_date).date()
 
   return ShipmentLiterCharge.objects.create(
     seller=seller,

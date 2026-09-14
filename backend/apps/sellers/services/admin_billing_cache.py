@@ -13,7 +13,7 @@ from apps.sellers.services.seller_billing_stats import load_admin_billing_dashbo
 
 logger = logging.getLogger(__name__)
 
-CACHE_PREFIX = "admin_billing_v1"
+CACHE_PREFIX = "admin_billing_v2"
 CACHE_TTL_SEC = 900
 REFRESH_LOCK_TTL_SEC = 600
 STALE_AFTER_SEC = 600

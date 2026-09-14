@@ -14,17 +14,12 @@ from apps.orders.models import Order, OzonPosting, Supply
 from apps.sellers.models import Seller, ShipmentUnitCharge
 from apps.sellers.services.calendar_periods import calendar_week_bounds_offset, today_local
 from apps.sellers.services.seller_billing_stats import (
-  MAX_SUPPLY_ORDER_FETCHES,
   SHIPMENTS_WEEKS_HISTORY,
-  WB_ORDERS_LOOKBACK_DAYS,
+  _ShippedOrderMeta,
   _barcode_price_map,
-  _build_wb_order_index,
-  _fetch_supply_order_ids,
-  _get_client,
   _order_eligible_for_billing,
   _resolve_unit_price,
   _seller_fallback_tariff,
-  _supply_handoff_at,
 )
 from apps.sellers.services.warehouse_filter import (
   get_billing_warehouse_match_ids,
@@ -62,7 +57,12 @@ def _unit_price_for_barcode(
 
 
 @transaction.atomic
-def record_shipment_unit_charge_for_order(order: Order, *, seller: Seller) -> ShipmentUnitCharge | None:
+def record_shipment_unit_charge_for_order(
+  order: Order,
+  *,
+  seller: Seller,
+  charge_date=None,
+) -> ShipmentUnitCharge | None:
   if seller_uses_liter_pricing(seller):
     return None
   if not order.wb_order_id:
@@ -77,7 +77,10 @@ def record_shipment_unit_charge_for_order(order: Order, *, seller: Seller) -> Sh
   if unit_price is None:
     return None
 
-  charge_date = (order.in_delivery_at or timezone.now()).date()
+  if charge_date is None:
+    charge_date = (order.in_delivery_at or timezone.now()).date()
+  elif hasattr(charge_date, "date"):
+    charge_date = timezone.localtime(charge_date).date()
   return ShipmentUnitCharge.objects.create(
     seller=seller,
     product=product,
@@ -178,6 +181,14 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
   if mode not in TARIFF_APPLY_MODES:
     raise TariffBillingError("Неизвестный режим применения тарифа")
 
+  from apps.sellers.services.crm_product_stats import WB_STICKER_STOCK_COMMENT
+  from apps.sellers.services.sticker_billing import (
+    _local_order_index,
+    _parse_sticker_key,
+    _parse_wb_order_id,
+  )
+  from apps.warehouse.models import StockOperation
+
   today = today_local()
   _, current_week_end = calendar_week_bounds_offset(0, today)
   oldest_week_start, _ = calendar_week_bounds_offset(SHIPMENTS_WEEKS_HISTORY - 1, today)
@@ -185,63 +196,54 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
 
   price_by_barcode = _barcode_price_map(seller, marketplace=WB)
   fallback_tariff = _seller_fallback_tariff(seller, marketplace=WB)
-  client = _get_client(seller)
-  try:
-    wb_supplies = client.fetch_supplies()
-  except WBApiError as exc:
-    raise SellerAnalyticsError(str(exc)) from exc
-
-  order_index = _build_wb_order_index(seller, client)
+  order_index = _local_order_index(seller)
   match_ids = (
     get_billing_warehouse_match_ids(seller)
     if seller_has_warehouse_config(seller)
     else None
   )
-  crm_supplies = {
-    supply.wb_supply_id: supply
-    for supply in Supply.objects.filter(seller=seller).exclude(wb_supply_id="").prefetch_related("orders")
-  }
+
+  ops = StockOperation.objects.filter(
+    product__seller=seller,
+    product__marketplace=WB,
+    operation_type=StockOperation.OperationType.SHIPMENT,
+    comment__icontains=WB_STICKER_STOCK_COMMENT,
+    created_at__date__gte=from_date,
+    created_at__date__lte=current_week_end,
+  ).select_related("product").order_by("created_at")
 
   updated = 0
-  api_fetches = 0
+  seen_sticker_keys: set[str] = set()
   seen_orders: set[int] = set()
 
-  for wb_supply in wb_supplies:
-    if not wb_supply.get("done"):
-      continue
-    handoff_at = _supply_handoff_at(wb_supply)
-    if handoff_at is None:
-      continue
-    handoff_date = timezone.localtime(handoff_at).date()
-    if handoff_date > current_week_end:
-      continue
-    if handoff_date < from_date:
-      continue
-
-    wb_supply_id = str(wb_supply.get("id") or "")
-    if not wb_supply_id or api_fetches >= MAX_SUPPLY_ORDER_FETCHES:
-      continue
-
-    crm_supply = crm_supplies.get(wb_supply_id)
-    order_wb_ids = _fetch_supply_order_ids(client, wb_supply, crm_supply=crm_supply)
-    api_fetches += 1
-    time.sleep(REQUEST_INTERVAL_SEC)
-
-    for wb_order_id in order_wb_ids:
-      if wb_order_id in seen_orders:
+  for op in ops:
+    comment = op.comment or ""
+    sticker_key = _parse_sticker_key(comment)
+    if sticker_key:
+      if sticker_key in seen_sticker_keys:
         continue
-      seen_orders.add(wb_order_id)
-      meta = order_index.get(wb_order_id)
-      if _upsert_wb_unit_charge(
-        seller=seller,
-        wb_order_id=wb_order_id,
-        charge_date=handoff_date,
-        meta=meta,
-        price_by_barcode=price_by_barcode,
-        fallback_tariff=fallback_tariff,
-        match_ids=match_ids,
-      ):
-        updated += 1
+      seen_sticker_keys.add(sticker_key)
+
+    wb_order_id = _parse_wb_order_id(comment)
+    if wb_order_id is None or wb_order_id in seen_orders:
+      continue
+    seen_orders.add(wb_order_id)
+
+    meta = order_index.get(wb_order_id)
+    if meta is None and op.product:
+      meta = _ShippedOrderMeta(barcode=(op.product.barcode or "").strip())
+
+    charge_date = timezone.localtime(op.created_at).date()
+    if _upsert_wb_unit_charge(
+      seller=seller,
+      wb_order_id=wb_order_id,
+      charge_date=charge_date,
+      meta=meta,
+      price_by_barcode=price_by_barcode,
+      fallback_tariff=fallback_tariff,
+      match_ids=match_ids,
+    ):
+      updated += 1
 
   return updated
 

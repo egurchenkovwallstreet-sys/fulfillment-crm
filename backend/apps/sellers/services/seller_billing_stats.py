@@ -1,4 +1,4 @@
-"""Отгрузки FBS — по факту передачи поставки на склад WB."""
+"""Отгрузки FBS — по факту печати FBS-стикера в CRM (sticker_billing)."""
 from __future__ import annotations
 
 import re
@@ -286,96 +286,9 @@ def _build_week_payload(
 
 
 def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_HISTORY) -> dict:
-  """
-  Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
-  Источник: GET /api/v3/supplies (done) + order-ids из WB API.
-  Учитываются отгрузки со всех FBS-складов, когда-либо подключённых в CRM (в т.ч. отключённых/удалённых).
-  """
-  today = today_local()
-  current_week_start, current_week_end = calendar_week_bounds(today)
-  oldest_week_start, _ = calendar_week_bounds_offset(weeks - 1, today)
+  from apps.sellers.services.sticker_billing import load_weekly_shipped_orders as _load_sticker_prints
 
-  daily_counts: dict[date, int] = defaultdict(int)
-  daily_amounts: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
-  supplies_per_week: dict[date, int] = defaultdict(int)
-
-  price_by_barcode = _barcode_price_map(seller)
-  fallback_tariff = _seller_fallback_tariff(seller)
-
-  client = _get_client(seller)
-  try:
-    wb_supplies = client.fetch_supplies()
-  except WBApiError as exc:
-    raise SellerAnalyticsError(str(exc)) from exc
-
-  order_index = _build_wb_order_index(seller, client)
-  match_ids = (
-    get_billing_warehouse_match_ids(seller)
-    if seller_has_warehouse_config(seller)
-    else None
-  )
-
-  crm_supplies = {
-    supply.wb_supply_id: supply
-    for supply in Supply.objects.filter(seller=seller).exclude(wb_supply_id="").prefetch_related("orders")
-  }
-
-  api_fetches = 0
-
-  for wb_supply in wb_supplies:
-    if not wb_supply.get("done"):
-      continue
-
-    handoff_at = _supply_handoff_at(wb_supply)
-    if handoff_at is None:
-      continue
-
-    handoff_date = timezone.localtime(handoff_at).date()
-    if not (oldest_week_start <= handoff_date <= current_week_end):
-      continue
-
-    wb_supply_id = str(wb_supply.get("id") or "")
-    if not wb_supply_id:
-      continue
-
-    if api_fetches >= MAX_SUPPLY_ORDER_FETCHES:
-      break
-
-    crm_supply = crm_supplies.get(wb_supply_id)
-    order_wb_ids = _fetch_supply_order_ids(client, wb_supply, crm_supply=crm_supply)
-    api_fetches += 1
-    time.sleep(REQUEST_INTERVAL_SEC)
-
-    order_count, order_amount = _sum_shipped_orders(
-      seller,
-      order_wb_ids,
-      order_index=order_index,
-      price_by_barcode=price_by_barcode,
-      fallback_tariff=fallback_tariff,
-      match_ids=match_ids,
-    )
-    if order_count <= 0:
-      continue
-
-    daily_counts[handoff_date] += order_count
-    daily_amounts[handoff_date] += order_amount
-    supplies_per_week[_week_start_for(handoff_date)] += 1
-
-  weeks_data = [
-    _build_week_payload(
-      *calendar_week_bounds_offset(weeks_ago, today),
-      daily_counts=daily_counts,
-      daily_amounts=daily_amounts,
-      supplies_per_week=supplies_per_week,
-      today=today,
-    )
-    for weeks_ago in range(weeks)
-  ]
-
-  return {
-    "today": today.isoformat(),
-    "weeks": weeks_data,
-  }
+  return _load_sticker_prints(seller, weeks=weeks)
 
 
 def _decimal_amount(value) -> Decimal:

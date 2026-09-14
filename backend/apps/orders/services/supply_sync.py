@@ -94,8 +94,6 @@ def close_order_accepted_at_wb_sc(
   if changed:
     update_fields.append("updated_at")
     order.save(update_fields=update_fields)
-  if record_charges:
-    record_shipment_charges_for_orders([order], seller=seller)
   return changed
 
 
@@ -143,15 +141,8 @@ def _sync_crm_orders_delivery_status(
 
 
 def record_shipment_charges_for_orders(orders: list[Order], *, seller: Seller) -> None:
-  try:
-    from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_order
-    from apps.sellers.services.unit_billing import record_shipment_unit_charge_for_order
-
-    for order in orders:
-      record_shipment_liter_charge_for_order(order, seller=seller)
-      record_shipment_unit_charge_for_order(order, seller=seller)
-  except Exception:
-    logger.exception("shipment charge failed during supply scan reconcile for seller %s", seller.id)
+  """Начисления отгрузки — только при печати FBS-стикера в CRM (sticker_billing)."""
+  del orders, seller
 
 
 def _finalize_supply_scan(

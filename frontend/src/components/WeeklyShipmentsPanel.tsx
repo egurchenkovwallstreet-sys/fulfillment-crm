@@ -27,7 +27,7 @@ type Props = {
 export function WeeklyShipmentsPanel({
   data,
   title = 'Отгрузки на склад WB',
-  hint = 'Заказы из поставок WB (done) только с включённых FBS-складов фулфилмента, в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.',
+  hint = 'Только заказы с напечатанным FBS-стикером в CRM (факт списания остатка). Сумма — по тарифу за единицу.',
   weekIndex: controlledWeekIndex,
   onWeekIndexChange,
 }: Props) {
@@ -57,7 +57,7 @@ export function WeeklyShipmentsPanel({
           <h2 className="section-title">{title}</h2>
           <p className="seller-weekly-shipments__hint">
             Календарная неделя {formatWeekRange(selectedWeek)} (МСК). {hint}
-            {selectedWeek.supplies_count > 0 && <> Поставок: {selectedWeek.supplies_count}.</>}
+            {selectedWeek.supplies_count > 0 && <> Дней со стикерами: {selectedWeek.supplies_count}.</>}
           </p>
         </div>
         <div className="seller-weekly-shipments__total">
@@ -67,7 +67,7 @@ export function WeeklyShipmentsPanel({
           </strong>
           <span className="seller-weekly-shipments__total-orders">
             {selectedWeek.total} заказов отгружено
-            {selectedWeek.supplies_count > 0 ? ` · ${selectedWeek.supplies_count} поставок` : ''}
+            {selectedWeek.supplies_count > 0 ? ` · ${selectedWeek.supplies_count} дн. со стикерами` : ''}
           </span>
         </div>
       </div>

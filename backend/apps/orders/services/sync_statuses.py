@@ -5,10 +5,7 @@ from apps.integrations.models import AuditLog
 from apps.integrations.wb_client import WBApiError, WBClient, WBOrderData
 from apps.orders.models import Order
 from apps.orders.services.assembly import get_seller_stage_counts
-from apps.orders.services.supply_sync import (
-  close_order_accepted_at_wb_sc,
-  record_shipment_charges_for_orders,
-)
+from apps.orders.services.supply_sync import close_order_accepted_at_wb_sc
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -225,15 +222,12 @@ def reconcile_stale_delivery_orders(
       wb = (data.get("wbStatus") or "").strip()
       if apply_wb_status_to_order(order, supplier, wb):
         cleared += 1
-        if order.status == Order.Status.SHIPPED:
-          record_shipment_charges_for_orders([order], seller=seller)
       continue
 
     order.wb_supplier_status = WB_SUPPLIER_DELIVERY
     order.wb_status = "sorted"
     order.status = Order.Status.SHIPPED
     order.save(update_fields=["wb_supplier_status", "wb_status", "status", "updated_at"])
-    record_shipment_charges_for_orders([order], seller=seller)
     cleared += 1
 
   return {"stale_delivery_cleared": cleared}

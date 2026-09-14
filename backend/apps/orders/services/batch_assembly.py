@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
 
 from django.db import transaction
+
+logger = logging.getLogger(__name__)
 
 from apps.integrations.models import AuditLog
 from apps.integrations.marketplace import OZON, WB
@@ -595,6 +598,12 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
       deduct_stock_for_sticker_print(order=order, user=user)
     except StockDeductionError as exc:
       raise _marking_error(str(exc), order, code="insufficient_stock") from exc
+    try:
+      from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
+
+      record_billing_on_sticker_print(order, seller=seller)
+    except Exception:
+      logger.exception("billing on sticker print failed for order %s", order.id)
 
   AuditLog.objects.create(
     user=user,
@@ -703,6 +712,12 @@ def bind_wb_batch_scan(
         stock_info = deduct_stock_for_sticker_print(order=order, user=user)
       except StockDeductionError as exc:
         raise AssemblyError(str(exc), code="insufficient_stock", order=order) from exc
+    try:
+      from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
+
+      record_billing_on_sticker_print(order, seller=seller)
+    except Exception:
+      logger.exception("billing on sticker print failed for order %s", order.id)
     AuditLog.objects.create(
       user=user,
       seller=seller,

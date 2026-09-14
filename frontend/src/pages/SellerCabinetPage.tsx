@@ -156,7 +156,7 @@ export function SellerCabinetPage() {
                     Календарная неделя {formatWeekRange(selectedShipmentWeek)} (МСК).
                     {isOzon
                       ? ' Считаются отправления, переданные к отгрузке через CRM (ship). Сумма — по тарифу обработки за единицу.'
-                      : ' Заказы из поставок WB (done) только с включённых FBS-складов фулфилмента, в т.ч. отгруженные вне CRM. Сумма — по тарифу обработки за единицу.'}
+                      : ' Только заказы с напечатанным FBS-стикером в CRM. Сумма — по тарифу обработки за единицу.'}
                     {selectedShipmentWeek.supplies_count > 0 && (
                       <> {isOzon ? 'Отгрузок' : 'Поставок'}: {selectedShipmentWeek.supplies_count}.</>
                     )}

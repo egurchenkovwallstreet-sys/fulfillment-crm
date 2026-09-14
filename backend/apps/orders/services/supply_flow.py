@@ -1647,14 +1647,6 @@ def _complete_order_in_delivery(
     ],
   )
   stock_info = stock_deduction_info(order)
-  try:
-    from apps.sellers.services.liter_billing import record_shipment_liter_charge_for_order
-    from apps.sellers.services.unit_billing import record_shipment_unit_charge_for_order
-
-    record_shipment_liter_charge_for_order(order, seller=seller)
-    record_shipment_unit_charge_for_order(order, seller=seller)
-  except Exception:
-    logger.exception("shipment charge failed for order %s", order.id)
   AuditLog.objects.create(
     user=user,
     seller=seller,
