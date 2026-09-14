@@ -1,3 +1,5 @@
+import { markPrintSurfaceHtml } from './printMode'
+
 /**
  * Печать через Chrome: без колонтитулов (дата, URL, номер страницы).
  * Размеры по ТЗ: лист подбора A4, ячейка 75×120 мм, стикер FBS 58×40 мм.
@@ -45,7 +47,7 @@ function autoPrintScript(): string {
 
 function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   const payload = normalizeImageBase64(base64)
-  return `<!DOCTYPE html>
+  return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
@@ -73,7 +75,7 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   <img src="data:image/png;base64,${payload}" alt="" />
   ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
-</html>`
+</html>`)
 }
 
 export function openPrintHolder(): Window | null {
@@ -105,51 +107,16 @@ export function closePrintHolder(win?: Window | null) {
   }
 }
 
-function printViaIframe(html: string): boolean {
-  const iframe = document.createElement('iframe')
-  iframe.setAttribute('aria-hidden', 'true')
-  iframe.style.position = 'fixed'
-  iframe.style.right = '0'
-  iframe.style.bottom = '0'
-  iframe.style.width = '0'
-  iframe.style.height = '0'
-  iframe.style.border = '0'
-  document.body.appendChild(iframe)
-  const doc = iframe.contentDocument
-  if (!doc) {
-    iframe.remove()
+/** Отдельное окно через blob: безопаснее iframe при --kiosk-printing. */
+function printViaBlobWindow(html: string): boolean {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const win = window.open(url, '_blank', 'width=420,height=640')
+  if (!win) {
+    URL.revokeObjectURL(url)
     return false
   }
-  doc.open()
-  doc.write(html)
-  doc.close()
-  const cleanup = () => {
-    window.setTimeout(() => iframe.remove(), 1500)
-  }
-  const frameWin = iframe.contentWindow
-  if (!frameWin) {
-    cleanup()
-    return false
-  }
-  const doPrint = () => {
-    try {
-      frameWin.print()
-    } catch {
-      // ignore
-    }
-    cleanup()
-  }
-  const img = doc.querySelector('img')
-  if (img) {
-    if (img.complete && img.naturalWidth > 0) {
-      doPrint()
-    } else {
-      img.addEventListener('load', doPrint)
-      img.addEventListener('error', cleanup)
-    }
-  } else {
-    doPrint()
-  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
   return true
 }
 
@@ -180,7 +147,7 @@ export function printFbsSticker(
     win.document.close()
     return true
   }
-  return printViaIframe(html)
+  return printViaBlobWindow(html)
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */

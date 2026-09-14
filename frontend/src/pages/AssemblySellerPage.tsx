@@ -1813,7 +1813,7 @@ function WbAssemblySellerPage() {
 
   const counts = data?.counts ?? {}
   const assemblyEligible = data?.assembly_eligible
-  const sellerName = data?.seller.company_name ?? 'Сборка FBS'
+  const sellerName = data?.seller?.company_name ?? 'Сборка FBS'
 
   function stageCount(key: string): number {
     if (key === 'confirm') return counts.in_picking ?? 0

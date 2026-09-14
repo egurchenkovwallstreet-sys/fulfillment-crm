@@ -29,9 +29,10 @@ import { WarehouseHubPage } from './pages/WarehouseHubPage'
 import { XlIntakeHub } from './pages/XlIntakeHub'
 import { ArticleIntakePage } from './pages/ArticleIntakePage'
 import { WbFactIntakePage } from './pages/WbFactIntakePage'
-import { initKioskPrintMode } from './utils/printMode'
+import { initKioskPrintGuard, initKioskPrintMode } from './utils/printMode'
 
 initKioskPrintMode()
+initKioskPrintGuard()
 
 function HomeRedirect() {
   const { isSeller } = useAuth()

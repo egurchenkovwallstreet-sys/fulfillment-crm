@@ -951,17 +951,6 @@
   font-size: 0.88rem;
 }
 
-@media print {
-  .sidebar,
-  .topbar,
-  .assembly-pipeline,
-  .assembly-scan-panel,
-  .assembly-scan-live,
-  .assembly-table-panel {
-    display: none !important;
-  }
-}
-
 .assembly-warehouse {
   display: inline-flex;
   align-items: center;

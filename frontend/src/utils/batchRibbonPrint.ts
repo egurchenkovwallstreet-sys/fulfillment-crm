@@ -1,4 +1,5 @@
 import { openPrintHolder, closePrintHolder, normalizeImageBase64 } from './browserPrint'
+import { markPrintSurfaceHtml } from './printMode'
 import { bridgePrintImage, type PrintJobType } from './printBridge'
 import { getCachedPrintBridgeHealth } from './printService'
 
@@ -131,7 +132,7 @@ function itemToHtml(item: BatchRibbonItem): string {
 }
 
 function buildRibbonHtml(items: BatchRibbonItem[]): string {
-  return `<!DOCTYPE html>
+  return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
@@ -140,7 +141,7 @@ function buildRibbonHtml(items: BatchRibbonItem[]): string {
 </head>
 <body>${items.map(itemToHtml).join('')}
 </body>
-</html>`
+</html>`)
 }
 
 function drawRowsPng(title: string, rows: Array<[string, string]>): string {
