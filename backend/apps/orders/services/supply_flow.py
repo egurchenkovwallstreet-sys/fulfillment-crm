@@ -209,7 +209,7 @@ def fetch_seller_shipping_points(
 
 
 SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
-SHIPPING_POINTS_CACHE_VERSION = "v9"
+SHIPPING_POINTS_CACHE_VERSION = "v10"
 
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
   "Липкинское",
@@ -324,8 +324,11 @@ def _all_sc_fetch_cities() -> tuple[str, ...]:
   return _dedupe_shipping_cities(MOSCOW_REGION_50KM_CITIES, PINNED_SHIPPING_EXTRA_CITIES)
 
 
-def _fulfillment_shipping_cache_key(fulfillment_id: int) -> str:
-  return f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:ff:{fulfillment_id}"
+def _fulfillment_shipping_cache_key(fulfillment_id: int, cargo_type: int) -> str:
+  return (
+    f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:"
+    f"ff:{fulfillment_id}:cargo:{int(cargo_type)}"
+  )
 
 
 def _reference_wb_seller_for_fulfillment(user) -> Seller:
@@ -378,8 +381,34 @@ def _is_pp_office_type(point: dict) -> bool:
   return _normalize_text(point.get("officeType")) == "pp"
 
 
+def _is_explicit_ppt_point(point: dict) -> bool:
+  """ППТ — пункт приёма FBS-отправлений (officeType=pp, не ПВЗ)."""
+  haystack = _point_haystack(point)
+  return any(
+    marker in haystack
+    for marker in (
+      "ппт",
+      "пункт прием",
+      "пункт приёма",
+      "пункт приема",
+      "прием товар",
+      "приём товар",
+      "сдача отправлен",
+      "прием отправлен",
+      "приём отправлен",
+    )
+  )
+
+
 def _is_consumer_pvz_point(point: dict) -> bool:
-  """ПВЗ для выдачи покупателям — не для FBS-отгрузки."""
+  """
+  ПВЗ для выдачи покупателям — не для FBS-отгрузки.
+  В WB API и ПВЗ, и ППТ приходят как officeType=pp; отличаем по названию/адресу.
+  """
+  if not _is_pp_office_type(point):
+    return False
+  if _is_explicit_ppt_point(point):
+    return False
   haystack = _point_haystack(point)
   return any(
     marker in haystack
@@ -387,15 +416,21 @@ def _is_consumer_pvz_point(point: dict) -> bool:
       "пвз",
       "пункт выдачи",
       "выдачи заказ",
+      "выдача заказ",
       "pickup point",
+      "для покупат",
+      "для клиент",
     )
   )
 
 
 def _is_ppt_shipment_point(point: dict) -> bool:
+  """ППТ для FBS-отгрузки: officeType=pp и явные маркеры приёма (не ПВЗ)."""
   if not _is_pp_office_type(point):
     return False
-  return not _is_consumer_pvz_point(point)
+  if _is_consumer_pvz_point(point):
+    return False
+  return _is_explicit_ppt_point(point)
 
 
 def _is_delivery_office_type(point: dict) -> bool:
@@ -508,7 +543,7 @@ def fetch_moscow_region_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = _fulfillment_shipping_cache_key(seller.fulfillment_id)
+  cache_key = _fulfillment_shipping_cache_key(seller.fulfillment_id, resolved_cargo)
   if not force_refresh:
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
@@ -581,7 +616,13 @@ def fetch_fulfillment_shipping_points_catalog(
   if not reference or not reference.wb_api_token_encrypted:
     reference = _reference_wb_seller_for_fulfillment(user)
 
-  cache_key = _fulfillment_shipping_cache_key(fulfillment.id)
+  client = _get_client(reference)
+  resolved_cargo = _resolve_shipping_cargo_type(
+    client,
+    cargo_type=cargo_type,
+    wb_supply_id=wb_supply_id,
+  )
+  cache_key = _fulfillment_shipping_cache_key(fulfillment.id, resolved_cargo)
   cached_before = cache.get(cache_key) if not force_refresh else None
   from_cache = (
     isinstance(cached_before, dict)
@@ -886,7 +927,10 @@ def _merge_pinned_shipping_points(
   cargo_type: int,
   points: list[dict],
 ) -> list[dict]:
-  """Всегда добавить в список СЦ Вешки, Внуково и Пушкино."""
+  """
+  Добавить закреплённые СЦ (Вешки, Внуково, Пушкино), если их нет в ответе WB.
+  ID из API не подменяем — менеджер выбирает конкретный пункт, CRM передаёт его в WB.
+  """
   merged = list(points or [])
   known_ids = {
     int(point["id"])
@@ -901,60 +945,35 @@ def _merge_pinned_shipping_points(
       if key not in found_keys and matcher(point):
         found_keys.add(key)
 
-  if len(found_keys) == len(PINNED_SHIPPING_POINT_MATCHERS):
-    pool = []
-  else:
-    pool = _fetch_pinned_shipping_pool(client, cargo_type)
+  missing = [
+    (key, matcher)
+    for key, matcher in PINNED_SHIPPING_POINT_MATCHERS
+    if key not in found_keys
+  ]
+  if not missing:
+    return merged
 
-  if pool:
-    for key, matcher in PINNED_SHIPPING_POINT_MATCHERS:
-      if key in found_keys:
-        continue
-      if key == "veshki_lipkinskoe":
-        scorer = _veshki_lipkinskoe_score
-      elif key == "vnukovo_sc":
-        scorer = _vnukovo_sc_score
-      else:
-        scorer = None
-      point = _pick_best_matching_point(pool, matcher, scorer=scorer)
-      if not point:
-        continue
-      point_id = int(point["id"])
-      if point_id in known_ids:
-        found_keys.add(key)
-        continue
-      merged.append(_normalize_pinned_point(point))
-      known_ids.add(point_id)
-      found_keys.add(key)
-
-  veshki = _resolve_veshki_shipping_point(client, cargo_type)
-  if veshki:
-    veshki_id = int(veshki["id"])
-    merged = [
-      point
-      for point in merged
-      if not (
-        isinstance(point, dict)
-        and _matches_veshki_lipkinskoe(point)
-        and int(point.get("id") or 0) != veshki_id
-      )
-    ]
-    known_ids = {
-      int(point["id"])
-      for point in merged
-      if isinstance(point, dict) and point.get("id") is not None
-    }
-    merged = [point for point in merged if not (isinstance(point, dict) and int(point.get("id") or 0) == veshki_id)]
-    merged.insert(0, veshki)
-    known_ids.add(veshki_id)
-
-  if not any(_matches_vnukovo_sc(point) for point in merged if isinstance(point, dict)):
-    vnukovo = _resolve_vnukovo_shipping_point(client, cargo_type)
-    if vnukovo:
-      point_id = int(vnukovo["id"])
-      if point_id not in known_ids:
-        merged.append(vnukovo)
-        known_ids.add(point_id)
+  pool = _fetch_pinned_shipping_pool(client, cargo_type)
+  for key, matcher in missing:
+    if key == "veshki_lipkinskoe":
+      scorer = _veshki_lipkinskoe_score
+      fallback = _veshki_env_fallback_point
+    elif key == "vnukovo_sc":
+      scorer = _vnukovo_sc_score
+      fallback = _vnukovo_env_fallback_point
+    else:
+      scorer = None
+      fallback = lambda: None
+    point = _pick_best_matching_point(pool, matcher, scorer=scorer)
+    if not point:
+      point = fallback()
+    if not point:
+      continue
+    point_id = int(point["id"])
+    if point_id in known_ids:
+      continue
+    merged.append(_normalize_pinned_point(point))
+    known_ids.add(point_id)
 
   return merged
 

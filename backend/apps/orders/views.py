@@ -75,6 +75,7 @@ from .services.assembly_queue import (
 from .services.marking_verification import verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
+  _serialize_shipping_point_for_api,
   fetch_all_russia_sc_shipping_points,
   fetch_seller_shipping_points,
   fetch_supply_barcode,
@@ -1256,14 +1257,16 @@ class AssemblyShippingPointsView(APIView):
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
 
+    sc_payload = [_serialize_shipping_point_for_api(item) for item in sc_points]
+    pp_payload = [_serialize_shipping_point_for_api(item) for item in pp_points]
     return Response({
       "success": True,
       "city": city,
       "scope": scope,
       "cargo_type": resolved_cargo,
-      "shipping_points": sc_points,
-      "shipping_points_sc": sc_points,
-      "shipping_points_pp": pp_points,
+      "shipping_points": sc_payload,
+      "shipping_points_sc": sc_payload,
+      "shipping_points_pp": pp_payload,
     })
 
 

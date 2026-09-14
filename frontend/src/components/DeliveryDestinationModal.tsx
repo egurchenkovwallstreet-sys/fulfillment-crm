@@ -84,18 +84,7 @@ function formatPointLabel(point: ShippingPoint): string {
   return `#${point.id} · ${city}${point.name} — ${point.address}`
 }
 
-function isVeshkiLipkinskoe(point: ShippingPoint): boolean {
-  const haystack = normalizeSearch(`${point.city} ${point.name} ${point.address}`)
-  if (!haystack.includes('липкин')) return false
-  return (
-    haystack.includes('веш') ||
-    (haystack.includes('2') && haystack.includes('км')) ||
-    haystack.includes('вешки') ||
-    haystack.includes('вёшки')
-  )
-}
-
-function pickPointId(
+function resolvePreferredPointId(
   points: ShippingPoint[],
   preferredId: number | null | undefined,
 ): number | '' {
@@ -103,9 +92,7 @@ function pickPointId(
   if (preferredId != null && points.some((point) => point.id === preferredId)) {
     return preferredId
   }
-  const veshki = points.find(isVeshkiLipkinskoe)
-  if (veshki) return veshki.id
-  return points[0].id
+  return ''
 }
 
 function normalizeSearch(value: string): string {
@@ -198,14 +185,14 @@ export function DeliveryDestinationModal({
           if (fallbackPool.length > 0) {
             setPointKind(fallbackKind)
             setSelectedPointId(
-              pickPointId(fallbackPool, preferredPointId ?? saved.shippingPointId),
+              resolvePreferredPointId(fallbackPool, preferredPointId ?? saved.shippingPointId),
             )
           } else {
             setSelectedPointId('')
           }
         } else {
           setSelectedPointId(
-            pickPointId(pool, preferredPointId ?? saved.shippingPointId),
+            resolvePreferredPointId(pool, preferredPointId ?? saved.shippingPointId),
           )
         }
         setPointsError('')
@@ -230,7 +217,9 @@ export function DeliveryDestinationModal({
     setPointKind(nextKind)
     setSearchQuery('')
     const pool = nextKind === 'pp' ? ppPoints : scPoints
-    setSelectedPointId(pickPointId(pool, selectedPointId === '' ? null : selectedPointId))
+    setSelectedPointId(
+      resolvePreferredPointId(pool, selectedPointId === '' ? null : selectedPointId),
+    )
   }
 
   function handleConfirm() {
@@ -272,8 +261,9 @@ export function DeliveryDestinationModal({
         <p className="assembly-modal__message delivery-destination-modal__message">{message}</p>
 
         <p className="delivery-destination-modal__hint">
-          Москва и Московская область: СЦ/склады (МГТ и КГТ) — {scPoints.length}, ППТ — {ppPoints.length}.
-          Поиск: «липкин», «веш», «внуков», «пушкино»…
+          Москва и Московская область: СЦ/склады — {scPoints.length}, ППТ — {ppPoints.length}
+          (ПВЗ для покупателей скрыты).
+          Выберите пункт в списке — пропуск оформится строго на него (#ID в строке).
         </p>
 
         <div className="delivery-destination-modal__field">

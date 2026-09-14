@@ -5,9 +5,11 @@ from apps.orders.services.supply_flow import (
   SHIPPING_POINTS_CACHE_VERSION,
   _fulfillment_shipping_cache_key,
   _is_consumer_pvz_point,
+  _is_explicit_ppt_point,
   _is_ppt_shipment_point,
   _matches_vnukovo_sc,
   _matches_veshki_lipkinskoe,
+  _merge_pinned_shipping_points,
   _pick_best_matching_point,
   _point_supports_any_cargo,
   _shipping_point_zone_label,
@@ -53,14 +55,24 @@ class ShippingPointMatchersTests(SimpleTestCase):
     self.assertTrue(_is_consumer_pvz_point(point))
     self.assertFalse(_is_ppt_shipment_point(point))
 
-  def test_ppt_kept_when_not_pvz(self):
+  def test_ppt_kept_when_explicit_markers(self):
     point = {
       "name": "ППТ Москва",
       "address": "пункт приема",
       "city": "Москва",
       "officeType": "pp",
     }
+    self.assertTrue(_is_explicit_ppt_point(point))
     self.assertTrue(_is_ppt_shipment_point(point))
+
+  def test_ambiguous_pp_without_markers_excluded(self):
+    point = {
+      "name": "Wildberries",
+      "address": "Москва, ул. Пример",
+      "city": "Москва",
+      "officeType": "pp",
+    }
+    self.assertFalse(_is_ppt_shipment_point(point))
 
   def test_sc_list_includes_mgt_and_kgt(self):
     self.assertEqual(SC_LIST_CARGO_TYPES, (1, 3))
@@ -77,10 +89,39 @@ class ShippingPointMatchersTests(SimpleTestCase):
     self.assertEqual(merged["cargoTypes"], [1, 3])
     self.assertEqual(merged["address"], "addr")
 
-  def test_fulfillment_cache_key_shared(self):
-    key = _fulfillment_shipping_cache_key(42)
-    self.assertIn(f"ff:42", key)
+  def test_fulfillment_cache_key_includes_cargo(self):
+    key = _fulfillment_shipping_cache_key(42, 3)
+    self.assertIn("ff:42", key)
+    self.assertIn("cargo:3", key)
     self.assertIn(SHIPPING_POINTS_CACHE_VERSION, key)
+
+  def test_merge_pinned_does_not_replace_veshki_ids(self):
+    veshki_sc = {
+      "id": 100,
+      "name": "Москва (Вёшки)",
+      "address": "Липкинское ш., 2-й км",
+      "city": "Мытищи",
+      "officeType": "sc",
+    }
+    veshki_sw = {
+      "id": 101,
+      "name": "Склад Вёшки",
+      "address": "Липкинское ш., 2-й км",
+      "city": "Мытищи",
+      "officeType": "sw",
+    }
+
+    class DummyClient:
+      def fetch_shipping_points(self, city, cargo_type):
+        return [veshki_sw]
+
+    merged = _merge_pinned_shipping_points(
+      DummyClient(),
+      1,
+      [veshki_sc, veshki_sw],
+    )
+    ids = {int(point["id"]) for point in merged}
+    self.assertEqual(ids, {100, 101})
 
   def test_vnukovo_zone_label(self):
     point = {"name": "СЦ Внуково", "address": "Москва", "city": "Москва"}
