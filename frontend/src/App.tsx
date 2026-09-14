@@ -11,6 +11,7 @@ import { OwnerPricingPage } from './pages/owner/OwnerPricingPage'
 import { OwnerSellerTariffsPage } from './pages/owner/OwnerSellerTariffsPage'
 import { OwnerStaffPage } from './pages/owner/OwnerStaffPage'
 import { OwnerShippingPointsPage } from './pages/owner/OwnerShippingPointsPage'
+import { OwnerProductStatsPage } from './pages/owner/OwnerProductStatsPage'
 import { AssemblySellerPage } from './pages/AssemblySellerPage'
 import { AssemblySellersPage } from './pages/AssemblySellersPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -89,6 +90,7 @@ function AppRoutes() {
               <Route path="pricing" element={<OwnerPricingPage />} />
               <Route path="tariffs" element={<OwnerSellerTariffsPage />} />
               <Route path="billing" element={<AdminBillingPage />} />
+              <Route path="product-stats" element={<OwnerProductStatsPage />} />
               <Route path="shipping-points" element={<OwnerShippingPointsPage />} />
             </Route>
             <Route path="/billing" element={<Navigate to="/owner/billing" replace />} />

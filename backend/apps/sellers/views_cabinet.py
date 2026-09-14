@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -14,6 +15,7 @@ from apps.sellers.models import Seller
 from apps.sellers.serializers import (
   SellerBarcodeAnalyticsSerializer,
   SellerBarcodeDetailSerializer,
+  CrmProductStatsSerializer,
   SellerCabinetSummarySerializer,
   SellerCreateSerializer,
   SellerInviteSerializer,
@@ -49,6 +51,10 @@ from apps.sellers.services.admin_billing_cache import (
   get_cached_admin_billing,
   is_cache_stale,
   queue_admin_billing_refresh,
+)
+from apps.sellers.services.crm_product_stats import (
+  PERIOD_CHOICES,
+  load_crm_product_shipment_stats,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.utils import seller_has_user_account, seller_username
@@ -308,6 +314,58 @@ class SellerCabinetBarcodeView(APIView):
     if not detail:
       return Response(status=status.HTTP_404_NOT_FOUND)
     return Response(SellerBarcodeDetailSerializer(detail).data)
+
+
+def _parse_optional_date(value: str | None):
+  if not value:
+    return None
+  try:
+    return datetime.strptime(value.strip()[:10], "%Y-%m-%d").date()
+  except ValueError:
+    return None
+
+
+class AdminCrmProductStatsView(APIView):
+  """Отгрузки по баркодам селлера — только данные CRM."""
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def get(self, request):
+    seller_id = request.query_params.get("seller_id")
+    if not seller_id:
+      return Response({"detail": "Укажите seller_id"}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+      seller_pk = int(seller_id)
+    except (TypeError, ValueError):
+      return Response({"detail": "Некорректный seller_id"}, status=status.HTTP_400_BAD_REQUEST)
+    seller = get_seller_for_user(request.user, seller_pk)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    marketplace = parse_marketplace(request)
+    period = (request.query_params.get("period") or "all").strip().lower()
+    if period not in PERIOD_CHOICES:
+      return Response(
+        {"detail": "period: day, week, month, all или custom"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+    date_from = _parse_optional_date(request.query_params.get("date_from"))
+    date_to = _parse_optional_date(request.query_params.get("date_to"))
+    if period == "custom" and (not date_from or not date_to):
+      return Response(
+        {"detail": "Для period=custom укажите date_from и date_to (YYYY-MM-DD)"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    barcode = (request.query_params.get("barcode") or "").strip() or None
+    payload = load_crm_product_shipment_stats(
+      seller,
+      marketplace=marketplace,
+      period=period,
+      date_from=date_from,
+      date_to=date_to,
+      barcode=barcode,
+    )
+    return Response(CrmProductStatsSerializer(payload).data)
 
 
 class AdminBillingDashboardView(APIView):

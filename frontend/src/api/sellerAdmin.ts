@@ -377,3 +377,44 @@ export async function fetchAdminBilling(
 
   return { status: 'pending', detail: 'Статистика всё ещё загружается' }
 }
+
+export type CrmProductStatsPeriod = 'day' | 'week' | 'month' | 'all' | 'custom'
+
+export type CrmProductStatItem = {
+  barcode: string
+  name: string
+  tech_size: string
+  vendor_code: string
+  units: number
+}
+
+export type CrmProductStatsResponse = {
+  seller_id: number
+  company_name: string
+  marketplace: 'wb' | 'ozon'
+  period: CrmProductStatsPeriod
+  date_from: string | null
+  date_to: string | null
+  crm_data_from: string | null
+  crm_data_to: string | null
+  total_units: number
+  items: CrmProductStatItem[]
+}
+
+export async function fetchCrmProductStats(params: {
+  sellerId: number
+  marketplace?: 'wb' | 'ozon'
+  period?: CrmProductStatsPeriod
+  dateFrom?: string
+  dateTo?: string
+  barcode?: string
+}): Promise<CrmProductStatsResponse> {
+  const qs = new URLSearchParams()
+  qs.set('seller_id', String(params.sellerId))
+  if (params.marketplace === 'ozon') qs.set('marketplace', 'ozon')
+  if (params.period) qs.set('period', params.period)
+  if (params.dateFrom) qs.set('date_from', params.dateFrom)
+  if (params.dateTo) qs.set('date_to', params.dateTo)
+  if (params.barcode?.trim()) qs.set('barcode', params.barcode.trim())
+  return apiFetch<CrmProductStatsResponse>(`/api/sellers/admin/product-stats/?${qs.toString()}`)
+}

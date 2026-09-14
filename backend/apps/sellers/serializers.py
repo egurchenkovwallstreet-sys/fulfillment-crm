@@ -278,3 +278,24 @@ class SellerBarcodeAnalyticsSerializer(serializers.Serializer):
 class SellerBarcodeDetailSerializer(SellerBarcodeAnalyticsSerializer):
   daily_orders = serializers.ListField()
   sales_lookback_days = serializers.IntegerField()
+
+
+class CrmProductStatItemSerializer(serializers.Serializer):
+  barcode = serializers.CharField()
+  name = serializers.CharField()
+  tech_size = serializers.CharField(allow_blank=True)
+  vendor_code = serializers.CharField(allow_blank=True)
+  units = serializers.IntegerField()
+
+
+class CrmProductStatsSerializer(serializers.Serializer):
+  seller_id = serializers.IntegerField()
+  company_name = serializers.CharField()
+  marketplace = serializers.CharField()
+  period = serializers.CharField()
+  date_from = serializers.DateField(allow_null=True)
+  date_to = serializers.DateField(allow_null=True)
+  crm_data_from = serializers.DateField(allow_null=True)
+  crm_data_to = serializers.DateField(allow_null=True)
+  total_units = serializers.IntegerField()
+  items = CrmProductStatItemSerializer(many=True)

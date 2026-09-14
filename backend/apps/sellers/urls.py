@@ -17,6 +17,7 @@ from .views_ozon import (
 )
 from .views_cabinet import (
   AdminBillingDashboardView,
+  AdminCrmProductStatsView,
   SellerCabinetBarcodeView,
   SellerCabinetView,
   SellerInviteView,
@@ -41,6 +42,11 @@ urlpatterns = [
     "admin/billing/",
     AdminBillingDashboardView.as_view(),
     name="admin-billing-dashboard",
+  ),
+  path(
+    "admin/product-stats/",
+    AdminCrmProductStatsView.as_view(),
+    name="admin-crm-product-stats",
   ),
   path(
     "manage/<int:seller_id>/invite/",
