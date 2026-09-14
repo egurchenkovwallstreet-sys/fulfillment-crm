@@ -10,6 +10,7 @@ from apps.orders.services.supply_sync import (
   _finalize_supply_scan,
   _wb_supply_scanned_at,
   reconcile_stuck_in_delivery_supplies,
+  sync_supply_scan_dates,
 )
 from apps.sellers.models import Seller
 
@@ -26,15 +27,11 @@ class WbSupplyScannedAtTests(TestCase):
       datetime(2026, 9, 10, 8, 0, tzinfo=dt_timezone.utc),
     )
 
-  def test_closed_at_fallback_for_done_supply(self):
-    scanned = _wb_supply_scanned_at({
+  def test_closed_at_without_scan_dt_is_not_warehouse_scan(self):
+    self.assertIsNone(_wb_supply_scanned_at({
       "done": True,
       "closedAt": "2026-09-10T09:00:00Z",
-    })
-    self.assertEqual(
-      scanned,
-      datetime(2026, 9, 10, 9, 0, tzinfo=dt_timezone.utc),
-    )
+    }))
 
   def test_open_supply_without_scan_is_none(self):
     self.assertIsNone(_wb_supply_scanned_at({"done": False, "closedAt": "2026-09-10T09:00:00Z"}))
@@ -108,3 +105,27 @@ class ReconcileStuckDeliveryTests(TestCase):
 
     reconcile_stuck_in_delivery_supplies(self.seller, client=client)
     record_mock.assert_called_once()
+
+  @patch("apps.orders.services.supply_sync._get_client")
+  def test_sync_reopens_supply_closed_by_closed_at_only(self, get_client_mock):
+    scanned_at = timezone.now()
+    self.supply.wb_scanned_at = scanned_at
+    self.supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    self.order.status = Order.Status.SHIPPED
+    self.order.save(update_fields=["status", "updated_at"])
+
+    client = MagicMock()
+    client.fetch_supplies.return_value = [{
+      "id": "WB-SUP-1",
+      "done": True,
+      "closedAt": "2026-09-10T09:00:00Z",
+    }]
+    get_client_mock.return_value = client
+
+    result = sync_supply_scan_dates(self.seller, client=client)
+
+    self.order.refresh_from_db()
+    self.supply.refresh_from_db()
+    self.assertEqual(result["orders_reopened"], 1)
+    self.assertEqual(self.order.status, Order.Status.IN_DELIVERY)
+    self.assertIsNone(self.supply.wb_scanned_at)

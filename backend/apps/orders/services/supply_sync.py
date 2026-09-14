@@ -24,15 +24,10 @@ CRM_SUPPLY_LEGACY_RE = re.compile(r"^CRM-(\d+)-")
 
 def _wb_supply_scanned_at(wb_supply: dict) -> datetime | None:
   """
-  Момент приёмки поставки на складе WB.
-  Основной признак — scanDt; для закрытых поставок без scanDt — closedAt.
+  Момент приёмки поставки на складе WB — только scanDt (скан ШК поставки).
+  closedAt ставится при передаче в доставку, до физической приёмки на СЦ.
   """
-  scanned_at = _parse_wb_datetime(wb_supply.get("scanDt") or wb_supply.get("scan_dt"))
-  if scanned_at:
-    return scanned_at
-  if bool(wb_supply.get("done")):
-    return _parse_wb_datetime(wb_supply.get("closedAt") or wb_supply.get("closed_at"))
-  return None
+  return _parse_wb_datetime(wb_supply.get("scanDt") or wb_supply.get("scan_dt"))
 
 
 def _parse_wb_datetime(value) -> datetime | None:
@@ -221,6 +216,10 @@ def _process_wb_supply(
         scanned_at=scanned_at,
       )
     else:
+      if supply.wb_scanned_at is not None:
+        supply.wb_scanned_at = None
+        supply.save(update_fields=["wb_scanned_at", "updated_at"])
+        stats["premature_scan_reverted"] = stats.get("premature_scan_reverted", 0) + 1
       stats["orders_status_updated"] += _sync_crm_orders_delivery_status(
         crm_orders,
         scanned_at=None,
@@ -314,7 +313,35 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
   except WBApiError as exc:
     raise AssemblyError(str(exc)) from exc
 
-  return _apply_wb_supply_scan_index(seller, wb_supplies)
+  result = _apply_wb_supply_scan_index(seller, wb_supplies)
+  result["orders_reopened"] = _revert_premature_supply_scans(seller, wb_supplies)
+  return result
+
+
+def _revert_premature_supply_scans(seller: Seller, wb_supplies: list[dict]) -> int:
+  """Вернуть во «В доставке» поставки, ошибочно закрытые по closedAt без scanDt."""
+  wb_by_id = {
+    str(item.get("id") or ""): item
+    for item in wb_supplies
+    if item.get("id")
+  }
+  reopened = 0
+  supplies = Supply.objects.filter(
+    seller=seller,
+    status=Supply.Status.CONFIRMED,
+    wb_scanned_at__isnull=False,
+  ).prefetch_related("orders")
+  for supply in supplies:
+    wb_supply = wb_by_id.get(supply.wb_supply_id)
+    if wb_supply is None or _wb_supply_scanned_at(wb_supply) is not None:
+      continue
+    supply.wb_scanned_at = None
+    supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    reopened += _sync_crm_orders_delivery_status(
+      list(supply.orders.all()),
+      scanned_at=None,
+    )
+  return reopened
 
 
 def _stuck_delivery_supplies_qs(seller: Seller):
@@ -331,7 +358,7 @@ def _stuck_delivery_supplies_qs(seller: Seller):
 def reconcile_stuck_in_delivery_supplies(seller: Seller, client=None) -> dict:
   """
   Найти поставки, застрявшие во «В доставке» из‑за забытого scanDt в CRM,
-  и закрыть их, если WB уже принял поставку (scanDt / closedAt).
+  и закрыть их, если WB уже принял поставку (есть scanDt).
   """
   if not seller.wb_enabled or not seller.wb_api_token_encrypted:
     return {"skipped": True, "reason": "wb_disabled"}
