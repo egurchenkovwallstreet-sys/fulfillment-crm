@@ -397,6 +397,7 @@ export type CrmProductStatsResponse = {
   date_to: string | null
   crm_data_from: string | null
   crm_data_to: string | null
+  barcode_filter?: string | null
   total_units: number
   items: CrmProductStatItem[]
 }

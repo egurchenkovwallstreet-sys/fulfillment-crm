@@ -47,10 +47,19 @@ class CrmProductStatsTests(TestCase):
     )
 
     payload = load_crm_product_shipment_stats(self.seller, period=PERIOD_ALL)
-    self.assertEqual(payload["total_units"], 2)
-    by_barcode = {row["barcode"]: row["units"] for row in payload["items"]}
-    self.assertEqual(by_barcode["111"], 1)
-    self.assertEqual(by_barcode["222"], 1)
+    self.assertEqual(payload["total_units"], 1)
+    self.assertEqual(payload["items"][0]["barcode"], "222")
+
+  def test_wb_ignores_in_delivery_without_wb_acceptance(self):
+    Order.objects.create(
+      seller=self.seller,
+      wb_order_id=1010,
+      barcode="111",
+      status=Order.Status.IN_DELIVERY,
+      in_delivery_at=timezone.now(),
+    )
+    payload = load_crm_product_shipment_stats(self.seller, period=PERIOD_ALL)
+    self.assertEqual(payload["total_units"], 0)
 
   def test_period_day_filters_by_today(self):
     Order.objects.create(

@@ -92,6 +92,12 @@ export function OwnerProductStatsPage() {
   }, [sellerId, marketplace, period, dateFrom, dateTo, barcodeApplied])
 
   useEffect(() => {
+    setBarcodeQuery('')
+    setBarcodeApplied('')
+    setData(null)
+  }, [sellerId, marketplace])
+
+  useEffect(() => {
     if (!sellerId) return
     if (period === 'custom' && (!dateFrom || !dateTo)) return
     void loadStats()
@@ -109,6 +115,11 @@ export function OwnerProductStatsPage() {
   function applyBarcodeSearch(event?: React.FormEvent) {
     event?.preventDefault()
     setBarcodeApplied(barcodeQuery.trim())
+  }
+
+  function clearBarcodeSearch() {
+    setBarcodeQuery('')
+    setBarcodeApplied('')
   }
 
   return (
@@ -176,6 +187,16 @@ export function OwnerProductStatsPage() {
               <button type="submit" className="btn btn--secondary" disabled={!sellerId || loading}>
                 Найти
               </button>
+              {(barcodeQuery || barcodeApplied) && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={clearBarcodeSearch}
+                  disabled={!sellerId || loading}
+                >
+                  Сбросить
+                </button>
+              )}
             </div>
           </form>
         </div>
@@ -229,6 +250,9 @@ export function OwnerProductStatsPage() {
               Показано {periodLabel}: <strong>{data.total_units.toLocaleString('ru-RU')} шт.</strong>
             </span>
             <span>{data.items.length} баркод(ов)</span>
+            {data.barcode_filter && (
+              <span>Фильтр: <strong>{data.barcode_filter}</strong></span>
+            )}
           </div>
         )}
 
@@ -258,7 +282,7 @@ export function OwnerProductStatsPage() {
                 {data.items.map((item) => (
                   <tr key={item.barcode}>
                     <td><code>{item.barcode}</code></td>
-                    <td>{item.name || '—'}</td>
+                    <td>{item.name || item.barcode}</td>
                     <td>{item.tech_size || '—'}</td>
                     <td>{item.vendor_code || '—'}</td>
                     <td>{item.units.toLocaleString('ru-RU')}</td>

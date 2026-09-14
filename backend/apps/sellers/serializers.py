@@ -297,5 +297,6 @@ class CrmProductStatsSerializer(serializers.Serializer):
   date_to = serializers.DateField(allow_null=True)
   crm_data_from = serializers.DateField(allow_null=True)
   crm_data_to = serializers.DateField(allow_null=True)
+  barcode_filter = serializers.CharField(allow_null=True, required=False)
   total_units = serializers.IntegerField()
   items = CrmProductStatItemSerializer(many=True)
