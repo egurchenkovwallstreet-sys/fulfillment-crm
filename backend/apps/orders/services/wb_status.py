@@ -101,6 +101,16 @@ def is_terminal_cancelled_order(order: Order) -> bool:
   )
 
 
+def order_departed_wb_assembly(order: Order) -> bool:
+  """Уже не на сборке WB (передан через ЛК или CRM) — не блокирует поставку в CRM."""
+  if is_terminal_cancelled_order(order):
+    return False
+  supplier = (order.wb_supplier_status or "").strip()
+  if supplier == WB_SUPPLIER_DELIVERY:
+    return True
+  return order.status in (Order.Status.IN_DELIVERY, Order.Status.SHIPPED)
+
+
 def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
   """complete + waiting — вкладка «В доставке» в ЛК WB."""
   supplier_status = (supplier_status or "").strip()

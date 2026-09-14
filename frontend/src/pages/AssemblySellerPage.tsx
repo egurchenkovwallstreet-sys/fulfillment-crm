@@ -1381,12 +1381,13 @@ function WbAssemblySellerPage() {
     supply: AssemblySupply,
     shipping: DeliveryShippingParams,
     printWin: Window | null,
+    options?: { force?: boolean },
   ) {
     if (!id) return
     setError('')
     setLoading(true)
     try {
-      const result = await deliverSupply(supply.id, shipping)
+      const result = await deliverSupply(supply.id, shipping, options)
       if (result.supply_barcode_file) {
         setPrintHolderMessage(printWin, 'Загрузка QR поставки…')
         const channel = await printSupplySticker(result.supply_barcode_file, true, printWin)
@@ -1397,7 +1398,9 @@ function WbAssemblySellerPage() {
         closePrintHolder(printWin)
       }
       noticeOk(
-        `Поставка WB ${supply.wb_supply_id} (${supply.warehouse_name}) передана в доставку`,
+        options?.force
+          ? `Поставка WB ${supply.wb_supply_id} принудительно передана в доставку`
+          : `Поставка WB ${supply.wb_supply_id} (${supply.warehouse_name}) передана в доставку`,
         'Поставка',
       )
       setSelectedMoveIds(new Set())
@@ -1435,6 +1438,36 @@ function WbAssemblySellerPage() {
       (shipping, printWin) => void runDeliverSupply(supply, shipping, printWin),
       supply.wb_supply_id,
     )
+  }
+
+  function handleForceDeliverSupply(supply: AssemblySupply) {
+    if (markingQueueBlocked) {
+      setModal({
+        kind: 'block',
+        title: 'Сначала закройте ошибки ЧЗ',
+        message: 'Есть заказы с отклонённым Честным знаком.',
+      })
+      return
+    }
+    setModal({
+      kind: 'confirm',
+      title: 'Принудительная передача в доставку',
+      message:
+        `Поставка WB ${supply.wb_supply_id} (${supply.warehouse_name}).\n\n` +
+        'Передать в доставку только собранные заказы в CRM? Заказы, уже отправленные через ЛК WB ' +
+        'или без стикера в CRM, не будут учитываться и не заблокируют отправку.\n\n' +
+        'Продолжить?',
+      confirmLabel: 'Да, передать принудительно',
+      onConfirm: () => {
+        setModal(null)
+        openDeliveryModal(
+          'Принудительная передача поставки',
+          `Поставка WB ${supply.wb_supply_id}\nСклад: ${supply.warehouse_name}`,
+          (shipping, printWin) => void runDeliverSupply(supply, shipping, printWin, { force: true }),
+          supply.wb_supply_id,
+        )
+      },
+    })
   }
 
   function toggleMoveOrder(orderId: number) {
@@ -1854,6 +1887,7 @@ function WbAssemblySellerPage() {
       : stage === 'complete'
         ? deliverySupplies
         : []
+  const forceDeliverSupplies = stageSupplies.filter((supply) => supply.can_force_deliver)
   const groupedBySupply = stage === 'confirm' || stage === 'complete'
   const supplyOrderIds = new Set(
     stageSupplies.flatMap((supply) => (supply.orders ?? []).map((order) => order.id)),
@@ -2809,6 +2843,31 @@ function WbAssemblySellerPage() {
         </div>
         )}
       </div>
+
+      {stage === 'confirm' && forceDeliverSupplies.length > 0 && (
+        <section className="panel assembly-force-deliver">
+          <h2 className="section-title">Принудительная передача в доставку</h2>
+          <p className="assembly-force-deliver__hint">
+            Поставка не уходит в доставку из‑за заказов, которых нет в сборке CRM
+            (например, уже отправленных через ЛК WB). Можно передать только собранные заказы.
+          </p>
+          <div className="assembly-force-deliver__actions">
+            {forceDeliverSupplies.map((supply) => (
+              <button
+                key={`force-deliver-${supply.id}`}
+                type="button"
+                className="btn btn--danger-outline"
+                disabled={loading || markingQueueBlocked}
+                onClick={() => handleForceDeliverSupply(supply)}
+                {...uiHint('Пропустить «призрачные» заказы и передать собранные в доставку WB')}
+              >
+                Принудительно: WB {supply.wb_supply_id}
+                {supply.warehouse_name ? ` · ${supply.warehouse_name}` : ''}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {modal && (
         <AssemblyModal modal={modal} onClose={() => setModal(null)} loading={loading} />

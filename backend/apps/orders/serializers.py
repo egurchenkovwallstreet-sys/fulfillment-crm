@@ -372,6 +372,7 @@ class SupplyDeliverSerializer(serializers.Serializer):
     default="selfShipping",
     required=False,
   )
+  force = serializers.BooleanField(required=False, default=False)
 
 
 class ReprintStickerSerializer(serializers.Serializer):
@@ -435,6 +436,7 @@ class SupplySerializer(serializers.ModelSerializer):
   orders = serializers.SerializerMethodField()
   orders_count = serializers.SerializerMethodField()
   can_deliver = serializers.SerializerMethodField()
+  can_force_deliver = serializers.SerializerMethodField()
 
   class Meta:
     model = Supply
@@ -450,6 +452,7 @@ class SupplySerializer(serializers.ModelSerializer):
       "orders_count",
       "orders",
       "can_deliver",
+      "can_force_deliver",
       "supply_barcode_printed",
       "stock_deducted",
       "created_at",
@@ -486,6 +489,11 @@ class SupplySerializer(serializers.ModelSerializer):
     from apps.orders.services.supply_flow import supply_can_deliver
     seller = self.context.get("seller") or obj.seller
     return supply_can_deliver(obj, seller=seller)
+
+  def get_can_force_deliver(self, obj):
+    from apps.orders.services.supply_flow import supply_can_force_deliver
+    seller = self.context.get("seller") or obj.seller
+    return supply_can_force_deliver(obj, seller=seller)
 
 
 class DeliverySupplySerializer(serializers.ModelSerializer):

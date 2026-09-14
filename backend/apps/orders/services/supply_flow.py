@@ -26,6 +26,7 @@ from apps.orders.services.wb_status import (
   WB_STAGE_QUERIES,
   WB_STATUS_AFTER_DELIVER,
   is_terminal_cancelled_order,
+  order_departed_wb_assembly,
   WB_SUPPLIER_ASSEMBLY,
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
@@ -1690,11 +1691,27 @@ def _assert_all_supply_orders_ready_for_deliver(supply: Supply, *, seller: Selle
     )
 
 
+def _detach_departed_orders_from_active_supply(supply: Supply, seller: Seller) -> int:
+  """Открепить от активной поставки заказы, уже ушедшие с этапа сборки WB."""
+  if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
+    return 0
+  to_remove = [
+    order.id
+    for order in supply.orders.filter(assembly_hidden=False).select_related("seller")
+    if order_departed_wb_assembly(order)
+  ]
+  if not to_remove:
+    return 0
+  supply.orders.remove(*Order.objects.filter(pk__in=to_remove))
+  return len(to_remove)
+
+
 def _prepare_supply_orders_for_deliver(
   seller: Seller,
   supply: Supply,
   *,
   user=None,
+  force: bool = False,
 ) -> None:
   for order in assembly_supply_orders(supply, seller):
     if not order_can_send_to_delivery(order):
@@ -1704,7 +1721,8 @@ def _prepare_supply_orders_for_deliver(
       assert_order_stock_deducted_at_print(order)
     except StockDeductionError as exc:
       raise SupplyFlowError(str(exc), code="insufficient_stock") from exc
-  _assert_all_supply_orders_ready_for_deliver(supply, seller=seller)
+  if not force:
+    _assert_all_supply_orders_ready_for_deliver(supply, seller=seller)
 
 
 def _finalize_supply_after_wb_deliver(
@@ -2272,18 +2290,30 @@ def _supply_orders(supply: Supply) -> list[Order]:
 
 
 def assembly_supply_orders(supply: Supply, seller: Seller) -> list[Order]:
-  """Заказы поставки для доставки: без скрытых и без отменённых в WB."""
+  """Заказы поставки для доставки: без скрытых, отменённых и уже ушедших с сборки WB."""
   orders = filter_orders_for_assembly(
     supply.orders.filter(assembly_hidden=False).select_related("product", "seller"),
     seller,
   )
-  return [order for order in orders if not is_terminal_cancelled_order(order)]
+  return [
+    order for order in orders
+    if not is_terminal_cancelled_order(order)
+    and not order_departed_wb_assembly(order)
+  ]
+
+
+def supply_ready_orders(supply: Supply, seller: Seller) -> list[Order]:
+  return [
+    order for order in assembly_supply_orders(supply, seller)
+    if order_can_send_to_delivery(order)
+  ]
 
 
 def refresh_supply_readiness(supply: Supply, *, seller: Seller | None = None) -> Supply:
   if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
     return supply
   seller = seller or supply.seller
+  _detach_departed_orders_from_active_supply(supply, seller)
   orders = assembly_supply_orders(supply, seller)
   if not orders:
     return supply
@@ -2305,6 +2335,18 @@ def supply_can_deliver(supply: Supply, *, seller: Seller | None = None) -> bool:
   return bool(orders) and all(order_can_send_to_delivery(order) for order in orders)
 
 
+def supply_can_force_deliver(supply: Supply, *, seller: Seller | None = None) -> bool:
+  """Есть собранные заказы, но поставку блокируют «призраки» или неготовые."""
+  if supply.status not in (Supply.Status.FORMING, Supply.Status.READY):
+    return False
+  if not supply.wb_supply_id:
+    return False
+  seller = seller or supply.seller
+  if supply_can_deliver(supply, seller=seller):
+    return False
+  return bool(supply_ready_orders(supply, seller))
+
+
 @transaction.atomic
 def send_supply_to_delivery(
   seller: Seller,
@@ -2314,6 +2356,7 @@ def send_supply_to_delivery(
   shipping_point_id: int | None = None,
   shipping_date: date | None = None,
   shipping_type: str = "selfShipping",
+  force: bool = False,
 ) -> dict:
   supply = (
     Supply.objects.filter(pk=supply_id, seller=seller)
@@ -2332,7 +2375,14 @@ def send_supply_to_delivery(
       )
 
   refresh_supply_readiness(supply, seller=seller)
-  if not supply_can_deliver(supply, seller=seller):
+  ready_orders = supply_ready_orders(supply, seller)
+  if force:
+    if not ready_orders:
+      raise SupplyFlowError(
+        "Нет собранных заказов для принудительной передачи в доставку.",
+        code="not_ready",
+      )
+  elif not supply_can_deliver(supply, seller=seller):
     reasons = [
       reason
       for order in assembly_supply_orders(supply, seller)
@@ -2349,7 +2399,7 @@ def send_supply_to_delivery(
   supply_barcode_error = ""
 
   if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
-    _prepare_supply_orders_for_deliver(seller, supply, user=user)
+    _prepare_supply_orders_for_deliver(seller, supply, user=user, force=force)
     try:
       if not shipping_point_id or not shipping_date:
         raise SupplyFlowError(
@@ -2379,7 +2429,7 @@ def send_supply_to_delivery(
       supply.wb_supply_id,
     )
 
-  assembly_orders = assembly_supply_orders(supply, seller)
+  assembly_orders = ready_orders if force else assembly_supply_orders(supply, seller)
   primary_order = next(
     (order for order in assembly_orders if order_can_send_to_delivery(order)),
     None,

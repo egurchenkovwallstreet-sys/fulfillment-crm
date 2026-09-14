@@ -1494,6 +1494,7 @@ class SupplyDeliverView(APIView):
         shipping_point_id=data["shipping_point_id"],
         shipping_date=data["shipping_date"],
         shipping_type=data.get("shipping_type") or "selfShipping",
+        force=bool(data.get("force")),
       )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)

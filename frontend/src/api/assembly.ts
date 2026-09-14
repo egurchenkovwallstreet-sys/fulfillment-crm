@@ -66,6 +66,7 @@ export interface AssemblySupply {
   orders_count: number
   orders?: AssemblyOrder[]
   can_deliver: boolean
+  can_force_deliver?: boolean
   supply_barcode_printed: boolean
   created_at: string
 }
@@ -626,6 +627,7 @@ export interface DeliverSupplyResult {
 export function deliverSupply(
   supplyId: number,
   shipping: DeliveryShippingParams,
+  options?: { force?: boolean },
 ) {
   return apiFetch<DeliverSupplyResult>(`/api/orders/supplies/${supplyId}/deliver/`, {
     method: 'POST',
@@ -633,6 +635,7 @@ export function deliverSupply(
       shipping_point_id: shipping.shipping_point_id,
       shipping_date: shipping.shipping_date,
       shipping_type: shipping.shipping_type ?? 'selfShipping',
+      force: options?.force ?? false,
     }),
   })
 }
