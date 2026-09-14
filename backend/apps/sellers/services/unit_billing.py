@@ -27,7 +27,7 @@ from apps.sellers.services.seller_billing_stats import (
   _supply_handoff_at,
 )
 from apps.sellers.services.warehouse_filter import (
-  get_enabled_warehouse_match_ids,
+  get_billing_warehouse_match_ids,
   seller_has_warehouse_config,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
@@ -135,7 +135,12 @@ def _upsert_wb_unit_charge(
   fallback_tariff: Decimal | None,
   match_ids,
 ) -> bool:
-  if not _order_eligible_for_billing(seller, meta, match_ids=match_ids):
+  if not _order_eligible_for_billing(
+    seller,
+    meta,
+    match_ids=match_ids,
+    wb_order_id=wb_order_id,
+  ):
     return False
 
   unit_price = _resolve_unit_price(
@@ -188,7 +193,7 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
 
   order_index = _build_wb_order_index(seller, client)
   match_ids = (
-    get_enabled_warehouse_match_ids(seller)
+    get_billing_warehouse_match_ids(seller)
     if seller_has_warehouse_config(seller)
     else None
   )

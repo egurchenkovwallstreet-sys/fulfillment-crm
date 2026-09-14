@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from django.db.models import QuerySet
 
-from apps.sellers.models import Seller, SellerWarehouse
+from apps.integrations.marketplace import WB
+from apps.orders.models import Order, Supply
+from apps.sellers.models import ExcludedSellerWarehouse, Seller, SellerWarehouse
 
 
 def seller_has_warehouse_config(seller: Seller) -> bool:
@@ -29,6 +31,41 @@ def get_enabled_warehouse_match_ids(seller: Seller) -> set[int]:
     match_ids.add(wh_id)
     if office_id:
       match_ids.add(office_id)
+  return match_ids
+
+
+def get_billing_warehouse_match_ids(seller: Seller) -> set[int]:
+  """
+  ID складов WB для биллинга и истории отгрузок.
+  Включает включённые, отключённые, удалённые из CRM и склады из заказов/поставок.
+  """
+  match_ids: set[int] = set()
+  for wh_id, office_id in SellerWarehouse.objects.filter(seller=seller).values_list(
+    "wb_warehouse_id",
+    "office_id",
+  ):
+    match_ids.add(int(wh_id))
+    if office_id:
+      match_ids.add(int(office_id))
+
+  for ext_id in ExcludedSellerWarehouse.objects.filter(
+    seller=seller,
+    marketplace=WB,
+  ).values_list("warehouse_external_id", flat=True):
+    match_ids.add(int(ext_id))
+
+  for wh_id in Order.objects.filter(
+    seller=seller,
+    wb_warehouse_id__isnull=False,
+  ).values_list("wb_warehouse_id", flat=True).distinct():
+    match_ids.add(int(wh_id))
+
+  for wh_id in Supply.objects.filter(
+    seller=seller,
+    wb_warehouse_id__isnull=False,
+  ).values_list("wb_warehouse_id", flat=True).distinct():
+    match_ids.add(int(wh_id))
+
   return match_ids
 
 

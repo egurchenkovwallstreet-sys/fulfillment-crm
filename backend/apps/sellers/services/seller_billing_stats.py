@@ -25,7 +25,7 @@ from apps.sellers.services.calendar_periods import (
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.services.warehouse_filter import (
-  get_enabled_warehouse_match_ids,
+  get_billing_warehouse_match_ids,
   order_matches_enabled_warehouse,
   seller_has_warehouse_config,
 )
@@ -160,12 +160,24 @@ def _order_eligible_for_billing(
   meta: _ShippedOrderMeta | None,
   *,
   match_ids: set[int] | None,
+  wb_order_id: int | None = None,
 ) -> bool:
-  """Только заказы с включённых FBS-складов фулфилмента."""
-  if not seller_has_warehouse_config(seller):
+  """
+  Заказы для биллинга: склады, когда-либо подключённые в CRM, и зафиксированные начисления.
+  Отключение или удаление склада не убирает прошлые отгрузки из расчётов.
+  """
+  if wb_order_id is not None and ShipmentUnitCharge.objects.filter(
+    seller=seller,
+    wb_order_id=wb_order_id,
+  ).exists():
     return True
   if meta is None:
     return False
+  if not seller_has_warehouse_config(seller):
+    return True
+  match_ids = match_ids if match_ids is not None else get_billing_warehouse_match_ids(seller)
+  if not match_ids:
+    return meta.warehouse_id is not None or meta.office_id is not None
   return order_matches_enabled_warehouse(
     seller,
     meta.warehouse_id,
@@ -216,7 +228,12 @@ def _sum_shipped_orders(
     seen.add(wb_order_id)
 
     meta = order_index.get(wb_order_id)
-    if not _order_eligible_for_billing(seller, meta, match_ids=match_ids):
+    if not _order_eligible_for_billing(
+      seller,
+      meta,
+      match_ids=match_ids,
+      wb_order_id=wb_order_id,
+    ):
       continue
 
     count += 1
@@ -272,7 +289,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
   """
   Заказы, переданные на склад WB по календарным неделям (пн–вс, МСК).
   Источник: GET /api/v3/supplies (done) + order-ids из WB API.
-  Учитываются заказы только с включённых FBS-складов фулфилмента.
+  Учитываются отгрузки со всех FBS-складов, когда-либо подключённых в CRM (в т.ч. отключённых/удалённых).
   """
   today = today_local()
   current_week_start, current_week_end = calendar_week_bounds(today)
@@ -293,7 +310,7 @@ def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_H
 
   order_index = _build_wb_order_index(seller, client)
   match_ids = (
-    get_enabled_warehouse_match_ids(seller)
+    get_billing_warehouse_match_ids(seller)
     if seller_has_warehouse_config(seller)
     else None
   )
