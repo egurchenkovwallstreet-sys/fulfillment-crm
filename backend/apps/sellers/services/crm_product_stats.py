@@ -1,4 +1,4 @@
-"""Отгрузки по товарам из данных CRM (без внешних API)."""
+"""Отгрузки по товарам: фактические списания CRM-остатка (без внешних API)."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -8,15 +8,13 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.marketplace import OZON, WB, normalize_marketplace
-from apps.integrations.models import AuditLog
-from apps.orders.models import Order, OzonPosting
 from apps.sellers.models import Seller
 from apps.sellers.services.calendar_periods import (
   calendar_month_start,
   calendar_week_bounds,
   today_local,
 )
-from apps.warehouse.models import Product
+from apps.warehouse.models import Product, StockOperation
 
 PERIOD_DAY = "day"
 PERIOD_WEEK = "week"
@@ -25,7 +23,9 @@ PERIOD_ALL = "all"
 PERIOD_CUSTOM = "custom"
 PERIOD_CHOICES = {PERIOD_DAY, PERIOD_WEEK, PERIOD_MONTH, PERIOD_ALL, PERIOD_CUSTOM}
 
-WB_DELIVERY_LOG_PREFIX = "В доставку (WB): заказ #"
+WB_STICKER_STOCK_COMMENT = "стикер FBS"
+OZON_STOCK_COMMENT_PREFIX = "Ozon "
+STATS_SOURCE = "sticker_stock_deduction"
 
 
 def resolve_stats_period(
@@ -52,65 +52,31 @@ def resolve_stats_period(
   return None, None, PERIOD_ALL
 
 
-def _wb_delivery_audit_qs(seller: Seller):
-  """Журнал: кнопка «В доставку» в CRM (не автоматический SHIPPED от WB)."""
-  return AuditLog.objects.filter(
-    seller=seller,
-    action_type=AuditLog.ActionType.SUPPLY,
-    message__startswith=WB_DELIVERY_LOG_PREFIX,
-  )
-
-
-def _wb_delivered_order_ids(
+def _stock_shipment_qs(
   seller: Seller,
   *,
+  marketplace: str,
   date_from: date | None = None,
   date_to: date | None = None,
-) -> set[int]:
-  qs = _wb_delivery_audit_qs(seller)
-  if date_from:
-    qs = qs.filter(created_at__date__gte=date_from)
-  if date_to:
-    qs = qs.filter(created_at__date__lte=date_to)
-
-  order_ids: set[int] = set()
-  for details in qs.values_list("details", flat=True):
-    if not isinstance(details, dict):
-      continue
-    order_id = details.get("order_id")
-    if order_id:
-      order_ids.add(int(order_id))
-  return order_ids
-
-
-def _wb_shipped_qs(seller: Seller, *, date_from: date | None = None, date_to: date | None = None):
-  order_ids = _wb_delivered_order_ids(seller, date_from=date_from, date_to=date_to)
-  if not order_ids:
-    return Order.objects.none()
-  return Order.objects.filter(seller=seller, pk__in=order_ids).exclude(barcode="")
-
-
-def _ozon_shipped_qs(seller: Seller):
-  return OzonPosting.objects.filter(
-    seller=seller,
-    shipped_at__isnull=False,
-  ).exclude(barcode="")
+):
+  """Списания при первой печати FBS-стикера (WB) или отгрузке Ozon."""
+  mp = normalize_marketplace(marketplace)
+  qs = StockOperation.objects.filter(
+    product__seller=seller,
+    product__marketplace=mp,
+    operation_type=StockOperation.OperationType.SHIPMENT,
+  )
+  if mp == OZON:
+    qs = qs.filter(comment__startswith=OZON_STOCK_COMMENT_PREFIX)
+  else:
+    qs = qs.filter(comment__icontains=WB_STICKER_STOCK_COMMENT)
+  return _apply_date_filter(qs, field="created_at", date_from=date_from, date_to=date_to)
 
 
 def _crm_bounds(seller: Seller, *, marketplace: str) -> tuple[date | None, date | None]:
-  mp = normalize_marketplace(marketplace)
-  if mp == OZON:
-    qs = _ozon_shipped_qs(seller)
-    date_field = "shipped_at"
-    first = qs.order_by(date_field).values_list(date_field, flat=True).first()
-    last = qs.order_by(f"-{date_field}").values_list(date_field, flat=True).first()
-  else:
-    first_log = _wb_delivery_audit_qs(seller).order_by("created_at").values_list("created_at", flat=True).first()
-    last_log = _wb_delivery_audit_qs(seller).order_by("-created_at").values_list("created_at", flat=True).first()
-    if not first_log or not last_log:
-      return None, None
-    return timezone.localtime(first_log).date(), timezone.localtime(last_log).date()
-
+  qs = _stock_shipment_qs(seller, marketplace=marketplace)
+  first = qs.order_by("created_at").values_list("created_at", flat=True).first()
+  last = qs.order_by("-created_at").values_list("created_at", flat=True).first()
   if not first or not last:
     return None, None
   return timezone.localtime(first).date(), timezone.localtime(last).date()
@@ -124,48 +90,37 @@ def _apply_date_filter(qs, *, field: str, date_from: date | None, date_to: date 
   return qs
 
 
-def _aggregate_wb(
+def _aggregate_stock_shipments(
   seller: Seller,
   *,
+  marketplace: str,
   date_from: date | None,
   date_to: date | None,
   barcode: str | None,
 ) -> tuple[dict[str, int], dict[str, int | None]]:
-  qs = _wb_shipped_qs(seller, date_from=date_from, date_to=date_to)
+  qs = _stock_shipment_qs(
+    seller,
+    marketplace=marketplace,
+    date_from=date_from,
+    date_to=date_to,
+  )
   if barcode:
-    qs = qs.filter(barcode__icontains=barcode.strip())
+    qs = qs.filter(product__barcode__icontains=barcode.strip())
 
   counts: dict[str, int] = defaultdict(int)
   product_ids: dict[str, int | None] = {}
-  for barcode_value, product_id in qs.values_list("barcode", "product_id"):
+  for barcode_value, quantity, product_id in qs.values_list(
+    "product__barcode",
+    "quantity",
+    "product_id",
+  ):
     code = (barcode_value or "").strip()
     if not code:
       continue
-    counts[code] += 1
-    if code not in product_ids and product_id:
-      product_ids[code] = product_id
-  return counts, product_ids
-
-
-def _aggregate_ozon(
-  seller: Seller,
-  *,
-  date_from: date | None,
-  date_to: date | None,
-  barcode: str | None,
-) -> tuple[dict[str, int], dict[str, int | None]]:
-  qs = _ozon_shipped_qs(seller)
-  qs = _apply_date_filter(qs, field="shipped_at", date_from=date_from, date_to=date_to)
-  if barcode:
-    qs = qs.filter(barcode__icontains=barcode.strip())
-
-  counts: dict[str, int] = defaultdict(int)
-  product_ids: dict[str, int | None] = {}
-  for barcode_value, quantity, product_id in qs.values_list("barcode", "quantity", "product_id"):
-    code = (barcode_value or "").strip()
-    if not code:
-      continue
-    counts[code] += max(1, quantity or 1)
+    units = abs(int(quantity or 1))
+    if units < 1:
+      units = 1
+    counts[code] += units
     if code not in product_ids and product_id:
       product_ids[code] = product_id
   return counts, product_ids
@@ -226,22 +181,13 @@ def load_crm_product_shipment_stats(
     date_to=date_to,
   )
 
-  if mp == OZON:
-    counts, product_ids = _aggregate_ozon(
-      seller,
-      date_from=range_from,
-      date_to=range_to,
-      barcode=barcode,
-    )
-    source = "ozon_shipped_at"
-  else:
-    counts, product_ids = _aggregate_wb(
-      seller,
-      date_from=range_from,
-      date_to=range_to,
-      barcode=barcode,
-    )
-    source = "crm_delivery_audit"
+  counts, product_ids = _aggregate_stock_shipments(
+    seller,
+    marketplace=mp,
+    date_from=range_from,
+    date_to=range_to,
+    barcode=barcode,
+  )
 
   meta = _product_meta(
     seller,
@@ -274,7 +220,7 @@ def load_crm_product_shipment_stats(
     "crm_data_from": crm_from.isoformat() if crm_from else None,
     "crm_data_to": crm_to.isoformat() if crm_to else None,
     "barcode_filter": (barcode or "").strip() or None,
-    "source": source,
+    "source": STATS_SOURCE,
     "total_units": total_units,
     "items": items,
   }
