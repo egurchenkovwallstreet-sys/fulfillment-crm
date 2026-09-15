@@ -11,6 +11,10 @@ app.autodiscover_tasks()
 
 # Быстрый sync каждую минуту; полный — раз в 15 мин (архив 30 дн. для счётчика «В доставке»)
 app.conf.beat_schedule = {
+    "sync-wb-delivery-scans": {
+        "task": "apps.integrations.tasks.sync_wb_delivery_scans",
+        "schedule": 120.0,
+    },
     "sync-wb-orders-quick": {
         "task": "apps.integrations.tasks.sync_wb_orders",
         "schedule": 60.0,

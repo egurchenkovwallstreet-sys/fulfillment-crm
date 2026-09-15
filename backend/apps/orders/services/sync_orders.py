@@ -351,6 +351,32 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   }
 
 
+def sync_all_delivery_scans(*, user=None, fulfillment=None) -> dict:
+  """Быстрая синхронизация scanDt для всех активных селлеров WB."""
+  sellers = Seller.objects.filter(is_active=True, wb_enabled=True).exclude(
+    wb_api_token_encrypted="",
+  )
+  if fulfillment:
+    sellers = sellers.filter(fulfillment=fulfillment)
+
+  results = []
+  errors = []
+  totals = {"supplies_scanned": 0, "orders_closed": 0, "reconciled": 0}
+
+  for seller in sellers:
+    try:
+      stats = sync_delivery_scans_for_seller(seller, user=user)
+      results.append({"seller_id": seller.id, **stats})
+      scan = stats.get("supply_scan") or {}
+      totals["supplies_scanned"] += int(scan.get("supplies_scanned") or 0)
+      totals["orders_closed"] += int(scan.get("orders_closed") or 0)
+      totals["reconciled"] += int(stats.get("reconciled") or 0)
+    except SyncError as exc:
+      errors.append({"seller_id": seller.id, "error": str(exc)})
+
+  return {"results": results, "errors": errors, "totals": totals}
+
+
 def sync_all_active_sellers(*, user=None, mode: str = "full", fulfillment=None) -> list[dict]:
   results = []
   errors = []

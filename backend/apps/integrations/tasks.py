@@ -95,6 +95,22 @@ def scan_off_crm_shipments():
   return result
 
 
+@shared_task(queue="sync")
+def sync_wb_delivery_scans():
+  """Каждые 2 мин — подтянуть scanDt поставок для всех селлеров WB."""
+  from apps.orders.services.sync_orders import sync_all_delivery_scans
+
+  result = sync_all_delivery_scans()
+  if result["errors"]:
+    logger.warning("WB delivery scan sync errors: %s", result["errors"])
+  logger.info(
+    "WB delivery scan sync done: scanned=%s closed=%s",
+    result["totals"].get("supplies_scanned"),
+    result["totals"].get("orders_closed"),
+  )
+  return result
+
+
 @shared_task
 def reconcile_stuck_delivery_orders():
   """Ежедневно в 4:00 — закрыть «зависшие» во «В доставке» после scanDt на WB."""

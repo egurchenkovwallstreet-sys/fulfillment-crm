@@ -98,6 +98,11 @@ export interface SyncResult {
     shipped_missing?: number
     delivery_status_breakdown?: Record<string, number>
   }
+  supply_scan?: {
+    supplies_scanned?: number
+    orders_closed?: number
+    supplies_checked?: number
+  }
   cancelled_in_supplies?: {
     order_id: number
     wb_order_id: number

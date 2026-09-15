@@ -181,6 +181,7 @@ CELERY_TASK_DEFAULT_QUEUE = "default"
 CELERY_TASK_ROUTES = {
   "apps.warehouse.tasks.*": {"queue": "heavy"},
   "apps.integrations.tasks.sync_wb_orders": {"queue": "sync"},
+  "apps.integrations.tasks.sync_wb_delivery_scans": {"queue": "sync"},
   "apps.integrations.tasks.sync_ozon_orders": {"queue": "sync"},
   "apps.integrations.tasks.sync_orders_for_seller_task": {"queue": "sync"},
 }
