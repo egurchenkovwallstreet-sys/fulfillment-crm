@@ -426,7 +426,6 @@ export type SupplyReportCrmOrder = {
   sticker_number: string
   wb_created_at: string | null
   supply_scanned_at: string | null
-  wb_sorted_at: string | null
   sticker_scanned_at_wb: boolean
   was_shipped_to_wb_sc: boolean
   crm_status: string
@@ -449,7 +448,6 @@ export type SupplyReportOffCrmOrder = {
   sticker_number: string
   wb_created_at: string | null
   supply_scanned_at: string | null
-  wb_sorted_at: string | null
   sticker_scanned_at_wb: boolean
   was_shipped_to_wb_sc: boolean
   resolution_status: string

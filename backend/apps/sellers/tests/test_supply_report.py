@@ -98,7 +98,7 @@ class SupplyReportTests(TestCase):
     payload = load_supply_report(self.fulfillment, month=month)
     row = payload["supplies"][0]["crm_orders"][0]
     self.assertTrue(row["sticker_scanned_at_wb"])
-    self.assertIsNone(row["wb_sorted_at"])
+    self.assertNotIn("wb_sorted_at", row)
 
   def test_sticker_excel_format(self):
     self.crm_order.sticker_part_a = "12345"

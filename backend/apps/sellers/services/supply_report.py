@@ -110,9 +110,8 @@ def resolve_wb_sorted_at(order: Order, supply: Supply) -> datetime | None:
 
 
 def resolve_sticker_scanned_at_wb(order: Order, supply: Supply) -> bool:
-  """Стикер заказа точно отсканирован на СЦ WB (wbStatus sorted+ или зафиксированный wb_sorted_at)."""
-  if resolve_wb_sorted_at(order, supply):
-    return True
+  """Факт поштучного скана стикера на СЦ WB по wbStatus sorted+ (без времени)."""
+  del supply
   return order_sticker_scanned_at_wb(order)
 
 
@@ -293,7 +292,6 @@ def _serialize_crm_order(order: Order, supply: Supply) -> dict:
     "sticker_number": order_sticker_display(order),
     "wb_created_at": order.wb_created_at.isoformat() if order.wb_created_at else None,
     "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
-    "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
     "sticker_scanned_at_wb": sticker_scanned,
     "was_shipped_to_wb_sc": sticker_scanned,
     "crm_status": order.status,
@@ -340,7 +338,6 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
     "sticker_number": off_crm_sticker_display(row),
     "wb_created_at": wb_created_at,
     "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
-    "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
     "sticker_scanned_at_wb": sticker_scanned,
     "was_shipped_to_wb_sc": was_shipped,
     "resolution_status": row.status,
