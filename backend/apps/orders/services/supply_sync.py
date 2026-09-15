@@ -401,12 +401,21 @@ def _process_wb_supply(
     if update_fields:
       supply.save(update_fields=list(dict.fromkeys(update_fields)))
 
+    if not scanned_at and supply.wb_scanned_at is None:
+      scanned_at = _fetch_supply_scanned_at_detail(client, wb_supply_id)
+
     if scanned_at:
       stats["orders_status_updated"] += _finalize_supply_scan(
         supply,
         crm_orders,
         seller=seller,
         scanned_at=scanned_at,
+      )
+    elif supply.wb_scanned_at is not None:
+      stats["orders_status_updated"] += _sync_crm_orders_delivery_status(
+        crm_orders,
+        seller=seller,
+        scanned_at=supply.wb_scanned_at,
       )
     else:
       stats["orders_status_updated"] += _sync_crm_orders_delivery_status(
@@ -503,6 +512,7 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
   except WBApiError as exc:
     raise AssemblyError(str(exc)) from exc
 
+  pending_count = _pending_scan_supplies_qs(seller).count()
   result = _apply_wb_supply_scan_index(seller, wb_supplies, client=client)
   detail_scanned, detail_closed = _apply_stuck_supply_detail_scans(
     seller,
@@ -511,12 +521,23 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
   )
   result["supplies_scanned"] += detail_scanned
   result["orders_closed"] += detail_closed
+  result["pending_supplies"] = pending_count
+  result["scan_dt_in_list"] = len(_build_wb_supply_scan_index(wb_supplies))
   result["orders_reopened"] = _revert_premature_supply_scans(
     seller,
     wb_supplies,
     client=client,
   )
   return result
+
+
+def delivery_order_ids_from_crm_pending(seller: Seller) -> set[int]:
+  """ID заказов из CRM-поставок без scanDt — без сотен запросов к WB."""
+  ids: set[int] = set()
+  pending = _pending_scan_supplies_qs(seller).prefetch_related("orders")
+  for supply in pending:
+    ids.update(order.wb_order_id for order in supply.orders.all() if order.wb_order_id)
+  return ids
 
 
 def _revert_premature_supply_scans(

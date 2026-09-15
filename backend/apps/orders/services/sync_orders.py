@@ -132,11 +132,13 @@ def sync_delivery_scans_for_seller(seller: Seller, *, user=None) -> dict:
   supply_scan_result = {"supplies_scanned": 0, "orders_closed": 0}
   stale_after_supply = {"stale_delivery_cleared": 0}
   individual_after_supply = {"individually_accepted_closed": 0}
+  scan_error = ""
   try:
     supply_scan_result = sync_supply_scan_dates(seller, client=client)
     stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
     individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
-  except Exception:
+  except Exception as exc:
+    scan_error = str(exc)
     logger.exception("delivery scan sync failed for seller_id=%s", seller.id)
 
   reconciled = (
@@ -155,14 +157,16 @@ def sync_delivery_scans_for_seller(seller: Seller, *, user=None) -> dict:
       "supply_scan": supply_scan_result,
       "reconciled": reconciled,
       "sync_mode": "delivery",
+      "scan_error": scan_error,
     },
   )
 
   return {
-    "success": True,
+    "success": not scan_error,
     "sync_mode": "delivery",
     "supply_scan": supply_scan_result,
     "reconciled": reconciled,
+    "scan_error": scan_error,
   }
 
 
@@ -219,10 +223,15 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   except WBApiError:
     pass
 
-  try:
-    delivery_supply_ids = client.fetch_delivery_order_ids()
-  except WBApiError:
-    pass
+  if quick:
+    from apps.orders.services.supply_sync import delivery_order_ids_from_crm_pending
+
+    delivery_supply_ids = delivery_order_ids_from_crm_pending(seller)
+  else:
+    try:
+      delivery_supply_ids = client.fetch_delivery_order_ids()
+    except WBApiError:
+      delivery_supply_ids = set()
 
   supply_scan_result = {"supplies_scanned": 0, "orders_closed": 0}
   supply_sync_result = {}
@@ -273,6 +282,11 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
 
     supply_scan_result = sync_supply_scan_dates(seller, client=client)
     supply_sync_result = sync_supplies_from_wb(seller, include_closed=True)
+    # Повторно: sync_supplies мог откатить заказы, если в списке WB не было scanDt
+    rescan = sync_supply_scan_dates(seller, client=client)
+    supply_scan_result["supplies_scanned"] += int(rescan.get("supplies_scanned") or 0)
+    supply_scan_result["orders_closed"] += int(rescan.get("orders_closed") or 0)
+    supply_scan_result["rescan"] = rescan
     stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
     individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
   except Exception:

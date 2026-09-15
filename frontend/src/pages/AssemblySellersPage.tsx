@@ -48,8 +48,13 @@ export function AssemblySellersPage() {
     setSyncing(true)
     try {
       const deliveryResult = await syncOrders(undefined, 'delivery', { background: false })
-      const scanned = deliveryResult.supply_scan?.supplies_scanned ?? 0
-      const closed = deliveryResult.supply_scan?.orders_closed ?? 0
+      const scanInfo = deliveryResult.supply_scan
+      const scanned = scanInfo?.supplies_scanned ?? 0
+      const closed = scanInfo?.orders_closed ?? 0
+      const pending = scanInfo?.pending_supplies ?? '?'
+      if (deliveryResult.scan_error) {
+        showError('ScanDt', deliveryResult.scan_error)
+      }
       const result = await syncOrders(undefined, 'quick')
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0
@@ -57,7 +62,7 @@ export function AssemblySellersPage() {
         'Синхронизация',
         marketplace === 'ozon'
           ? 'Счётчики Ozon обновлены'
-          : `Синхронизация завершена. ScanDt: ${scanned} поставок, ${closed} заказов. Из WB: ${fetched}, статусов: ${statusesUpdated}`,
+          : `ScanDt: ${scanned}/${pending} поставок, ${closed} заказов закрыто. WB: ${fetched} новых, статусов ${statusesUpdated}`,
       )
       await load()
     } catch (err) {

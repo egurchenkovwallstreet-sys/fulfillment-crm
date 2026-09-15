@@ -102,7 +102,10 @@ export interface SyncResult {
     supplies_scanned?: number
     orders_closed?: number
     supplies_checked?: number
+    pending_supplies?: number
+    scan_dt_in_list?: number
   }
+  scan_error?: string
   cancelled_in_supplies?: {
     order_id: number
     wb_order_id: number
