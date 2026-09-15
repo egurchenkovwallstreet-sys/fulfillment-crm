@@ -106,6 +106,11 @@ class ReconcileStuckDeliveryTests(TestCase):
       "done": True,
       "closedAt": "2026-09-10T09:00:00Z",
     }]
+    client.fetch_supply.return_value = {
+      "id": "WB-SUP-1",
+      "done": True,
+      "closedAt": "2026-09-10T09:00:00Z",
+    }
     get_client_mock.return_value = client
 
     result = sync_supply_scan_dates(self.seller, client=client)
@@ -115,3 +120,28 @@ class ReconcileStuckDeliveryTests(TestCase):
     self.assertEqual(result["orders_reopened"], 1)
     self.assertEqual(self.order.status, Order.Status.IN_DELIVERY)
     self.assertIsNone(self.supply.wb_scanned_at)
+
+  @patch("apps.orders.services.supply_sync._get_client")
+  def test_sync_applies_scan_dt_from_supply_detail_when_list_omits_it(self, get_client_mock):
+    client = MagicMock()
+    client.fetch_supplies.return_value = [{
+      "id": "WB-SUP-1",
+      "done": True,
+      "closedAt": "2026-09-10T09:00:00Z",
+    }]
+    client.fetch_supply.return_value = {
+      "id": "WB-SUP-1",
+      "done": True,
+      "scanDt": "2026-09-10T08:00:00Z",
+    }
+    get_client_mock.return_value = client
+
+    result = sync_supply_scan_dates(self.seller, client=client)
+
+    self.order.refresh_from_db()
+    self.supply.refresh_from_db()
+    self.assertEqual(result["supplies_scanned"], 1)
+    self.assertEqual(result["orders_closed"], 1)
+    self.assertEqual(self.order.status, Order.Status.SHIPPED)
+    self.assertIsNotNone(self.supply.wb_scanned_at)
+    client.fetch_supply.assert_called_with("WB-SUP-1")

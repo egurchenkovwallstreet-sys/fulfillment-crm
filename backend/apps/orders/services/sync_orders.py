@@ -1,7 +1,11 @@
+import logging
+
 from django.db import transaction
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
+
+logger = logging.getLogger(__name__)
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.orders.models import Order
@@ -218,7 +222,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
     individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
   except Exception:
-    pass
+    logger.exception("supply sync failed for seller_id=%s", seller.id)
 
   reconciled = status_result.get("reconciled", 0)
   reconciled += stale_after_supply.get("stale_delivery_cleared", 0)

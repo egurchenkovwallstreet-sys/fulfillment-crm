@@ -182,6 +182,50 @@ def _build_wb_supply_scan_index(wb_supplies: list[dict]) -> dict[str, datetime]:
   return scan_by_id
 
 
+def _fetch_supply_scanned_at_detail(client, wb_supply_id: str) -> datetime | None:
+  """GET /api/v3/supplies/{id} — в списке scanDt иногда отсутствует."""
+  try:
+    detail = client.fetch_supply(wb_supply_id)
+  except WBApiError:
+    return None
+  time.sleep(REQUEST_INTERVAL_SEC)
+  return _wb_supply_scanned_at(detail)
+
+
+def _apply_stuck_supply_detail_scans(
+  seller: Seller,
+  client,
+  wb_supplies: list[dict],
+) -> tuple[int, int]:
+  """Закрыть «зависшие» поставки, если scanDt есть только в detail API."""
+  scan_by_id = _build_wb_supply_scan_index(wb_supplies)
+  supplies_scanned = 0
+  orders_closed = 0
+
+  stuck = list(_stuck_delivery_supplies_qs(seller).prefetch_related("orders"))
+  for supply in stuck:
+    if supply.wb_supply_id in scan_by_id:
+      continue
+    scanned_at = _fetch_supply_scanned_at_detail(client, supply.wb_supply_id)
+    if not scanned_at:
+      continue
+    orders = list(supply.orders.all())
+    was_pending = supply.wb_scanned_at is None or any(
+      order.status == Order.Status.IN_DELIVERY for order in orders
+    )
+    closed = _finalize_supply_scan(
+      supply,
+      orders,
+      seller=seller,
+      scanned_at=scanned_at,
+    )
+    if was_pending and (closed or supply.wb_scanned_at is not None):
+      supplies_scanned += 1
+      orders_closed += closed
+
+  return supplies_scanned, orders_closed
+
+
 def _process_wb_supply(
   seller: Seller,
   client,
@@ -200,8 +244,23 @@ def _process_wb_supply(
   try:
     order_wb_ids = _fetch_supply_order_wb_ids(client, wb_supply)
   except WBApiError:
-    stats["skipped"] += 1
     stats["fetch_errors"] += 1
+    if done and scanned_at:
+      existing = (
+        Supply.objects.filter(seller=seller, wb_supply_id=wb_supply_id)
+        .prefetch_related("orders")
+        .first()
+      )
+      if existing:
+        crm_orders = list(existing.orders.all())
+        if crm_orders:
+          stats["orders_status_updated"] += _finalize_supply_scan(
+            existing,
+            crm_orders,
+            seller=seller,
+            scanned_at=scanned_at,
+          )
+    stats["skipped"] += 1
     return
 
   stats["api_order_fetches"] += 1
@@ -250,10 +309,6 @@ def _process_wb_supply(
         scanned_at=scanned_at,
       )
     else:
-      if supply.wb_scanned_at is not None:
-        supply.wb_scanned_at = None
-        supply.save(update_fields=["wb_scanned_at", "updated_at"])
-        stats["premature_scan_reverted"] = stats.get("premature_scan_reverted", 0) + 1
       stats["orders_status_updated"] += _sync_crm_orders_delivery_status(
         crm_orders,
         seller=seller,
@@ -349,11 +404,27 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
     raise AssemblyError(str(exc)) from exc
 
   result = _apply_wb_supply_scan_index(seller, wb_supplies)
-  result["orders_reopened"] = _revert_premature_supply_scans(seller, wb_supplies)
+  detail_scanned, detail_closed = _apply_stuck_supply_detail_scans(
+    seller,
+    client,
+    wb_supplies,
+  )
+  result["supplies_scanned"] += detail_scanned
+  result["orders_closed"] += detail_closed
+  result["orders_reopened"] = _revert_premature_supply_scans(
+    seller,
+    wb_supplies,
+    client=client,
+  )
   return result
 
 
-def _revert_premature_supply_scans(seller: Seller, wb_supplies: list[dict]) -> int:
+def _revert_premature_supply_scans(
+  seller: Seller,
+  wb_supplies: list[dict],
+  *,
+  client=None,
+) -> int:
   """Вернуть во «В доставке» поставки, ошибочно закрытые по closedAt без scanDt."""
   wb_by_id = {
     str(item.get("id") or ""): item
@@ -368,7 +439,20 @@ def _revert_premature_supply_scans(seller: Seller, wb_supplies: list[dict]) -> i
   ).prefetch_related("orders")
   for supply in supplies:
     wb_supply = wb_by_id.get(supply.wb_supply_id)
-    if wb_supply is None or _wb_supply_scanned_at(wb_supply) is not None:
+    if wb_supply is not None and _wb_supply_scanned_at(wb_supply) is not None:
+      continue
+    if client is not None:
+      detail_scanned = _fetch_supply_scanned_at_detail(client, supply.wb_supply_id)
+      if detail_scanned:
+        orders = list(supply.orders.all())
+        _finalize_supply_scan(
+          supply,
+          orders,
+          seller=seller,
+          scanned_at=detail_scanned,
+        )
+        continue
+    if wb_supply is None:
       continue
     supply.wb_scanned_at = None
     supply.save(update_fields=["wb_scanned_at", "updated_at"])
@@ -425,11 +509,16 @@ def reconcile_stuck_in_delivery_supplies(seller: Seller, client=None) -> dict:
   scan_by_id = _build_wb_supply_scan_index(wb_supplies)
   relevant_scan = {sid: scan_by_id[sid] for sid in stuck_ids if sid in scan_by_id}
   if not relevant_scan:
+    detail_scanned, detail_closed = _apply_stuck_supply_detail_scans(
+      seller,
+      client,
+      wb_supplies,
+    )
     return {
       "stuck_supplies": len(stuck_ids),
       "supplies_checked": len(wb_supplies),
-      "supplies_scanned": 0,
-      "orders_closed": 0,
+      "supplies_scanned": detail_scanned,
+      "orders_closed": detail_closed,
     }
 
   wb_supplies_subset = [

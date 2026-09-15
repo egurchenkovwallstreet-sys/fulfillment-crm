@@ -439,14 +439,31 @@ function WbAssemblySellerPage() {
   useEffect(() => {
     if (!id || stage !== 'complete') return
 
-    const refreshDelivery = () => {
+    const refreshDelivery = async () => {
       if (document.visibilityState !== 'visible') return
-      void load({ silent: true })
+      if (!syncInFlightRef.current) {
+        syncInFlightRef.current = true
+        try {
+          await syncOrders(id, 'quick')
+        } catch {
+          // фоновая синхронизация WB — без алертов
+        } finally {
+          syncInFlightRef.current = false
+        }
+      }
+      await load({ silent: true })
     }
 
-    refreshDelivery()
-    const interval = window.setInterval(refreshDelivery, 5 * 60 * 1000)
-    return () => window.clearInterval(interval)
+    void refreshDelivery()
+    const interval = window.setInterval(() => void refreshDelivery(), 5 * 60 * 1000)
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshDelivery()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [id, stage, load])
 
   function normalizeScanCode(value: string): string {
