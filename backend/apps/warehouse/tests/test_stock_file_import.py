@@ -70,7 +70,7 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(by_barcode["4602222222222"].cell_number, "15")
 
   @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
-  @patch("apps.warehouse.services.stock_file_import.build_seller_catalog_index")
+  @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
   def test_preview_shows_target_cell_from_excel(self, mock_catalog, mock_wb_stocks):
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
     mock_wb_stocks.return_value = {"4601111111111": {"total": 0}}
@@ -87,18 +87,21 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(row["cell_number"], "7")
     self.assertTrue(row["will_create_cell"])
 
-  @patch("apps.warehouse.services.stock_file_import.fetch_wb_stock_for_barcode", return_value=0)
-  @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses", return_value={})
-  @patch("apps.warehouse.services.stock_file_import.push_wb_stock_increment")
-  @patch("apps.warehouse.services.stock_file_import.build_seller_catalog_index")
+  @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
+  @patch("apps.warehouse.services.stock_file_import.set_wb_stocks_absolute_batch")
+  @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
   def test_apply_creates_cell_and_assigns_product(
     self,
     mock_catalog,
-    mock_push_increment,
-    _mock_wb_stocks,
-    _mock_fetch_wb,
+    mock_push_batch,
+    mock_wb_stocks,
   ):
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
+    mock_wb_stocks.side_effect = [
+      {"4601111111111": {"total": 0}},
+      {"4601111111111": {"total": 4}},
+      {"4601111111111": {"total": 4}},
+    ]
     file_bytes = self._build_excel([("4601111111111", 4, 9)])
     preview = build_stock_import_preview(
       self.seller,
@@ -115,21 +118,30 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(result["applied"], 1)
     product = Product.objects.get(seller=self.seller, barcode="4601111111111")
     self.assertEqual(product.cell.number, "9")
+    self.assertEqual(product.quantity, 4)
     self.assertTrue(Cell.objects.filter(seller=self.seller, number="9").exists())
-    mock_push_increment.assert_called_once()
+    mock_push_batch.assert_called_once()
+    pushed = mock_push_batch.call_args[0][2]
+    self.assertEqual(pushed[0][0], "4601111111111")
+    self.assertEqual(pushed[0][1], 4)
 
-  @patch("apps.warehouse.services.stock_file_import.fetch_wb_stock_for_barcode", return_value=2)
-  @patch("apps.warehouse.services.stock_file_import.push_wb_stock_increment")
-  @patch("apps.warehouse.services.stock_file_import.build_seller_catalog_index")
+  @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
+  @patch("apps.warehouse.services.stock_file_import.set_wb_stocks_absolute_batch")
+  @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
   def test_apply_moves_existing_product_to_excel_cell(
     self,
     mock_catalog,
-    mock_push_increment,
-    _mock_fetch_wb,
+    mock_push_batch,
+    mock_wb_stocks,
   ):
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
+    mock_wb_stocks.side_effect = [
+      {"4601111111111": {"total": 2}},
+      {"4601111111111": {"total": 4}},
+      {"4601111111111": {"total": 4}},
+    ]
     old_cell = Cell.objects.create(seller=self.seller, number="1", is_occupied=True)
-    product = Product.objects.create(
+    Product.objects.create(
       seller=self.seller,
       barcode="4601111111111",
       name="Old",
@@ -148,9 +160,10 @@ class StockFileImportCellTests(TestCase):
       rows=preview_rows,
     )
 
-    product.refresh_from_db()
+    product = Product.objects.get(seller=self.seller, barcode="4601111111111")
     old_cell.refresh_from_db()
     self.assertEqual(product.cell.number, "22")
     self.assertEqual(product.quantity, 3)
     self.assertFalse(old_cell.is_occupied)
-    mock_push_increment.assert_called_once()
+    mock_push_batch.assert_called_once()
+    self.assertEqual(mock_push_batch.call_args[0][2][0][1], 4)

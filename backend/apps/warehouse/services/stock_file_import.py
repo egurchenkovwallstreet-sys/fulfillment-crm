@@ -11,7 +11,11 @@ from apps.integrations.marketplace import WB
 from apps.integrations.models import AuditLog
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOperation
-from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+from apps.warehouse.services.catalog_fetch import (
+  CatalogBarcodeItem,
+  CatalogError,
+  build_catalog_index_for_barcodes,
+)
 from apps.warehouse.services.cells import (
   create_cell_with_next_number,
   get_or_create_cell_by_number,
@@ -23,12 +27,10 @@ from apps.warehouse.services.stock_balance import (
 )
 from apps.warehouse.services.wb_stocks import (
   WBStockError,
-  fetch_wb_stock_for_barcode,
   fetch_wb_stocks_for_warehouses,
   get_seller_warehouse,
   increment_product_warehouse_stock,
-  push_wb_stock_absolute,
-  push_wb_stock_increment,
+  set_wb_stocks_absolute_batch,
 )
 
 try:
@@ -86,6 +88,22 @@ class StockImportPreviewRow:
   cell_number_before: str
   will_create_cell: bool
   message: str
+
+
+@dataclass
+class _ImportPlan:
+  parsed: ParsedStockRow
+  catalog_item: CatalogBarcodeItem
+  crm_before: int
+  wb_before: int
+  crm_wh_before: int
+  crm_expected: int
+  wb_expected: int
+  crm_wh_expected: int
+  crm_total_expected: int
+  reserved_new: int
+  product: Product | None = None
+  created_product: bool = False
 
 
 def _normalize_header(value) -> str:
@@ -197,6 +215,31 @@ def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
   return sorted(aggregated.values(), key=lambda item: item.barcode)
 
 
+def _aggregate_import_rows(rows: list[dict]) -> dict[str, ParsedStockRow]:
+  aggregated: dict[str, ParsedStockRow] = {}
+  for row in rows:
+    barcode = str(row.get("barcode") or "").strip()
+    try:
+      qty = int(row.get("add_quantity") or 0)
+    except (TypeError, ValueError):
+      qty = 0
+    cell_number = _parse_cell_number(row.get("cell_number"))
+    if not barcode or qty <= 0:
+      continue
+    existing = aggregated.get(barcode)
+    if existing:
+      existing.add_quantity += qty
+      if cell_number:
+        existing.cell_number = cell_number
+    else:
+      aggregated[barcode] = ParsedStockRow(
+        barcode=barcode,
+        add_quantity=qty,
+        cell_number=cell_number,
+      )
+  return aggregated
+
+
 def _get_crm_warehouse_qty(product: Product | None, warehouse) -> int:
   if not product:
     return 0
@@ -299,7 +342,10 @@ def build_stock_import_preview(
   file_units = sum(row.add_quantity for row in parsed_rows)
 
   try:
-    catalog_index = build_seller_catalog_index(seller)
+    catalog_index = build_catalog_index_for_barcodes(
+      seller,
+      {row.barcode for row in parsed_rows},
+    )
   except CatalogError as exc:
     raise StockFileImportError(str(exc)) from exc
 
@@ -332,14 +378,13 @@ def build_stock_import_preview(
 
     product = crm_products.get(row.barcode)
     crm_before = product.quantity if product else 0
-    crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
     wb_before = int((wb_stock_map.get(row.barcode) or {}).get("total") or 0)
     crm_after, wb_after, reserved_new, message = _preview_row_values(
       mode=mode,
       seller=seller,
       row=row,
       product=product,
-      crm_wh_before=crm_wh_before,
+      crm_wh_before=_get_crm_warehouse_qty(product, warehouse),
       wb_before=wb_before,
     )
     if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
@@ -349,11 +394,10 @@ def build_stock_import_preview(
     cell_number_before = product.cell.number if product and product.cell_id else ""
     will_create_cell = _cell_will_be_created(seller, target_cell_number, existing_cells)
     if target_cell_number and not will_create_cell:
-      existing_cells.setdefault(target_cell_number, Cell.objects.get(
-        seller=seller,
-        marketplace=WB,
-        number=target_cell_number,
-      ))
+      existing_cells.setdefault(
+        target_cell_number,
+        Cell.objects.get(seller=seller, marketplace=WB, number=target_cell_number),
+      )
 
     preview_rows.append(
       StockImportPreviewRow(
@@ -430,71 +474,30 @@ def _serialize_mismatch(item: dict) -> dict:
   }
 
 
-@transaction.atomic
-def apply_stock_import(
+def _build_import_plans(
   seller: Seller,
   *,
-  warehouse_id: int,
-  rows: list[dict],
-  mode: str = STOCK_IMPORT_MODE_INCREMENT,
-  user=None,
-) -> dict:
-  mode = _normalize_import_mode(mode)
-  warehouse = get_seller_warehouse(seller, warehouse_id)
-  if not rows:
-    raise StockFileImportError("Нет строк для применения")
-
-  try:
-    catalog_index = build_seller_catalog_index(seller)
-  except CatalogError as exc:
-    raise StockFileImportError(str(exc)) from exc
-
-  aggregated: dict[str, ParsedStockRow] = {}
-  for row in rows:
-    barcode = str(row.get("barcode") or "").strip()
-    try:
-      qty = int(row.get("add_quantity") or 0)
-    except (TypeError, ValueError):
-      qty = 0
-    cell_number = _parse_cell_number(row.get("cell_number"))
-    if not barcode or qty <= 0:
-      continue
-    existing = aggregated.get(barcode)
-    if existing:
-      existing.add_quantity += qty
-      if cell_number:
-        existing.cell_number = cell_number
-    else:
-      aggregated[barcode] = ParsedStockRow(
-        barcode=barcode,
-        add_quantity=qty,
-        cell_number=cell_number,
-      )
-
-  if not aggregated:
-    raise StockFileImportError("Нет корректных строк для применения")
-
-  applied = 0
-  created_products = 0
-  verified = 0
-  skipped_unknown_details: list[dict] = []
+  warehouse,
+  mode: str,
+  aggregated: dict[str, ParsedStockRow],
+  catalog_index: dict[str, CatalogBarcodeItem],
+  wb_stock_map: dict[str, dict],
+) -> tuple[list[_ImportPlan], list[dict]]:
+  plans: list[_ImportPlan] = []
   mismatches: list[dict] = []
-  existing_cells = {
-    cell.number: cell
-    for cell in Cell.objects.filter(seller=seller, marketplace=WB)
-  }
 
-  was_crm_units = 0
-  was_wb_units = 0
-  added_units = 0
-  result_crm_units = 0
-  result_wb_units = 0
+  products = {
+    p.barcode: p
+    for p in Product.objects.filter(
+      seller=seller,
+      barcode__in=aggregated.keys(),
+    ).select_related("cell")
+  }
 
   for barcode, parsed_row in aggregated.items():
     add_qty = parsed_row.add_quantity
     catalog_item = catalog_index.get(barcode)
     if not catalog_item:
-      skipped_unknown_details.append({"barcode": barcode, "add_quantity": add_qty})
       mismatches.append({
         "barcode": barcode,
         "add_quantity": add_qty,
@@ -509,14 +512,8 @@ def apply_stock_import(
       })
       continue
 
-    product = (
-      Product.objects.select_for_update()
-      .filter(seller=seller, barcode=barcode)
-      .select_related("cell")
-      .first()
-    )
-    crm_before = product.quantity if product else 0
-    wb_before = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+    product = products.get(barcode)
+    wb_before = int((wb_stock_map.get(barcode) or {}).get("total") or 0)
     crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
     reserved_new = count_reserved_new_orders(seller, barcode) if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else 0
 
@@ -526,169 +523,305 @@ def apply_stock_import(
       crm_wh_expected = add_qty
       crm_total_expected = add_qty
     else:
+      crm_before = product.quantity if product else 0
       crm_expected = crm_before + add_qty
       wb_expected = wb_before + add_qty
       crm_wh_expected = crm_wh_before + add_qty
       crm_total_expected = crm_expected
 
-    was_crm_units += crm_before
-    was_wb_units += wb_before
-
-    savepoint = transaction.savepoint()
-    created_here = False
-    try:
-      cell = _resolve_import_cell(
-        seller,
-        cell_number=parsed_row.cell_number,
-        existing_cells=existing_cells,
-      )
-
-      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
-        if product:
-          old_cell = _assign_product_cell(product, cell)
-          product.quantity = crm_total_expected
-          product.save(update_fields=["quantity", "cell", "updated_at"])
-          _refresh_cells_after_assign(cell, old_cell)
-          ProductWarehouseStock.objects.update_or_create(
-            product=product,
-            seller_warehouse=warehouse,
-            defaults={"quantity": add_qty},
-          )
-        else:
-          product = Product.objects.create(
-            seller=seller,
-            barcode=barcode,
-            name=catalog_item.title,
-            cell=cell,
-            quantity=add_qty,
-            requires_marking=catalog_item.requires_marking,
-            wb_nm_id=catalog_item.wb_nm_id,
-            vendor_code=catalog_item.vendor_code,
-            tech_size=catalog_item.tech_size,
-            wb_size=catalog_item.wb_size,
-            photo_url=catalog_item.photo_url,
-          )
-          refresh_cell_occupied(cell)
-          ProductWarehouseStock.objects.update_or_create(
-            product=product,
-            seller_warehouse=warehouse,
-            defaults={"quantity": add_qty},
-          )
-          created_here = True
-        push_wb_stock_absolute(seller, warehouse, barcode, wb_expected)
-      else:
-        if product:
-          old_cell = _assign_product_cell(product, cell)
-          product.quantity += add_qty
-          product.save(update_fields=["quantity", "cell", "updated_at"])
-          _refresh_cells_after_assign(cell, old_cell)
-          increment_product_warehouse_stock(product, warehouse, add_qty)
-        else:
-          product = Product.objects.create(
-            seller=seller,
-            barcode=barcode,
-            name=catalog_item.title,
-            cell=cell,
-            quantity=add_qty,
-            requires_marking=catalog_item.requires_marking,
-            wb_nm_id=catalog_item.wb_nm_id,
-            vendor_code=catalog_item.vendor_code,
-            tech_size=catalog_item.tech_size,
-            wb_size=catalog_item.wb_size,
-            photo_url=catalog_item.photo_url,
-          )
-          refresh_cell_occupied(cell)
-          increment_product_warehouse_stock(product, warehouse, add_qty)
-          created_here = True
-        push_wb_stock_increment(seller, warehouse, barcode, add_qty)
-
-      product.refresh_from_db()
-      crm_actual = product.quantity
-      crm_wh_actual = _get_crm_warehouse_qty(product, warehouse)
-      wb_actual = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
-
-      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
-        crm_ok = crm_actual == crm_total_expected and crm_wh_actual == crm_wh_expected
-      else:
-        crm_ok = crm_actual == crm_expected and crm_wh_actual == crm_wh_expected
-      wb_ok = wb_actual == wb_expected
-
-      if not crm_ok and not wb_ok:
-        raise StockFileImportError(
-          f"CRM: ожидалось {crm_total_expected if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else crm_expected}, "
-          f"получилось {crm_actual}; "
-          f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
-        )
-      if not crm_ok:
-        raise StockFileImportError(
-          f"CRM: ожидалось {crm_total_expected if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else crm_expected} "
-          f"(склад {crm_wh_expected}), "
-          f"получилось {crm_actual} (склад {crm_wh_actual})",
-        )
-      if not wb_ok:
-        raise StockFileImportError(
-          f"WB: ожидалось {wb_expected}, получилось {wb_actual}",
-        )
-
-      mode_label = (
-        "установка из Excel"
-        if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
-        else f"Импорт Excel +{add_qty} шт."
-      )
-      cell_label = f", яч. {cell.number}" if cell.number else ""
-      StockOperation.objects.create(
+    plans.append(
+      _ImportPlan(
+        parsed=parsed_row,
+        catalog_item=catalog_item,
         product=product,
-        operation_type=StockOperation.OperationType.INTAKE,
-        quantity=add_qty,
-        performed_by=user,
-        comment=(
-          f"{mode_label}, склад WB "
-          f"{warehouse.name or warehouse.wb_warehouse_id}"
-          f"{cell_label}"
-          + (
-            f", «Новые» −{reserved_new}, WB={wb_expected}"
-            if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
-            else ""
-          )
-        ),
+        crm_before=product.quantity if product else 0,
+        wb_before=wb_before,
+        crm_wh_before=crm_wh_before,
+        crm_expected=crm_expected,
+        wb_expected=wb_expected,
+        crm_wh_expected=crm_wh_expected,
+        crm_total_expected=crm_total_expected,
+        reserved_new=reserved_new,
       )
-      transaction.savepoint_commit(savepoint)
-      applied += 1
-      verified += 1
-      added_units += add_qty
-      if created_here:
-        created_products += 1
-      result_crm_units += crm_actual
-      result_wb_units += wb_actual
-    except (WBStockError, StockFileImportError) as exc:
-      transaction.savepoint_rollback(savepoint)
-      if isinstance(exc, WBStockError):
-        stage = "wb"
-      elif "CRM" in str(exc):
-        stage = "crm"
-      elif "WB" in str(exc):
-        stage = "wb"
-      else:
-        stage = "verify"
+    )
 
+  return plans, mismatches
+
+
+@transaction.atomic
+def _apply_crm_import_plans(
+  seller: Seller,
+  *,
+  warehouse,
+  mode: str,
+  plans: list[_ImportPlan],
+  existing_cells: dict[str, Cell],
+  user,
+) -> tuple[int, int]:
+  applied = 0
+  created_products = 0
+
+  for plan in plans:
+    product = (
+      Product.objects.select_for_update()
+      .filter(seller=seller, barcode=plan.parsed.barcode)
+      .select_related("cell")
+      .first()
+    )
+    plan.product = product
+
+    cell = _resolve_import_cell(
+      seller,
+      cell_number=plan.parsed.cell_number,
+      existing_cells=existing_cells,
+    )
+    add_qty = plan.parsed.add_quantity
+    catalog_item = plan.catalog_item
+    created_here = False
+
+    if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+      if product:
+        old_cell = _assign_product_cell(product, cell)
+        product.quantity = plan.crm_total_expected
+        product.save(update_fields=["quantity", "cell", "updated_at"])
+        _refresh_cells_after_assign(cell, old_cell)
+        ProductWarehouseStock.objects.update_or_create(
+          product=product,
+          seller_warehouse=warehouse,
+          defaults={"quantity": add_qty},
+        )
+      else:
+        product = Product.objects.create(
+          seller=seller,
+          barcode=plan.parsed.barcode,
+          name=catalog_item.title,
+          cell=cell,
+          quantity=add_qty,
+          requires_marking=catalog_item.requires_marking,
+          wb_nm_id=catalog_item.wb_nm_id,
+          vendor_code=catalog_item.vendor_code,
+          tech_size=catalog_item.tech_size,
+          wb_size=catalog_item.wb_size,
+          photo_url=catalog_item.photo_url,
+        )
+        refresh_cell_occupied(cell)
+        ProductWarehouseStock.objects.update_or_create(
+          product=product,
+          seller_warehouse=warehouse,
+          defaults={"quantity": add_qty},
+        )
+        created_here = True
+    else:
+      if product:
+        old_cell = _assign_product_cell(product, cell)
+        product.quantity += add_qty
+        product.save(update_fields=["quantity", "cell", "updated_at"])
+        _refresh_cells_after_assign(cell, old_cell)
+        increment_product_warehouse_stock(product, warehouse, add_qty)
+      else:
+        product = Product.objects.create(
+          seller=seller,
+          barcode=plan.parsed.barcode,
+          name=catalog_item.title,
+          cell=cell,
+          quantity=add_qty,
+          requires_marking=catalog_item.requires_marking,
+          wb_nm_id=catalog_item.wb_nm_id,
+          vendor_code=catalog_item.vendor_code,
+          tech_size=catalog_item.tech_size,
+          wb_size=catalog_item.wb_size,
+          photo_url=catalog_item.photo_url,
+        )
+        refresh_cell_occupied(cell)
+        increment_product_warehouse_stock(product, warehouse, add_qty)
+        created_here = True
+
+    plan.product = product
+    plan.created_product = created_here
+
+    crm_actual = product.quantity
+    crm_wh_actual = _get_crm_warehouse_qty(product, warehouse)
+    if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+      crm_ok = crm_actual == plan.crm_total_expected and crm_wh_actual == plan.crm_wh_expected
+    else:
+      crm_ok = crm_actual == plan.crm_expected and crm_wh_actual == plan.crm_wh_expected
+    if not crm_ok:
+      raise StockFileImportError(
+        f"CRM: баркод {plan.parsed.barcode} — ожидалось {plan.crm_total_expected}, "
+        f"получилось {crm_actual} (склад {crm_wh_actual})",
+      )
+
+    mode_label = (
+      "установка из Excel"
+      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
+      else f"Импорт Excel +{add_qty} шт."
+    )
+    cell_label = f", яч. {cell.number}" if cell.number else ""
+    StockOperation.objects.create(
+      product=product,
+      operation_type=StockOperation.OperationType.INTAKE,
+      quantity=add_qty,
+      performed_by=user,
+      comment=(
+        f"{mode_label}, склад WB {warehouse.name or warehouse.wb_warehouse_id}{cell_label}"
+        + (
+          f", «Новые» −{plan.reserved_new}, WB={plan.wb_expected}"
+          if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
+          else ""
+        )
+      ),
+    )
+    applied += 1
+    if created_here:
+      created_products += 1
+
+  return applied, created_products
+
+
+def _push_wb_import_plans(
+  seller: Seller,
+  warehouse,
+  plans: list[_ImportPlan],
+) -> None:
+  if not plans:
+    return
+  stocks = [(plan.parsed.barcode, plan.wb_expected) for plan in plans]
+  set_wb_stocks_absolute_batch(seller, warehouse, stocks)
+
+
+def _verify_wb_import_plans(
+  seller: Seller,
+  warehouse,
+  plans: list[_ImportPlan],
+) -> list[dict]:
+  if not plans:
+    return []
+  barcodes = [plan.parsed.barcode for plan in plans]
+  try:
+    wb_stock_map = fetch_wb_stocks_for_warehouses(seller, [warehouse], barcodes)
+  except WBStockError as exc:
+    return [{
+      "barcode": "",
+      "add_quantity": 0,
+      "crm_before": 0,
+      "crm_expected": 0,
+      "crm_actual": 0,
+      "wb_before": 0,
+      "wb_expected": 0,
+      "wb_actual": 0,
+      "error": f"Не удалось сверить остатки WB после загрузки: {exc}",
+      "stage": "verify",
+    }]
+
+  mismatches: list[dict] = []
+  for plan in plans:
+    wb_actual = int((wb_stock_map.get(plan.parsed.barcode) or {}).get("total") or 0)
+    if wb_actual != plan.wb_expected:
       mismatches.append({
-        "barcode": barcode,
-        "add_quantity": add_qty,
-        "crm_before": crm_before,
-        "crm_expected": crm_expected,
-        "crm_actual": crm_before,
-        "wb_before": wb_before,
-        "wb_expected": wb_expected,
-        "wb_actual": wb_before,
-        "error": str(exc),
-        "stage": stage,
+        "barcode": plan.parsed.barcode,
+        "add_quantity": plan.parsed.add_quantity,
+        "crm_before": plan.crm_before,
+        "crm_expected": plan.crm_expected,
+        "crm_actual": plan.product.quantity if plan.product else plan.crm_expected,
+        "wb_before": plan.wb_before,
+        "wb_expected": plan.wb_expected,
+        "wb_actual": wb_actual,
+        "error": (
+          f"WB ещё показывает {wb_actual}, ожидалось {plan.wb_expected} "
+          "(возможна задержка API — CRM уже обновлена)"
+        ),
+        "stage": "verify",
       })
-      result_crm_units += crm_before
-      result_wb_units += wb_before
+  return mismatches
+
+
+def apply_stock_import(
+  seller: Seller,
+  *,
+  warehouse_id: int,
+  rows: list[dict],
+  mode: str = STOCK_IMPORT_MODE_INCREMENT,
+  user=None,
+) -> dict:
+  mode = _normalize_import_mode(mode)
+  warehouse = get_seller_warehouse(seller, warehouse_id)
+  if not rows:
+    raise StockFileImportError("Нет строк для применения")
+
+  aggregated = _aggregate_import_rows(rows)
+  if not aggregated:
+    raise StockFileImportError("Нет корректных строк для применения")
+
+  try:
+    catalog_index = build_catalog_index_for_barcodes(seller, set(aggregated.keys()))
+  except CatalogError as exc:
+    raise StockFileImportError(str(exc)) from exc
+
+  plan_barcodes = [barcode for barcode in aggregated if barcode in catalog_index]
+  try:
+    wb_stock_map = fetch_wb_stocks_for_warehouses(seller, [warehouse], plan_barcodes)
+  except WBStockError as exc:
+    raise StockFileImportError(str(exc)) from exc
+
+  plans, mismatches = _build_import_plans(
+    seller,
+    warehouse=warehouse,
+    mode=mode,
+    aggregated=aggregated,
+    catalog_index=catalog_index,
+    wb_stock_map=wb_stock_map,
+  )
+
+  skipped_unknown_details = [
+    {"barcode": item["barcode"], "add_quantity": item["add_quantity"]}
+    for item in mismatches
+    if item.get("stage") == "catalog"
+  ]
+
+  was_crm_units = sum(plan.crm_before for plan in plans)
+  was_wb_units = sum(plan.wb_before for plan in plans)
+  added_units = sum(plan.parsed.add_quantity for plan in plans)
+
+  existing_cells = {
+    cell.number: cell
+    for cell in Cell.objects.filter(seller=seller, marketplace=WB)
+  }
+
+  applied = 0
+  created_products = 0
+  if plans:
+    applied, created_products = _apply_crm_import_plans(
+      seller,
+      warehouse=warehouse,
+      mode=mode,
+      plans=plans,
+      existing_cells=existing_cells,
+      user=user,
+    )
+
+  try:
+    _push_wb_import_plans(seller, warehouse, plans)
+  except WBStockError as exc:
+    raise StockFileImportError(
+      f"CRM обновлена ({applied} баркодов), но WB отклонил пакетную загрузку: {exc}",
+    ) from exc
+
+  verify_mismatches = _verify_wb_import_plans(seller, warehouse, plans)
+  mismatches.extend(verify_mismatches)
+
+  result_crm_units = sum(plan.product.quantity for plan in plans if plan.product)
+  try:
+    final_wb_map = fetch_wb_stocks_for_warehouses(seller, [warehouse], plan_barcodes)
+    result_wb_units = sum(
+      int((final_wb_map.get(plan.parsed.barcode) or {}).get("total") or 0)
+      for plan in plans
+    )
+  except WBStockError:
+    result_wb_units = sum(plan.wb_expected for plan in plans)
 
   file_barcodes = len(aggregated)
   file_units = sum(row.add_quantity for row in aggregated.values())
-
+  verified = applied if not verify_mismatches else max(0, applied - len(verify_mismatches))
   all_ok = len(mismatches) == 0 and applied > 0
 
   summary = {
@@ -697,8 +830,12 @@ def apply_stock_import(
     "was_crm_units": was_crm_units,
     "was_wb_units": was_wb_units,
     "added_units": added_units,
-    "expected_crm_units": was_crm_units + added_units,
-    "expected_wb_units": was_wb_units + added_units,
+    "expected_crm_units": (
+      sum(plan.crm_total_expected for plan in plans)
+      if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
+      else was_crm_units + added_units
+    ),
+    "expected_wb_units": sum(plan.wb_expected for plan in plans),
     "result_crm_units": result_crm_units,
     "result_wb_units": result_wb_units,
     "applied_barcodes": applied,

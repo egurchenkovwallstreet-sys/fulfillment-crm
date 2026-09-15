@@ -203,6 +203,23 @@ def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
   return index
 
 
+def build_catalog_index_for_barcodes(
+  seller: Seller,
+  barcodes: set[str] | list[str],
+) -> dict[str, CatalogBarcodeItem]:
+  """Индекс только для баркодов из файла — останавливаемся, когда все найдены."""
+  needed = {normalize_barcode(code) for code in barcodes if normalize_barcode(code)}
+  if not needed:
+    return {}
+  index: dict[str, CatalogBarcodeItem] = {}
+  for item in fetch_seller_catalog_items(seller):
+    if item.barcode in needed:
+      index[item.barcode] = item
+      if len(index) >= len(needed):
+        break
+  return index
+
+
 def resolve_seller_warehouses(
   seller: Seller,
   warehouse_ids: list[int] | None,
