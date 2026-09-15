@@ -444,9 +444,9 @@ function WbAssemblySellerPage() {
       if (!syncInFlightRef.current) {
         syncInFlightRef.current = true
         try {
-          await syncOrders(id, 'quick')
+          await syncOrders(id, 'delivery', { background: false })
         } catch {
-          // фоновая синхронизация WB — без алертов
+          // фоновая синхронизация scanDt — без алертов
         } finally {
           syncInFlightRef.current = false
         }

@@ -293,7 +293,11 @@ class SellerAssemblyCountersSerializer(serializers.Serializer):
 
 class OrderSyncSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField(required=False, allow_null=True)
-  mode = serializers.ChoiceField(choices=["full", "quick"], default="full", required=False)
+  mode = serializers.ChoiceField(
+    choices=["full", "quick", "delivery"],
+    default="full",
+    required=False,
+  )
   background = serializers.BooleanField(required=False, default=True)
 
   def validate_seller_id(self, value):

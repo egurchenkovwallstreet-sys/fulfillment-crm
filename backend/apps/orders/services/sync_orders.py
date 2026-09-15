@@ -115,9 +115,63 @@ def _import_wb_orders_atomic(seller, wb_orders, *, mark_as_new=False, user=None)
   return _import_wb_orders(seller, wb_orders, mark_as_new=mark_as_new, user=user)
 
 
+def sync_delivery_scans_for_seller(seller: Seller, *, user=None) -> dict:
+  """Быстрая синхронизация scanDt поставок для вкладки «В доставке»."""
+  if not seller.is_active:
+    raise SyncError("Селлер неактивен")
+
+  token = _get_seller_token(seller)
+  client = WBClient(token)
+
+  from apps.orders.services.supply_sync import sync_supply_scan_dates
+  from apps.orders.services.sync_statuses import (
+    reconcile_individually_accepted_delivery_orders,
+    reconcile_stale_delivery_orders,
+  )
+
+  supply_scan_result = {"supplies_scanned": 0, "orders_closed": 0}
+  stale_after_supply = {"stale_delivery_cleared": 0}
+  individual_after_supply = {"individually_accepted_closed": 0}
+  try:
+    supply_scan_result = sync_supply_scan_dates(seller, client=client)
+    stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
+    individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
+  except Exception:
+    logger.exception("delivery scan sync failed for seller_id=%s", seller.id)
+
+  reconciled = (
+    stale_after_supply.get("stale_delivery_cleared", 0)
+    + individual_after_supply.get("individually_accepted_closed", 0)
+  )
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.WB_SYNC,
+    message=(
+      f"Синхронизация scanDt поставок: закрыто {supply_scan_result.get('orders_closed', 0)}"
+    ),
+    details={
+      "supply_scan": supply_scan_result,
+      "reconciled": reconciled,
+      "sync_mode": "delivery",
+    },
+  )
+
+  return {
+    "success": True,
+    "sync_mode": "delivery",
+    "supply_scan": supply_scan_result,
+    "reconciled": reconciled,
+  }
+
+
 def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> dict:
   if not seller.is_active:
     raise SyncError("Селлер неактивен")
+
+  if mode == "delivery":
+    return sync_delivery_scans_for_seller(seller, user=user)
 
   quick = mode == "quick"
   token = _get_seller_token(seller)
@@ -217,8 +271,8 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
       reconcile_stale_delivery_orders,
     )
 
-    supply_sync_result = sync_supplies_from_wb(seller, include_closed=True)
     supply_scan_result = sync_supply_scan_dates(seller, client=client)
+    supply_sync_result = sync_supplies_from_wb(seller, include_closed=True)
     stale_after_supply = reconcile_stale_delivery_orders(seller, client, {})
     individual_after_supply = reconcile_individually_accepted_delivery_orders(seller)
   except Exception:

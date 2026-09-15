@@ -145,3 +145,26 @@ class ReconcileStuckDeliveryTests(TestCase):
     self.assertEqual(self.order.status, Order.Status.SHIPPED)
     self.assertIsNotNone(self.supply.wb_scanned_at)
     client.fetch_supply.assert_called_with("WB-SUP-1")
+
+  @patch("apps.orders.services.supply_sync._get_client")
+  def test_sync_applies_scan_dt_when_crm_wb_supply_id_mismatch(self, get_client_mock):
+    self.supply.wb_supply_id = "WB-OLD-ID"
+    self.supply.save(update_fields=["wb_supply_id", "updated_at"])
+
+    client = MagicMock()
+    client.fetch_supplies.return_value = [{
+      "id": "WB-NEW-ID",
+      "done": True,
+      "scanDt": "2026-09-10T08:00:00Z",
+    }]
+    client.fetch_supply_order_ids.return_value = [900001]
+    get_client_mock.return_value = client
+
+    result = sync_supply_scan_dates(self.seller, client=client)
+
+    self.order.refresh_from_db()
+    self.supply.refresh_from_db()
+    self.assertEqual(result["supplies_scanned"], 1)
+    self.assertEqual(self.supply.wb_supply_id, "WB-NEW-ID")
+    self.assertEqual(self.order.status, Order.Status.SHIPPED)
+    self.assertIsNotNone(self.supply.wb_scanned_at)

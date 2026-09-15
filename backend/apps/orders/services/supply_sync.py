@@ -6,13 +6,12 @@ import re
 import time
 from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.wb_client import REQUEST_INTERVAL_SEC, WBApiError
 from apps.orders.models import Order, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client
-from apps.orders.services.supply_flow import refresh_supply_readiness
+from apps.orders.services.supply_flow import delivery_stage_supplies_queryset, refresh_supply_readiness
 from apps.orders.services.wb_status import (
   WB_STATUS_AFTER_DELIVER,
   WB_SUPPLIER_DELIVERY,
@@ -27,11 +26,24 @@ logger = logging.getLogger(__name__)
 CRM_SUPPLY_LEGACY_RE = re.compile(r"^CRM-(\d+)-")
 
 
+def _unwrap_wb_supply_dict(payload: dict) -> dict:
+  if not payload:
+    return {}
+  for key in ("supply", "data", "result"):
+    nested = payload.get(key)
+    if isinstance(nested, dict) and (
+      nested.get("id") or nested.get("scanDt") or nested.get("scan_dt")
+    ):
+      return nested
+  return payload
+
+
 def _wb_supply_scanned_at(wb_supply: dict) -> datetime | None:
   """
   Момент приёмки поставки на складе WB — только scanDt (скан ШК поставки).
   closedAt ставится при передаче в доставку, до физической приёмки на СЦ.
   """
+  wb_supply = _unwrap_wb_supply_dict(wb_supply)
   return _parse_wb_datetime(wb_supply.get("scanDt") or wb_supply.get("scan_dt"))
 
 
@@ -185,11 +197,75 @@ def _build_wb_supply_scan_index(wb_supplies: list[dict]) -> dict[str, datetime]:
 def _fetch_supply_scanned_at_detail(client, wb_supply_id: str) -> datetime | None:
   """GET /api/v3/supplies/{id} — в списке scanDt иногда отсутствует."""
   try:
-    detail = client.fetch_supply(wb_supply_id)
+    detail = _unwrap_wb_supply_dict(client.fetch_supply(wb_supply_id))
   except WBApiError:
     return None
   time.sleep(REQUEST_INTERVAL_SEC)
   return _wb_supply_scanned_at(detail)
+
+
+def _find_crm_supply_for_wb_scan(
+  seller: Seller,
+  wb_supply_id: str,
+  order_wb_ids: list[int] | None = None,
+) -> Supply | None:
+  supply = Supply.objects.filter(seller=seller, wb_supply_id=wb_supply_id).first()
+  if supply:
+    return supply
+  if not order_wb_ids:
+    return None
+  return (
+    Supply.objects.filter(
+      seller=seller,
+      status=Supply.Status.CONFIRMED,
+      wb_scanned_at__isnull=True,
+      orders__wb_order_id__in=order_wb_ids,
+    )
+    .distinct()
+    .order_by("-updated_at")
+    .first()
+  )
+
+
+def _ensure_supply_wb_id(supply: Supply, wb_supply_id: str) -> None:
+  if supply.wb_supply_id == wb_supply_id:
+    return
+  supply.wb_supply_id = wb_supply_id
+  supply.save(update_fields=["wb_supply_id", "updated_at"])
+
+
+def _apply_scan_to_crm_supply(
+  seller: Seller,
+  *,
+  wb_supply_id: str,
+  scanned_at: datetime,
+  order_wb_ids: list[int] | None = None,
+  client=None,
+) -> tuple[int, bool]:
+  """Найти CRM-поставку по ID или заказам и закрыть после scanDt."""
+  supply = _find_crm_supply_for_wb_scan(seller, wb_supply_id, order_wb_ids)
+  if not supply and client is not None and order_wb_ids is None:
+    try:
+      order_wb_ids = client.fetch_supply_order_ids(wb_supply_id)
+      time.sleep(REQUEST_INTERVAL_SEC)
+    except WBApiError:
+      order_wb_ids = []
+    supply = _find_crm_supply_for_wb_scan(seller, wb_supply_id, order_wb_ids)
+  if not supply:
+    return 0, False
+
+  _ensure_supply_wb_id(supply, wb_supply_id)
+  orders = list(supply.orders.all())
+  was_pending = supply.wb_scanned_at is None or any(
+    order.status == Order.Status.IN_DELIVERY for order in orders
+  )
+  closed = _finalize_supply_scan(
+    supply,
+    orders,
+    seller=seller,
+    scanned_at=scanned_at,
+  )
+  return closed, was_pending and (closed or supply.wb_scanned_at is not None)
 
 
 def _apply_stuck_supply_detail_scans(
@@ -204,22 +280,21 @@ def _apply_stuck_supply_detail_scans(
 
   stuck = list(_stuck_delivery_supplies_qs(seller).prefetch_related("orders"))
   for supply in stuck:
-    if supply.wb_supply_id in scan_by_id:
+    wb_supply_id = str(supply.wb_supply_id or "")
+    if not wb_supply_id:
       continue
-    scanned_at = _fetch_supply_scanned_at_detail(client, supply.wb_supply_id)
+    scanned_at = scan_by_id.get(wb_supply_id)
+    if not scanned_at:
+      scanned_at = _fetch_supply_scanned_at_detail(client, wb_supply_id)
     if not scanned_at:
       continue
-    orders = list(supply.orders.all())
-    was_pending = supply.wb_scanned_at is None or any(
-      order.status == Order.Status.IN_DELIVERY for order in orders
-    )
-    closed = _finalize_supply_scan(
-      supply,
-      orders,
-      seller=seller,
+    closed, counted = _apply_scan_to_crm_supply(
+      seller,
+      wb_supply_id=wb_supply_id,
       scanned_at=scanned_at,
+      order_wb_ids=[order.wb_order_id for order in supply.orders.all()],
     )
-    if was_pending and (closed or supply.wb_scanned_at is not None):
+    if counted:
       supplies_scanned += 1
       orders_closed += closed
 
@@ -403,7 +478,7 @@ def sync_supply_scan_dates(seller: Seller, client=None) -> dict:
   except WBApiError as exc:
     raise AssemblyError(str(exc)) from exc
 
-  result = _apply_wb_supply_scan_index(seller, wb_supplies)
+  result = _apply_wb_supply_scan_index(seller, wb_supplies, client=client)
   detail_scanned, detail_closed = _apply_stuck_supply_detail_scans(
     seller,
     client,
@@ -469,14 +544,8 @@ def _revert_premature_supply_scans(
 
 
 def _stuck_delivery_supplies_qs(seller: Seller):
-  """Поставки, которые висят во «В доставке» в CRM."""
-  return Supply.objects.filter(
-    seller=seller,
-    status=Supply.Status.CONFIRMED,
-  ).exclude(wb_supply_id="").filter(
-    Q(wb_scanned_at__isnull=True)
-    | Q(orders__status=Order.Status.IN_DELIVERY),
-  ).distinct()
+  """Поставки на вкладке «В доставке» — те же фильтры, что и в UI."""
+  return delivery_stage_supplies_queryset(seller)
 
 
 def reconcile_stuck_in_delivery_supplies(seller: Seller, client=None) -> dict:
@@ -524,7 +593,12 @@ def reconcile_stuck_in_delivery_supplies(seller: Seller, client=None) -> dict:
   wb_supplies_subset = [
     item for item in wb_supplies if str(item.get("id") or "") in relevant_scan
   ]
-  result = _apply_wb_supply_scan_index(seller, wb_supplies_subset, only_supply_ids=stuck_ids)
+  result = _apply_wb_supply_scan_index(
+    seller,
+    wb_supplies_subset,
+    only_supply_ids=stuck_ids,
+    client=client,
+  )
   result["stuck_supplies"] = len(stuck_ids)
   return result
 
@@ -553,6 +627,7 @@ def _apply_wb_supply_scan_index(
   wb_supplies: list[dict],
   *,
   only_supply_ids: set[str] | None = None,
+  client=None,
 ) -> dict:
   scan_by_id = _build_wb_supply_scan_index(wb_supplies)
   if not scan_by_id:
@@ -564,28 +639,20 @@ def _apply_wb_supply_scan_index(
   if not target_ids:
     return {"supplies_checked": len(wb_supplies), "supplies_scanned": 0, "orders_closed": 0}
 
-  supplies = list(
-    Supply.objects.filter(seller=seller, wb_supply_id__in=target_ids)
-    .prefetch_related("orders")
-  )
   supplies_scanned = 0
   orders_closed = 0
 
-  for supply in supplies:
-    scanned_at = scan_by_id.get(supply.wb_supply_id)
+  for wb_supply_id in target_ids:
+    scanned_at = scan_by_id.get(wb_supply_id)
     if not scanned_at:
       continue
-    orders = list(supply.orders.all())
-    was_pending = supply.wb_scanned_at is None or any(
-      order.status == Order.Status.IN_DELIVERY for order in orders
-    )
-    closed = _finalize_supply_scan(
-      supply,
-      orders,
-      seller=seller,
+    closed, counted = _apply_scan_to_crm_supply(
+      seller,
+      wb_supply_id=wb_supply_id,
       scanned_at=scanned_at,
+      client=client,
     )
-    if was_pending and (closed or supply.wb_scanned_at is not None):
+    if counted:
       supplies_scanned += 1
       orders_closed += closed
 

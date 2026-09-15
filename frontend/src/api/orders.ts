@@ -129,14 +129,14 @@ export type SyncEnqueueResult = SyncResult & {
 
 export async function syncOrders(
   sellerId?: number,
-  mode: 'full' | 'quick' = 'full',
+  mode: 'full' | 'quick' | 'delivery' = 'full',
   opts?: { background?: boolean; wait?: boolean },
 ): Promise<SyncResult> {
-  const background = opts?.background ?? true
+  const background = opts?.background ?? mode !== 'delivery'
   const wait = opts?.wait ?? true
   const body: {
     seller_id?: number
-    mode: 'full' | 'quick'
+    mode: 'full' | 'quick' | 'delivery'
     background: boolean
   } = { mode, background }
   if (sellerId) body.seller_id = sellerId
