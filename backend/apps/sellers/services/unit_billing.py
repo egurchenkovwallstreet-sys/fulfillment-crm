@@ -184,6 +184,7 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
   from apps.sellers.services.crm_product_stats import WB_STICKER_STOCK_COMMENT
   from apps.sellers.services.sticker_billing import (
     _local_order_index,
+    _order_sticker_event_date,
     _parse_sticker_key,
     _parse_wb_order_id,
   )
@@ -203,6 +204,38 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
     else None
   )
 
+  updated = 0
+  seen_sticker_keys: set[str] = set()
+  seen_orders: set[int] = set()
+
+  sticker_orders = Order.objects.filter(
+    seller=seller,
+    has_sticker=True,
+    wb_order_id__isnull=False,
+  )
+  for order in sticker_orders:
+    wb_order_id = int(order.wb_order_id)
+    if wb_order_id in seen_orders:
+      continue
+    charge_date = _order_sticker_event_date(order)
+    if charge_date is None or charge_date < from_date or charge_date > current_week_end:
+      continue
+    seen_orders.add(wb_order_id)
+    meta = order_index.get(wb_order_id) or _ShippedOrderMeta(
+      barcode=(order.barcode or "").strip(),
+      warehouse_id=order.wb_warehouse_id,
+    )
+    if _upsert_wb_unit_charge(
+      seller=seller,
+      wb_order_id=wb_order_id,
+      charge_date=charge_date,
+      meta=meta,
+      price_by_barcode=price_by_barcode,
+      fallback_tariff=fallback_tariff,
+      match_ids=match_ids,
+    ):
+      updated += 1
+
   ops = StockOperation.objects.filter(
     product__seller=seller,
     product__marketplace=WB,
@@ -211,10 +244,6 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
     created_at__date__gte=from_date,
     created_at__date__lte=current_week_end,
   ).select_related("product").order_by("created_at")
-
-  updated = 0
-  seen_sticker_keys: set[str] = set()
-  seen_orders: set[int] = set()
 
   for op in ops:
     comment = op.comment or ""

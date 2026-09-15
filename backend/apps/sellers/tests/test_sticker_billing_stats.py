@@ -4,8 +4,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.accounts.models import Fulfillment
+from apps.integrations.marketplace import WB
 from apps.orders.models import Order
-from apps.sellers.models import Seller
+from apps.sellers.models import ExcludedSellerWarehouse, Seller, ShipmentUnitCharge
 from apps.sellers.services.sticker_billing import load_weekly_shipped_orders
 from apps.warehouse.models import Product, StockOperation
 
@@ -57,3 +58,67 @@ class StickerBillingStatsTests(TestCase):
     payload = load_weekly_shipped_orders(self.seller)
     current = payload["weeks"][0]
     self.assertEqual(current["total"], 0)
+
+  def test_billing_counts_shipment_unit_charge_without_stock_operation(self):
+    charge_date = timezone.localtime(timezone.now()).date()
+    ShipmentUnitCharge.objects.create(
+      seller=self.seller,
+      barcode=self.product.barcode,
+      marketplace=WB,
+      order=self.order,
+      wb_order_id=self.order.wb_order_id,
+      charge_date=charge_date,
+      quantity=1,
+      unit_price=Decimal("35.00"),
+      amount=Decimal("35.00"),
+    )
+    StockOperation.objects.filter(product=self.product).delete()
+    self.product.delete()
+
+    payload = load_weekly_shipped_orders(self.seller)
+    current = payload["weeks"][0]
+    self.assertEqual(current["total"], 1)
+    self.assertEqual(Decimal(str(current["total_amount"])), Decimal("35.00"))
+
+  def test_billing_counts_order_with_sticker_when_product_removed(self):
+    self.order.has_sticker = True
+    self.order.sticker_fetched_at = timezone.now()
+    self.order.save(update_fields=["has_sticker", "sticker_fetched_at", "updated_at"])
+    StockOperation.objects.filter(product=self.product).delete()
+    self.product.delete()
+
+    payload = load_weekly_shipped_orders(self.seller)
+    current = payload["weeks"][0]
+    self.assertEqual(current["total"], 1)
+
+  def test_billing_keeps_deleted_warehouse_history(self):
+    charge_date = timezone.localtime(timezone.now()).date()
+    ExcludedSellerWarehouse.objects.create(
+      seller=self.seller,
+      marketplace=WB,
+      warehouse_external_id=909,
+      name="Deleted WH",
+    )
+    self.order.wb_warehouse_id = 909
+    self.order.has_sticker = True
+    self.order.sticker_fetched_at = timezone.now()
+    self.order.save(
+      update_fields=["wb_warehouse_id", "has_sticker", "sticker_fetched_at", "updated_at"],
+    )
+    ShipmentUnitCharge.objects.create(
+      seller=self.seller,
+      barcode=self.order.barcode,
+      marketplace=WB,
+      order=self.order,
+      wb_order_id=self.order.wb_order_id,
+      charge_date=charge_date,
+      quantity=1,
+      unit_price=Decimal("35.00"),
+      amount=Decimal("35.00"),
+    )
+    self.product.delete()
+
+    payload = load_weekly_shipped_orders(self.seller)
+    current = payload["weeks"][0]
+    self.assertEqual(current["total"], 1)
+    self.assertEqual(Decimal(str(current["total_amount"])), Decimal("35.00"))
