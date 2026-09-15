@@ -343,3 +343,31 @@ class ShipmentUnitCharge(models.Model):
 
   def __str__(self):
     return f"{self.charge_date} {self.barcode} ×{self.quantity} {self.amount}₽"
+
+
+class SupplyReportSnapshot(models.Model):
+  """Месячный снимок отчёта по поставкам — обновляется ночью, читается без WB API."""
+  fulfillment = models.ForeignKey(
+    "accounts.Fulfillment",
+    on_delete=models.CASCADE,
+    related_name="supply_report_snapshots",
+  )
+  month = models.DateField("Месяц (1-е число)")
+  payload = models.JSONField(default=dict)
+  built_at = models.DateTimeField("Собран")
+
+  class Meta:
+    verbose_name = "Снимок отчёта по поставкам"
+    verbose_name_plural = "Снимки отчёта по поставкам"
+    constraints = [
+      models.UniqueConstraint(
+        fields=["fulfillment", "month"],
+        name="sellers_supply_report_snapshot_uniq",
+      ),
+    ]
+    indexes = [
+      models.Index(fields=["fulfillment", "month"]),
+    ]
+
+  def __str__(self):
+    return f"{self.fulfillment_id} {self.month:%Y-%m}"

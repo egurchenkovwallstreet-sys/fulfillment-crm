@@ -168,6 +168,20 @@ def refresh_admin_billing_cache(fulfillment_id: int | None, marketplace: str = "
 
 
 @shared_task
+def rebuild_supply_report_snapshots():
+  """Ежедневно ночью — снимок отчёта по поставкам за текущий и прошлый месяц."""
+  from apps.sellers.services.supply_report_cache import rebuild_all_supply_report_snapshots
+
+  result = rebuild_all_supply_report_snapshots()
+  logger.info(
+    "Supply report snapshots rebuilt: fulfillments=%s deleted=%s",
+    result["fulfillments"],
+    result["deleted_snapshots"],
+  )
+  return result
+
+
+@shared_task
 def refresh_all_admin_billing_caches():
   """Пересчитать кеш статистики для всех фулфилментов и маркетплейсов."""
   from apps.accounts.models import Fulfillment

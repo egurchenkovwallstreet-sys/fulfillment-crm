@@ -419,3 +419,69 @@ export async function fetchCrmProductStats(params: {
   if (params.barcode?.trim()) qs.set('barcode', params.barcode.trim())
   return apiFetch<CrmProductStatsResponse>(`/api/sellers/admin/product-stats/?${qs.toString()}`)
 }
+
+export type SupplyReportCrmOrder = {
+  wb_order_id: number
+  barcode: string
+  crm_status: string
+  crm_status_label: string
+  wb_supplier_status: string
+  wb_status: string
+  in_delivery_at: string | null
+}
+
+export type SupplyReportOffCrmOrder = {
+  wb_order_id: number
+  barcode: string
+  resolution_status: string
+  resolution_status_label: string
+  shipped_at: string | null
+  detected_at: string | null
+  warehouse_name: string
+}
+
+export type SupplyReportRow = {
+  supply_id: number
+  wb_supply_id: string
+  seller_id: number
+  seller_name: string
+  warehouse_id: number | null
+  warehouse_name: string
+  supply_status: string
+  supply_status_label: string
+  barcode_scanned: boolean
+  crm_delivered_at: string | null
+  wb_scanned_at: string | null
+  shipment_dates: string
+  crm_orders: SupplyReportCrmOrder[]
+  off_crm_orders: SupplyReportOffCrmOrder[]
+  crm_orders_count: number
+  off_crm_orders_count: number
+}
+
+export type SupplyReportResponse = {
+  month: string
+  month_start: string
+  month_end: string
+  supplies: SupplyReportRow[]
+  totals: {
+    supplies: number
+    crm_orders: number
+    off_crm_orders: number
+  }
+  built_at: string
+  cached_at?: string
+  source?: string
+}
+
+export async function fetchSupplyReport(params: {
+  month: string
+  sellerId?: number
+  refresh?: boolean
+}): Promise<SupplyReportResponse> {
+  const qs = new URLSearchParams()
+  qs.set('month', params.month)
+  if (params.sellerId) qs.set('seller_id', String(params.sellerId))
+  if (params.refresh) qs.set('refresh', '1')
+  return apiFetch<SupplyReportResponse>(`/api/sellers/admin/supply-report/?${qs.toString()}`)
+}

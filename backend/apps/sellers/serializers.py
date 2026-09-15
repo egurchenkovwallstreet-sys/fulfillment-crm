@@ -301,3 +301,59 @@ class CrmProductStatsSerializer(serializers.Serializer):
   source = serializers.CharField(required=False)
   total_units = serializers.IntegerField()
   items = CrmProductStatItemSerializer(many=True)
+
+
+class SupplyReportCrmOrderSerializer(serializers.Serializer):
+  wb_order_id = serializers.IntegerField()
+  barcode = serializers.CharField()
+  crm_status = serializers.CharField()
+  crm_status_label = serializers.CharField()
+  wb_supplier_status = serializers.CharField()
+  wb_status = serializers.CharField()
+  in_delivery_at = serializers.CharField(allow_null=True)
+
+
+class SupplyReportOffCrmOrderSerializer(serializers.Serializer):
+  wb_order_id = serializers.IntegerField()
+  barcode = serializers.CharField()
+  resolution_status = serializers.CharField()
+  resolution_status_label = serializers.CharField()
+  shipped_at = serializers.CharField(allow_null=True)
+  detected_at = serializers.CharField(allow_null=True)
+  warehouse_name = serializers.CharField()
+
+
+class SupplyReportRowSerializer(serializers.Serializer):
+  supply_id = serializers.IntegerField()
+  wb_supply_id = serializers.CharField()
+  seller_id = serializers.IntegerField()
+  seller_name = serializers.CharField()
+  warehouse_id = serializers.IntegerField(allow_null=True)
+  warehouse_name = serializers.CharField()
+  supply_status = serializers.CharField()
+  supply_status_label = serializers.CharField()
+  barcode_scanned = serializers.BooleanField()
+  crm_delivered_at = serializers.CharField(allow_null=True)
+  wb_scanned_at = serializers.CharField(allow_null=True)
+  shipment_dates = serializers.CharField()
+  crm_orders = SupplyReportCrmOrderSerializer(many=True)
+  off_crm_orders = SupplyReportOffCrmOrderSerializer(many=True)
+  crm_orders_count = serializers.IntegerField()
+  off_crm_orders_count = serializers.IntegerField()
+
+
+class SupplyReportTotalsSerializer(serializers.Serializer):
+  supplies = serializers.IntegerField()
+  crm_orders = serializers.IntegerField()
+  off_crm_orders = serializers.IntegerField()
+
+
+class SupplyReportSerializer(serializers.Serializer):
+  month = serializers.CharField()
+  month_start = serializers.CharField()
+  month_end = serializers.CharField()
+  supplies = SupplyReportRowSerializer(many=True)
+  totals = SupplyReportTotalsSerializer()
+  built_at = serializers.CharField()
+  cached_at = serializers.CharField(required=False)
+  source = serializers.CharField(required=False)

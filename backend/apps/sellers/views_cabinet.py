@@ -24,6 +24,7 @@ from apps.sellers.serializers import (
   SellerUpdateSerializer,
   SellerWeeklyShipmentsSerializer,
   SellerWbStageCountsSerializer,
+  SupplyReportSerializer,
 )
 from apps.integrations.marketplace import parse_marketplace, seller_allows_marketplace
 from apps.sellers.services.invite import (
@@ -55,6 +56,11 @@ from apps.sellers.services.admin_billing_cache import (
 from apps.sellers.services.crm_product_stats import (
   PERIOD_CHOICES,
   load_crm_product_shipment_stats,
+)
+from apps.sellers.services.supply_report import load_supply_report, parse_report_month
+from apps.sellers.services.supply_report_cache import (
+  get_supply_report_snapshot,
+  rebuild_supply_report_snapshot,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.utils import seller_has_user_account, seller_username
@@ -366,6 +372,52 @@ class AdminCrmProductStatsView(APIView):
       barcode=barcode,
     )
     return Response(CrmProductStatsSerializer(payload).data)
+
+
+class AdminSupplyReportView(APIView):
+  """Месячный отчёт по отгруженным поставкам WB — из ночного снимка БД."""
+  permission_classes = [IsAuthenticated, IsAdmin]
+
+  def get(self, request):
+    fulfillment = fulfillment_for_staff_user(request.user)
+    if not fulfillment:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    month = parse_report_month(request.query_params.get("month"))
+    if not month:
+      return Response(
+        {"detail": "Укажите month=YYYY-MM"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+
+    seller_id_raw = request.query_params.get("seller_id")
+    seller_id = None
+    if seller_id_raw:
+      try:
+        seller_id = int(seller_id_raw)
+      except (TypeError, ValueError):
+        return Response({"detail": "Некорректный seller_id"}, status=status.HTTP_400_BAD_REQUEST)
+      seller = get_seller_for_user(request.user, seller_id)
+      if not seller:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    force_refresh = request.query_params.get("refresh") == "1"
+
+    if seller_id is not None:
+      payload = load_supply_report(fulfillment, month=month, seller_id=seller_id)
+      payload["source"] = "live"
+    elif force_refresh:
+      payload = rebuild_supply_report_snapshot(fulfillment, month=month)
+      payload["source"] = "snapshot"
+    else:
+      payload = get_supply_report_snapshot(fulfillment, month=month)
+      if payload is None:
+        payload = rebuild_supply_report_snapshot(fulfillment, month=month)
+        payload["source"] = "snapshot"
+      else:
+        payload["source"] = "snapshot"
+
+    return Response(SupplyReportSerializer(payload).data)
 
 
 class AdminBillingDashboardView(APIView):

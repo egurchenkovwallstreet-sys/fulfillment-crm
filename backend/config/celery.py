@@ -37,6 +37,10 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.scan_off_crm_shipments",
         "schedule": crontab(hour=4, minute=0),
     },
+    "rebuild-supply-report-snapshots": {
+        "task": "apps.integrations.tasks.rebuild_supply_report_snapshots",
+        "schedule": crontab(hour=4, minute=30),
+    },
     "reconcile-stuck-delivery": {
         "task": "apps.integrations.tasks.reconcile_stuck_delivery_orders",
         "schedule": crontab(hour=4, minute=0),
