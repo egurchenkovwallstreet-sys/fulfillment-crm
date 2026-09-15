@@ -2189,7 +2189,7 @@ function WbAssemblySellerPage() {
               className="btn btn--ghost"
               onClick={() => void handleOpenPickListArchive()}
               disabled={loading || pickListArchiveLoading}
-              {...uiHint('Архив листов подбора за последние 10 дней — скачать PDF повторно')}
+              {...uiHint('Архив листов подбора за последние 30 дней — скачать PDF повторно')}
             >
               {pickListArchiveLoading ? 'Архив…' : 'Листы подбора (архив)'}
             </button>
@@ -2990,9 +2990,9 @@ function WbAssemblySellerPage() {
             aria-labelledby="pick-list-archive-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="pick-list-archive-title" className="section-title">Листы подбора — архив (10 дней)</h2>
+            <h2 id="pick-list-archive-title" className="section-title">Листы подбора — архив (30 дней)</h2>
             {pickListArchive.length === 0 ? (
-              <p className="assembly-scan-hint">За последние 10 дней завершённых листов нет.</p>
+              <p className="assembly-scan-hint">За последние 30 дней завершённых листов нет.</p>
             ) : (
               <table className="assembly-table">
                 <thead>

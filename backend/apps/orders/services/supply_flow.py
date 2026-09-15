@@ -1678,10 +1678,12 @@ def _complete_pick_lists_after_supply_delivery(supply: Supply, *, seller: Seller
   )
   if supply.wb_warehouse_id is not None:
     qs = qs.filter(wb_warehouse_id=supply.wb_warehouse_id)
+  now = timezone.now()
   for pick_list in qs:
     if pick_list.items.exists():
       pick_list.is_completed = True
-      pick_list.save(update_fields=["is_completed"])
+      pick_list.completed_at = now
+      pick_list.save(update_fields=["is_completed", "completed_at"])
     else:
       pick_list.delete()
 

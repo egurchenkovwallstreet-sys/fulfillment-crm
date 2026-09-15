@@ -701,7 +701,7 @@ class AssemblyPickListPreviewView(APIView):
 
 
 class AssemblyPickListArchiveView(APIView):
-  """Архив листов подбора за последние 10 дней."""
+  """Архив листов подбора за последние 30 дней."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):
@@ -709,7 +709,7 @@ class AssemblyPickListArchiveView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
-    pick_lists = archived_wb_pick_lists(seller, days=10)
+    pick_lists = archived_wb_pick_lists(seller)
     return Response({
       "pick_lists": PickListSerializer(pick_lists, many=True).data,
     })

@@ -119,6 +119,7 @@ class PickList(models.Model):
   )
   created_at = models.DateTimeField(auto_now_add=True)
   is_completed = models.BooleanField(default=False)
+  completed_at = models.DateTimeField("Архивирован", null=True, blank=True)
   wb_warehouse_id = models.BigIntegerField(
     "ID склада WB",
     null=True,

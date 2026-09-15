@@ -1053,31 +1053,21 @@ def _reset_assembly_marking_pick_order(order: Order, seller: Seller, *, user=Non
 
 
 def _detach_order_from_pick_list(order: Order) -> None:
+  """Отвязать заказ от листа, не меняя позиции — архив хранит полный состав."""
   pick_list_id = order.pick_list_id
   if not pick_list_id:
     return
 
-  item_qs = PickListItem.objects.filter(pick_list_id=pick_list_id, barcode=order.barcode)
-  if order.product_id:
-    item_qs = item_qs.filter(product_id=order.product_id)
-  item = item_qs.first()
-
-  if item:
-    if item.quantity > 1:
-      item.quantity -= 1
-      item.save(update_fields=["quantity"])
-    else:
-      item.delete()
-
   order.pick_list = None
 
   pick_list = PickList.objects.filter(pk=pick_list_id).first()
-  if pick_list and not pick_list.items.exists():
-    still_linked = (
-      Order.objects.filter(pick_list_id=pick_list_id).exclude(pk=order.pk).exists()
-    )
-    if not still_linked:
-      pick_list.delete()
+  if not pick_list or pick_list.is_completed:
+    return
+  if pick_list.items.exists():
+    return
+  still_linked = Order.objects.filter(pick_list_id=pick_list_id).exclude(pk=order.pk).exists()
+  if not still_linked:
+    pick_list.delete()
 
 
 def order_is_restorable_in_wb(order: Order) -> bool:

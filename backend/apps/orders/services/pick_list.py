@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.orders.models import Order, PickList, PickListItem, Supply
@@ -76,16 +77,19 @@ def active_wb_pick_lists(seller: Seller) -> list[PickList]:
   )
 
 
-def archived_wb_pick_lists(seller: Seller, *, days: int = 10) -> list[PickList]:
-  """Завершённые листы подбора за последние N дней."""
+PICK_LIST_ARCHIVE_DAYS = 30
+
+
+def archived_wb_pick_lists(seller: Seller, *, days: int = PICK_LIST_ARCHIVE_DAYS) -> list[PickList]:
+  """Завершённые листы подбора за последние N дней (от даты архивации)."""
   since = timezone.now() - timedelta(days=days)
   return list(
     PickList.objects.filter(
       seller=seller,
       is_completed=True,
       marketplace=MARKETPLACE_WB,
-      created_at__gte=since,
     )
+    .filter(Q(completed_at__gte=since) | Q(completed_at__isnull=True, created_at__gte=since))
     .prefetch_related("items__cell", "items__product")
     .order_by("-created_at")
   )
