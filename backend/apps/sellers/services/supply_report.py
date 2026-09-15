@@ -1,6 +1,7 @@
 """Месячный отчёт по отгруженным поставкам WB для кабинета владельца."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 
 from django.db.models import Min, Prefetch, Q
@@ -9,7 +10,11 @@ from django.utils import timezone
 from apps.accounts.models import Fulfillment
 from apps.integrations.marketplace import WB
 from apps.orders.models import OffCrmShipment, Order, Supply
-from apps.orders.services.assembly import format_sticker_number, get_wb_stage_label
+from apps.orders.services.assembly import (
+  format_sticker_excel_number,
+  format_sticker_number,
+  get_wb_stage_label,
+)
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -94,30 +99,30 @@ def order_is_cancelled(order: Order) -> bool:
 
 
 def resolve_wb_sorted_at(order: Order, supply: Supply) -> datetime | None:
-  if order.wb_sorted_at:
-    return order.wb_sorted_at
-  if order.status == Order.Status.SHIPPED and order.in_delivery_at:
-    return order.in_delivery_at
-  return None
+  """Только реальная поштучная сортировка на СЦ WB, не раньше scanDt поставки."""
+  if not order.wb_sorted_at:
+    return None
+  sorted_at = order.wb_sorted_at
+  if supply.wb_scanned_at and sorted_at < supply.wb_scanned_at:
+    return None
+  return sorted_at
 
 
 def order_sticker_display(order: Order) -> str:
-  number = format_sticker_number(order)
-  scan_code = (order.sticker_scan_code or "").strip()
-  if number and scan_code and scan_code not in number:
-    return f"{number} · {scan_code}"
-  return number or scan_code or "—"
+  number = format_sticker_excel_number(order)
+  return number or "—"
 
 
 def off_crm_sticker_display(row: OffCrmShipment) -> str:
-  number = (row.sticker_number or "").strip()
-  if not number and row.sticker_part_a and row.sticker_part_b:
-    number = f"{row.sticker_part_a} / {row.sticker_part_b}"
   if row.crm_order_id:
-    crm_sticker = order_sticker_display(row.crm_order)
-    if crm_sticker != "—":
-      return crm_sticker
-  return number or "—"
+    number = format_sticker_excel_number(row.crm_order)
+    if number:
+      return number
+  number = format_sticker_excel_number(row)
+  if number:
+    return number
+  legacy = re.sub(r"\D", "", (row.sticker_number or "").strip())
+  return legacy or "—"
 
 
 def _sticker_search_blob(*parts: str) -> str:
@@ -133,6 +138,7 @@ def order_matches_sticker_query(order: Order, query: str) -> bool:
     order.sticker_part_b,
     order.sticker_scan_code,
     format_sticker_number(order),
+    format_sticker_excel_number(order),
     str(order.wb_order_id),
     order.barcode,
   )
@@ -147,6 +153,7 @@ def off_crm_matches_sticker_query(row: OffCrmShipment, query: str) -> bool:
     row.sticker_part_a,
     row.sticker_part_b,
     row.sticker_number,
+    format_sticker_excel_number(row),
     str(row.wb_order_id),
     row.barcode,
   )

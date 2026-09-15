@@ -75,6 +75,19 @@ def sticker_scans_match(left: str, right: str) -> bool:
   return bool(left_tokens & right_tokens)
 
 
+def _sticker_part_digits(value: str) -> str:
+  return re.sub(r"\D", "", (value or "").strip())
+
+
+def format_sticker_excel_number(order) -> str:
+  """Номер стикера как в Excel WB: partA+partB слитно, без QR и разделителей."""
+  part_a = _sticker_part_digits(getattr(order, "sticker_part_a", "") or "")
+  part_b = _sticker_part_digits(getattr(order, "sticker_part_b", "") or "")
+  if part_a and part_b:
+    return f"{part_a}{part_b}"
+  return part_a or part_b
+
+
 def format_sticker_number(order: Order) -> str:
   part_a = (order.sticker_part_a or "").strip()
   part_b = (order.sticker_part_b or "").strip()

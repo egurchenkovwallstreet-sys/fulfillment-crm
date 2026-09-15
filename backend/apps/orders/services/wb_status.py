@@ -159,16 +159,12 @@ def maybe_set_wb_sorted_at(
 
 
 def order_reached_wb_sc(order: Order) -> bool:
-  """Был ли заказ принят на СЦ WB — в том числе до отмены покупателем."""
+  """Был ли заказ поштучно принят/отсортирован на СЦ WB."""
   if order.wb_sorted_at:
     return True
   supplier = (order.wb_supplier_status or "").strip()
   wb = (order.wb_status or "").strip()
-  if is_wb_sc_acceptance_status(supplier, wb):
-    return True
-  if order.status == Order.Status.SHIPPED:
-    return True
-  return False
+  return is_wb_sc_acceptance_status(supplier, wb)
 
 
 def order_accepted_at_wb_sc(order: Order) -> bool:

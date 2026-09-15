@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.test import TestCase
 from django.utils import timezone
@@ -7,10 +7,13 @@ from apps.accounts.models import Fulfillment
 from apps.integrations.marketplace import WB
 from apps.orders.models import OffCrmShipment, Order, Supply
 from apps.sellers.models import Seller, SellerWarehouse
+from apps.orders.services.assembly import format_sticker_excel_number
 from apps.sellers.services.supply_report import (
   describe_order_cancellation,
   load_supply_report,
+  order_sticker_display,
   parse_report_month,
+  resolve_wb_sorted_at,
   wb_sc_acceptance_label,
 )
 
@@ -86,7 +89,29 @@ class SupplyReportTests(TestCase):
     self.assertIsNone(parse_report_month("bad"))
 
   def test_wb_sc_acceptance_label(self):
-    self.assertEqual(wb_sc_acceptance_label(self.crm_order), "Отсортирован")
+    self.assertEqual(wb_sc_acceptance_label(self.crm_order, self.supply), "Отсортирован")
+
+  def test_sticker_excel_format(self):
+    self.crm_order.sticker_part_a = "12345"
+    self.crm_order.sticker_part_b = "67890"
+    self.crm_order.sticker_scan_code = "!uKEtQZVx"
+    self.crm_order.save(
+      update_fields=["sticker_part_a", "sticker_part_b", "sticker_scan_code", "updated_at"],
+    )
+    self.assertEqual(format_sticker_excel_number(self.crm_order), "1234567890")
+    self.assertEqual(order_sticker_display(self.crm_order), "1234567890")
+
+  def test_sorted_at_not_before_supply_scan(self):
+    scan_time = timezone.now()
+    self.supply.wb_scanned_at = scan_time
+    self.supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    self.crm_order.wb_sorted_at = scan_time - timedelta(hours=1)
+    self.crm_order.save(update_fields=["wb_sorted_at", "updated_at"])
+    self.assertIsNone(resolve_wb_sorted_at(self.crm_order, self.supply))
+
+    self.crm_order.wb_sorted_at = scan_time + timedelta(minutes=5)
+    self.crm_order.save(update_fields=["wb_sorted_at", "updated_at"])
+    self.assertIsNotNone(resolve_wb_sorted_at(self.crm_order, self.supply))
 
   def test_seller_cancel_where(self):
     cancel = describe_order_cancellation(self.seller_cancel_order, self.supply)
@@ -117,9 +142,10 @@ class SupplyReportTests(TestCase):
     )
 
   def test_buyer_cancel_with_sorting_date(self):
-    from apps.sellers.services.supply_report import wb_sc_acceptance_label
-
-    self.buyer_cancel_order.wb_sorted_at = timezone.now()
+    scan_time = timezone.now()
+    self.supply.wb_scanned_at = scan_time
+    self.supply.save(update_fields=["wb_scanned_at", "updated_at"])
+    self.buyer_cancel_order.wb_sorted_at = scan_time + timedelta(minutes=10)
     self.buyer_cancel_order.save(update_fields=["wb_sorted_at", "updated_at"])
     self.assertEqual(
       wb_sc_acceptance_label(self.buyer_cancel_order, self.supply),
@@ -131,6 +157,6 @@ class SupplyReportTests(TestCase):
     self.crm_order.sticker_part_b = "67890"
     self.crm_order.save(update_fields=["sticker_part_a", "sticker_part_b", "updated_at"])
     month = timezone.localdate().replace(day=1)
-    payload = load_supply_report(self.fulfillment, month=month, sticker_query="12345")
+    payload = load_supply_report(self.fulfillment, month=month, sticker_query="1234567890")
     self.assertEqual(payload["totals"]["crm_orders"], 1)
     self.assertEqual(payload["supplies"][0]["crm_orders"][0]["wb_order_id"], 700001)
