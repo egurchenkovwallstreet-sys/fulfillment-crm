@@ -1,4 +1,4 @@
-"""Импорт остатков из Excel (формат WB): баркод + количество."""
+"""Импорт остатков из Excel (формат WB): баркод + количество + ячейка."""
 from __future__ import annotations
 
 import re
@@ -7,11 +7,16 @@ from io import BytesIO
 
 from django.db import transaction
 
+from apps.integrations.marketplace import WB
 from apps.integrations.models import AuditLog
 from apps.sellers.models import Seller
-from apps.warehouse.models import Product, ProductWarehouseStock, StockOperation
+from apps.warehouse.models import Cell, Product, ProductWarehouseStock, StockOperation
 from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
-from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
+from apps.warehouse.services.cells import (
+  create_cell_with_next_number,
+  get_or_create_cell_by_number,
+  refresh_cell_occupied,
+)
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_new_orders,
@@ -47,12 +52,22 @@ BARCODE_HEADERS = {
 QTY_HEADERS = {
   "количество", "кол-во", "кол во", "колво", "amount", "qty", "остаток", "quantity",
 }
+CELL_HEADERS = {
+  "ячейка",
+  "cell",
+  "номер ячейки",
+  "№ ячейки",
+  "no ячейки",
+  "место",
+  "яч",
+}
 
 
 @dataclass
 class ParsedStockRow:
   barcode: str
   add_quantity: int
+  cell_number: str = ""
 
 
 @dataclass
@@ -68,6 +83,8 @@ class StockImportPreviewRow:
   reserved_new: int
   will_create: bool
   cell_number: str
+  cell_number_before: str
+  will_create_cell: bool
   message: str
 
 
@@ -93,6 +110,29 @@ def _parse_quantity(value) -> int | None:
   return qty if qty > 0 else None
 
 
+def _parse_cell_number(value) -> str:
+  if value is None or value == "":
+    return ""
+  if isinstance(value, (int, float)):
+    if float(value).is_integer():
+      return str(int(value))
+    return str(value).strip()
+  text = str(value).strip()
+  if re.fullmatch(r"\d+\.0+", text):
+    return str(int(float(text)))
+  return text
+
+
+def _detect_cell_column(headers: list[str], barcode_col: int, qty_col: int) -> int | None:
+  cell_candidates = [i for i, h in enumerate(headers) if h in CELL_HEADERS]
+  if cell_candidates:
+    return cell_candidates[0]
+  fallback = 2
+  if fallback not in {barcode_col, qty_col} and fallback < len(headers):
+    return fallback
+  return None
+
+
 def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
   if load_workbook is None:
     raise StockFileImportError("На сервере не установлен openpyxl для чтения Excel")
@@ -110,6 +150,7 @@ def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
   header_idx = None
   barcode_col = None
   qty_col = None
+  cell_col = None
 
   for idx, row in enumerate(rows[:20]):
     headers = [_normalize_header(cell) for cell in row]
@@ -119,6 +160,7 @@ def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
       header_idx = idx
       barcode_col = bc_candidates[0]
       qty_col = qty_candidates[0]
+      cell_col = _detect_cell_column(headers, barcode_col, qty_col)
       break
 
   if header_idx is None or barcode_col is None or qty_col is None:
@@ -126,23 +168,33 @@ def parse_stock_excel(file_bytes: bytes) -> list[ParsedStockRow]:
       "Не найдены колонки «Баркод» и «Количество». Используйте выгрузку остатков WB."
     )
 
-  aggregated: dict[str, int] = {}
+  aggregated: dict[str, ParsedStockRow] = {}
   for row in rows[header_idx + 1:]:
     if not row:
       continue
     barcode = str(row[barcode_col] or "").strip()
     qty = _parse_quantity(row[qty_col] if qty_col < len(row) else None)
+    cell_number = ""
+    if cell_col is not None and cell_col < len(row):
+      cell_number = _parse_cell_number(row[cell_col])
     if not barcode or qty is None:
       continue
-    aggregated[barcode] = aggregated.get(barcode, 0) + qty
+    existing = aggregated.get(barcode)
+    if existing:
+      existing.add_quantity += qty
+      if cell_number:
+        existing.cell_number = cell_number
+    else:
+      aggregated[barcode] = ParsedStockRow(
+        barcode=barcode,
+        add_quantity=qty,
+        cell_number=cell_number,
+      )
 
   if not aggregated:
     raise StockFileImportError("В файле нет строк с баркодом и количеством")
 
-  return [
-    ParsedStockRow(barcode=barcode, add_quantity=qty)
-    for barcode, qty in sorted(aggregated.items())
-  ]
+  return sorted(aggregated.values(), key=lambda item: item.barcode)
 
 
 def _get_crm_warehouse_qty(product: Product | None, warehouse) -> int:
@@ -193,6 +245,47 @@ def _preview_row_values(
   )
 
 
+def _resolve_import_cell(
+  seller: Seller,
+  *,
+  cell_number: str,
+  existing_cells: dict[str, Cell],
+) -> Cell:
+  normalized = _parse_cell_number(cell_number)
+  if not normalized:
+    cell = create_cell_with_next_number(seller)
+    existing_cells[cell.number] = cell
+    return cell
+  if normalized in existing_cells:
+    return existing_cells[normalized]
+  cell = get_or_create_cell_by_number(seller, normalized)
+  existing_cells[normalized] = cell
+  return cell
+
+
+def _cell_will_be_created(seller: Seller, cell_number: str, existing_cells: dict[str, Cell]) -> bool:
+  normalized = _parse_cell_number(cell_number)
+  if not normalized:
+    return True
+  if normalized in existing_cells:
+    return False
+  return not Cell.objects.filter(seller=seller, marketplace=WB, number=normalized).exists()
+
+
+def _assign_product_cell(product: Product, cell: Cell) -> Cell | None:
+  old_cell = product.cell if product.cell_id else None
+  if product.cell_id == cell.id:
+    return None
+  product.cell = cell
+  return old_cell
+
+
+def _refresh_cells_after_assign(new_cell: Cell, old_cell: Cell | None) -> None:
+  refresh_cell_occupied(new_cell)
+  if old_cell and old_cell.pk != new_cell.pk:
+    refresh_cell_occupied(old_cell)
+
+
 def build_stock_import_preview(
   seller: Seller,
   *,
@@ -213,6 +306,10 @@ def build_stock_import_preview(
   crm_products = {
     p.barcode: p
     for p in Product.objects.filter(seller=seller).select_related("cell")
+  }
+  existing_cells = {
+    cell.number: cell
+    for cell in Cell.objects.filter(seller=seller, marketplace=WB)
   }
 
   known_barcodes = [row.barcode for row in parsed_rows if row.barcode in catalog_index]
@@ -248,6 +345,16 @@ def build_stock_import_preview(
     if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
       crm_before = product.quantity if product else 0
 
+    target_cell_number = _parse_cell_number(row.cell_number)
+    cell_number_before = product.cell.number if product and product.cell_id else ""
+    will_create_cell = _cell_will_be_created(seller, target_cell_number, existing_cells)
+    if target_cell_number and not will_create_cell:
+      existing_cells.setdefault(target_cell_number, Cell.objects.get(
+        seller=seller,
+        marketplace=WB,
+        number=target_cell_number,
+      ))
+
     preview_rows.append(
       StockImportPreviewRow(
         barcode=row.barcode,
@@ -260,7 +367,9 @@ def build_stock_import_preview(
         wb_after=wb_after,
         reserved_new=reserved_new,
         will_create=product is None,
-        cell_number=product.cell.number if product else "",
+        cell_number=target_cell_number,
+        cell_number_before=cell_number_before,
+        will_create_cell=will_create_cell,
         message=message,
       ),
     )
@@ -300,6 +409,8 @@ def _serialize_preview_row(row: StockImportPreviewRow) -> dict:
     "reserved_new": row.reserved_new,
     "will_create": row.will_create,
     "cell_number": row.cell_number,
+    "cell_number_before": row.cell_number_before,
+    "will_create_cell": row.will_create_cell,
     "message": row.message,
   }
 
@@ -338,16 +449,27 @@ def apply_stock_import(
   except CatalogError as exc:
     raise StockFileImportError(str(exc)) from exc
 
-  aggregated: dict[str, int] = {}
+  aggregated: dict[str, ParsedStockRow] = {}
   for row in rows:
     barcode = str(row.get("barcode") or "").strip()
     try:
       qty = int(row.get("add_quantity") or 0)
     except (TypeError, ValueError):
       qty = 0
+    cell_number = _parse_cell_number(row.get("cell_number"))
     if not barcode or qty <= 0:
       continue
-    aggregated[barcode] = aggregated.get(barcode, 0) + qty
+    existing = aggregated.get(barcode)
+    if existing:
+      existing.add_quantity += qty
+      if cell_number:
+        existing.cell_number = cell_number
+    else:
+      aggregated[barcode] = ParsedStockRow(
+        barcode=barcode,
+        add_quantity=qty,
+        cell_number=cell_number,
+      )
 
   if not aggregated:
     raise StockFileImportError("Нет корректных строк для применения")
@@ -357,6 +479,10 @@ def apply_stock_import(
   verified = 0
   skipped_unknown_details: list[dict] = []
   mismatches: list[dict] = []
+  existing_cells = {
+    cell.number: cell
+    for cell in Cell.objects.filter(seller=seller, marketplace=WB)
+  }
 
   was_crm_units = 0
   was_wb_units = 0
@@ -364,7 +490,8 @@ def apply_stock_import(
   result_crm_units = 0
   result_wb_units = 0
 
-  for barcode, add_qty in aggregated.items():
+  for barcode, parsed_row in aggregated.items():
+    add_qty = parsed_row.add_quantity
     catalog_item = catalog_index.get(barcode)
     if not catalog_item:
       skipped_unknown_details.append({"barcode": barcode, "add_quantity": add_qty})
@@ -410,17 +537,24 @@ def apply_stock_import(
     savepoint = transaction.savepoint()
     created_here = False
     try:
+      cell = _resolve_import_cell(
+        seller,
+        cell_number=parsed_row.cell_number,
+        existing_cells=existing_cells,
+      )
+
       if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
         if product:
+          old_cell = _assign_product_cell(product, cell)
           product.quantity = crm_total_expected
-          product.save(update_fields=["quantity", "updated_at"])
+          product.save(update_fields=["quantity", "cell", "updated_at"])
+          _refresh_cells_after_assign(cell, old_cell)
           ProductWarehouseStock.objects.update_or_create(
             product=product,
             seller_warehouse=warehouse,
             defaults={"quantity": add_qty},
           )
         else:
-          cell = create_cell_with_next_number(seller)
           product = Product.objects.create(
             seller=seller,
             barcode=barcode,
@@ -444,11 +578,12 @@ def apply_stock_import(
         push_wb_stock_absolute(seller, warehouse, barcode, wb_expected)
       else:
         if product:
+          old_cell = _assign_product_cell(product, cell)
           product.quantity += add_qty
-          product.save(update_fields=["quantity", "updated_at"])
+          product.save(update_fields=["quantity", "cell", "updated_at"])
+          _refresh_cells_after_assign(cell, old_cell)
           increment_product_warehouse_stock(product, warehouse, add_qty)
         else:
-          cell = create_cell_with_next_number(seller)
           product = Product.objects.create(
             seller=seller,
             barcode=barcode,
@@ -500,6 +635,7 @@ def apply_stock_import(
         if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
         else f"Импорт Excel +{add_qty} шт."
       )
+      cell_label = f", яч. {cell.number}" if cell.number else ""
       StockOperation.objects.create(
         product=product,
         operation_type=StockOperation.OperationType.INTAKE,
@@ -508,6 +644,7 @@ def apply_stock_import(
         comment=(
           f"{mode_label}, склад WB "
           f"{warehouse.name or warehouse.wb_warehouse_id}"
+          f"{cell_label}"
           + (
             f", «Новые» −{reserved_new}, WB={wb_expected}"
             if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
@@ -550,7 +687,7 @@ def apply_stock_import(
       result_wb_units += wb_before
 
   file_barcodes = len(aggregated)
-  file_units = sum(aggregated.values())
+  file_units = sum(row.add_quantity for row in aggregated.values())
 
   all_ok = len(mismatches) == 0 and applied > 0
 

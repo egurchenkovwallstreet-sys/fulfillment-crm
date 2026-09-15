@@ -964,7 +964,8 @@ export function WarehouseHubPage() {
                     <th>«Новые»</th>
                     <th>CRM</th>
                     <th>WB</th>
-                    <th>Действие</th>
+                    <th>Ячейка</th>
+                    <th>Примечание</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -980,8 +981,13 @@ export function WarehouseHubPage() {
                       <td>{row.crm_before} → {row.crm_after}</td>
                       <td>{row.wb_before} → {row.wb_after}</td>
                       <td>
-                        {row.message || (row.will_create ? 'новая ячейка' : `яч. ${row.cell_number}`)}
+                        {row.cell_number
+                          ? (row.cell_number_before && row.cell_number_before !== row.cell_number
+                            ? `${row.cell_number_before} → ${row.cell_number}`
+                            : row.cell_number)
+                          : (row.will_create_cell ? 'авто' : '—')}
                       </td>
+                      <td>{row.message || (row.will_create ? 'новый товар' : '—')}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -57,6 +57,26 @@ def create_cell_with_next_number(seller: Seller, marketplace: str = WB) -> Cell:
   )
 
 
+def get_or_create_cell_by_number(
+  seller: Seller,
+  number: str,
+  *,
+  marketplace: str = WB,
+) -> Cell:
+  """Найти ячейку по номеру из Excel или создать новую с этим номером."""
+  mp = normalize_marketplace(marketplace)
+  normalized = str(number or "").strip()
+  if not normalized:
+    return create_cell_with_next_number(seller, mp)
+  cell, _created = Cell.objects.get_or_create(
+    seller=seller,
+    marketplace=mp,
+    number=normalized,
+    defaults={"is_occupied": False},
+  )
+  return cell
+
+
 def refresh_cell_occupied(cell: Cell) -> None:
   """Синхронизировать флаг is_occupied с фактическими товарами в ячейке."""
   occupied = cell.products.exists()

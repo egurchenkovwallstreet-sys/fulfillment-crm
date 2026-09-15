@@ -65,6 +65,8 @@ export type StockImportPreviewRow = {
   reserved_new: number
   will_create: boolean
   cell_number: string
+  cell_number_before: string
+  will_create_cell: boolean
   message: string
 }
 
