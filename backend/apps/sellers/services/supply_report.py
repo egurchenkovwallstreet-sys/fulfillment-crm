@@ -109,9 +109,8 @@ def resolve_wb_sorted_at(order: Order, supply: Supply) -> datetime | None:
   return sorted_at
 
 
-def resolve_sticker_scanned_at_wb(order: Order, supply: Supply) -> bool:
+def resolve_sticker_scanned_at_wb(order: Order, _supply: Supply) -> bool:
   """Факт поштучного скана стикера на СЦ WB по wbStatus sorted+ (без времени)."""
-  del supply
   return order_sticker_scanned_at_wb(order)
 
 
