@@ -423,6 +423,11 @@ export async function fetchCrmProductStats(params: {
 export type SupplyReportCrmOrder = {
   wb_order_id: number
   barcode: string
+  sticker_number: string
+  wb_created_at: string | null
+  supply_scanned_at: string | null
+  wb_sorted_at: string | null
+  was_shipped_to_wb_sc: boolean
   crm_status: string
   crm_status_label: string
   wb_stage_label: string
@@ -440,6 +445,11 @@ export type SupplyReportCrmOrder = {
 export type SupplyReportOffCrmOrder = {
   wb_order_id: number
   barcode: string
+  sticker_number: string
+  wb_created_at: string | null
+  supply_scanned_at: string | null
+  wb_sorted_at: string | null
+  was_shipped_to_wb_sc: boolean
   resolution_status: string
   resolution_status_label: string
   wb_stage_label: string
@@ -478,6 +488,7 @@ export type SupplyReportResponse = {
   month: string
   month_start: string
   month_end: string
+  sticker_query?: string | null
   supplies: SupplyReportRow[]
   totals: {
     supplies: number
@@ -492,11 +503,13 @@ export type SupplyReportResponse = {
 export async function fetchSupplyReport(params: {
   month: string
   sellerId?: number
+  sticker?: string
   refresh?: boolean
 }): Promise<SupplyReportResponse> {
   const qs = new URLSearchParams()
   qs.set('month', params.month)
   if (params.sellerId) qs.set('seller_id', String(params.sellerId))
+  if (params.sticker?.trim()) qs.set('sticker', params.sticker.trim())
   if (params.refresh) qs.set('refresh', '1')
   return apiFetch<SupplyReportResponse>(`/api/sellers/admin/supply-report/?${qs.toString()}`)
 }

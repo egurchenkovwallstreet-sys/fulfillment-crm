@@ -16,6 +16,7 @@ from apps.orders.services.supply_flow import refresh_supply_readiness
 from apps.orders.services.wb_status import (
   WB_STATUS_AFTER_DELIVER,
   WB_SUPPLIER_DELIVERY,
+  maybe_set_wb_sorted_at,
   order_accepted_at_wb_sc,
 )
 from apps.sellers.models import Seller
@@ -87,6 +88,8 @@ def close_order_accepted_at_wb_sc(
   if order.wb_status != wb:
     order.wb_status = wb
     update_fields.append("wb_status")
+  if maybe_set_wb_sorted_at(order, supplier, wb):
+    update_fields.append("wb_sorted_at")
   if order.status != Order.Status.SHIPPED:
     order.status = Order.Status.SHIPPED
     update_fields.append("status")

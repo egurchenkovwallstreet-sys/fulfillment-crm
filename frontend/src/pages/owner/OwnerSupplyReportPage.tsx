@@ -47,6 +47,8 @@ export function OwnerSupplyReportPage() {
   const [sellers, setSellers] = useState<SellerManageItem[]>([])
   const [sellerId, setSellerId] = useState<number | ''>('')
   const [month, setMonth] = useState(currentMonthValue)
+  const [stickerQuery, setStickerQuery] = useState('')
+  const [stickerApplied, setStickerApplied] = useState('')
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchSupplyReport>> | null>(null)
   const [expandedSupplyIds, setExpandedSupplyIds] = useState<Set<number>>(new Set())
   const [loadingSellers, setLoadingSellers] = useState(true)
@@ -86,6 +88,7 @@ export function OwnerSupplyReportPage() {
       const result = await fetchSupplyReport({
         month,
         sellerId: sellerId || undefined,
+        sticker: stickerApplied || undefined,
         refresh: options?.refresh,
       })
       setData(result)
@@ -96,7 +99,7 @@ export function OwnerSupplyReportPage() {
     } finally {
       setLoading(false)
     }
-  }, [month, sellerId])
+  }, [month, sellerId, stickerApplied])
 
   useEffect(() => {
     void loadReport()
@@ -116,6 +119,16 @@ export function OwnerSupplyReportPage() {
     })
   }
 
+  function applyStickerSearch(event?: React.FormEvent) {
+    event?.preventDefault()
+    setStickerApplied(stickerQuery.trim())
+  }
+
+  function clearStickerSearch() {
+    setStickerQuery('')
+    setStickerApplied('')
+  }
+
   function renderCancelCell(order: SupplyReportCrmOrder | SupplyReportOffCrmOrder) {
     if (!order.is_cancelled) return '—'
     if (order.cancel_party === 'seller' && order.cancel_detail_label) {
@@ -124,44 +137,60 @@ export function OwnerSupplyReportPage() {
     return order.cancel_detail_label || order.cancel_party_label
   }
 
+  function renderOrderDateCells(order: SupplyReportCrmOrder | SupplyReportOffCrmOrder) {
+    return (
+      <>
+        <td>{formatIsoDate(order.wb_created_at)}</td>
+        <td>{formatIsoDate(order.supply_scanned_at)}</td>
+        <td>{formatIsoDate(order.wb_sorted_at)}</td>
+      </>
+    )
+  }
+
   function renderSupplyDetails(row: SupplyReportRow) {
     return (
       <tr className="owner-supply-report-details">
         <td colSpan={8}>
-          <div className="owner-supply-report-details-grid">
+          <div className="owner-supply-report-details-stack">
             <section>
               <h3>Заказы в поставке ({row.crm_orders_count})</h3>
               {row.crm_orders.length === 0 ? (
                 <p className="owner-tariffs-empty">Нет заказов</p>
               ) : (
-                <table className="owner-product-stats-table">
-                  <thead>
-                    <tr>
-                      <th>Заказ WB</th>
-                      <th>Баркод</th>
-                      <th>Приём на СЦ WB</th>
-                      <th>Статус CRM</th>
-                      <th>Этап WB</th>
-                      <th>Статус WB</th>
-                      <th>Отмена</th>
-                      <th>В доставку CRM</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row.crm_orders.map((order) => (
-                      <tr key={order.wb_order_id} className={orderRowClass(order)}>
-                        <td>{order.wb_order_id}</td>
-                        <td>{order.barcode}</td>
-                        <td>{order.wb_acceptance_label}</td>
-                        <td>{order.crm_status_label}</td>
-                        <td>{order.wb_stage_label}</td>
-                        <td>{order.wb_status_label}</td>
-                        <td>{renderCancelCell(order)}</td>
-                        <td>{formatIsoDate(order.in_delivery_at)}</td>
+                <div className="owner-supply-report-table-wrap">
+                  <table className="owner-product-stats-table">
+                    <thead>
+                      <tr>
+                        <th>Заказ WB</th>
+                        <th>Стикер</th>
+                        <th>Баркод</th>
+                        <th>Заказ пришёл</th>
+                        <th>Поставка отсканирована</th>
+                        <th>Сортировка заказа</th>
+                        <th>Отгрузка на СЦ WB</th>
+                        <th>Статус CRM</th>
+                        <th>Этап WB</th>
+                        <th>Статус WB</th>
+                        <th>Отмена</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {row.crm_orders.map((order) => (
+                        <tr key={order.wb_order_id} className={orderRowClass(order)}>
+                          <td>{order.wb_order_id}</td>
+                          <td className="owner-supply-report-sticker">{order.sticker_number}</td>
+                          <td>{order.barcode}</td>
+                          {renderOrderDateCells(order)}
+                          <td>{order.wb_acceptance_label}</td>
+                          <td>{order.crm_status_label}</td>
+                          <td>{order.wb_stage_label}</td>
+                          <td>{order.wb_status_label}</td>
+                          <td>{renderCancelCell(order)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </section>
             <section>
@@ -169,37 +198,43 @@ export function OwnerSupplyReportPage() {
               {row.off_crm_orders.length === 0 ? (
                 <p className="owner-tariffs-empty">Нет заказов вне CRM</p>
               ) : (
-                <table className="owner-product-stats-table">
-                  <thead>
-                    <tr>
-                      <th>Заказ WB</th>
-                      <th>Баркод</th>
-                      <th>Приём на СЦ WB</th>
-                      <th>Этап WB</th>
-                      <th>Статус WB</th>
-                      <th>Отмена</th>
-                      <th>Решение CRM</th>
-                      <th>Отгружено WB</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row.off_crm_orders.map((order) => (
-                      <tr
-                        key={`${order.wb_order_id}-${order.barcode}`}
-                        className={orderRowClass(order)}
-                      >
-                        <td>{order.wb_order_id}</td>
-                        <td>{order.barcode}</td>
-                        <td>{order.wb_acceptance_label}</td>
-                        <td>{order.wb_stage_label}</td>
-                        <td>{order.wb_status_label}</td>
-                        <td>{renderCancelCell(order)}</td>
-                        <td>{order.resolution_status_label}</td>
-                        <td>{formatIsoDate(order.shipped_at)}</td>
+                <div className="owner-supply-report-table-wrap">
+                  <table className="owner-product-stats-table">
+                    <thead>
+                      <tr>
+                        <th>Заказ WB</th>
+                        <th>Стикер</th>
+                        <th>Баркод</th>
+                        <th>Заказ пришёл</th>
+                        <th>Поставка отсканирована</th>
+                        <th>Сортировка заказа</th>
+                        <th>Отгрузка на СЦ WB</th>
+                        <th>Этап WB</th>
+                        <th>Статус WB</th>
+                        <th>Отмена</th>
+                        <th>Решение CRM</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {row.off_crm_orders.map((order) => (
+                        <tr
+                          key={`${order.wb_order_id}-${order.barcode}`}
+                          className={orderRowClass(order)}
+                        >
+                          <td>{order.wb_order_id}</td>
+                          <td className="owner-supply-report-sticker">{order.sticker_number}</td>
+                          <td>{order.barcode}</td>
+                          {renderOrderDateCells(order)}
+                          <td>{order.wb_acceptance_label}</td>
+                          <td>{order.wb_stage_label}</td>
+                          <td>{order.wb_status_label}</td>
+                          <td>{renderCancelCell(order)}</td>
+                          <td>{order.resolution_status_label}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </section>
           </div>
@@ -213,7 +248,7 @@ export function OwnerSupplyReportPage() {
       <header className="topbar">
         <div>
           <h1>Поставки WB</h1>
-          <p>Отгруженные поставки всех селлеров за месяц — приём на СЦ, статусы и отмены</p>
+          <p>Отгруженные поставки — даты, стикеры, приём на СЦ WB и отмены</p>
         </div>
       </header>
 
@@ -243,6 +278,26 @@ export function OwnerSupplyReportPage() {
               ))}
             </select>
           </label>
+          <form className="owner-product-stats-field owner-supply-report-sticker-search" onSubmit={applyStickerSearch}>
+            <span>Стикер</span>
+            <div className="owner-supply-report-sticker-search-row">
+              <input
+                type="text"
+                value={stickerQuery}
+                onChange={(event) => setStickerQuery(event.target.value)}
+                placeholder="Номер, QR или часть"
+                disabled={loading}
+              />
+              <button type="submit" className="btn btn--ghost" disabled={loading}>
+                Найти
+              </button>
+              {stickerApplied ? (
+                <button type="button" className="btn btn--ghost" onClick={clearStickerSearch} disabled={loading}>
+                  Сброс
+                </button>
+              ) : null}
+            </div>
+          </form>
           <button
             type="button"
             className="btn btn--ghost"
@@ -268,18 +323,27 @@ export function OwnerSupplyReportPage() {
             <span>
               Вне CRM: <strong>{data.totals.off_crm_orders}</strong>
             </span>
-            {data.cached_at && (
+            {data.sticker_query ? (
+              <span>
+                Поиск стикера: <strong>{data.sticker_query}</strong>
+              </span>
+            ) : null}
+            {data.cached_at && !data.sticker_query ? (
               <span>
                 Снимок: <strong>{formatIsoDate(data.cached_at)}</strong>
               </span>
-            )}
+            ) : null}
           </div>
         )}
 
         {error && <p className="form-error">{error}</p>}
 
         {!loading && data && data.supplies.length === 0 && (
-          <p className="owner-tariffs-empty">За выбранный месяц отгруженных поставок нет.</p>
+          <p className="owner-tariffs-empty">
+            {stickerApplied
+              ? 'По этому стикеру за выбранный месяц ничего не найдено.'
+              : 'За выбранный месяц отгруженных поставок нет.'}
+          </p>
         )}
 
         {data && data.supplies.length > 0 && (

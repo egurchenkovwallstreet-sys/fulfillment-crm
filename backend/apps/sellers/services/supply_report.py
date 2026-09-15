@@ -9,7 +9,7 @@ from django.utils import timezone
 from apps.accounts.models import Fulfillment
 from apps.integrations.marketplace import WB
 from apps.orders.models import OffCrmShipment, Order, Supply
-from apps.orders.services.assembly import get_wb_stage_label
+from apps.orders.services.assembly import format_sticker_number, get_wb_stage_label
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -17,6 +17,7 @@ from apps.orders.services.wb_status import (
   get_wb_status_label,
   is_wb_cancelled,
   order_accepted_at_wb_sc,
+  order_reached_wb_sc,
 )
 from apps.sellers.models import ExcludedSellerWarehouse, Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import calendar_month_start, previous_month_bounds, today_local
@@ -92,11 +93,89 @@ def order_is_cancelled(order: Order) -> bool:
   )
 
 
-def wb_sc_acceptance_label(order: Order) -> str:
+def resolve_wb_sorted_at(order: Order, supply: Supply) -> datetime | None:
+  if order.wb_sorted_at:
+    return order.wb_sorted_at
+  if order.status == Order.Status.SHIPPED and order.in_delivery_at:
+    return order.in_delivery_at
+  return None
+
+
+def order_sticker_display(order: Order) -> str:
+  number = format_sticker_number(order)
+  scan_code = (order.sticker_scan_code or "").strip()
+  if number and scan_code and scan_code not in number:
+    return f"{number} · {scan_code}"
+  return number or scan_code or "—"
+
+
+def off_crm_sticker_display(row: OffCrmShipment) -> str:
+  number = (row.sticker_number or "").strip()
+  if not number and row.sticker_part_a and row.sticker_part_b:
+    number = f"{row.sticker_part_a} / {row.sticker_part_b}"
+  if row.crm_order_id:
+    crm_sticker = order_sticker_display(row.crm_order)
+    if crm_sticker != "—":
+      return crm_sticker
+  return number or "—"
+
+
+def _sticker_search_blob(*parts: str) -> str:
+  return " ".join((part or "").strip().lower() for part in parts if (part or "").strip())
+
+
+def order_matches_sticker_query(order: Order, query: str) -> bool:
+  token = (query or "").strip().lower()
+  if not token:
+    return True
+  blob = _sticker_search_blob(
+    order.sticker_part_a,
+    order.sticker_part_b,
+    order.sticker_scan_code,
+    format_sticker_number(order),
+    str(order.wb_order_id),
+    order.barcode,
+  )
+  return token in blob
+
+
+def off_crm_matches_sticker_query(row: OffCrmShipment, query: str) -> bool:
+  token = (query or "").strip().lower()
+  if not token:
+    return True
+  blob = _sticker_search_blob(
+    row.sticker_part_a,
+    row.sticker_part_b,
+    row.sticker_number,
+    str(row.wb_order_id),
+    row.barcode,
+  )
+  if row.crm_order_id:
+    blob = f"{blob} {_sticker_search_blob(order_sticker_display(row.crm_order))}"
+  return token in blob
+
+
+def wb_sc_acceptance_label(order: Order, supply: Supply) -> str:
   """Человекочитаемый статус приёмки заказа на СЦ WB."""
-  if order_is_cancelled(order):
-    return "—"
+  sorted_at = resolve_wb_sorted_at(order, supply)
+  cancelled = order_is_cancelled(order)
   wb = (order.wb_status or "").strip()
+
+  if sorted_at or order_reached_wb_sc(order):
+    if cancelled:
+      return "Был отгружен на СЦ WB"
+    label = get_wb_status_label(wb)
+    return label if label not in ("—", wb, "") else "Отсортирован на СЦ WB"
+
+  if order.in_delivery_at:
+    if cancelled:
+      return "Передан в доставку · не отсортирован"
+    if wb == WB_STATUS_AFTER_DELIVER or not wb:
+      return "Не принят · ждёт сортировки"
+
+  if cancelled:
+    return "Не отгружен на СЦ WB"
+
   if order_accepted_at_wb_sc(order):
     label = get_wb_status_label(wb)
     return label if label not in ("—", "") else "Принят на СЦ WB"
@@ -190,14 +269,20 @@ def _serialize_crm_order(order: Order, supply: Supply) -> dict:
   supplier = (order.wb_supplier_status or "").strip()
   wb = (order.wb_status or "").strip()
   cancel = describe_order_cancellation(order, supply, via_crm=True)
+  sorted_at = resolve_wb_sorted_at(order, supply)
   return {
     "wb_order_id": order.wb_order_id,
     "barcode": order.barcode,
+    "sticker_number": order_sticker_display(order),
+    "wb_created_at": order.wb_created_at.isoformat() if order.wb_created_at else None,
+    "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
+    "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
+    "was_shipped_to_wb_sc": bool(sorted_at or order_reached_wb_sc(order)),
     "crm_status": order.status,
     "crm_status_label": order.get_status_display(),
     "wb_stage_label": get_wb_stage_label(supplier),
     "wb_status_label": get_wb_status_label(wb),
-    "wb_acceptance_label": wb_sc_acceptance_label(order),
+    "wb_acceptance_label": wb_sc_acceptance_label(order, supply),
     "in_delivery_at": order.in_delivery_at.isoformat() if order.in_delivery_at else None,
     "via_crm": bool(order.has_sticker or order.in_delivery_at),
     **cancel,
@@ -208,9 +293,12 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
   order = row.crm_order
   if order:
     cancel = describe_order_cancellation(order, supply, via_crm=False)
-    wb_acceptance = wb_sc_acceptance_label(order)
+    wb_acceptance = wb_sc_acceptance_label(order, supply)
     wb_stage_label = get_wb_stage_label(order.wb_supplier_status or "")
     wb_status_label = get_wb_status_label(order.wb_status or "")
+    sorted_at = resolve_wb_sorted_at(order, supply)
+    wb_created_at = order.wb_created_at.isoformat() if order.wb_created_at else None
+    was_shipped = bool(sorted_at or order_reached_wb_sc(order))
   else:
     cancel = {
       "is_cancelled": False,
@@ -222,10 +310,18 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
     wb_acceptance = "—"
     wb_stage_label = "—"
     wb_status_label = "—"
+    sorted_at = None
+    wb_created_at = None
+    was_shipped = False
 
   return {
     "wb_order_id": row.wb_order_id,
     "barcode": row.barcode,
+    "sticker_number": off_crm_sticker_display(row),
+    "wb_created_at": wb_created_at,
+    "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
+    "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
+    "was_shipped_to_wb_sc": was_shipped,
     "resolution_status": row.status,
     "resolution_status_label": row.get_status_display(),
     "wb_stage_label": wb_stage_label,
@@ -254,6 +350,7 @@ def load_supply_report(
   *,
   month: date,
   seller_id: int | None = None,
+  sticker_query: str | None = None,
 ) -> dict:
   """Собрать отчёт по поставкам за календарный месяц."""
   month_start, month_end = month_bounds(month)
@@ -341,6 +438,14 @@ def load_supply_report(
     ):
       continue
 
+    if sticker_query:
+      crm_orders = [order for order in crm_orders if order_matches_sticker_query(order, sticker_query)]
+      off_crm_in_month = [
+        row for row in off_crm_in_month if off_crm_matches_sticker_query(row, sticker_query)
+      ]
+      if not crm_orders and not off_crm_in_month:
+        continue
+
     crm_payload = [_serialize_crm_order(order, supply) for order in crm_orders]
     off_payload = [_serialize_off_crm_row(row, supply) for row in off_crm_in_month]
     total_crm += len(crm_payload)
@@ -377,6 +482,7 @@ def load_supply_report(
     "month": month.isoformat(),
     "month_start": month_start.isoformat(),
     "month_end": month_end.isoformat(),
+    "sticker_query": (sticker_query or "").strip() or None,
     "supplies": rows,
     "totals": {
       "supplies": len(rows),

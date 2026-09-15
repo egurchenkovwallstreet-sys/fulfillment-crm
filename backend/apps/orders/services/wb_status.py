@@ -25,6 +25,13 @@ WB_DELIVERED_WB_STATUSES = frozenset({
   "defect",
 })
 
+WB_SC_ACCEPTED_WB_STATUSES = frozenset({
+  "sorted",
+  "accepted_by_carrier",
+  "sent_to_carrier",
+  "postponed_delivery",
+}) | WB_DELIVERED_WB_STATUSES
+
 WB_TERMINAL_WB_STATUSES = WB_DELIVERED_WB_STATUSES | CANCEL_WB_STATUSES
 
 # wbStatus сразу после PATCH .../deliver; в ЛК поставки — «Ждёт сортировки».
@@ -124,6 +131,46 @@ def is_wb_in_delivery(supplier_status: str, wb_status: str) -> bool:
   return wb_status == WB_DELIVERY_TAB_WB_STATUS
 
 
+def is_wb_sc_acceptance_status(supplier_status: str, wb_status: str) -> bool:
+  supplier_status = (supplier_status or "").strip()
+  wb_status = (wb_status or "").strip()
+  if supplier_status != WB_SUPPLIER_DELIVERY:
+    return False
+  if is_wb_cancelled(supplier_status, wb_status):
+    return False
+  if wb_status in WB_SC_ACCEPTED_WB_STATUSES:
+    return True
+  return bool(wb_status) and wb_status != WB_STATUS_AFTER_DELIVER
+
+
+def maybe_set_wb_sorted_at(
+  order: Order,
+  supplier_status: str,
+  wb_status: str,
+  *,
+  at=None,
+) -> bool:
+  if order.wb_sorted_at:
+    return False
+  if not is_wb_sc_acceptance_status(supplier_status, wb_status):
+    return False
+  order.wb_sorted_at = at or timezone.now()
+  return True
+
+
+def order_reached_wb_sc(order: Order) -> bool:
+  """Был ли заказ принят на СЦ WB — в том числе до отмены покупателем."""
+  if order.wb_sorted_at:
+    return True
+  supplier = (order.wb_supplier_status or "").strip()
+  wb = (order.wb_status or "").strip()
+  if is_wb_sc_acceptance_status(supplier, wb):
+    return True
+  if order.status == Order.Status.SHIPPED:
+    return True
+  return False
+
+
 def order_accepted_at_wb_sc(order: Order) -> bool:
   """
   Заказ уже принят/отсортирован на СЦ WB поштучно (wbStatus ≠ waiting).
@@ -156,6 +203,9 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   if order.wb_status != wb_status:
     order.wb_status = wb_status
     changed_fields.add("wb_status")
+
+  if maybe_set_wb_sorted_at(order, supplier_status, wb_status):
+    changed_fields.add("wb_sorted_at")
 
   if is_wb_cancelled(supplier_status, wb_status):
     if order.status != Order.Status.CANCELLED:

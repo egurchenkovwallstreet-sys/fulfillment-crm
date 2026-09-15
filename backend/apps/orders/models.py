@@ -78,6 +78,12 @@ class Order(models.Model):
     db_index=True,
   )
   wb_created_at = models.DateTimeField("Дата заказа WB", null=True, blank=True, db_index=True)
+  wb_sorted_at = models.DateTimeField(
+    "Отсортирован на СЦ WB",
+    null=True,
+    blank=True,
+    db_index=True,
+  )
   assembly_hidden = models.BooleanField(
     "Скрыт из сборки FBS",
     default=False,

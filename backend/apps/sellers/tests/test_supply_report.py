@@ -107,3 +107,30 @@ class SupplyReportTests(TestCase):
     self.assertEqual(row["off_crm_orders_count"], 1)
     crm_ids = {item["wb_order_id"] for item in row["crm_orders"]}
     self.assertEqual(crm_ids, {700001, 700003, 700004})
+
+  def test_buyer_cancel_without_sorting(self):
+    from apps.sellers.services.supply_report import wb_sc_acceptance_label
+
+    self.assertEqual(
+      wb_sc_acceptance_label(self.buyer_cancel_order, self.supply),
+      "Передан в доставку · не отсортирован",
+    )
+
+  def test_buyer_cancel_with_sorting_date(self):
+    from apps.sellers.services.supply_report import wb_sc_acceptance_label
+
+    self.buyer_cancel_order.wb_sorted_at = timezone.now()
+    self.buyer_cancel_order.save(update_fields=["wb_sorted_at", "updated_at"])
+    self.assertEqual(
+      wb_sc_acceptance_label(self.buyer_cancel_order, self.supply),
+      "Был отгружен на СЦ WB",
+    )
+
+  def test_sticker_search_filters_orders(self):
+    self.crm_order.sticker_part_a = "12345"
+    self.crm_order.sticker_part_b = "67890"
+    self.crm_order.save(update_fields=["sticker_part_a", "sticker_part_b", "updated_at"])
+    month = timezone.localdate().replace(day=1)
+    payload = load_supply_report(self.fulfillment, month=month, sticker_query="12345")
+    self.assertEqual(payload["totals"]["crm_orders"], 1)
+    self.assertEqual(payload["supplies"][0]["crm_orders"][0]["wb_order_id"], 700001)

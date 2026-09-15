@@ -402,9 +402,15 @@ class AdminSupplyReportView(APIView):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     force_refresh = request.query_params.get("refresh") == "1"
+    sticker_query = (request.query_params.get("sticker") or "").strip() or None
 
-    if seller_id is not None:
-      payload = load_supply_report(fulfillment, month=month, seller_id=seller_id)
+    if seller_id is not None or sticker_query:
+      payload = load_supply_report(
+        fulfillment,
+        month=month,
+        seller_id=seller_id,
+        sticker_query=sticker_query,
+      )
       payload["source"] = "live"
     elif force_refresh:
       payload = rebuild_supply_report_snapshot(fulfillment, month=month)

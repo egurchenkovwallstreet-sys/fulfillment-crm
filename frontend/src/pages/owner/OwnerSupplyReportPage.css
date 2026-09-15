@@ -13,15 +13,36 @@
   padding: 0.75rem 1rem 1rem;
 }
 
-.owner-supply-report-details-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
+.owner-supply-report-details-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
-.owner-supply-report-details-grid h3 {
+.owner-supply-report-details-stack h3 {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
+}
+
+.owner-supply-report-table-wrap {
+  overflow-x: auto;
+}
+
+.owner-supply-report-sticker {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.owner-supply-report-sticker-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.owner-supply-report-sticker-search-row input {
+  min-width: 220px;
 }
 
 .owner-supply-report-order--cancelled {
