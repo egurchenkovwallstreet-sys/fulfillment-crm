@@ -148,7 +148,7 @@ export async function syncOrders(
 
   if (enqueued.background && enqueued.task_id) {
     if (!wait) {
-      return { success: true, ...enqueued }
+      return { ...enqueued, success: enqueued.success ?? true }
     }
     const result = await waitForTask<SyncResult>(enqueued.task_id, { timeoutMs: 180_000 })
     return { ...result, success: result.success ?? true }

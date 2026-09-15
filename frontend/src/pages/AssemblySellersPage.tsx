@@ -45,7 +45,7 @@ export function AssemblySellersPage() {
   }, [marketplace])
 
   async function handleSyncAll() {
-    setLoading(true)
+    setSyncing(true)
     try {
       const result = await syncOrders(undefined, 'quick')
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
@@ -60,7 +60,7 @@ export function AssemblySellersPage() {
     } catch (err) {
       showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
     } finally {
-      setLoading(false)
+      setSyncing(false)
     }
   }
 
