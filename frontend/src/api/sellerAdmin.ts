@@ -425,9 +425,16 @@ export type SupplyReportCrmOrder = {
   barcode: string
   crm_status: string
   crm_status_label: string
-  wb_supplier_status: string
-  wb_status: string
+  wb_stage_label: string
+  wb_status_label: string
+  wb_acceptance_label: string
   in_delivery_at: string | null
+  via_crm: boolean
+  is_cancelled: boolean
+  cancel_party: string
+  cancel_party_label: string
+  cancel_where_label: string
+  cancel_detail_label: string
 }
 
 export type SupplyReportOffCrmOrder = {
@@ -435,9 +442,17 @@ export type SupplyReportOffCrmOrder = {
   barcode: string
   resolution_status: string
   resolution_status_label: string
+  wb_stage_label: string
+  wb_status_label: string
+  wb_acceptance_label: string
   shipped_at: string | null
   detected_at: string | null
   warehouse_name: string
+  is_cancelled: boolean
+  cancel_party: string
+  cancel_party_label: string
+  cancel_where_label: string
+  cancel_detail_label: string
 }
 
 export type SupplyReportRow = {

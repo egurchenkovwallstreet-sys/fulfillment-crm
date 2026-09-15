@@ -9,8 +9,20 @@ from django.utils import timezone
 from apps.accounts.models import Fulfillment
 from apps.integrations.marketplace import WB
 from apps.orders.models import OffCrmShipment, Order, Supply
+from apps.orders.services.assembly import get_wb_stage_label
+from apps.orders.services.wb_status import (
+  CANCEL_SUPPLIER_STATUSES,
+  CANCEL_WB_STATUSES,
+  WB_STATUS_AFTER_DELIVER,
+  get_wb_status_label,
+  is_wb_cancelled,
+  order_accepted_at_wb_sc,
+)
 from apps.sellers.models import ExcludedSellerWarehouse, Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import calendar_month_start, previous_month_bounds, today_local
+
+BUYER_CANCEL_WB_STATUSES = frozenset({"canceled_by_client", "declined_by_client"})
+CARRIER_CANCEL_WB_STATUSES = frozenset({"canceled_by_carrier", "cancel_carrier"})
 
 
 def parse_report_month(value: str | None) -> date | None:
@@ -73,27 +85,156 @@ def _warehouse_label(
   return maps.get(seller_id, {}).get(int(warehouse_id), f"Склад #{warehouse_id}")
 
 
-def _serialize_crm_order(order: Order) -> dict:
+def order_is_cancelled(order: Order) -> bool:
+  return order.status == Order.Status.CANCELLED or is_wb_cancelled(
+    order.wb_supplier_status or "",
+    order.wb_status or "",
+  )
+
+
+def wb_sc_acceptance_label(order: Order) -> str:
+  """Человекочитаемый статус приёмки заказа на СЦ WB."""
+  if order_is_cancelled(order):
+    return "—"
+  wb = (order.wb_status or "").strip()
+  if order_accepted_at_wb_sc(order):
+    label = get_wb_status_label(wb)
+    return label if label not in ("—", "") else "Принят на СЦ WB"
+  if wb == WB_STATUS_AFTER_DELIVER or wb == "":
+    return "Не принят · ждёт сортировки"
+  return get_wb_status_label(wb)
+
+
+def _seller_cancel_where(order: Order, supply: Supply, *, via_crm: bool) -> str:
+  if not via_crm or not order.has_sticker:
+    return "в ЛК WB (вне CRM)"
+  if order.in_delivery_at:
+    return "после передачи в доставку"
+  if supply.status in (Supply.Status.FORMING, Supply.Status.READY):
+    return "в поставке до доставки"
+  if order.status in (
+    Order.Status.IN_PICKING,
+    Order.Status.ASSEMBLED,
+    Order.Status.LABEL_PRINTED,
+    Order.Status.MARKED,
+  ) or order.has_sticker:
+    return "на сборке в CRM"
+  return "до поставки"
+
+
+def describe_order_cancellation(
+  order: Order,
+  supply: Supply,
+  *,
+  via_crm: bool = True,
+) -> dict:
+  """Кто отменил и (для селлера) на каком этапе — человекочитаемые подписи."""
+  supplier = (order.wb_supplier_status or "").strip()
+  wb = (order.wb_status or "").strip()
+  empty = {
+    "is_cancelled": False,
+    "cancel_party": "",
+    "cancel_party_label": "—",
+    "cancel_where_label": "",
+    "cancel_detail_label": "—",
+  }
+  if not order_is_cancelled(order):
+    return empty
+
+  wb_label = get_wb_status_label(wb)
+  supplier_label = get_wb_stage_label(supplier)
+
+  if wb in BUYER_CANCEL_WB_STATUSES:
+    detail = wb_label if wb_label not in ("—", wb) else "Отменён покупателем"
+    return {
+      "is_cancelled": True,
+      "cancel_party": "buyer",
+      "cancel_party_label": "Покупатель",
+      "cancel_where_label": "",
+      "cancel_detail_label": detail,
+    }
+
+  if supplier in CARRIER_CANCEL_WB_STATUSES or wb in CARRIER_CANCEL_WB_STATUSES:
+    detail = wb_label if wb_label not in ("—", wb) else supplier_label
+    if detail in ("—", supplier):
+      detail = "Отменён перевозчиком"
+    return {
+      "is_cancelled": True,
+      "cancel_party": "carrier",
+      "cancel_party_label": "Перевозчик",
+      "cancel_where_label": "",
+      "cancel_detail_label": detail,
+    }
+
+  if supplier in CANCEL_SUPPLIER_STATUSES or wb in CANCEL_WB_STATUSES:
+    where = _seller_cancel_where(order, supply, via_crm=via_crm)
+    detail = supplier_label if supplier_label not in ("—", supplier) else "Отменён"
+    return {
+      "is_cancelled": True,
+      "cancel_party": "seller",
+      "cancel_party_label": "Селлер",
+      "cancel_where_label": where,
+      "cancel_detail_label": f"Селлер · {where}" if where else detail,
+    }
+
+  return {
+    "is_cancelled": True,
+    "cancel_party": "unknown",
+    "cancel_party_label": "Отменён",
+    "cancel_where_label": "",
+    "cancel_detail_label": wb_label if wb_label not in ("—", wb) else "Отменён",
+  }
+
+
+def _serialize_crm_order(order: Order, supply: Supply) -> dict:
+  supplier = (order.wb_supplier_status or "").strip()
+  wb = (order.wb_status or "").strip()
+  cancel = describe_order_cancellation(order, supply, via_crm=True)
   return {
     "wb_order_id": order.wb_order_id,
     "barcode": order.barcode,
     "crm_status": order.status,
     "crm_status_label": order.get_status_display(),
-    "wb_supplier_status": order.wb_supplier_status or "",
-    "wb_status": order.wb_status or "",
+    "wb_stage_label": get_wb_stage_label(supplier),
+    "wb_status_label": get_wb_status_label(wb),
+    "wb_acceptance_label": wb_sc_acceptance_label(order),
     "in_delivery_at": order.in_delivery_at.isoformat() if order.in_delivery_at else None,
+    "via_crm": bool(order.has_sticker or order.in_delivery_at),
+    **cancel,
   }
 
 
-def _serialize_off_crm_row(row: OffCrmShipment) -> dict:
+def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
+  order = row.crm_order
+  if order:
+    cancel = describe_order_cancellation(order, supply, via_crm=False)
+    wb_acceptance = wb_sc_acceptance_label(order)
+    wb_stage_label = get_wb_stage_label(order.wb_supplier_status or "")
+    wb_status_label = get_wb_status_label(order.wb_status or "")
+  else:
+    cancel = {
+      "is_cancelled": False,
+      "cancel_party": "",
+      "cancel_party_label": "—",
+      "cancel_where_label": "",
+      "cancel_detail_label": "—",
+    }
+    wb_acceptance = "—"
+    wb_stage_label = "—"
+    wb_status_label = "—"
+
   return {
     "wb_order_id": row.wb_order_id,
     "barcode": row.barcode,
     "resolution_status": row.status,
     "resolution_status_label": row.get_status_display(),
+    "wb_stage_label": wb_stage_label,
+    "wb_status_label": wb_status_label,
+    "wb_acceptance_label": wb_acceptance,
     "shipped_at": row.shipped_at.isoformat() if row.shipped_at else None,
     "detected_at": row.detected_at.isoformat() if row.detected_at else None,
     "warehouse_name": row.warehouse_name or "—",
+    **cancel,
   }
 
 
@@ -160,14 +301,17 @@ def load_supply_report(
     .distinct()
     .select_related("seller")
     .prefetch_related(
-      Prefetch("orders", queryset=Order.objects.order_by("wb_order_id")),
+      Prefetch(
+        "orders",
+        queryset=Order.objects.order_by("wb_order_id"),
+      ),
     )
     .annotate(crm_delivered_at_agg=Min("orders__in_delivery_at"))
     .order_by("-crm_delivered_at_agg", "-wb_scanned_at", "-created_at")
   )
 
   off_crm_by_supply: dict[tuple[int, str], list[OffCrmShipment]] = {}
-  for row in OffCrmShipment.objects.filter(seller_id__in=seller_ids).exclude(wb_supply_id=""):
+  for row in OffCrmShipment.objects.filter(seller_id__in=seller_ids).select_related("crm_order").exclude(wb_supply_id=""):
     key = (row.seller_id, row.wb_supply_id)
     off_crm_by_supply.setdefault(key, []).append(row)
 
@@ -177,11 +321,7 @@ def load_supply_report(
 
   for supply in supplies:
     orders = list(supply.orders.all())
-    crm_orders = [
-      order
-      for order in orders
-      if order.in_delivery_at is not None and order.has_sticker
-    ]
+    crm_orders = list(orders)
     crm_delivered_at = min(
       (order.in_delivery_at for order in crm_orders if order.in_delivery_at),
       default=supply.crm_delivered_at_agg,
@@ -201,8 +341,8 @@ def load_supply_report(
     ):
       continue
 
-    crm_payload = [_serialize_crm_order(order) for order in crm_orders]
-    off_payload = [_serialize_off_crm_row(row) for row in off_crm_in_month]
+    crm_payload = [_serialize_crm_order(order, supply) for order in crm_orders]
+    off_payload = [_serialize_off_crm_row(row, supply) for row in off_crm_in_month]
     total_crm += len(crm_payload)
     total_off += len(off_payload)
 

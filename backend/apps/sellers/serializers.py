@@ -308,9 +308,16 @@ class SupplyReportCrmOrderSerializer(serializers.Serializer):
   barcode = serializers.CharField()
   crm_status = serializers.CharField()
   crm_status_label = serializers.CharField()
-  wb_supplier_status = serializers.CharField()
-  wb_status = serializers.CharField()
+  wb_stage_label = serializers.CharField()
+  wb_status_label = serializers.CharField()
+  wb_acceptance_label = serializers.CharField()
   in_delivery_at = serializers.CharField(allow_null=True)
+  via_crm = serializers.BooleanField()
+  is_cancelled = serializers.BooleanField()
+  cancel_party = serializers.CharField()
+  cancel_party_label = serializers.CharField()
+  cancel_where_label = serializers.CharField()
+  cancel_detail_label = serializers.CharField()
 
 
 class SupplyReportOffCrmOrderSerializer(serializers.Serializer):
@@ -318,9 +325,17 @@ class SupplyReportOffCrmOrderSerializer(serializers.Serializer):
   barcode = serializers.CharField()
   resolution_status = serializers.CharField()
   resolution_status_label = serializers.CharField()
+  wb_stage_label = serializers.CharField()
+  wb_status_label = serializers.CharField()
+  wb_acceptance_label = serializers.CharField()
   shipped_at = serializers.CharField(allow_null=True)
   detected_at = serializers.CharField(allow_null=True)
   warehouse_name = serializers.CharField()
+  is_cancelled = serializers.BooleanField()
+  cancel_party = serializers.CharField()
+  cancel_party_label = serializers.CharField()
+  cancel_where_label = serializers.CharField()
+  cancel_detail_label = serializers.CharField()
 
 
 class SupplyReportRowSerializer(serializers.Serializer):
