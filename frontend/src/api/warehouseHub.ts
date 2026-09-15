@@ -378,16 +378,39 @@ export async function previewStockImport(
   return response.json() as Promise<StockImportPreview>
 }
 
-export function applyStockImport(
+export type StockImportEnqueueResult = {
+  success: boolean
+  background?: boolean
+  task_id?: string
+  message?: string
+}
+
+export async function applyStockImport(
   sellerId: number,
   warehouseId: number,
   rows: StockImportPreviewRow[],
   mode: StockImportMode = 'increment',
-) {
-  return apiFetch<StockImportResult>(`/api/warehouse/stock-import/${sellerId}/apply/`, {
-    method: 'POST',
-    body: JSON.stringify({ warehouse_id: warehouseId, rows, mode }),
-  })
+  opts?: { onProgress?: (state: string) => void },
+): Promise<StockImportResult> {
+  const { waitForTask } = await import('./tasks')
+  const enqueued = await apiFetch<StockImportEnqueueResult>(
+    `/api/warehouse/stock-import/${sellerId}/apply/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ warehouse_id: warehouseId, rows, mode }),
+    },
+  )
+  if (enqueued.background && enqueued.task_id) {
+    const result = await waitForTask<StockImportResult>(enqueued.task_id, {
+      timeoutMs: 600_000,
+      onProgress: opts?.onProgress,
+    })
+    if (result && typeof result === 'object' && 'detail' in result && !('ok' in result)) {
+      throw new Error(String((result as { detail?: string }).detail || 'Ошибка импорта'))
+    }
+    return result
+  }
+  return enqueued as unknown as StockImportResult
 }
 
 export function pushOzonStocks(sellerId: number, warehouseId: number) {

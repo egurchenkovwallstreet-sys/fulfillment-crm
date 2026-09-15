@@ -266,6 +266,18 @@ class OrderStatsView(APIView):
     return Response(data)
 
 
+def _background_task_response(task) -> Response:
+  return Response(
+    {
+      "success": True,
+      "background": True,
+      "task_id": task.id,
+      "message": "Синхронизация запущена в фоне",
+    },
+    status=status.HTTP_202_ACCEPTED,
+  )
+
+
 class OrderSyncView(APIView):
   permission_classes = [IsAuthenticated]
 
@@ -276,8 +288,13 @@ class OrderSyncView(APIView):
     serializer.is_valid(raise_exception=True)
     seller_id = serializer.validated_data.get("seller_id")
     sync_mode = serializer.validated_data.get("mode", "full")
+    background = serializer.validated_data.get("background", True)
 
     if marketplace == OZON:
+      if background:
+        from apps.integrations.tasks import sync_ozon_orders
+
+        return _background_task_response(sync_ozon_orders.delay())
       from apps.orders.services.ozon_counts import OzonCountsError, _stage_totals_ozon
       from apps.orders.services.ozon_postings import OzonPostingSyncError, sync_ozon_postings
       from apps.sellers.services.sync_ozon_warehouses import OzonWarehouseSyncError, sync_seller_ozon_warehouses
@@ -332,6 +349,16 @@ class OrderSyncView(APIView):
           {"detail": "У пользователя не привязан селлер"},
           status=status.HTTP_400_BAD_REQUEST,
         )
+      if background:
+        from apps.integrations.tasks import sync_orders_for_seller_task
+
+        return _background_task_response(
+          sync_orders_for_seller_task.delay(
+            user.seller_id,
+            user_id=user.id,
+            mode=sync_mode,
+          ),
+        )
       try:
         result = sync_orders_for_seller(user.seller, user=user, mode=sync_mode)
       except SyncError as exc:
@@ -348,6 +375,16 @@ class OrderSyncView(APIView):
       seller = get_seller_for_user(user, seller_id, active_only=True)
       if not seller:
         return Response(status=status.HTTP_404_NOT_FOUND)
+      if background:
+        from apps.integrations.tasks import sync_orders_for_seller_task
+
+        return _background_task_response(
+          sync_orders_for_seller_task.delay(
+            seller_id,
+            user_id=user.id,
+            mode=sync_mode,
+          ),
+        )
       try:
         result = sync_orders_for_seller(seller, user=user, mode=sync_mode)
       except SyncError as exc:
@@ -356,6 +393,13 @@ class OrderSyncView(APIView):
         get_seller_wb_tab_counts(seller, assembly_only=True),
       )
       return Response({"success": True, "dashboard_stats": dashboard_stats, **result})
+
+    if background:
+      from apps.integrations.tasks import sync_wb_orders
+
+      return _background_task_response(
+        sync_wb_orders.delay(quick=(sync_mode == "quick")),
+      )
 
     from apps.accounts.tenant import get_user_fulfillment
 
@@ -485,6 +529,18 @@ class AssemblySellerListView(APIView):
     return Response(SellerAssemblyCountersSerializer(payload, many=True).data)
 
 
+def _assembly_order_select_related(qs):
+  return qs.select_related("product", "product__cell", "seller")
+
+
+def _build_order_assembly_map(orders) -> dict[int, dict]:
+  unique = list({order.id: order for order in orders}.values())
+  if not unique:
+    return {}
+  serialized = OrderAssemblySerializer(unique, many=True).data
+  return {item["id"]: item for item in serialized}
+
+
 class AssemblySellerDetailView(APIView):
   """Кабинет сборки конкретного селлера."""
   permission_classes = [IsAuthenticated, IsManager]
@@ -514,20 +570,14 @@ class AssemblySellerDetailView(APIView):
     stage = request.query_params.get("stage", "")
     visible_orders = Order.objects.filter(seller=seller, assembly_hidden=False)
     if stage == "new":
-      orders_qs = new_stage_orders_queryset(seller).select_related(
-        "product", "product__cell",
-      )
+      orders_qs = _assembly_order_select_related(new_stage_orders_queryset(seller))
     elif stage == "complete":
-      orders_qs = delivery_stage_orders_queryset(seller).select_related(
-        "product", "product__cell",
-      )
+      orders_qs = _assembly_order_select_related(delivery_stage_orders_queryset(seller))
     elif stage == "confirm":
-      orders_qs = picking_stage_orders_queryset(seller).select_related(
-        "product", "product__cell",
-      )
+      orders_qs = _assembly_order_select_related(picking_stage_orders_queryset(seller))
     else:
       orders_qs = filter_orders_for_assembly(
-        visible_orders.select_related("product", "product__cell"),
+        _assembly_order_select_related(visible_orders),
         seller,
       )
       if stage in WB_STAGE_QUERIES:
@@ -541,15 +591,16 @@ class AssemblySellerDetailView(APIView):
       order_ids = list(
         orders_qs.order_by("-created_at").values_list("id", flat=True).distinct()[:500]
       )
-      orders_qs = Order.objects.filter(id__in=order_ids).select_related(
-        "product", "product__cell",
+      orders_qs = _assembly_order_select_related(
+        Order.objects.filter(id__in=order_ids),
       )
     orders = list(orders_qs.order_by("-created_at")[:500])
 
     enabled_orders_qs = filter_orders_for_assembly(
       Order.objects.filter(seller=seller, assembly_hidden=False),
       seller,
-    ).select_related("product", "product__cell", "seller")
+    )
+    enabled_orders_qs = _assembly_order_select_related(enabled_orders_qs)
 
     active_pick_lists = active_wb_pick_lists(seller)
     active_pick_list = active_pick_lists[0] if active_pick_lists else None
@@ -562,21 +613,16 @@ class AssemblySellerDetailView(APIView):
     warehouses = SellerWarehouse.objects.filter(seller=seller).order_by("name", "wb_warehouse_id")
 
     delivery_supplies = []
+    active_supplies = []
+    supplies_qs = []
     if stage == "complete":
-      supplies_qs = (
+      supplies_qs = list(
         delivery_stage_supplies_queryset(seller)
         .prefetch_related(Prefetch("orders", queryset=enabled_orders_qs))
         .order_by("-created_at")[:200]
       )
-      delivery_supplies = SupplySerializer(
-        supplies_qs,
-        many=True,
-        context={"seller": seller},
-      ).data
-
-    active_supplies = []
-    if stage == "confirm":
-      supplies_qs = (
+    elif stage == "confirm":
+      supplies_qs = list(
         filter_supplies_for_assembly(
           Supply.objects.filter(
             seller=seller,
@@ -589,20 +635,36 @@ class AssemblySellerDetailView(APIView):
       )
       for supply in supplies_qs:
         refresh_supply_readiness(supply, seller=seller)
+
+    all_orders = list(orders)
+    if supplies_qs:
+      for supply in supplies_qs:
+        all_orders.extend(supply.orders.all())
+    order_data_map = _build_order_assembly_map(all_orders)
+
+    supply_context = {"seller": seller, "order_data_map": order_data_map}
+    if stage == "complete":
+      delivery_supplies = SupplySerializer(
+        supplies_qs,
+        many=True,
+        context=supply_context,
+      ).data
+    elif stage == "confirm":
       active_supplies = SupplySerializer(
         supplies_qs,
         many=True,
-        context={"seller": seller},
+        context=supply_context,
       ).data
 
     hidden_restorable = []
     if stage == "confirm":
-      hidden_restorable = OrderAssemblySerializer(
-        hidden_restorable_orders_queryset(seller).select_related(
-          "product", "product__cell",
-        ).order_by("-updated_at")[:50],
-        many=True,
-      ).data
+      hidden_orders = list(
+        _assembly_order_select_related(
+          hidden_restorable_orders_queryset(seller),
+        ).order_by("-updated_at")[:50]
+      )
+      hidden_map = _build_order_assembly_map(hidden_orders)
+      hidden_restorable = [hidden_map[o.id] for o in hidden_orders if o.id in hidden_map]
 
     cancelled_in_supplies = []
     if stage == "confirm":
@@ -640,7 +702,7 @@ class AssemblySellerDetailView(APIView):
       "assembly_eligible": assembly_counts["new"],
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
-      "orders": OrderAssemblySerializer(orders, many=True).data,
+      "orders": [order_data_map[o.id] for o in orders if o.id in order_data_map],
       "hidden_restorable_orders": hidden_restorable,
       "delivery_supplies": delivery_supplies,
       "active_supplies": active_supplies,

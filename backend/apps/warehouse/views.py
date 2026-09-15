@@ -46,7 +46,6 @@ from .services.stock_balance_messages import stock_balance_breakdown_message
 from .services.onboarding import OnboardingError, confirm_onboarding
 from .services.stock_file_import import (
   StockFileImportError,
-  apply_stock_import,
   build_stock_import_preview,
 )
 from .services.stock_transfer import (
@@ -912,17 +911,43 @@ class StockFileApplyView(APIView):
     )
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    try:
-      result = apply_stock_import(
-        seller,
-        warehouse_id=data["warehouse_id"],
-        rows=data["rows"],
-        mode=data.get("mode") or "increment",
-        user=request.user,
+    from django.core.cache import cache
+
+    from apps.warehouse.tasks import (
+      apply_stock_import_task,
+      stock_import_lock_key,
+    )
+
+    lock_key = stock_import_lock_key(seller_id)
+    existing_task_id = cache.get(lock_key)
+    if existing_task_id:
+      return Response(
+        {
+          "success": True,
+          "background": True,
+          "task_id": existing_task_id,
+          "message": "Импорт остатков уже выполняется",
+        },
+        status=status.HTTP_202_ACCEPTED,
       )
-    except StockFileImportError as exc:
-      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    return Response({"success": result.get("ok", False), **result}, status=status.HTTP_201_CREATED)
+
+    task = apply_stock_import_task.delay(
+      seller_id,
+      warehouse_id=data["warehouse_id"],
+      rows=data["rows"],
+      mode=data.get("mode") or "increment",
+      user_id=request.user.id,
+    )
+    cache.set(lock_key, task.id, timeout=3600)
+    return Response(
+      {
+        "success": True,
+        "background": True,
+        "task_id": task.id,
+        "message": "Импорт остатков запущен в фоне",
+      },
+      status=status.HTTP_202_ACCEPTED,
+    )
 
 
 class OzonStocksPushView(APIView):

@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { waitForTask } from './tasks'
 
 export interface Order {
   id: number
@@ -120,13 +121,39 @@ export function fetchOrderStats() {
   return apiFetch<OrderStats>('/api/orders/stats/')
 }
 
-export function syncOrders(sellerId?: number, mode: 'full' | 'quick' = 'full') {
-  const body: { seller_id?: number; mode: 'full' | 'quick' } = { mode }
+export type SyncEnqueueResult = SyncResult & {
+  background?: boolean
+  task_id?: string
+  message?: string
+}
+
+export async function syncOrders(
+  sellerId?: number,
+  mode: 'full' | 'quick' = 'full',
+  opts?: { background?: boolean; wait?: boolean },
+): Promise<SyncResult> {
+  const background = opts?.background ?? true
+  const wait = opts?.wait ?? true
+  const body: {
+    seller_id?: number
+    mode: 'full' | 'quick'
+    background: boolean
+  } = { mode, background }
   if (sellerId) body.seller_id = sellerId
-  return apiFetch<SyncResult>('/api/orders/sync/', {
+
+  const enqueued = await apiFetch<SyncEnqueueResult>('/api/orders/sync/', {
     method: 'POST',
     body: JSON.stringify(body),
   })
+
+  if (enqueued.background && enqueued.task_id) {
+    if (!wait) {
+      return { success: true, ...enqueued }
+    }
+    const result = await waitForTask<SyncResult>(enqueued.task_id, { timeoutMs: 180_000 })
+    return { ...result, success: result.success ?? true }
+  }
+  return enqueued
 }
 
 export function fetchPickLists(sellerId?: number) {

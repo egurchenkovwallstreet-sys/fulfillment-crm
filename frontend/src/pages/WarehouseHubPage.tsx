@@ -307,11 +307,22 @@ export function WarehouseHubPage() {
     setLoading(true)
     setStockImportResult(null)
     try {
+      showSuccess(
+        'Загрузка остатков',
+        'Импорт запущен в фоне — сборка FBS не блокируется. Подождите…',
+      )
       const result = await applyStockImport(
         Number(sellerId),
         Number(importWarehouseId),
         stockImportPreview.rows,
         importMode,
+        {
+          onProgress: (state) => {
+            if (state === 'STARTED') {
+              showSuccess('Загрузка остатков', 'Обрабатываем файл и отправляем остатки в WB…')
+            }
+          },
+        },
       )
       setStockImportResult(result)
       const message = buildImportResultMessage(result)

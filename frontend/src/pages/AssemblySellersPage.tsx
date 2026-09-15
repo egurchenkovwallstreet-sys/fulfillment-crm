@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchAssemblySellers, type SellerAssemblyCounters } from '../api/assembly'
 import { syncOrders } from '../api/orders'
@@ -16,8 +16,6 @@ export function AssemblySellersPage() {
   )
   const [loading, setLoading] = useState(() => !(readAssemblySellersCache(marketplace)?.length))
   const [syncing, setSyncing] = useState(false)
-  const bgSyncStartedRef = useRef(false)
-
   const load = useCallback(async () => {
     try {
       const list = await fetchAssemblySellers()
@@ -30,8 +28,6 @@ export function AssemblySellersPage() {
 
   useEffect(() => {
     let cancelled = false
-    bgSyncStartedRef.current = false
-
     async function initialLoad() {
       setLoading(sellers.length === 0)
       try {
@@ -44,35 +40,6 @@ export function AssemblySellersPage() {
     void initialLoad()
     return () => {
       cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marketplace])
-
-  useEffect(() => {
-    if (bgSyncStartedRef.current) return
-    bgSyncStartedRef.current = true
-
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        setSyncing(true)
-        try {
-          await syncOrders(undefined, 'quick')
-          if (cancelled) return
-          await load()
-        } catch (err) {
-          if (!cancelled && !sellers.length) {
-            showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
-          }
-        } finally {
-          if (!cancelled) setSyncing(false)
-        }
-      })()
-    }, 600)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marketplace])

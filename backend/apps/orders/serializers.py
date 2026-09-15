@@ -102,14 +102,17 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.orders.services.supply_flow import order_can_move_to_new_supply
     return order_can_move_to_new_supply(obj)
 
-  def get_warehouse_quantity(self, obj):
-    from apps.warehouse.services.stock_deduction import resolve_order_product
-    product = resolve_order_product(obj)
-    return product.quantity if product else None
-
   def _resolve_product(self, obj):
+    if obj.product_id:
+      product = getattr(obj, "product", None)
+      if product is not None:
+        return product
     from apps.warehouse.services.stock_deduction import resolve_order_product
     return resolve_order_product(obj)
+
+  def get_warehouse_quantity(self, obj):
+    product = self._resolve_product(obj)
+    return product.quantity if product else None
 
   def get_photo_url(self, obj):
     product = self._resolve_product(obj)
@@ -291,6 +294,7 @@ class SellerAssemblyCountersSerializer(serializers.Serializer):
 class OrderSyncSerializer(serializers.Serializer):
   seller_id = serializers.IntegerField(required=False, allow_null=True)
   mode = serializers.ChoiceField(choices=["full", "quick"], default="full", required=False)
+  background = serializers.BooleanField(required=False, default=True)
 
   def validate_seller_id(self, value):
     if value is None:
@@ -480,7 +484,15 @@ class SupplySerializer(serializers.ModelSerializer):
     )
 
   def get_orders(self, obj):
-    return OrderAssemblySerializer(self._assembly_orders_qs(obj), many=True).data
+    order_data_map = self.context.get("order_data_map")
+    assembly_orders = list(self._assembly_orders_qs(obj))
+    if order_data_map is not None:
+      return [
+        order_data_map[order.id]
+        for order in assembly_orders
+        if order.id in order_data_map
+      ]
+    return OrderAssemblySerializer(assembly_orders, many=True).data
 
   def get_orders_count(self, obj):
     return self._assembly_orders_qs(obj).count()

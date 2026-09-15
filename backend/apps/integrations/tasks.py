@@ -6,7 +6,27 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-@shared_task
+@shared_task(queue="sync")
+def sync_orders_for_seller_task(
+  seller_id: int,
+  *,
+  user_id: int | None = None,
+  mode: str = "quick",
+) -> dict:
+  """Синхронизация заказов одного селлера — очередь sync, не web."""
+  from apps.accounts.models import User
+  from apps.orders.services.sync_orders import sync_orders_for_seller
+  from apps.sellers.models import Seller
+
+  seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+  if not seller:
+    return {"success": False, "detail": "Селлер не найден"}
+  user = User.objects.filter(pk=user_id).first() if user_id else None
+  result = sync_orders_for_seller(seller, user=user, mode=mode)
+  return {"success": True, **result}
+
+
+@shared_task(queue="sync")
 def sync_wb_orders(quick: bool = True):
   """Sync new orders and statuses from WB API for all active sellers."""
   from apps.orders.services.sync_orders import sync_all_active_sellers
@@ -37,7 +57,7 @@ def sync_wb_product_cards():
   return result
 
 
-@shared_task
+@shared_task(queue="sync")
 def sync_ozon_orders():
   """Синхронизация отправлений Ozon FBS для всех активных селлеров с ключами."""
   from apps.orders.services.ozon_postings import OzonPostingSyncError, sync_ozon_postings

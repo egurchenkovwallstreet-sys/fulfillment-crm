@@ -177,6 +177,14 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_DEFAULT_QUEUE = "default"
+CELERY_TASK_ROUTES = {
+  "apps.warehouse.tasks.*": {"queue": "heavy"},
+  "apps.integrations.tasks.sync_wb_orders": {"queue": "sync"},
+  "apps.integrations.tasks.sync_ozon_orders": {"queue": "sync"},
+  "apps.integrations.tasks.sync_orders_for_seller_task": {"queue": "sync"},
+}
+CELERY_RESULT_EXPIRES = 86400
 
 # Wildberries API
 WB_API_BASE_URL = env("WB_API_BASE_URL", default="https://marketplace-api.wildberries.ru")

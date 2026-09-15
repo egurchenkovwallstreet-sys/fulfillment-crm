@@ -236,7 +236,6 @@ function WbAssemblySellerPage() {
   const [pickListArchiveOpen, setPickListArchiveOpen] = useState(false)
   const [pickListArchive, setPickListArchive] = useState<PickList[]>([])
   const [pickListArchiveLoading, setPickListArchiveLoading] = useState(false)
-  const bgSyncSellerRef = useRef<number | null>(null)
   const cancelledNoticeShownRef = useRef(false)
 
   const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
@@ -282,24 +281,6 @@ function WbAssemblySellerPage() {
         + 'Строка подсветится красным — удалите из CRM вручную.',
     )
   }, [showError])
-
-  const runBackgroundSync = useCallback(async () => {
-    if (!id || syncInFlightRef.current) return
-    syncInFlightRef.current = true
-    setSyncing(true)
-    try {
-      const result = await syncOrders(id, 'quick')
-      await load({ silent: true })
-      if (result.cancelled_in_supplies?.length) {
-        notifyCancelledInSupplies(result.cancelled_in_supplies)
-      }
-    } catch {
-      // Фоновая синхронизация WB — не блокируем экран
-    } finally {
-      syncInFlightRef.current = false
-      setSyncing(false)
-    }
-  }, [id, load, notifyCancelledInSupplies])
 
   const applySavedPickList = useCallback((fresh: AssemblySellerDetail | null) => {
     if (fresh?.active_pick_lists?.length) {
@@ -375,16 +356,6 @@ function WbAssemblySellerPage() {
     cancelledNoticeShownRef.current = true
     notifyCancelledInSupplies(data.cancelled_in_supplies)
   }, [data?.cancelled_in_supplies, stage, notifyCancelledInSupplies])
-
-  useEffect(() => {
-    if (!id) return
-    if (bgSyncSellerRef.current === id) return
-    bgSyncSellerRef.current = id
-    const timer = window.setTimeout(() => {
-      void runBackgroundSync()
-    }, 500)
-    return () => window.clearTimeout(timer)
-  }, [id, runBackgroundSync])
 
   const refreshMarkingStatus = useCallback(async () => {
     if (!id) return
@@ -468,17 +439,13 @@ function WbAssemblySellerPage() {
   useEffect(() => {
     if (!id || stage !== 'complete') return
 
-    const syncDelivery = async () => {
-      try {
-        await syncOrders(id, 'quick')
-        await load({ silent: true })
-      } catch {
-        // Фоновый опрос вкладки «В доставке»
-      }
+    const refreshDelivery = () => {
+      if (document.visibilityState !== 'visible') return
+      void load({ silent: true })
     }
 
-    void syncDelivery()
-    const interval = window.setInterval(() => void syncDelivery(), 5 * 60 * 1000)
+    refreshDelivery()
+    const interval = window.setInterval(refreshDelivery, 5 * 60 * 1000)
     return () => window.clearInterval(interval)
   }, [id, stage, load])
 
