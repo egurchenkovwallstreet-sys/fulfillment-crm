@@ -37,8 +37,10 @@ function formatIsoDate(value: string | null | undefined): string {
   })
 }
 
-function orderRowClass(isCancelled: boolean): string {
-  return isCancelled ? 'owner-supply-report-order--cancelled' : ''
+function orderRowClass(order: SupplyReportCrmOrder | SupplyReportOffCrmOrder): string {
+  if (!order.is_cancelled) return ''
+  if (order.cancel_party === 'seller') return 'owner-supply-report-order--seller-cancelled'
+  return 'owner-supply-report-order--cancelled'
 }
 
 export function OwnerSupplyReportPage() {
@@ -147,7 +149,7 @@ export function OwnerSupplyReportPage() {
                   </thead>
                   <tbody>
                     {row.crm_orders.map((order) => (
-                      <tr key={order.wb_order_id} className={orderRowClass(order.is_cancelled)}>
+                      <tr key={order.wb_order_id} className={orderRowClass(order)}>
                         <td>{order.wb_order_id}</td>
                         <td>{order.barcode}</td>
                         <td>{order.wb_acceptance_label}</td>
@@ -184,7 +186,7 @@ export function OwnerSupplyReportPage() {
                     {row.off_crm_orders.map((order) => (
                       <tr
                         key={`${order.wb_order_id}-${order.barcode}`}
-                        className={orderRowClass(order.is_cancelled)}
+                        className={orderRowClass(order)}
                       >
                         <td>{order.wb_order_id}</td>
                         <td>{order.barcode}</td>

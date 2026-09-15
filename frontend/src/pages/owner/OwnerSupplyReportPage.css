@@ -35,3 +35,15 @@
 .owner-supply-report-order--cancelled:hover {
   background: #fee2e2;
 }
+
+.owner-supply-report-order--seller-cancelled {
+  background: #eff6ff;
+}
+
+.owner-supply-report-order--seller-cancelled td {
+  color: #1d4ed8;
+}
+
+.owner-supply-report-order--seller-cancelled:hover {
+  background: #dbeafe;
+}
