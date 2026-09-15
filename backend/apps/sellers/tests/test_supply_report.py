@@ -13,6 +13,7 @@ from apps.sellers.services.supply_report import (
   load_supply_report,
   order_sticker_display,
   parse_report_month,
+  resolve_sticker_scanned_at_wb,
   resolve_wb_sorted_at,
   wb_sc_acceptance_label,
 )
@@ -90,6 +91,14 @@ class SupplyReportTests(TestCase):
 
   def test_wb_sc_acceptance_label(self):
     self.assertEqual(wb_sc_acceptance_label(self.crm_order, self.supply), "Отсортирован")
+
+  def test_sticker_scanned_without_timestamp(self):
+    self.assertTrue(resolve_sticker_scanned_at_wb(self.crm_order, self.supply))
+    month = timezone.localdate().replace(day=1)
+    payload = load_supply_report(self.fulfillment, month=month)
+    row = payload["supplies"][0]["crm_orders"][0]
+    self.assertTrue(row["sticker_scanned_at_wb"])
+    self.assertIsNone(row["wb_sorted_at"])
 
   def test_sticker_excel_format(self):
     self.crm_order.sticker_part_a = "12345"

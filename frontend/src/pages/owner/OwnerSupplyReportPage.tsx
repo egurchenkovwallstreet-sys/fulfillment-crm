@@ -37,6 +37,12 @@ function formatIsoDate(value: string | null | undefined): string {
   })
 }
 
+function formatStickerScannedAt(order: SupplyReportCrmOrder | SupplyReportOffCrmOrder): string {
+  if (order.wb_sorted_at) return formatIsoDate(order.wb_sorted_at)
+  if (order.sticker_scanned_at_wb) return 'Отсканирован'
+  return '—'
+}
+
 function orderRowClass(order: SupplyReportCrmOrder | SupplyReportOffCrmOrder): string {
   if (!order.is_cancelled) return ''
   if (order.cancel_party === 'seller') return 'owner-supply-report-order--seller-cancelled'
@@ -142,7 +148,7 @@ export function OwnerSupplyReportPage() {
       <>
         <td>{formatIsoDate(order.wb_created_at)}</td>
         <td>{formatIsoDate(order.supply_scanned_at)}</td>
-        <td>{formatIsoDate(order.wb_sorted_at)}</td>
+        <td>{formatStickerScannedAt(order)}</td>
       </>
     )
   }
@@ -166,7 +172,7 @@ export function OwnerSupplyReportPage() {
                         <th>Баркод</th>
                         <th>Заказ пришёл</th>
                         <th>Поставка отсканирована</th>
-                        <th>Сортировка заказа</th>
+                        <th>Стикер отсканирован на СЦ WB</th>
                         <th>Отгрузка на СЦ WB</th>
                         <th>Статус CRM</th>
                         <th>Этап WB</th>
@@ -207,7 +213,7 @@ export function OwnerSupplyReportPage() {
                         <th>Баркод</th>
                         <th>Заказ пришёл</th>
                         <th>Поставка отсканирована</th>
-                        <th>Сортировка заказа</th>
+                        <th>Стикер отсканирован на СЦ WB</th>
                         <th>Отгрузка на СЦ WB</th>
                         <th>Этап WB</th>
                         <th>Статус WB</th>

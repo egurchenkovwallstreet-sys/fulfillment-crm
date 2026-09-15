@@ -79,7 +79,7 @@ class Order(models.Model):
   )
   wb_created_at = models.DateTimeField("Дата заказа WB", null=True, blank=True, db_index=True)
   wb_sorted_at = models.DateTimeField(
-    "Отсортирован на СЦ WB",
+    "Стикер отсканирован на СЦ WB",
     null=True,
     blank=True,
     db_index=True,

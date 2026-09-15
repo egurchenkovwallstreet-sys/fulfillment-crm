@@ -23,6 +23,7 @@ from apps.orders.services.wb_status import (
   is_wb_cancelled,
   order_accepted_at_wb_sc,
   order_reached_wb_sc,
+  order_sticker_scanned_at_wb,
 )
 from apps.sellers.models import ExcludedSellerWarehouse, Seller, SellerWarehouse
 from apps.sellers.services.calendar_periods import calendar_month_start, previous_month_bounds, today_local
@@ -99,13 +100,20 @@ def order_is_cancelled(order: Order) -> bool:
 
 
 def resolve_wb_sorted_at(order: Order, supply: Supply) -> datetime | None:
-  """Только реальная поштучная сортировка на СЦ WB, не раньше scanDt поставки."""
+  """Момент поштучного скана стикера на СЦ WB (не scanDt поставки), не раньше scanDt."""
   if not order.wb_sorted_at:
     return None
   sorted_at = order.wb_sorted_at
   if supply.wb_scanned_at and sorted_at < supply.wb_scanned_at:
     return None
   return sorted_at
+
+
+def resolve_sticker_scanned_at_wb(order: Order, supply: Supply) -> bool:
+  """Стикер заказа точно отсканирован на СЦ WB (wbStatus sorted+ или зафиксированный wb_sorted_at)."""
+  if resolve_wb_sorted_at(order, supply):
+    return True
+  return order_sticker_scanned_at_wb(order)
 
 
 def order_sticker_display(order: Order) -> str:
@@ -165,10 +173,11 @@ def off_crm_matches_sticker_query(row: OffCrmShipment, query: str) -> bool:
 def wb_sc_acceptance_label(order: Order, supply: Supply) -> str:
   """Человекочитаемый статус приёмки заказа на СЦ WB."""
   sorted_at = resolve_wb_sorted_at(order, supply)
+  sticker_scanned = resolve_sticker_scanned_at_wb(order, supply)
   cancelled = order_is_cancelled(order)
   wb = (order.wb_status or "").strip()
 
-  if sorted_at or order_reached_wb_sc(order):
+  if sorted_at or sticker_scanned:
     if cancelled:
       return "Был отгружен на СЦ WB"
     label = get_wb_status_label(wb)
@@ -277,6 +286,7 @@ def _serialize_crm_order(order: Order, supply: Supply) -> dict:
   wb = (order.wb_status or "").strip()
   cancel = describe_order_cancellation(order, supply, via_crm=True)
   sorted_at = resolve_wb_sorted_at(order, supply)
+  sticker_scanned = resolve_sticker_scanned_at_wb(order, supply)
   return {
     "wb_order_id": order.wb_order_id,
     "barcode": order.barcode,
@@ -284,7 +294,8 @@ def _serialize_crm_order(order: Order, supply: Supply) -> dict:
     "wb_created_at": order.wb_created_at.isoformat() if order.wb_created_at else None,
     "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
     "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
-    "was_shipped_to_wb_sc": bool(sorted_at or order_reached_wb_sc(order)),
+    "sticker_scanned_at_wb": sticker_scanned,
+    "was_shipped_to_wb_sc": sticker_scanned,
     "crm_status": order.status,
     "crm_status_label": order.get_status_display(),
     "wb_stage_label": get_wb_stage_label(supplier),
@@ -304,8 +315,9 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
     wb_stage_label = get_wb_stage_label(order.wb_supplier_status or "")
     wb_status_label = get_wb_status_label(order.wb_status or "")
     sorted_at = resolve_wb_sorted_at(order, supply)
+    sticker_scanned = resolve_sticker_scanned_at_wb(order, supply)
     wb_created_at = order.wb_created_at.isoformat() if order.wb_created_at else None
-    was_shipped = bool(sorted_at or order_reached_wb_sc(order))
+    was_shipped = sticker_scanned
   else:
     cancel = {
       "is_cancelled": False,
@@ -318,6 +330,7 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
     wb_stage_label = "—"
     wb_status_label = "—"
     sorted_at = None
+    sticker_scanned = False
     wb_created_at = None
     was_shipped = False
 
@@ -328,6 +341,7 @@ def _serialize_off_crm_row(row: OffCrmShipment, supply: Supply) -> dict:
     "wb_created_at": wb_created_at,
     "supply_scanned_at": supply.wb_scanned_at.isoformat() if supply.wb_scanned_at else None,
     "wb_sorted_at": sorted_at.isoformat() if sorted_at else None,
+    "sticker_scanned_at_wb": sticker_scanned,
     "was_shipped_to_wb_sc": was_shipped,
     "resolution_status": row.status,
     "resolution_status_label": row.get_status_display(),

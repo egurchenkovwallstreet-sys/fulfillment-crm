@@ -143,6 +143,22 @@ def is_wb_sc_acceptance_status(supplier_status: str, wb_status: str) -> bool:
   return bool(wb_status) and wb_status != WB_STATUS_AFTER_DELIVER
 
 
+def is_wb_sticker_scanned_status(supplier_status: str, wb_status: str) -> bool:
+  """
+  Поштучный скан стикера на СЦ WB в API: wbStatus перешёл из waiting в sorted и дальше.
+  Не путать со scanDt поставки — это отдельный шаг приёмки короба.
+  """
+  supplier_status = (supplier_status or "").strip()
+  wb_status = (wb_status or "").strip()
+  if supplier_status != WB_SUPPLIER_DELIVERY:
+    return False
+  if wb_status in CANCEL_WB_STATUSES:
+    return False
+  if wb_status in WB_SC_ACCEPTED_WB_STATUSES:
+    return True
+  return bool(wb_status) and wb_status != WB_STATUS_AFTER_DELIVER
+
+
 def maybe_set_wb_sorted_at(
   order: Order,
   supplier_status: str,
@@ -152,19 +168,25 @@ def maybe_set_wb_sorted_at(
 ) -> bool:
   if order.wb_sorted_at:
     return False
-  if not is_wb_sc_acceptance_status(supplier_status, wb_status):
+  if not is_wb_sticker_scanned_status(supplier_status, wb_status):
     return False
   order.wb_sorted_at = at or timezone.now()
   return True
 
 
-def order_reached_wb_sc(order: Order) -> bool:
-  """Был ли заказ поштучно принят/отсортирован на СЦ WB."""
+def order_sticker_scanned_at_wb(order: Order) -> bool:
+  """Стикер заказа отсканирован на СЦ WB (зафиксировано или текущий wbStatus sorted+)."""
   if order.wb_sorted_at:
     return True
-  supplier = (order.wb_supplier_status or "").strip()
-  wb = (order.wb_status or "").strip()
-  return is_wb_sc_acceptance_status(supplier, wb)
+  return is_wb_sticker_scanned_status(
+    order.wb_supplier_status or "",
+    order.wb_status or "",
+  )
+
+
+def order_reached_wb_sc(order: Order) -> bool:
+  """Был ли заказ поштучно принят/отсортирован на СЦ WB."""
+  return order_sticker_scanned_at_wb(order)
 
 
 def order_accepted_at_wb_sc(order: Order) -> bool:
@@ -193,6 +215,14 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   wb_status = (wb_status or "").strip()
 
   changed_fields: set[str] = set()
+  # Сохранить момент скана до перезаписи wbStatus (например sorted → canceled_by_client).
+  if maybe_set_wb_sorted_at(
+    order,
+    order.wb_supplier_status or supplier_status,
+    order.wb_status or wb_status,
+  ):
+    changed_fields.add("wb_sorted_at")
+
   if order.wb_supplier_status != supplier_status:
     order.wb_supplier_status = supplier_status
     changed_fields.update({"wb_supplier_status"})
