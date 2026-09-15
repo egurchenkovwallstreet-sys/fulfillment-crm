@@ -47,6 +47,7 @@ export function AssemblySellersPage() {
   async function handleSyncAll() {
     setSyncing(true)
     try {
+      await syncOrders(undefined, 'delivery', { background: false })
       const result = await syncOrders(undefined, 'quick')
       const fetched = result.fetched ?? result.results?.reduce((s, r) => s + (r.fetched ?? 0), 0) ?? 0
       const statusesUpdated = result.statuses_updated ?? result.results?.reduce((s, r) => s + (r.statuses_updated ?? 0), 0) ?? 0

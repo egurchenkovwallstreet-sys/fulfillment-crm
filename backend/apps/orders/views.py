@@ -512,8 +512,9 @@ class AssemblySellerListView(APIView):
           "cancelled": 0,
         }
       else:
-        tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
+        assembly_counts = get_assembly_stage_counts(seller)
         stage_counts = get_seller_stage_counts(seller, assembly_only=True)
+        tab_counts = assembly_counts
       total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
       payload.append({
         "id": seller.id,
