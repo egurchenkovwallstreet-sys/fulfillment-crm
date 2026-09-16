@@ -2,8 +2,9 @@ Option Explicit
 
 Const CRM_URL = "http://5.129.243.246:8080/?print_mode=kiosk"
 Const LNK_NAME = "Fulfillment CRM (autoprint).lnk"
+Const PROFILE_DIR = "FulfillmentCRM-Print"
 
-Dim fso, shell, chrome, args, targets, i, folderPath, fullPath, link, created, cmd
+Dim fso, shell, chrome, profilePath, args, targets, i, folderPath, created, cmd
 
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
@@ -20,11 +21,17 @@ If chrome = "" Then
   WScript.Quit 1
 End If
 
-WScript.Echo "Chrome: " & chrome
-WScript.Echo "CRM:    " & CRM_URL
+profilePath = shell.ExpandEnvironmentStrings("%LocalAppData%") & "\" & PROFILE_DIR
+If Not fso.FolderExists(profilePath) Then
+  fso.CreateFolder profilePath
+End If
+
+WScript.Echo "Chrome:  " & chrome
+WScript.Echo "CRM:     " & CRM_URL
+WScript.Echo "Profile: " & profilePath
 WScript.Echo ""
 
-args = "--disable-extensions --kiosk-printing " & CRM_URL
+args = "--user-data-dir=""" & profilePath & """ --disable-extensions --kiosk-printing --new-window " & CRM_URL
 created = 0
 
 targets = Array( _
@@ -45,19 +52,18 @@ Next
 If created = 0 Then
   WScript.Echo ""
   WScript.Echo "[ERROR] Could not create shortcut."
-  WScript.Echo "Check Desktop / Start menu / folder with this script."
   WScript.Quit 1
 End If
 
 WScript.Echo ""
-WScript.Echo "Done. Open CRM only via shortcut:"
-WScript.Echo "  " & LNK_NAME
-WScript.Echo "1. Set Xprinter as default printer (58x40 mm)"
-WScript.Echo "2. In FBS assembly header: Print: Chrome (autoprint)"
+WScript.Echo "Done. Before first use:"
+WScript.Echo "  Task Manager -> end ALL chrome.exe"
+WScript.Echo "Then open ONLY: " & LNK_NAME
+WScript.Echo "Expected: ONE tab with CRM (not github/WB tabs)."
 WScript.Echo ""
 WScript.Echo "Starting CRM..."
 
-cmd = Chr(34) & chrome & Chr(34) & " --disable-extensions --kiosk-printing " & CRM_URL
+cmd = Chr(34) & chrome & Chr(34) & " " & args
 shell.Run cmd, 1, False
 
 Function FindChrome()
@@ -84,7 +90,7 @@ Function CreateShortcut(folderPath, chromePath, chromeArgs)
   link.TargetPath = chromePath
   link.Arguments = chromeArgs
   link.WorkingDirectory = shell.ExpandEnvironmentStrings("%USERPROFILE%")
-  link.Description = "Fulfillment CRM autoprint"
+  link.Description = "Fulfillment CRM autoprint (separate Chrome profile)"
   link.Save
   If Err.Number <> 0 Then
     WScript.Echo "[WARN] " & fullPath & " - " & Err.Description
@@ -97,7 +103,6 @@ Function CreateShortcut(folderPath, chromePath, chromeArgs)
     WScript.Echo "[OK] " & fullPath
     CreateShortcut = True
   Else
-    WScript.Echo "[WARN] " & fullPath & " - not found after save"
     CreateShortcut = False
   End If
 End Function

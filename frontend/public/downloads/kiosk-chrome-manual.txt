@@ -1,28 +1,31 @@
 Fulfillment CRM — Chrome autoprint (без скачивания скриптов)
 ============================================================
 
-Если антивирус блокирует .bat / .vbs — настройте ярлык вручную (2 минуты).
+ВАЖНО: --kiosk-printing — это ТИХАЯ печать без Enter, НЕ полноэкранный режим.
+Chrome может быть с вкладками — но через ярлык должна открыться ТОЛЬКО CRM.
 
-1. Xprinter — принтер по умолчанию в Windows (58x40 мм).
+Если открылись github / WB / старые вкладки — Chrome проигнорировал флаги ярлыка.
+Причина: тот же профиль Chrome. Нужен отдельный профиль (строка ниже).
 
-2. ПКМ на рабочем столе → Создать → Ярлык.
+1. Xprinter — принтер по умолчанию в Windows (58×40 мм).
 
-3. В поле «Расположение» вставьте (одной строкой):
+2. Диспетчер задач → завершить ВСЕ процессы chrome.exe.
 
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --disable-extensions --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+3. ПКМ на рабочем столе → Создать → Ярлык.
 
-   Если Chrome не в Program Files, укажите свой путь к chrome.exe
-   (часто: C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
-   или %LocalAppData%\Google\Chrome\Application\chrome.exe).
+4. В поле «Расположение» вставьте (одной строкой):
 
-4. Имя ярлыка: Fulfillment CRM (autoprint)
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="%LOCALAPPDATA%\FulfillmentCRM-Print" --disable-extensions --kiosk-printing --new-window http://5.129.243.246:8080/?print_mode=kiosk
 
-5. Открывайте CRM ТОЛЬКО через этот ярлык, не через обычный Chrome.
+   Если Chrome не в Program Files — укажите свой путь к chrome.exe.
 
-6. В сборке FBS в шапке должно быть: «Печать: Chrome (автопечать)».
+5. Имя ярлыка: Fulfillment CRM (autoprint)
 
----
-Альтернатива: свойства ярлыка Chrome → в «Объект» после chrome.exe добавить:
- --disable-extensions --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+6. Открывайте CRM ТОЛЬКО через этот ярлык.
 
-Актуальный URL для вашего сервера — на странице CRM «Агент печати».
+Проверка:
+- Одна вкладка Fulfillment CRM (не github, не WB).
+- Справа нет иконок расширений.
+- После скана стикера НЕТ окна «Печать» с кнопкой — сразу на Xprinter.
+
+Актуальный URL — на странице CRM «Агент печати».

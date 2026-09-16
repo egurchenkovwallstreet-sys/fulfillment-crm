@@ -19,12 +19,16 @@ if (-not $chrome) {
   exit 1
 }
 
-Write-Host "Chrome: $chrome"
-Write-Host "CRM:    $CrmUrl"
+$profileDir = Join-Path $env:LOCALAPPDATA 'FulfillmentCRM-Print'
+New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+
+Write-Host "Chrome:  $chrome"
+Write-Host "CRM:     $CrmUrl"
+Write-Host "Profile: $profileDir"
 Write-Host ''
 
 $shortcutName = 'Fulfillment CRM (autoprint).lnk'
-$chromeArgs = "--disable-extensions --kiosk-printing `"$CrmUrl`""
+$chromeArgs = "--user-data-dir=`"$profileDir`" --disable-extensions --kiosk-printing --new-window `"$CrmUrl`""
 
 $targets = @(
   [Environment]::GetFolderPath('Desktop'),
@@ -42,7 +46,7 @@ foreach ($dir in $targets) {
   $sc.TargetPath = $chrome
   $sc.Arguments = $chromeArgs
   $sc.WorkingDirectory = $env:USERPROFILE
-  $sc.Description = 'Fulfillment CRM autoprint'
+  $sc.Description = 'Fulfillment CRM autoprint (отдельный профиль Chrome)'
   $sc.Save()
   if (Test-Path -LiteralPath $path) {
     $created += $path
@@ -56,6 +60,15 @@ if ($created.Count -eq 0) {
 }
 
 Write-Host ''
+Write-Host 'IMPORTANT: close ALL Chrome windows first (Task Manager -> end chrome.exe).'
+Write-Host 'Then open CRM ONLY via the new shortcut — one tab, no old session.'
+Write-Host ''
 Write-Host 'Starting CRM...'
-Start-Process -FilePath $chrome -ArgumentList @('--disable-extensions', '--kiosk-printing', $CrmUrl)
+Start-Process -FilePath $chrome -ArgumentList @(
+  "--user-data-dir=$profileDir",
+  '--disable-extensions',
+  '--kiosk-printing',
+  '--new-window',
+  $CrmUrl
+)
 exit 0

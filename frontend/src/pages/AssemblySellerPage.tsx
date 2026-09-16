@@ -2414,8 +2414,8 @@ function WbAssemblySellerPage() {
       {stage === 'confirm' && !isBatchMode && bridgeOk !== true && (
         <p className="assembly-kiosk-hint" role="status">
           {isKioskPrintMode()
-            ? 'Если после скана открывается окно «Печать» с кнопкой — Chrome запущен без --kiosk-printing. Закройте все окна Chrome и откройте только ярлык «Fulfillment CRM (autoprint)». Справа в Chrome не должно быть иконок расширений.'
-            : 'Стикер печатается через окно Chrome — нужен Enter. Для печати без Enter: ярлык с --kiosk-printing или агент печати.'}
+            ? 'Если после скана окно «Печать» с кнопкой — Chrome без --kiosk-printing. Закройте все chrome.exe в диспетчере задач. Ярлык должен содержать --user-data-dir=%LOCALAPPDATA%\\FulfillmentCRM-Print — тогда одна вкладка CRM, без github/WB.'
+            : 'Стикер печатается через окно Chrome — нужен Enter. Для печати без Enter: ярлык с --user-data-dir и --kiosk-printing или агент печати.'}
         </p>
       )}
 
