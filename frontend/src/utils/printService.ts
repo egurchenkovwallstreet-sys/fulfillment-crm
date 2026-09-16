@@ -61,20 +61,24 @@ export async function printFbsSticker(
   preopened?: Window | null,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
+
+  if (!preopened || preopened.closed) {
+    const bridgeAttempt = printViaBridge('fbs_sticker', base64)
+    const winner = await Promise.race([
+      bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+      new Promise<'no'>((resolve) => {
+        window.setTimeout(() => resolve('no'), 1200)
+      }),
+    ])
+    if (winner === 'bridge') {
+      return 'bridge'
+    }
+  }
+
   if (preopened && !preopened.closed) {
     return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
   }
 
-  const bridgeAttempt = printViaBridge('fbs_sticker', base64)
-  const winner = await Promise.race([
-    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
-    new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 1200)
-    }),
-  ])
-  if (winner === 'bridge') {
-    return 'bridge'
-  }
   browserPrintFbsSticker(base64, browserAutoPrint, preopened)
   return 'browser'
 }

@@ -45,7 +45,7 @@ function autoPrintScript(): string {
 })();`
 }
 
-function fbsStickerHtml(base64: string, autoPrint: boolean): string {
+function fbsStickerHtml(base64: string, inlineAutoPrint: boolean): string {
   const payload = normalizeImageBase64(base64)
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
@@ -73,9 +73,46 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
 </head>
 <body>
   <img src="data:image/png;base64,${payload}" alt="" />
-  ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
+  ${inlineAutoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`)
+}
+
+/** Надёжнее inline-script: print() из opener после загрузки img (kiosk-printing). */
+function triggerPopupPrint(win: Window | null, autoPrint: boolean): void {
+  if (!win || win.closed || !autoPrint) return
+
+  const closeLater = () => {
+    window.setTimeout(() => {
+      try {
+        win.close()
+      } catch {
+        // ignore
+      }
+    }, 400)
+  }
+
+  const doPrint = () => {
+    try {
+      win.focus()
+      win.onafterprint = closeLater
+      win.print()
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    const img = win.document.querySelector('img')
+    if (img instanceof HTMLImageElement && !img.complete) {
+      img.addEventListener('load', doPrint, { once: true })
+      img.addEventListener('error', doPrint, { once: true })
+      return
+    }
+  } catch {
+    // ignore
+  }
+  window.setTimeout(doPrint, 30)
 }
 
 export function openPrintHolder(): Window | null {
@@ -126,12 +163,13 @@ export function printFbsSticker(
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
-  const html = fbsStickerHtml(base64, autoPrint)
+  const html = fbsStickerHtml(base64, false)
   if (preopened && !preopened.closed) {
     try {
       preopened.document.open()
       preopened.document.write(html)
       preopened.document.close()
+      triggerPopupPrint(preopened, autoPrint)
       return true
     } catch {
       try {
@@ -145,9 +183,10 @@ export function printFbsSticker(
   if (win) {
     win.document.write(html)
     win.document.close()
+    triggerPopupPrint(win, autoPrint)
     return true
   }
-  return printViaBlobWindow(html)
+  return printViaBlobWindow(fbsStickerHtml(base64, autoPrint))
 }
 
 /** QR/ШК поставки WB — термоэтикетка 58×40 мм. */
