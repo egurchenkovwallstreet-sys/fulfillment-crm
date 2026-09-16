@@ -3,7 +3,6 @@ import { markPrintSurfaceHtml } from './printMode'
 /**
  * Печать через Chrome: без колонтитулов (дата, URL, номер страницы).
  * Размеры по ТЗ: лист подбора A4, ячейка 75×120 мм, стикер FBS 58×40 мм.
- * @page { margin: 0 } убирает поля, в которых Chrome рисует служебные надписи.
  */
 
 export const PRINT_SIZES = {
@@ -31,27 +30,22 @@ function autoPrintScript(): string {
   function closeOnce() {
     if (closed) return;
     closed = true;
-    window.setTimeout(function () { try { window.close(); } catch (e) {} }, 400);
+    window.setTimeout(function () { try { window.close(); } catch (e) {} }, 500);
   }
   window.onafterprint = closeOnce;
   function doPrint() {
     if (printed) return;
     printed = true;
     try { window.focus(); window.print(); } catch (e) {}
-    window.setTimeout(closeOnce, 800);
+    window.setTimeout(closeOnce, 1200);
   }
   if (!img) { doPrint(); return; }
   if (img.complete && img.naturalWidth > 0) doPrint();
-  else {
-    img.addEventListener('load', doPrint, { once: true });
-    img.addEventListener('error', function () {
-      document.body.innerHTML = '<p style="font-family:Arial,sans-serif;padding:16px">Ошибка загрузки изображения для печати</p>';
-    });
-  }
+  else img.addEventListener('load', doPrint, { once: true });
 })();`
 }
 
-function fbsStickerHtml(base64: string, autoPrint: boolean, inlineScript: boolean): string {
+function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   const payload = normalizeImageBase64(base64)
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
@@ -79,76 +73,18 @@ function fbsStickerHtml(base64: string, autoPrint: boolean, inlineScript: boolea
 </head>
 <body>
   <img src="data:image/png;base64,${payload}" alt="" />
-  ${autoPrint && inlineScript ? `<script>${autoPrintScript()}<\/script>` : ''}
+  ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`)
 }
 
-/** Один print() из opener после загрузки стикера в preopened popup. */
-function triggerPopupPrintOnce(win: Window, autoPrint: boolean): void {
-  if (!autoPrint || win.closed) return
-
-  let printed = false
-
-  const closeLater = () => {
-    window.setTimeout(() => closePrintHolder(win), 500)
-  }
-
-  const fire = () => {
-    if (printed || win.closed) return
-    printed = true
-    try {
-      win.focus()
-      win.print()
-    } catch {
-      // ignore
-    }
-    try {
-      win.onafterprint = () => closePrintHolder(win)
-    } catch {
-      // ignore
-    }
-    closeLater()
-  }
-
-  const attempt = () => {
-    if (printed || win.closed) return
-    let img: HTMLImageElement | null = null
-    try {
-      img = win.document.querySelector('img')
-    } catch {
-      return
-    }
-    if (!img) {
-      fire()
-      return
-    }
-    if (img.complete && img.naturalWidth > 0) fire()
-    else img.addEventListener('load', fire, { once: true })
-  }
-
+function writeHtmlToPopup(win: Window, html: string): boolean {
   try {
-    if (win.document.readyState === 'complete') attempt()
-    else win.addEventListener('load', attempt, { once: true })
-  } catch {
-    window.setTimeout(attempt, 200)
-  }
-}
-
-function loadHtmlInPopup(win: Window, html: string, autoPrint: boolean): boolean {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  try {
-    win.addEventListener(
-      'load',
-      () => triggerPopupPrintOnce(win, autoPrint),
-      { once: true },
-    )
-    win.location.replace(url)
-    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
     return true
   } catch {
-    URL.revokeObjectURL(url)
     return false
   }
 }
@@ -194,17 +130,16 @@ export function closePrintHolder(win?: Window | null) {
   }
 }
 
-/** Стикер FBS 58×40 мм. Preopened popup: print из opener. Fallback: blob + inline script. */
+/** Стикер FBS 58×40 мм. Печать и закрытие popup — inline script внутри окна. */
 export function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
+  const html = fbsStickerHtml(base64, autoPrint)
   if (preopened && !preopened.closed) {
-    const html = fbsStickerHtml(base64, autoPrint, false)
-    return loadHtmlInPopup(preopened, html, autoPrint)
+    return writeHtmlToPopup(preopened, html)
   }
-  const html = fbsStickerHtml(base64, autoPrint, true)
   return openHtmlBlobWindow(html)
 }
 

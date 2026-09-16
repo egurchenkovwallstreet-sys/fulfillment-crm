@@ -565,11 +565,13 @@ function WbAssemblySellerPage() {
     setStickerPreview(file)
     setLastPrinted(order as unknown as AssemblyOrder)
     await printSticker(file, preopened)
-    closePrintHolder(preopened)
     flashPrintOk()
     resetScanFlow(true)
     setStage('confirm')
-    window.setTimeout(() => scanRef.current?.focus(), 50)
+    window.setTimeout(() => {
+      scanRef.current?.focus()
+      scanRef.current?.select()
+    }, 900)
     void refreshMarkingStatus()
   }
 
