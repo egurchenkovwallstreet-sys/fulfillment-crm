@@ -1900,7 +1900,11 @@ function WbAssemblySellerPage() {
   const groupedVisibleCount =
     stageSupplies.reduce((sum, supply) => sum + (supply.orders?.length ?? 0), 0)
     + unassignedOrders.length
-  const useGroupedLayout = groupedBySupply && stageSupplies.length > 1 && groupedVisibleCount > 0
+  const useGroupedLayout = groupedBySupply && groupedVisibleCount > 0 && (
+    stage === 'complete'
+      ? stageSupplies.length >= 1
+      : stageSupplies.length > 1
+  )
   const tableColSpan = stage === 'confirm' ? 11 : 10
 
   function isOrderCancelled(order: AssemblyOrder): boolean {
