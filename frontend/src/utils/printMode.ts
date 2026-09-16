@@ -1,15 +1,12 @@
 const KIOSK_PRINT_KEY = 'crm_kiosk_print'
 const PRINT_SURFACE_ATTR = 'data-crm-print-surface'
 
-/** Запомнить режим Chrome --kiosk-printing (?print_mode=kiosk в URL ярлыка). */
-const KIOSK_PRINT_PERSIST_KEY = 'crm_kiosk_print_persist'
-
+/** Запомнить вход через ярлык (?print_mode=kiosk). Это НЕ проверка флага Chrome --kiosk-printing. */
 export function initKioskPrintMode(): void {
   try {
     const params = new URLSearchParams(window.location.search)
     if (params.get('print_mode') !== 'kiosk') return
     sessionStorage.setItem(KIOSK_PRINT_KEY, '1')
-    localStorage.setItem(KIOSK_PRINT_PERSIST_KEY, '1')
     params.delete('print_mode')
     const query = params.toString()
     const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
@@ -21,8 +18,7 @@ export function initKioskPrintMode(): void {
 
 export function isKioskPrintMode(): boolean {
   try {
-    if (sessionStorage.getItem(KIOSK_PRINT_KEY) === '1') return true
-    return localStorage.getItem(KIOSK_PRINT_PERSIST_KEY) === '1'
+    return sessionStorage.getItem(KIOSK_PRINT_KEY) === '1'
   } catch {
     return false
   }

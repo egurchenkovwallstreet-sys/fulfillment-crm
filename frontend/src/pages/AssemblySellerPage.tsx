@@ -2082,8 +2082,8 @@ function WbAssemblySellerPage() {
               </span>
             )}
             {bridgeOk === false && isKioskPrintMode() && (
-              <span className="assembly-bridge assembly-bridge--ok">
-                {' '}· Печать: Chrome (автопечать)
+              <span className="assembly-bridge assembly-bridge--warn" title="CRM открыт через ?print_mode=kiosk. Без флага Chrome --kiosk-printing будет диалог «Печать» и Enter.">
+                {' '}· Ярлык CRM ✓ — нужен Chrome с --kiosk-printing (без диалога)
               </span>
             )}
             {buildVersion && (
@@ -2409,6 +2409,14 @@ function WbAssemblySellerPage() {
           onSuccess={(message) => noticeOk(message, 'Связка ЧЗ')}
           onError={(message) => showError('Связка ЧЗ', message)}
         />
+      )}
+
+      {stage === 'confirm' && !isBatchMode && bridgeOk !== true && (
+        <p className="assembly-kiosk-hint" role="status">
+          {isKioskPrintMode()
+            ? 'Если после скана открывается окно «Печать» с кнопкой — Chrome запущен без --kiosk-printing. Закройте все окна Chrome и откройте только ярлык «Fulfillment CRM (autoprint)». Справа в Chrome не должно быть иконок расширений.'
+            : 'Стикер печатается через окно Chrome — нужен Enter. Для печати без Enter: ярлык с --kiosk-printing или агент печати.'}
+        </p>
       )}
 
       {stage === 'confirm' && !isBatchMode && (
