@@ -24,7 +24,7 @@ Write-Host "CRM:    $CrmUrl"
 Write-Host ''
 
 $shortcutName = 'Fulfillment CRM (autoprint).lnk'
-$chromeArgs = "--kiosk-printing `"$CrmUrl`""
+$chromeArgs = "--disable-extensions --kiosk-printing `"$CrmUrl`""
 
 $targets = @(
   [Environment]::GetFolderPath('Desktop'),
@@ -57,5 +57,5 @@ if ($created.Count -eq 0) {
 
 Write-Host ''
 Write-Host 'Starting CRM...'
-Start-Process -FilePath $chrome -ArgumentList @('--kiosk-printing', $CrmUrl)
+Start-Process -FilePath $chrome -ArgumentList @('--disable-extensions', '--kiosk-printing', $CrmUrl)
 exit 0

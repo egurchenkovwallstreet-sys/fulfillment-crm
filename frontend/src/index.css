@@ -61,3 +61,31 @@ select,
 textarea {
   font-family: inherit;
 }
+
+.error-boundary {
+  max-width: 36rem;
+  margin: 4rem auto;
+  padding: 2rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.error-boundary h2 {
+  margin: 0 0 0.75rem;
+  color: var(--color-danger);
+}
+
+.error-boundary__message {
+  margin: 0 0 1rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.error-boundary__hint {
+  margin: 0 0 1.25rem;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}

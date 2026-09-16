@@ -9,7 +9,7 @@ Fulfillment CRM — Chrome autoprint (без скачивания скрипто
 
 3. В поле «Расположение» вставьте (одной строкой):
 
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --disable-extensions --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
 
    Если Chrome не в Program Files, укажите свой путь к chrome.exe
    (часто: C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
@@ -23,6 +23,6 @@ Fulfillment CRM — Chrome autoprint (без скачивания скрипто
 
 ---
 Альтернатива: свойства ярлыка Chrome → в «Объект» после chrome.exe добавить:
- --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
+ --disable-extensions --kiosk-printing http://5.129.243.246:8080/?print_mode=kiosk
 
 Актуальный URL для вашего сервера — на странице CRM «Агент печати».

@@ -24,7 +24,7 @@ WScript.Echo "Chrome: " & chrome
 WScript.Echo "CRM:    " & CRM_URL
 WScript.Echo ""
 
-args = "--kiosk-printing " & CRM_URL
+args = "--disable-extensions --kiosk-printing " & CRM_URL
 created = 0
 
 targets = Array( _
@@ -57,7 +57,7 @@ WScript.Echo "2. In FBS assembly header: Print: Chrome (autoprint)"
 WScript.Echo ""
 WScript.Echo "Starting CRM..."
 
-cmd = Chr(34) & chrome & Chr(34) & " --kiosk-printing " & CRM_URL
+cmd = Chr(34) & chrome & Chr(34) & " --disable-extensions --kiosk-printing " & CRM_URL
 shell.Run cmd, 1, False
 
 Function FindChrome()

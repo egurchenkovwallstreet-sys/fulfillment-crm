@@ -295,6 +295,10 @@ function WbAssemblySellerPage() {
   }, [])
 
   useEffect(() => {
+    if (isKioskPrintMode()) {
+      setBridgeOk(false)
+      return
+    }
     refreshPrintBridgeStatus()
       .then((health) => {
         setBridgeOk(health.ok)

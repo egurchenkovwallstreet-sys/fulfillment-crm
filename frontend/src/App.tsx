@@ -30,6 +30,7 @@ import { WarehouseHubPage } from './pages/WarehouseHubPage'
 import { XlIntakeHub } from './pages/XlIntakeHub'
 import { ArticleIntakePage } from './pages/ArticleIntakePage'
 import { WbFactIntakePage } from './pages/WbFactIntakePage'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { initKioskPrintGuard, initKioskPrintMode } from './utils/printMode'
 
 initKioskPrintMode()
@@ -111,7 +112,9 @@ function App() {
       <AuthProvider>
         <MarketplaceProvider>
           <CrmNoticeProvider>
-            <AppRoutes />
+            <ErrorBoundary>
+              <AppRoutes />
+            </ErrorBoundary>
           </CrmNoticeProvider>
         </MarketplaceProvider>
       </AuthProvider>
