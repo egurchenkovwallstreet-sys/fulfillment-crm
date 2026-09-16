@@ -12,6 +12,8 @@ export const PRINT_SIZES = {
   fbsSticker: '58mm 40mm',
 } as const
 
+const PRINT_POPUP_NAME = 'crm_fbs_print'
+
 export function normalizeImageBase64(value: string): string {
   let raw = (value || '').trim()
   const comma = raw.indexOf(',')
@@ -45,7 +47,7 @@ function autoPrintScript(): string {
 })();`
 }
 
-function fbsStickerHtml(base64: string, autoPrint: boolean): string {
+function fbsStickerHtml(base64: string, autoPrint: boolean, inlineScript: boolean): string {
   const payload = normalizeImageBase64(base64)
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
@@ -73,12 +75,59 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
 </head>
 <body>
   <img src="data:image/png;base64,${payload}" alt="" />
-  ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
+  ${autoPrint && inlineScript ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`)
 }
 
-/** document.write + inline script в popup — print() изнутри окна (kiosk без Enter). */
+/** Вызов print() на popup из opener — надёжнее inline script после async scan API. */
+export function triggerPopupPrint(win: Window | null | undefined, autoPrint: boolean): void {
+  if (!autoPrint || !win || win.closed) return
+
+  try {
+    win.onafterprint = () => {
+      window.setTimeout(() => closePrintHolder(win), 400)
+    }
+  } catch {
+    // ignore
+  }
+
+  const fire = () => {
+    if (win.closed) return
+    try {
+      win.focus()
+      win.print()
+    } catch {
+      // ignore
+    }
+  }
+
+  const attempt = () => {
+    if (win.closed) return
+    let img: HTMLImageElement | null = null
+    try {
+      img = win.document.querySelector('img')
+    } catch {
+      return
+    }
+    if (!img) {
+      fire()
+      return
+    }
+    if (img.complete && img.naturalWidth > 0) fire()
+    else img.addEventListener('load', fire, { once: true })
+  }
+
+  try {
+    win.addEventListener('load', attempt, { once: true })
+  } catch {
+    // ignore
+  }
+  window.setTimeout(attempt, 0)
+  window.setTimeout(attempt, 120)
+  window.setTimeout(attempt, 350)
+}
+
 function writeHtmlToPopup(win: Window, html: string): boolean {
   try {
     win.document.open()
@@ -90,21 +139,39 @@ function writeHtmlToPopup(win: Window, html: string): boolean {
   }
 }
 
-/** Запасной путь: blob-окно, если preopened недоступен. */
-function openHtmlBlobWindow(html: string): boolean {
+function loadHtmlInPopup(win: Window, html: string, autoPrint: boolean): boolean {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
-  const win = window.open(url, '_blank', 'width=420,height=640')
+  try {
+    triggerPopupPrint(win, autoPrint)
+    win.location.replace(url)
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    return true
+  } catch {
+    URL.revokeObjectURL(url)
+    if (writeHtmlToPopup(win, html)) {
+      triggerPopupPrint(win, autoPrint)
+      return true
+    }
+    return false
+  }
+}
+
+function openHtmlBlobWindow(html: string, autoPrint: boolean): boolean {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const win = window.open(url, '_blank', 'popup=1,width=420,height=640')
   if (!win) {
     URL.revokeObjectURL(url)
     return false
   }
+  triggerPopupPrint(win, autoPrint)
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
   return true
 }
 
 export function openPrintHolder(): Window | null {
-  const win = window.open('', '_blank', 'width=420,height=640')
+  const win = window.open('about:blank', PRINT_POPUP_NAME, 'popup=1,width=420,height=640')
   if (!win) return null
   setPrintHolderMessage(win, 'Печать стикера…')
   return win
@@ -138,16 +205,11 @@ export function printFbsSticker(
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
-  const html = fbsStickerHtml(base64, autoPrint)
+  const html = fbsStickerHtml(base64, autoPrint, !preopened || preopened.closed)
   if (preopened && !preopened.closed) {
-    if (writeHtmlToPopup(preopened, html)) return true
-    try {
-      preopened.close()
-    } catch {
-      // ignore
-    }
+    return loadHtmlInPopup(preopened, html, autoPrint)
   }
-  return openHtmlBlobWindow(html)
+  return openHtmlBlobWindow(html, autoPrint)
 }
 
 /** QR/ШК поставки WB — preview без автопечати в kiosk. */
