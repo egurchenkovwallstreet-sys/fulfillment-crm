@@ -41,7 +41,6 @@ async function printViaBridge(jobType: PrintJobType, base64: string): Promise<bo
   }
 }
 
-/** Печать в заранее открытое окно — только Chrome, без моста (мост закрывает popup). */
 async function printFbsStickerInWindow(
   base64: string,
   autoPrint: boolean,
@@ -55,6 +54,7 @@ async function printFbsStickerInWindow(
   return 'browser'
 }
 
+/** Стикер заказа: сначала агент (без окна), иначе blob-popup с autoprint. */
 export async function printFbsSticker(
   base64: string,
   autoPrint = true,
@@ -62,24 +62,26 @@ export async function printFbsSticker(
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
 
-  if (!preopened || preopened.closed) {
-    const bridgeAttempt = printViaBridge('fbs_sticker', base64)
-    const winner = await Promise.race([
-      bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
-      new Promise<'no'>((resolve) => {
-        window.setTimeout(() => resolve('no'), 1200)
-      }),
-    ])
-    if (winner === 'bridge') {
-      return 'bridge'
-    }
+  const bridgeAttempt = printViaBridge('fbs_sticker', base64)
+  const winner = await Promise.race([
+    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+    new Promise<'no'>((resolve) => {
+      window.setTimeout(() => resolve('no'), 800)
+    }),
+  ])
+  if (winner === 'bridge') {
+    closePrintHolder(preopened)
+    return 'bridge'
   }
 
   if (preopened && !preopened.closed) {
     return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
   }
 
-  browserPrintFbsSticker(base64, browserAutoPrint, preopened)
+  const ok = browserPrintFbsSticker(base64, browserAutoPrint, preopened)
+  if (!ok) {
+    throw new Error('Не удалось открыть печать — разрешите всплывающие окна')
+  }
   return 'browser'
 }
 
@@ -89,20 +91,23 @@ export async function printSupplySticker(
   preopened?: Window | null,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('document')
-  if (preopened && !preopened.closed) {
-    return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
-  }
 
   const bridgeAttempt = printViaBridge('supply_sticker', base64)
   const winner = await Promise.race([
     bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
     new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 1200)
+      window.setTimeout(() => resolve('no'), 800)
     }),
   ])
   if (winner === 'bridge') {
+    closePrintHolder(preopened)
     return 'bridge'
   }
+
+  if (preopened && !preopened.closed) {
+    return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
+  }
+
   browserPrintSupplySticker(base64, browserAutoPrint, preopened)
   return 'browser'
 }

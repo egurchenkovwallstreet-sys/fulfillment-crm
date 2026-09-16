@@ -45,7 +45,7 @@ function autoPrintScript(): string {
 })();`
 }
 
-function fbsStickerHtml(base64: string, inlineAutoPrint: boolean): string {
+function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   const payload = normalizeImageBase64(base64)
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
@@ -73,46 +73,40 @@ function fbsStickerHtml(base64: string, inlineAutoPrint: boolean): string {
 </head>
 <body>
   <img src="data:image/png;base64,${payload}" alt="" />
-  ${inlineAutoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
+  ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`)
 }
 
-/** Надёжнее inline-script: print() из opener после загрузки img (kiosk-printing). */
-function triggerPopupPrint(win: Window | null, autoPrint: boolean): void {
-  if (!win || win.closed || !autoPrint) return
+/** Blob-окно: скрипт print() выполняется внутри popup — работает с --kiosk-printing. */
+function openHtmlBlobWindow(html: string, preopened?: Window | null): boolean {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const cleanup = () => {
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  }
 
-  const closeLater = () => {
-    window.setTimeout(() => {
+  if (preopened && !preopened.closed) {
+    try {
+      preopened.location.href = url
+      cleanup()
+      return true
+    } catch {
       try {
-        win.close()
+        preopened.close()
       } catch {
         // ignore
       }
-    }, 400)
-  }
-
-  const doPrint = () => {
-    try {
-      win.focus()
-      win.onafterprint = closeLater
-      win.print()
-    } catch {
-      // ignore
     }
   }
 
-  try {
-    const img = win.document.querySelector('img')
-    if (img instanceof HTMLImageElement && !img.complete) {
-      img.addEventListener('load', doPrint, { once: true })
-      img.addEventListener('error', doPrint, { once: true })
-      return
-    }
-  } catch {
-    // ignore
+  const win = window.open(url, '_blank', 'width=420,height=640')
+  if (!win) {
+    URL.revokeObjectURL(url)
+    return false
   }
-  window.setTimeout(doPrint, 30)
+  cleanup()
+  return true
 }
 
 export function openPrintHolder(): Window | null {
@@ -144,52 +138,17 @@ export function closePrintHolder(win?: Window | null) {
   }
 }
 
-/** Отдельное окно через blob: безопаснее iframe при --kiosk-printing. */
-function printViaBlobWindow(html: string): boolean {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const win = window.open(url, '_blank', 'width=420,height=640')
-  if (!win) {
-    URL.revokeObjectURL(url)
-    return false
-  }
-  window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-  return true
-}
-
-/** Стикер FBS 58×40 мм (PNG base64 от WB API). */
+/** Стикер FBS 58×40 мм (PNG base64 от WB API). autoPrint=true → kiosk без Enter. */
 export function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
-  const html = fbsStickerHtml(base64, false)
-  if (preopened && !preopened.closed) {
-    try {
-      preopened.document.open()
-      preopened.document.write(html)
-      preopened.document.close()
-      triggerPopupPrint(preopened, autoPrint)
-      return true
-    } catch {
-      try {
-        preopened.close()
-      } catch {
-        // ignore
-      }
-    }
-  }
-  const win = window.open('', '_blank', 'width=420,height=640')
-  if (win) {
-    win.document.write(html)
-    win.document.close()
-    triggerPopupPrint(win, autoPrint)
-    return true
-  }
-  return printViaBlobWindow(fbsStickerHtml(base64, autoPrint))
+  const html = fbsStickerHtml(base64, autoPrint)
+  return openHtmlBlobWindow(html, preopened)
 }
 
-/** QR/ШК поставки WB — термоэтикетка 58×40 мм. */
+/** QR/ШК поставки WB — preview без автопечати в kiosk. */
 export function printSupplySticker(
   base64: string,
   autoPrint = true,

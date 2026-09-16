@@ -1541,11 +1541,17 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
+    const printWin = openPrintHolder()
+    if (printWin) {
+      setPrintHolderMessage(printWin, 'Сканирование…')
+    }
+
     try {
       const result = await scanOrderBarcode(id, barcode)
       const needsMarking = result.action === 'await_marking'
 
       if (needsMarking) {
+        closePrintHolder(printWin)
         openMarkingScan(
           result.order,
           result.message ||
@@ -1555,7 +1561,6 @@ function WbAssemblySellerPage() {
         return
       }
 
-      const printWin = openPrintHolder()
       try {
         await finishPrint(result.order, printWin)
       } catch (printErr) {
@@ -1565,6 +1570,7 @@ function WbAssemblySellerPage() {
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
+      closePrintHolder(printWin)
       const errOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'
           ? (err.order as AssemblyOrder)
