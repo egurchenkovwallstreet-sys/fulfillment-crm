@@ -1,5 +1,5 @@
 import { openPrintHolder, closePrintHolder, normalizeImageBase64 } from './browserPrint'
-import { markPrintSurfaceHtml } from './printMode'
+import { markPrintSurfaceHtml, shouldBrowserAutoPrint } from './printMode'
 import { bridgePrintImage, type PrintJobType } from './printBridge'
 import { getCachedPrintBridgeHealth } from './printService'
 
@@ -325,6 +325,7 @@ export async function printBatchRibbon(
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<boolean> {
+  const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('document')
   if (!items.length) {
     closePrintHolder(preopened)
     return false
@@ -346,7 +347,7 @@ export async function printBatchRibbon(
     }
   }
 
-  const printed = await printRibbonViaBrowser(items, autoPrint, preopened)
+  const printed = await printRibbonViaBrowser(items, browserAutoPrint, preopened)
   if (!printed) {
     closePrintHolder(preopened)
   }

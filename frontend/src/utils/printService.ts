@@ -12,6 +12,7 @@ import {
   closePrintHolder,
   setPrintHolderMessage,
 } from './browserPrint'
+import { shouldBrowserAutoPrint } from './printMode'
 
 export type PrintChannel = 'bridge' | 'browser'
 export { openPrintHolder, closePrintHolder, setPrintHolderMessage }
@@ -59,8 +60,9 @@ export async function printFbsSticker(
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<PrintChannel> {
+  const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
   if (preopened && !preopened.closed) {
-    return printFbsStickerInWindow(base64, autoPrint, preopened)
+    return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
   }
 
   const bridgeAttempt = printViaBridge('fbs_sticker', base64)
@@ -73,7 +75,7 @@ export async function printFbsSticker(
   if (winner === 'bridge') {
     return 'bridge'
   }
-  browserPrintFbsSticker(base64, autoPrint, preopened)
+  browserPrintFbsSticker(base64, browserAutoPrint, preopened)
   return 'browser'
 }
 
@@ -82,8 +84,9 @@ export async function printSupplySticker(
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<PrintChannel> {
+  const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('document')
   if (preopened && !preopened.closed) {
-    return printFbsStickerInWindow(base64, autoPrint, preopened)
+    return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
   }
 
   const bridgeAttempt = printViaBridge('supply_sticker', base64)
@@ -96,6 +99,6 @@ export async function printSupplySticker(
   if (winner === 'bridge') {
     return 'bridge'
   }
-  browserPrintSupplySticker(base64, autoPrint, preopened)
+  browserPrintSupplySticker(base64, browserAutoPrint, preopened)
   return 'browser'
 }

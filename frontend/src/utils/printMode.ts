@@ -29,9 +29,17 @@ function isMainPrintSurface(): boolean {
 }
 
 /**
- * Chrome с --kiosk-printing печатает без диалога. Любой window.print() на вкладке CRM
- * может «обнулить» экран. Стикеры печатаются только из popup с data-crm-print-surface.
- * Защита всегда включена — Chrome kiosk не виден из JS, а sessionStorage может сброситься.
+ * Разрешить window.print() в popup при загрузке.
+ * fbs_sticker — да (стикер после скана/ЧЗ; в обычном Chrome всё равно нужен Enter).
+ * document — нет (PDF, QR поставки, лента — только preview; в kiosk иначе белый экран).
+ */
+export function shouldBrowserAutoPrint(job: 'fbs_sticker' | 'document'): boolean {
+  return job === 'fbs_sticker'
+}
+
+/**
+ * Chrome с --kiosk-printing печатает без диалога. window.print() на главной вкладке CRM
+ * обнуляет экран. Стикеры — только из popup с data-crm-print-surface.
  */
 export function initKioskPrintGuard(): void {
   const nativePrint = window.print.bind(window)
@@ -42,16 +50,6 @@ export function initKioskPrintGuard(): void {
     }
     console.warn('[CRM] Печать основного окна CRM заблокирована — стикер только через popup')
   }
-  window.addEventListener(
-    'beforeprint',
-    (event) => {
-      if (!isMainPrintSurface()) {
-        event.preventDefault()
-        event.stopImmediatePropagation()
-      }
-    },
-    true,
-  )
 }
 
 export function markPrintSurfaceHtml(html: string): string {

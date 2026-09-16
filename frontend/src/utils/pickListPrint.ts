@@ -1,4 +1,5 @@
 import type { PickList } from '../api/orders'
+import { markPrintSurfaceHtml } from './printMode'
 
 /** Меньше 25 — последняя строка не попадает в непечатаемую зону между листами. */
 const ROWS_PER_PAGE = 24
@@ -228,7 +229,7 @@ function buildPickListDocument(pickList: PickList, autoPrint = false): string {
     .join('')
   const title = `Лист подбора ${pickList.id || ''}`
 
-  return `<!DOCTYPE html>
+  return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
@@ -241,7 +242,7 @@ function buildPickListDocument(pickList: PickList, autoPrint = false): string {
     ${autoPrint ? 'window.onload = function () { window.print(); };' : ''}
   </script>
 </body>
-</html>`
+</html>`)
 }
 
 function openPickListDocument(pickList: PickList, autoPrint = false): boolean {
@@ -255,9 +256,9 @@ function openPickListDocument(pickList: PickList, autoPrint = false): boolean {
   return true
 }
 
-/** Открыть диалог «Печать → Сохранить как PDF». */
+/** Открыть лист подбора для ручной печати (Ctrl+P / Enter в диалоге). Без автопечати в kiosk. */
 export function downloadPickListPdf(pickList: PickList): boolean {
-  return openPickListDocument(pickList, true)
+  return openPickListDocument(pickList, false)
 }
 
 export function printPickList(pickList: PickList, autoPrint = true): boolean {
