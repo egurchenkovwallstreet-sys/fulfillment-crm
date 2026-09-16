@@ -535,7 +535,10 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
     setScanValue('')
-    window.setTimeout(() => scanRef.current?.focus(), 0)
+    window.setTimeout(() => {
+      scanRef.current?.focus()
+      scanRef.current?.select()
+    }, 50)
   }
 
   async function printSticker(base64: string, preopened?: Window | null) {
@@ -562,9 +565,11 @@ function WbAssemblySellerPage() {
     setStickerPreview(file)
     setLastPrinted(order as unknown as AssemblyOrder)
     await printSticker(file, preopened)
+    closePrintHolder(preopened)
     flashPrintOk()
     resetScanFlow(true)
     setStage('confirm')
+    window.setTimeout(() => scanRef.current?.focus(), 50)
     void refreshMarkingStatus()
   }
 

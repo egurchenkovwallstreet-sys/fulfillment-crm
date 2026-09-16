@@ -26,6 +26,7 @@ export function normalizeImageBase64(value: string): string {
 function autoPrintScript(): string {
   return `(function () {
   var img = document.querySelector('img');
+  var printed = false;
   var closed = false;
   function closeOnce() {
     if (closed) return;
@@ -34,12 +35,15 @@ function autoPrintScript(): string {
   }
   window.onafterprint = closeOnce;
   function doPrint() {
+    if (printed) return;
+    printed = true;
     try { window.focus(); window.print(); } catch (e) {}
+    window.setTimeout(closeOnce, 800);
   }
   if (!img) { doPrint(); return; }
   if (img.complete && img.naturalWidth > 0) doPrint();
   else {
-    img.addEventListener('load', doPrint);
+    img.addEventListener('load', doPrint, { once: true });
     img.addEventListener('error', function () {
       document.body.innerHTML = '<p style="font-family:Arial,sans-serif;padding:16px">Ошибка загрузки изображения для печати</p>';
     });
@@ -80,30 +84,35 @@ function fbsStickerHtml(base64: string, autoPrint: boolean, inlineScript: boolea
 </html>`)
 }
 
-/** Вызов print() на popup из opener — надёжнее inline script после async scan API. */
-export function triggerPopupPrint(win: Window | null | undefined, autoPrint: boolean): void {
-  if (!autoPrint || !win || win.closed) return
+/** Один print() из opener после загрузки стикера в preopened popup. */
+function triggerPopupPrintOnce(win: Window, autoPrint: boolean): void {
+  if (!autoPrint || win.closed) return
 
-  try {
-    win.onafterprint = () => {
-      window.setTimeout(() => closePrintHolder(win), 400)
-    }
-  } catch {
-    // ignore
+  let printed = false
+
+  const closeLater = () => {
+    window.setTimeout(() => closePrintHolder(win), 500)
   }
 
   const fire = () => {
-    if (win.closed) return
+    if (printed || win.closed) return
+    printed = true
     try {
       win.focus()
       win.print()
     } catch {
       // ignore
     }
+    try {
+      win.onafterprint = () => closePrintHolder(win)
+    } catch {
+      // ignore
+    }
+    closeLater()
   }
 
   const attempt = () => {
-    if (win.closed) return
+    if (printed || win.closed) return
     let img: HTMLImageElement | null = null
     try {
       img = win.document.querySelector('img')
@@ -119,23 +128,10 @@ export function triggerPopupPrint(win: Window | null | undefined, autoPrint: boo
   }
 
   try {
-    win.addEventListener('load', attempt, { once: true })
+    if (win.document.readyState === 'complete') attempt()
+    else win.addEventListener('load', attempt, { once: true })
   } catch {
-    // ignore
-  }
-  window.setTimeout(attempt, 0)
-  window.setTimeout(attempt, 120)
-  window.setTimeout(attempt, 350)
-}
-
-function writeHtmlToPopup(win: Window, html: string): boolean {
-  try {
-    win.document.open()
-    win.document.write(html)
-    win.document.close()
-    return true
-  } catch {
-    return false
+    window.setTimeout(attempt, 200)
   }
 }
 
@@ -143,21 +139,21 @@ function loadHtmlInPopup(win: Window, html: string, autoPrint: boolean): boolean
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   try {
-    triggerPopupPrint(win, autoPrint)
+    win.addEventListener(
+      'load',
+      () => triggerPopupPrintOnce(win, autoPrint),
+      { once: true },
+    )
     win.location.replace(url)
     window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
     return true
   } catch {
     URL.revokeObjectURL(url)
-    if (writeHtmlToPopup(win, html)) {
-      triggerPopupPrint(win, autoPrint)
-      return true
-    }
     return false
   }
 }
 
-function openHtmlBlobWindow(html: string, autoPrint: boolean): boolean {
+function openHtmlBlobWindow(html: string): boolean {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const win = window.open(url, '_blank', 'popup=1,width=420,height=640')
@@ -165,7 +161,6 @@ function openHtmlBlobWindow(html: string, autoPrint: boolean): boolean {
     URL.revokeObjectURL(url)
     return false
   }
-  triggerPopupPrint(win, autoPrint)
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
   return true
 }
@@ -199,17 +194,18 @@ export function closePrintHolder(win?: Window | null) {
   }
 }
 
-/** Стикер FBS 58×40 мм (PNG base64 от WB API). autoPrint=true → kiosk без Enter. */
+/** Стикер FBS 58×40 мм. Preopened popup: print из opener. Fallback: blob + inline script. */
 export function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
-  const html = fbsStickerHtml(base64, autoPrint, !preopened || preopened.closed)
   if (preopened && !preopened.closed) {
+    const html = fbsStickerHtml(base64, autoPrint, false)
     return loadHtmlInPopup(preopened, html, autoPrint)
   }
-  return openHtmlBlobWindow(html, autoPrint)
+  const html = fbsStickerHtml(base64, autoPrint, true)
+  return openHtmlBlobWindow(html)
 }
 
 /** QR/ШК поставки WB — preview без автопечати в kiosk. */
