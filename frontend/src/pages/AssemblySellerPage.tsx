@@ -2577,7 +2577,7 @@ function WbAssemblySellerPage() {
           Лист подбора — отдельной кнопкой «Сформировать лист подбора» (режим скана и режим ленты не смешиваются).
           {pickListRefreshing ? ' Формируем лист подбора…' : ''}
         </p>
-        {(data?.warehouses.length ?? 0) === 0 ? (
+        {(data?.warehouses?.length ?? 0) === 0 ? (
           <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB»</p>
         ) : (
           <ul className="assembly-warehouses__list">

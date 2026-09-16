@@ -24,20 +24,34 @@ export function isKioskPrintMode(): boolean {
   }
 }
 
+function isMainPrintSurface(): boolean {
+  return document.documentElement.getAttribute(PRINT_SURFACE_ATTR) === '1'
+}
+
 /**
- * В Chrome с --kiosk-printing любой window.print() на вкладке CRM уходит на принтер
- * и может «обнулить» экран из-за @media print. Блокируем печать основного окна CRM.
+ * Chrome с --kiosk-printing печатает без диалога. Любой window.print() на вкладке CRM
+ * может «обнулить» экран. Стикеры печатаются только из popup с data-crm-print-surface.
+ * Защита всегда включена — Chrome kiosk не виден из JS, а sessionStorage может сброситься.
  */
 export function initKioskPrintGuard(): void {
-  if (!isKioskPrintMode()) return
   const nativePrint = window.print.bind(window)
   window.print = () => {
-    if (document.documentElement.getAttribute(PRINT_SURFACE_ATTR) === '1') {
+    if (isMainPrintSurface()) {
       nativePrint()
       return
     }
-    console.warn('[CRM] Печать основного окна заблокирована (режим kiosk-printing)')
+    console.warn('[CRM] Печать основного окна CRM заблокирована — стикер только через popup')
   }
+  window.addEventListener(
+    'beforeprint',
+    (event) => {
+      if (!isMainPrintSurface()) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+      }
+    },
+    true,
+  )
 }
 
 export function markPrintSurfaceHtml(html: string): string {
