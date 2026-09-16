@@ -78,34 +78,28 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
 </html>`)
 }
 
-/** Blob-окно: скрипт print() выполняется внутри popup — работает с --kiosk-printing. */
-function openHtmlBlobWindow(html: string, preopened?: Window | null): boolean {
+/** document.write + inline script в popup — print() изнутри окна (kiosk без Enter). */
+function writeHtmlToPopup(win: Window, html: string): boolean {
+  try {
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Запасной путь: blob-окно, если preopened недоступен. */
+function openHtmlBlobWindow(html: string): boolean {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
-  const cleanup = () => {
-    window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
-  }
-
-  if (preopened && !preopened.closed) {
-    try {
-      preopened.location.href = url
-      cleanup()
-      return true
-    } catch {
-      try {
-        preopened.close()
-      } catch {
-        // ignore
-      }
-    }
-  }
-
   const win = window.open(url, '_blank', 'width=420,height=640')
   if (!win) {
     URL.revokeObjectURL(url)
     return false
   }
-  cleanup()
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
   return true
 }
 
@@ -145,7 +139,15 @@ export function printFbsSticker(
   preopened?: Window | null,
 ): boolean {
   const html = fbsStickerHtml(base64, autoPrint)
-  return openHtmlBlobWindow(html, preopened)
+  if (preopened && !preopened.closed) {
+    if (writeHtmlToPopup(preopened, html)) return true
+    try {
+      preopened.close()
+    } catch {
+      // ignore
+    }
+  }
+  return openHtmlBlobWindow(html)
 }
 
 /** QR/ШК поставки WB — preview без автопечати в kiosk. */

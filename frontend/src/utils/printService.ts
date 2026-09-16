@@ -12,7 +12,7 @@ import {
   closePrintHolder,
   setPrintHolderMessage,
 } from './browserPrint'
-import { shouldBrowserAutoPrint } from './printMode'
+import { isKioskPrintMode, shouldBrowserAutoPrint } from './printMode'
 
 export type PrintChannel = 'bridge' | 'browser'
 export { openPrintHolder, closePrintHolder, setPrintHolderMessage }
@@ -54,24 +54,31 @@ async function printFbsStickerInWindow(
   return 'browser'
 }
 
-/** Стикер заказа: сначала агент (без окна), иначе blob-popup с autoprint. */
+/**
+ * Стикер заказа FBS.
+ * Kiosk Chrome (без агента): сразу popup + autoprint, bridge не трогаем.
+ * С агентом: bridge → browser fallback.
+ */
 export async function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
+  const kiosk = isKioskPrintMode()
 
-  const bridgeAttempt = printViaBridge('fbs_sticker', base64)
-  const winner = await Promise.race([
-    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
-    new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 800)
-    }),
-  ])
-  if (winner === 'bridge') {
-    closePrintHolder(preopened)
-    return 'bridge'
+  if (!kiosk && cachedHealth?.ok === true) {
+    const bridgeAttempt = printViaBridge('fbs_sticker', base64)
+    const winner = await Promise.race([
+      bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+      new Promise<'no'>((resolve) => {
+        window.setTimeout(() => resolve('no'), 800)
+      }),
+    ])
+    if (winner === 'bridge') {
+      closePrintHolder(preopened)
+      return 'bridge'
+    }
   }
 
   if (preopened && !preopened.closed) {
@@ -92,16 +99,18 @@ export async function printSupplySticker(
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('document')
 
-  const bridgeAttempt = printViaBridge('supply_sticker', base64)
-  const winner = await Promise.race([
-    bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
-    new Promise<'no'>((resolve) => {
-      window.setTimeout(() => resolve('no'), 800)
-    }),
-  ])
-  if (winner === 'bridge') {
-    closePrintHolder(preopened)
-    return 'bridge'
+  if (!isKioskPrintMode() && cachedHealth?.ok === true) {
+    const bridgeAttempt = printViaBridge('supply_sticker', base64)
+    const winner = await Promise.race([
+      bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
+      new Promise<'no'>((resolve) => {
+        window.setTimeout(() => resolve('no'), 800)
+      }),
+    ])
+    if (winner === 'bridge') {
+      closePrintHolder(preopened)
+      return 'bridge'
+    }
   }
 
   if (preopened && !preopened.closed) {
