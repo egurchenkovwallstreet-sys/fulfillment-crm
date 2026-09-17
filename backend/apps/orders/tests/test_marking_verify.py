@@ -2,7 +2,10 @@ from django.test import SimpleTestCase
 
 from apps.integrations.wb_client import parse_orders_meta_payload
 from apps.orders.services.marking import parse_marking_verify_decision
-from apps.orders.services.marking_verification import _extract_sgtin_decision
+from apps.orders.services.marking_verification import (
+  _extract_sgtin_decision,
+  _meta_marking_decision,
+)
 
 
 class OrdersMetaPayloadTests(SimpleTestCase):
@@ -59,3 +62,13 @@ class MarkingDecisionTests(SimpleTestCase):
       "metaDetails": [{"key": "sgtin", "value": "010460095447410021", "decision": "pending"}],
     })
     self.assertEqual(parse_marking_verify_decision(decision)[0], "pending")
+
+  def test_meta_marking_picks_worst_decision(self):
+    decision = _meta_marking_decision({
+      "id": 1,
+      "metaDetails": [
+        {"key": "sgtin", "decision": "filled"},
+        {"key": "sgtin", "decision": "sgtinNoGS"},
+      ],
+    })
+    self.assertEqual(parse_marking_verify_decision(decision)[0], "error")

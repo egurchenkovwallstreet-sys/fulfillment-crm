@@ -967,9 +967,15 @@ class AssemblyVerifyMarkingView(APIView):
     serializer = VerifyMarkingSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     order_ids = serializer.validated_data.get("order_ids") or []
+    force_recheck = serializer.validated_data.get("force_recheck", True)
 
     try:
-      results = verify_marking_orders(seller, order_ids or None, user=request.user)
+      results = verify_marking_orders(
+        seller,
+        order_ids or None,
+        user=request.user,
+        force_recheck=force_recheck,
+      )
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 

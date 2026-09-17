@@ -34,9 +34,11 @@ def order_on_current_pick_list(order: Order) -> bool:
 
 
 def order_has_chz_error(order: Order) -> bool:
+  if (order.marking_verify_status or "").strip() == VERIFY_ERROR:
+    return True
   if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
     return False
-  return (order.marking_verify_status or "").strip() == VERIFY_ERROR
+  return False
 
 
 def order_chz_pending_verify(order: Order) -> bool:

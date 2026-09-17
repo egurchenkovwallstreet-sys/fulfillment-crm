@@ -44,6 +44,7 @@ from apps.orders.services.marking_verification import (
   VERIFY_ERROR,
   VERIFY_PENDING,
   order_marking_ready,
+  sync_supply_marking_from_wb,
   verify_marking_orders,
 )
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
@@ -89,6 +90,8 @@ def order_can_send_to_assembly(order: Order) -> bool:
 
 
 def order_can_send_to_delivery(order: Order) -> bool:
+  if (order.marking_verify_status or "").strip() == VERIFY_ERROR:
+    return False
   if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
     return False
   if not order_sticker_printed_in_crm(order):
@@ -1390,6 +1393,7 @@ def _prepare_wb_supply_deliver(
     shipping_date=shipping_date,
     shipping_type=shipping_type,
   )
+  sync_supply_marking_from_wb(supply.seller, supply, client=client)
   _assert_wb_supply_orders_ready(client, supply)
   return False
 
@@ -1430,13 +1434,35 @@ def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=
     )
 
 
+def _supply_open_in_wb(client, supply: Supply) -> bool:
+  """Поставка в WB ещё открыта — можно добавлять заказы на сборку."""
+  if not supply.wb_supply_id:
+    return False
+  try:
+    details = client.fetch_supply(supply.wb_supply_id)
+  except WBApiError as exc:
+    logger.warning(
+      "WB fetch_supply failed supply=%s: %s",
+      supply.wb_supply_id,
+      exc,
+    )
+    return False
+  if not isinstance(details, dict):
+    return False
+  if _wb_supply_closed(details):
+    return False
+  if _wb_supply_cargo(details) != 0:
+    return False
+  return True
+
+
 def _get_or_create_forming_supply(
   seller: Seller,
   wb_warehouse_id: int,
   client,
 ) -> Supply:
-  """Одна формирующаяся поставка WB на склад."""
-  supply = (
+  """Одна формирующаяся поставка WB на склад (только открытая в ЛК WB)."""
+  candidates = (
     Supply.objects.filter(
       seller=seller,
       wb_warehouse_id=wb_warehouse_id,
@@ -1444,13 +1470,14 @@ def _get_or_create_forming_supply(
     )
     .exclude(wb_supply_id="")
     .order_by("-created_at")
-    .first()
   )
-  if supply:
-    return supply
+  for supply in candidates:
+    if _supply_open_in_wb(client, supply):
+      return supply
 
   supply_name = f"CRM-S{seller.id}-W{wb_warehouse_id}-{timezone.now():%Y%m%d%H%M}"
   wb_supply_id = client.create_supply(supply_name)
+  time.sleep(SUPPLY_CREATE_SETTLE_SEC)
   return Supply.objects.create(
     seller=seller,
     wb_supply_id=wb_supply_id,
@@ -1893,32 +1920,70 @@ def _append_orders_to_forming_supply(
   *,
   client,
   user=None,
-) -> tuple[int, str, int]:
-  """Добавить заказы в поставку WB. Возвращает (стикеры, ошибка, добавлено)."""
+) -> tuple[int, str, list[Order], Supply]:
+  """Добавить заказы в поставку WB. Возвращает (стикеры, ошибка, добавленные, поставка)."""
   existing_wb_ids = set(supply.orders.values_list("wb_order_id", flat=True))
   new_orders = [order for order in orders if order.wb_order_id not in existing_wb_ids]
   if not new_orders:
-    return 0, "", 0
+    return 0, "", [], supply
 
-  client.add_orders_to_supply(
-    supply.wb_supply_id,
-    [order.wb_order_id for order in new_orders],
-  )
-  supply.orders.add(*new_orders)
+  wb_order_ids = [order.wb_order_id for order in new_orders]
+  active_supply = supply
+  last_exc: WBApiError | None = None
+  for attempt in range(2):
+    try:
+      if not _supply_open_in_wb(client, active_supply):
+        active_supply = _create_new_forming_supply(
+          seller,
+          int(active_supply.wb_warehouse_id),
+          client,
+        )
+        time.sleep(SUPPLY_CREATE_SETTLE_SEC)
+      client.add_orders_to_supply(active_supply.wb_supply_id, wb_order_ids)
+      last_exc = None
+      break
+    except WBApiError as exc:
+      last_exc = exc
+      if exc.status_code != 409 or attempt == 1:
+        raise
+      logger.warning(
+        "WB 409 adding orders to supply=%s, creating new supply seller=%s",
+        active_supply.wb_supply_id,
+        seller.id,
+      )
+      active_supply = _create_new_forming_supply(
+        seller,
+        int(active_supply.wb_warehouse_id),
+        client,
+      )
+      time.sleep(SUPPLY_CREATE_SETTLE_SEC)
+  if last_exc:
+    raise last_exc
 
-  stickers_fetched = 0
-  sticker_error = ""
-  try:
-    stickers_fetched = fetch_stickers_for_orders(seller, new_orders, user=user)
-  except AssemblyError as exc:
-    sticker_error = str(exc)
+  active_supply.orders.add(*new_orders)
 
   for order in new_orders:
     order.status = Order.Status.IN_PICKING
     order.wb_supplier_status = WB_SUPPLIER_ASSEMBLY
     order.save(update_fields=["status", "wb_supplier_status", "updated_at"])
 
-  return stickers_fetched, sticker_error, len(new_orders)
+  time.sleep(SUPPLY_CREATE_SETTLE_SEC)
+
+  stickers_fetched = 0
+  sticker_error = ""
+  try:
+    stickers_fetched = fetch_stickers_for_orders(seller, new_orders, user=user)
+    missing = [
+      order for order in new_orders
+      if not (order.sticker_file or "").strip()
+    ]
+    if missing:
+      time.sleep(1.5)
+      stickers_fetched += fetch_stickers_for_orders(seller, missing, user=user)
+  except AssemblyError as exc:
+    sticker_error = str(exc)
+
+  return stickers_fetched, sticker_error, new_orders, active_supply
 
 
 @transaction.atomic
@@ -1945,14 +2010,14 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   client = _get_client(seller)
   try:
     supply = _get_or_create_forming_supply(seller, order.wb_warehouse_id, client)
-    stickers_fetched, sticker_error, added = _append_orders_to_forming_supply(
+    stickers_fetched, sticker_error, added_orders, supply = _append_orders_to_forming_supply(
       seller,
       supply,
       [order],
       client=client,
       user=user,
     )
-    if added == 0:
+    if not added_orders:
       order.refresh_from_db()
       return {
         "order": order,
@@ -1968,7 +2033,10 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
       message=f"Ошибка отправки на сборку WB #{order.wb_order_id}: {exc}",
       details={"order_id": order.id, "status_code": exc.status_code},
     )
-    raise SupplyFlowError(str(exc), code="wb_assembly_failed") from exc
+    raise SupplyFlowError(
+      parse_wb_supply_move_error(exc),
+      code="wb_assembly_failed",
+    ) from exc
 
   order.refresh_from_db()
 
@@ -1986,7 +2054,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
     },
   )
 
-  if added > 0:
+  if added_orders:
     maybe_prefetch_shipping_points_after_assembly_progress(
       seller,
       order,
@@ -1998,6 +2066,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
     "wb_supply_id": supply.wb_supply_id,
     "stickers_fetched": stickers_fetched,
     "sticker_error": sticker_error,
+    "orders_added": len(added_orders),
   }
 
 
@@ -2123,6 +2192,7 @@ def _prepare_supply_orders_for_deliver(
   user=None,
   force: bool = False,
 ) -> None:
+  sync_supply_marking_from_wb(seller, supply, user=user)
   for order in assembly_supply_orders(supply, seller):
     if not order_can_send_to_delivery(order):
       continue
@@ -2218,24 +2288,6 @@ def send_order_to_delivery(
   """
   order = _get_order(seller, order_id)
 
-  if not order_can_send_to_delivery(order):
-    requires_marking = resolve_product_requires_marking(
-      order.product, order.barcode, order.seller,
-    )
-    hint = ""
-    if requires_marking and not order.marking_bound:
-      hint = " Сначала привяжите Честный знак и распечатайте стикер."
-    elif requires_marking and (order.marking_verify_status or "").strip() == VERIFY_PENDING:
-      hint = " WB ещё проверяет Честный знак — подождите несколько минут."
-    elif requires_marking and (order.marking_verify_status or "").strip() == VERIFY_ERROR:
-      hint = f" {order.marking_verify_error or 'ЧЗ отклонён — замените товар.'}"
-    elif order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
-      hint = " Сначала отсканируйте баркод и распечатайте стикер FBS."
-    raise SupplyFlowError(
-      f"Заказ WB #{order.wb_order_id} не готов к отправке в доставку.{hint}",
-      code="not_ready",
-    )
-
   supply_qs = Supply.objects.filter(
     seller=seller,
     orders=order,
@@ -2266,6 +2318,26 @@ def send_order_to_delivery(
     )
 
   client = _get_client(seller)
+  sync_supply_marking_from_wb(seller, supply, client=client, user=user)
+  order.refresh_from_db()
+
+  if not order_can_send_to_delivery(order):
+    requires_marking = resolve_product_requires_marking(
+      order.product, order.barcode, order.seller,
+    )
+    hint = ""
+    if (order.marking_verify_status or "").strip() == VERIFY_ERROR:
+      hint = f" {order.marking_verify_error or 'ЧЗ отклонён — замените товар.'}"
+    elif requires_marking and not order.marking_bound:
+      hint = " Сначала привяжите Честный знак и распечатайте стикер."
+    elif requires_marking and (order.marking_verify_status or "").strip() == VERIFY_PENDING:
+      hint = " WB ещё проверяет Честный знак — подождите несколько минут."
+    elif order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
+      hint = " Сначала отсканируйте баркод и распечатайте стикер FBS."
+    raise SupplyFlowError(
+      f"Заказ WB #{order.wb_order_id} не готов к отправке в доставку.{hint}",
+      code="not_ready",
+    )
 
   if order.status == Order.Status.IN_DELIVERY:
     raise SupplyFlowError(
@@ -2616,19 +2688,21 @@ def send_orders_to_assembly_bulk(
   client = _get_client(seller)
   sent = 0
   stickers_total = 0
+  sent_order_ids: list[int] = []
 
   for wb_warehouse_id, wh_orders in by_warehouse.items():
     try:
       supply = _get_or_create_forming_supply(seller, wb_warehouse_id, client)
-      stickers_fetched, sticker_error, added = _append_orders_to_forming_supply(
+      stickers_fetched, sticker_error, added_orders, supply = _append_orders_to_forming_supply(
         seller,
         supply,
         wh_orders,
         client=client,
         user=user,
       )
-      sent += added
+      sent += len(added_orders)
       stickers_total += stickers_fetched
+      sent_order_ids.extend(order.id for order in added_orders)
       if sticker_error:
         errors.append({
           "wb_warehouse_id": wb_warehouse_id,
@@ -2636,11 +2710,35 @@ def send_orders_to_assembly_bulk(
           "error": sticker_error,
         })
     except (SupplyFlowError, WBApiError) as exc:
+      message = parse_wb_supply_move_error(exc) if isinstance(exc, WBApiError) else str(exc)
       for order in wh_orders:
         errors.append({
           "order_id": order.id,
           "wb_order_id": order.wb_order_id,
-          "error": str(exc),
+          "error": message,
+        })
+
+  if sent_order_ids:
+    missing_stickers = list(
+      Order.objects.filter(
+        seller=seller,
+        pk__in=sent_order_ids,
+        wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+      ).filter(
+        Q(sticker_file="") | Q(sticker_file__isnull=True) | Q(has_sticker=False),
+      ),
+    )
+    if missing_stickers:
+      try:
+        stickers_total += fetch_stickers_for_orders(
+          seller,
+          missing_stickers,
+          user=user,
+        )
+      except AssemblyError as exc:
+        errors.append({
+          "error": f"Не все стикеры подтянулись из WB: {exc}",
+          "still_missing": len(missing_stickers),
         })
 
   if sent == 0 and errors:
@@ -2692,12 +2790,12 @@ def order_delivery_block_reason(order: Order) -> str | None:
     return "Нет стикера FBS — отсканируйте в сборке"
   if order.status not in (Order.Status.LABEL_PRINTED, Order.Status.MARKED):
     return "Нет стикера FBS — отсканируйте в сборке"
+  verify_status = (order.marking_verify_status or "").strip()
+  if verify_status == "error":
+    return order.marking_verify_error or "ЧЗ отклонён WB — замените товар"
   if resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    verify_status = (order.marking_verify_status or "").strip()
     if verify_status == "pending":
       return "WB проверяет ЧЗ (несколько минут) — в доставку после подтверждения WB"
-    if verify_status == "error":
-      return order.marking_verify_error or "ЧЗ отклонён WB — замените товар"
     if not order_marking_ready(order):
       return "Нужен Честный знак"
   return "Не готов к доставке"

@@ -471,10 +471,17 @@ export function fetchMarkingStatus(sellerId: number) {
   return fetchAssemblyQueueStatus(sellerId)
 }
 
-export function verifyMarking(sellerId: number, orderIds?: number[]) {
+export function verifyMarking(
+  sellerId: number,
+  orderIds?: number[],
+  options?: { forceRecheck?: boolean },
+) {
   return apiFetch<VerifyMarkingResult>(`/api/orders/assembly/sellers/${sellerId}/verify-marking/`, {
     method: 'POST',
-    body: JSON.stringify({ order_ids: orderIds ?? [] }),
+    body: JSON.stringify({
+      order_ids: orderIds ?? [],
+      force_recheck: options?.forceRecheck ?? true,
+    }),
   })
 }
 

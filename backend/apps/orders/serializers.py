@@ -334,6 +334,7 @@ class VerifyMarkingSerializer(serializers.Serializer):
     required=False,
     allow_empty=True,
   )
+  force_recheck = serializers.BooleanField(required=False, default=True)
 
 
 class ReplaceOrderSerializer(serializers.Serializer):

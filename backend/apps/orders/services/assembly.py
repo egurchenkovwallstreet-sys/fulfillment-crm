@@ -436,7 +436,8 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
   updated = 0
   now = timezone.now()
 
-  for attempt in (1, 2):
+  retry_delays = (SUPPLY_CREATE_SETTLE_SEC, 1.2, 2.0, 3.0)
+  for attempt, delay in enumerate(retry_delays, start=1):
     wb_ids = [order.wb_order_id for order in pending]
     try:
       stickers = client.fetch_order_stickers(wb_ids)
@@ -469,13 +470,22 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
     pending = still_pending
     if not pending:
       break
-    if attempt == 1:
+    if attempt < len(retry_delays):
       logger.warning(
-        "WB stickers missing on first try seller=%s ids=%s",
+        "WB stickers missing attempt=%s seller=%s ids=%s",
+        attempt,
         seller.id,
         [order.wb_order_id for order in pending][:8],
       )
-      time.sleep(SUPPLY_CREATE_SETTLE_SEC)
+      time.sleep(delay)
+
+  if pending:
+    logger.warning(
+      "WB stickers still missing seller=%s count=%s ids=%s",
+      seller.id,
+      len(pending),
+      [order.wb_order_id for order in pending][:8],
+    )
 
   return updated
 

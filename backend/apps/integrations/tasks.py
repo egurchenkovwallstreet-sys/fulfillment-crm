@@ -138,7 +138,7 @@ def verify_seller_marking_codes(seller_id: int):
   if not seller:
     return {"skipped": True, "seller_id": seller_id}
   try:
-    results = verify_marking_orders(seller)
+    results = verify_marking_orders(seller, force_recheck=True)
   except AssemblyError as exc:
     logger.warning("Marking verify failed for seller %s: %s", seller_id, exc)
     return {"seller_id": seller_id, "error": str(exc)}

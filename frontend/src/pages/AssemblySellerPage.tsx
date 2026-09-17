@@ -85,8 +85,8 @@ import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
-const MARKING_STATUS_POLL_MS = 10_000
-const MARKING_VERIFY_POLL_MS = 12_000
+const MARKING_STATUS_POLL_MS = 5_000
+const MARKING_VERIFY_POLL_MS = 5_000
 
 const EMPTY_MARKING_STATUS: MarkingStatusResult = {
   success: true,

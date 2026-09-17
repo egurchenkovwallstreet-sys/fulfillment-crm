@@ -19,11 +19,11 @@ VERIFY_ERROR = "error"
 
 def order_marking_ready(order: Order) -> bool:
   """ЧЗ привязан и проверен WB — можно передавать в доставку."""
-  if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    return True
   status = (order.marking_verify_status or "").strip()
   if status == VERIFY_ERROR:
     return False
+  if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    return True
   if status == VERIFY_PENDING:
     return False
   if status == VERIFY_VERIFIED:
@@ -112,6 +112,37 @@ def _extract_sgtin_decision(meta_item: dict) -> str:
   return best
 
 
+def _meta_marking_decision(meta_item: dict) -> str:
+  """Худший статус маркировки из metaDetails и sgtin — как видит WB перед deliver."""
+  decisions: list[str] = []
+  details = meta_item.get("metaDetails") or meta_item.get("meta_details") or []
+  if isinstance(details, dict):
+    details = [details]
+  for detail in details:
+    if not isinstance(detail, dict):
+      continue
+    decision = str(
+      detail.get("decision") or detail.get("status") or detail.get("checkStatus") or "",
+    ).strip()
+    if decision:
+      decisions.append(decision)
+  sgtin_decision = _extract_sgtin_decision(meta_item)
+  if sgtin_decision:
+    decisions.append(sgtin_decision)
+  if not decisions:
+    return ""
+  rank = {VERIFY_ERROR: 3, VERIFY_PENDING: 2, VERIFY_VERIFIED: 1}
+  best = decisions[0]
+  best_rank = 0
+  for decision in decisions:
+    status, _ = parse_marking_verify_decision(decision)
+    current = rank.get(status, 1)
+    if current > best_rank:
+      best_rank = current
+      best = decision
+  return best
+
+
 def _apply_verify_result(order: Order, decision: str) -> str:
   status, error = parse_marking_verify_decision(decision)
   order.marking_verify_status = status
@@ -147,22 +178,36 @@ def _meta_order_id(item: dict) -> int | None:
   return None
 
 
-def _orders_for_marking_verify(seller: Seller, order_ids: list[int] | None = None):
+def _orders_for_marking_verify(
+  seller: Seller,
+  order_ids: list[int] | None = None,
+  *,
+  force_recheck: bool = False,
+):
   """Заказы на сборке, по которым уже есть ЧЗ или WB ещё не подтвердил код."""
-  qs = (
-    Order.objects.filter(
-      seller=seller,
-      assembly_hidden=False,
-      wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
-    )
-    .exclude(marking_verify_status=VERIFY_VERIFIED)
-    .exclude(marking_verify_status=VERIFY_ERROR)
-    .filter(Q(marking_verify_status=VERIFY_PENDING) | ~Q(marking_code=""))
+  qs = Order.objects.filter(
+    seller=seller,
+    assembly_hidden=False,
+    wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
   )
   if order_ids:
     qs = qs.filter(pk__in=order_ids)
+  elif force_recheck:
+    qs = qs.filter(
+      Q(marking_verify_status__in=[VERIFY_PENDING, VERIFY_VERIFIED, VERIFY_ERROR])
+      | ~Q(marking_code=""),
+    )
+  else:
+    qs = (
+      qs.exclude(marking_verify_status=VERIFY_VERIFIED)
+      .exclude(marking_verify_status=VERIFY_ERROR)
+      .filter(Q(marking_verify_status=VERIFY_PENDING) | ~Q(marking_code=""))
+    )
   result: list[Order] = []
   for order in qs.select_related("product", "seller"):
+    if force_recheck or order_ids:
+      result.append(order)
+      continue
     has_code = bool((order.marking_code or "").strip())
     is_pending = (order.marking_verify_status or "").strip() == VERIFY_PENDING
     if has_code or is_pending:
@@ -170,19 +215,23 @@ def _orders_for_marking_verify(seller: Seller, order_ids: list[int] | None = Non
   return result
 
 
-def verify_marking_orders(
+def sync_orders_marking_from_wb(
   seller: Seller,
-  order_ids: list[int] | None = None,
+  orders: list[Order],
   *,
+  client=None,
   user=None,
-) -> list[dict]:
-  """Опросить WB: принял ЧЗ → готовы к доставке, отклонил → ошибки ЧЗ."""
-  orders = list(_orders_for_marking_verify(seller, order_ids))
+  treat_missing_as_required: bool = False,
+) -> tuple[list[dict], int]:
+  """Обновить marking_verify_status в CRM по актуальным данным WB /orders/meta."""
   if not orders:
-    return []
+    return [], 0
 
-  client = _get_client(seller)
-  wb_ids = [order.wb_order_id for order in orders]
+  client = client or _get_client(seller)
+  wb_ids = [int(order.wb_order_id) for order in orders if order.wb_order_id]
+  if not wb_ids:
+    return [], 0
+
   meta_by_wb_id: dict[int, dict] = {}
   try:
     for offset in range(0, len(wb_ids), 100):
@@ -195,36 +244,25 @@ def verify_marking_orders(
       user=user,
       seller=seller,
       action_type=AuditLog.ActionType.API_ERROR,
-      message=f"Ошибка проверки ЧЗ WB: {exc}",
-      details={"status_code": exc.status_code, "order_ids": order_ids},
+      message=f"Ошибка синхронизации ЧЗ из WB: {exc}",
+      details={"status_code": exc.status_code, "order_count": len(orders)},
     )
     raise AssemblyError(parse_wb_marking_error(exc), code="wb_verify_failed") from exc
-
-  if not meta_by_wb_id or not any(int(order.wb_order_id) in meta_by_wb_id for order in orders):
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message="WB не вернул статусы ЧЗ (пустой ответ /orders/meta)",
-      details={
-        "order_ids": [order.id for order in orders],
-        "wb_ids": wb_ids[:20],
-        "meta_ids": list(meta_by_wb_id.keys())[:20],
-      },
-    )
-    raise AssemblyError(
-      "WB не вернул статусы Честного знака. Нажмите «Проверить ЧЗ» ещё раз.",
-      code="wb_verify_empty",
-    )
 
   results: list[dict] = []
   for order in orders:
     meta_item = meta_by_wb_id.get(int(order.wb_order_id))
     has_code = bool((order.marking_code or "").strip())
     if meta_item is None:
-      decision = "filled" if has_code else "required"
+      if treat_missing_as_required:
+        decision = "filled" if has_code else "required"
+      else:
+        decision = "filled" if has_code else ""
     else:
-      decision = _extract_sgtin_decision(meta_item) or ("filled" if has_code else "required")
+      decision = _meta_marking_decision(meta_item) or ("filled" if has_code else "")
+    if not decision:
+      continue
+    previous_status = (order.marking_verify_status or "").strip()
     status = _apply_verify_result(order, decision)
     results.append({
       "order_id": order.id,
@@ -233,16 +271,9 @@ def verify_marking_orders(
       "decision": decision,
       "error": order.marking_verify_error,
       "marking_bound": order.marking_bound,
+      "changed": status != previous_status,
     })
-    if status == VERIFY_VERIFIED:
-      AuditLog.objects.create(
-        user=user,
-        seller=seller,
-        action_type=AuditLog.ActionType.MARKING,
-        message=f"ЧЗ подтверждён WB для заказа #{order.wb_order_id}",
-        details={"order_id": order.id, "decision": decision},
-      )
-    elif status == VERIFY_ERROR:
+    if status == VERIFY_ERROR and previous_status != VERIFY_ERROR:
       AuditLog.objects.create(
         user=user,
         seller=seller,
@@ -251,14 +282,91 @@ def verify_marking_orders(
         details={"order_id": order.id, "decision": decision},
       )
 
-  from apps.orders.services.supply_flow import refresh_supply_readiness
+  if results:
+    from apps.orders.services.supply_flow import refresh_supply_readiness
 
-  touched_ids = {order.id for order in orders}
-  for supply in Supply.objects.filter(
-    seller=seller,
-    status__in=(Supply.Status.FORMING, Supply.Status.READY),
-    orders__id__in=touched_ids,
-  ).distinct():
-    refresh_supply_readiness(supply)
+    touched_ids = {item["order_id"] for item in results}
+    for supply in Supply.objects.filter(
+      seller=seller,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+      orders__id__in=touched_ids,
+    ).distinct():
+      refresh_supply_readiness(supply)
+
+  return results, len(meta_by_wb_id)
+
+
+def sync_supply_marking_from_wb(
+  seller: Seller,
+  supply: Supply,
+  *,
+  client=None,
+  user=None,
+) -> list[dict]:
+  """Синхронизировать ЧЗ всех заказов поставки из WB перед deliver."""
+  if not supply.wb_supply_id:
+    return []
+  client = client or _get_client(seller)
+  try:
+    wb_ids = client.fetch_supply_order_ids(supply.wb_supply_id)
+  except WBApiError:
+    return []
+  if not wb_ids:
+    return []
+  orders = list(
+    Order.objects.filter(
+      seller=seller,
+      wb_order_id__in=wb_ids,
+      assembly_hidden=False,
+    ).select_related("product", "seller"),
+  )
+  results, _meta_count = sync_orders_marking_from_wb(seller, orders, client=client, user=user)
+  return results
+
+
+def verify_marking_orders(
+  seller: Seller,
+  order_ids: list[int] | None = None,
+  *,
+  user=None,
+  force_recheck: bool = False,
+) -> list[dict]:
+  """Опросить WB: принял ЧЗ → готовы к доставке, отклонил → ошибки ЧЗ."""
+  orders = list(_orders_for_marking_verify(seller, order_ids, force_recheck=force_recheck))
+  if not orders:
+    return []
+
+  results, meta_count = sync_orders_marking_from_wb(
+    seller,
+    orders,
+    user=user,
+    treat_missing_as_required=True,
+  )
+  if orders and meta_count == 0:
+    wb_ids = [order.wb_order_id for order in orders]
+    AuditLog.objects.create(
+      user=user,
+      seller=seller,
+      action_type=AuditLog.ActionType.API_ERROR,
+      message="WB не вернул статусы ЧЗ (пустой ответ /orders/meta)",
+      details={
+        "order_ids": [order.id for order in orders],
+        "wb_ids": wb_ids[:20],
+      },
+    )
+    raise AssemblyError(
+      "WB не вернул статусы Честного знака. Нажмите «Проверить ЧЗ» ещё раз.",
+      code="wb_verify_empty",
+    )
+
+  for item in results:
+    if item["status"] == VERIFY_VERIFIED and item.get("changed"):
+      AuditLog.objects.create(
+        user=user,
+        seller=seller,
+        action_type=AuditLog.ActionType.MARKING,
+        message=f"ЧЗ подтверждён WB для заказа #{item['wb_order_id']}",
+        details={"order_id": item["order_id"], "decision": item["decision"]},
+      )
 
   return results
