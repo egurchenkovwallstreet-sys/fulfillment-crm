@@ -21,10 +21,18 @@ SUPPLY_ORDERS_BATCH_SIZE = 100
 
 
 class WBApiError(Exception):
-  def __init__(self, message: str, status_code: int | None = None, code: str = ""):
+  def __init__(
+    self,
+    message: str,
+    status_code: int | None = None,
+    code: str = "",
+    *,
+    payload: dict | None = None,
+  ):
     super().__init__(message)
     self.status_code = status_code
     self.code = code or ""
+    self.payload = payload if isinstance(payload, dict) else {}
 
 
 def _looks_like_order_meta_item(item: dict) -> bool:
@@ -153,6 +161,7 @@ class WBClient:
         f"WB API ошибка {response.status_code}: {wb_message}",
         status_code=response.status_code,
         code=wb_code,
+        payload=payload,
       )
 
     if not response.content:
@@ -532,15 +541,47 @@ class WBClient:
       json={"data": items},
     )
     if not isinstance(payload, dict):
-      return
-    for result in payload.get("results") or []:
+      raise WBApiError(
+        "WB не вернул результат установки параметров отгрузки",
+        status_code=502,
+      )
+    results = payload.get("results")
+    if not isinstance(results, list):
+      raise WBApiError(
+        "WB не вернул results для параметров отгрузки",
+        status_code=502,
+        payload=payload,
+      )
+    by_supply_id = {
+      str(result.get("supplyId") or ""): result
+      for result in results
+      if isinstance(result, dict) and result.get("supplyId")
+    }
+    for item in items:
+      supply_id = str(item.get("supplyId") or "")
+      if not supply_id:
+        continue
+      result = by_supply_id.get(supply_id)
+      if not result:
+        raise WBApiError(
+          f"WB не подтвердил параметры отгрузки для поставки {supply_id}",
+          status_code=409,
+          payload=payload,
+        )
       if result.get("error"):
         err = result["error"]
-        detail = err.get("detail") or err.get("code") or "unknown"
-        supply_id = result.get("supplyId", "")
+        detail = str(err.get("detail") or err.get("code") or "unknown")
         raise WBApiError(
           f"Не удалось установить параметры отгрузки {supply_id}: {detail}",
           status_code=409,
+          code=detail,
+          payload={"result": result, "response": payload},
+        )
+      if result.get("success") is not True:
+        raise WBApiError(
+          f"WB отклонил параметры отгрузки для поставки {supply_id}",
+          status_code=409,
+          payload={"result": result, "response": payload},
         )
 
   def deliver_supply(self, supply_id: str) -> None:

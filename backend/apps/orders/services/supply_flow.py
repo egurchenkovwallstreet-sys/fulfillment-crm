@@ -6,6 +6,7 @@ import os
 import time
 from collections import defaultdict
 from datetime import date
+from zoneinfo import ZoneInfo
 
 from django.core.cache import cache
 from django.db import transaction
@@ -99,21 +100,251 @@ def order_can_send_to_delivery(order: Order) -> bool:
   return True
 
 
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _wb_error_tokens(exc: WBApiError) -> str:
+  payload = getattr(exc, "payload", {}) or {}
+  chunks = [str(exc), str(getattr(exc, "code", "") or "")]
+  if isinstance(payload, dict):
+    chunks.append(str(payload.get("code") or ""))
+    chunks.append(str(payload.get("message") or ""))
+    chunks.append(str(payload.get("detail") or ""))
+    data = payload.get("data")
+    if isinstance(data, dict):
+      chunks.append(str(data))
+  return " ".join(chunks).lower()
+
+
+def _format_meta_validation_orders(payload: dict) -> str:
+  data = payload.get("data")
+  if not isinstance(data, dict):
+    return ""
+  orders = data.get("orders")
+  if not isinstance(orders, list) or not orders:
+    return ""
+  lines: list[str] = []
+  for item in orders[:5]:
+    if not isinstance(item, dict):
+      continue
+    wb_id = item.get("id") or item.get("orderId") or item.get("order_id")
+    details = item.get("metaDetails") or item.get("meta_details") or []
+    if not isinstance(details, list):
+      details = [details]
+    detail_bits: list[str] = []
+    for detail in details:
+      if not isinstance(detail, dict):
+        continue
+      key = str(detail.get("key") or detail.get("name") or "meta").strip()
+      decision = str(detail.get("decision") or detail.get("status") or "").strip()
+      if key or decision:
+        detail_bits.append(f"{key}={decision or '?'}")
+    suffix = f" ({', '.join(detail_bits)})" if detail_bits else ""
+    lines.append(f"#{wb_id}{suffix}")
+  if not lines:
+    return ""
+  extra = f" и ещё {len(orders) - len(lines)}" if len(orders) > len(lines) else ""
+  return " Проблемные заказы WB: " + ", ".join(lines) + extra + "."
+
+
+def _parse_shipping_method_error(exc: WBApiError) -> str:
+  text = _wb_error_tokens(exc)
+  code = str(getattr(exc, "code", "") or "")
+  if any(token in text for token in ("invalidshippingdt", "invalid_shipping_dt")):
+    return (
+      "WB отклонил дату отгрузки — выберите сегодня или более позднюю дату "
+      "в окне «В доставку» и повторите."
+    )
+  if any(token in text for token in ("supplyalreadyscanned", "already scanned")):
+    return (
+      "WB уже отсканировал эту поставку на пункте приёмки. "
+      "Нажмите «Обновить заказы» — CRM подтянет статус из WB."
+    )
+  if any(token in text for token in ("unsuitableshippingtype", "waybill")):
+    return (
+      "WB отклонил способ отгрузки. Для CRM используйте доставку силами продавца "
+      "(selfShipping), без транспортной компании."
+    )
+  if any(token in text for token in ("notfound", "incorrectparameter", "incorrect request")):
+    return (
+      f"WB не принял пункт отгрузки или параметры пропуска. "
+      f"Выберите другой пункт из списка (#ID в строке) и повторите. Ответ WB: {exc}"
+    )
+  if code and code not in ("unknown", ""):
+    return f"WB не принял параметры отгрузки ({code}): {exc}"
+  return f"Не удалось установить параметры отгрузки WB: {exc}"
+
+
 def _parse_deliver_error(exc: WBApiError) -> str:
-  text = str(exc).lower()
+  text = _wb_error_tokens(exc)
+  payload = getattr(exc, "payload", {}) or {}
+  code = str(getattr(exc, "code", "") or payload.get("code") or "")
   if exc.status_code == 409:
-    if "shipping" in text or "supplyshipping" in text:
+    if any(token in text for token in (
+      "supplyshippingrequired",
+      "supply shipping required",
+      "shipping point",
+      "shippingpoint",
+      "shippingdt",
+      "shipping type",
+      "supplyshipping",
+    )):
       return (
-        "WB требует указать пункт отгрузки (СЦ/ПВЗ) и дату перед передачей в доставку. "
-        "Выберите их в окне подтверждения и повторите."
+        "WB не видит параметры отгрузки (пункт, дата, способ). "
+        "Откройте окно «В доставку», заново выберите пункт из списка и дату, затем повторите."
       )
-    if "sgtin" in text or "marking" in text or "meta" in text:
+    if any(token in text for token in (
+      "metavalidationfail",
+      "sgtin",
+      "marking",
+      "uin",
+      "imei",
+      "customsdeclaration",
+      " meta ",
+    )):
+      meta_hint = _format_meta_validation_orders(payload)
       return (
-        "WB отклонил передачу в доставку: ошибка маркировки ЧЗ в поставке. "
-        "Замените товар, привяжите новый ЧЗ и повторите."
+        "WB отклонил передачу в доставку: не пройдена проверка маркировки/метаданных "
+        f"в поставке.{meta_hint} "
+        "Проверьте ЧЗ, УИН, IMEI или ДТ — замените товар или дождитесь проверки WB."
       )
+    if any(token in text for token in ("supplyalreadyscanned", "already delivered", "already scanned")):
+      return (
+        "WB уже принял эту поставку. Нажмите «Обновить заказы» — CRM синхронизирует статус."
+      )
+    if any(token in text for token in ("supplyhaszeroorders", "zero orders")):
+      return (
+        "WB не видит заказов в поставке. Нажмите «Обновить заказы» или отправьте заказы на сборку заново."
+      )
+    if any(token in text for token in ("statusmismatch", "statuschange")):
+      return (
+        "WB отклонил передачу: один или несколько заказов не в статусе «На сборке». "
+        "Нажмите «Обновить заказы» и повторите."
+      )
+    if code:
+      return f"WB отклонил передачу в доставку ({code}): {exc}"
     return f"WB отклонил передачу в доставку: {exc}"
   return str(exc)
+
+
+def _validate_shipping_date(shipping_date: date) -> None:
+  today_moscow = timezone.now().astimezone(MOSCOW_TZ).date()
+  if shipping_date < today_moscow:
+    raise SupplyFlowError(
+      f"Дата отгрузки {shipping_date.isoformat()} уже прошла по московскому времени. "
+      "Выберите сегодня или более позднюю дату.",
+      code="invalid_shipping_date",
+    )
+
+
+def _assert_wb_supply_shipping_applied(
+  client,
+  supply: Supply,
+  *,
+  shipping_point_id: int,
+  shipping_date: date,
+) -> None:
+  """Убедиться, что WB сохранил пункт и дату отгрузки перед deliver."""
+  try:
+    details = client.fetch_supply(supply.wb_supply_id)
+  except WBApiError as exc:
+    logger.warning(
+      "WB fetch_supply after shipping-method failed supply=%s: %s",
+      supply.wb_supply_id,
+      exc,
+    )
+    return
+  if not isinstance(details, dict):
+    return
+  wb_point = details.get("shippingPointId")
+  wb_date = str(details.get("shippingDt") or "").strip()[:10]
+  expected_date = shipping_date.isoformat()
+  if wb_point is None or int(wb_point) != int(shipping_point_id) or wb_date != expected_date:
+    raise SupplyFlowError(
+      "WB не сохранил параметры отгрузки для поставки "
+      f"{supply.wb_supply_id}. Выберите пункт из актуального списка (#ID) "
+      "и повторите передачу в доставку.",
+      code="wb_shipping_not_applied",
+    )
+
+
+def _assert_wb_supply_orders_ready(client, supply: Supply) -> None:
+  """Сверить состав поставки в WB — deliver падает 409, если там есть «битые» заказы."""
+  wb_ids = client.fetch_supply_order_ids(supply.wb_supply_id)
+  if not wb_ids:
+    raise SupplyFlowError(
+      f"WB не видит заказов в поставке {supply.wb_supply_id}. "
+      "Нажмите «Обновить заказы» или отправьте заказы на сборку заново.",
+      code="not_ready",
+    )
+  try:
+    statuses = client.fetch_order_statuses(wb_ids)
+  except WBApiError as exc:
+    logger.warning("WB order status preflight failed supply=%s: %s", supply.wb_supply_id, exc)
+    return
+  bad: list[str] = []
+  for item in statuses:
+    if not isinstance(item, dict):
+      continue
+    raw_id = item.get("id") or item.get("orderId") or item.get("orderID")
+    supplier = str(item.get("supplierStatus") or "").strip()
+    if supplier and supplier != WB_SUPPLIER_ASSEMBLY:
+      bad.append(f"#{raw_id} ({supplier})")
+  if bad:
+    sample = ", ".join(bad[:4])
+    extra = f" и ещё {len(bad) - 4}" if len(bad) > 4 else ""
+    raise SupplyFlowError(
+      "WB не даст передать поставку в доставку: в ней есть заказы не в статусе «На сборке»: "
+      f"{sample}{extra}. Перенесите или удалите их в ЛК WB, затем «Обновить заказы».",
+      code="wb_supply_orders_not_confirm",
+    )
+  try:
+    meta_items = client.fetch_orders_meta(wb_ids)
+  except WBApiError as exc:
+    logger.warning("WB orders/meta preflight failed supply=%s: %s", supply.wb_supply_id, exc)
+    return
+  from apps.orders.services.marking import parse_marking_verify_decision
+  from apps.orders.services.marking_verification import _extract_sgtin_decision
+
+  meta_by_id: dict[int, dict] = {}
+  for item in meta_items:
+    raw_id = item.get("id") or item.get("orderId") or item.get("order_id")
+    if raw_id is None:
+      continue
+    try:
+      meta_by_id[int(raw_id)] = item
+    except (TypeError, ValueError):
+      continue
+  blocked: list[str] = []
+  for wb_id in wb_ids:
+    item = meta_by_id.get(int(wb_id))
+    if not item:
+      continue
+    for detail in item.get("metaDetails") or item.get("meta_details") or []:
+      if not isinstance(detail, dict):
+        continue
+      decision = str(detail.get("decision") or detail.get("status") or "").strip()
+      if not decision:
+        continue
+      status, _ = parse_marking_verify_decision(decision)
+      if status in (VERIFY_PENDING, VERIFY_ERROR):
+        key = str(detail.get("key") or "meta")
+        blocked.append(f"#{wb_id} ({key}={decision})")
+        break
+    else:
+      sgtin_decision = _extract_sgtin_decision(item)
+      if sgtin_decision:
+        status, _ = parse_marking_verify_decision(sgtin_decision)
+        if status in (VERIFY_PENDING, VERIFY_ERROR):
+          blocked.append(f"#{wb_id} (sgtin={sgtin_decision})")
+  if blocked:
+    sample = ", ".join(blocked[:4])
+    extra = f" и ещё {len(blocked) - 4}" if len(blocked) > 4 else ""
+    raise SupplyFlowError(
+      "WB не даст передать поставку: маркировка не прошла проверку или ещё проверяется: "
+      f"{sample}{extra}. Исправьте ЧЗ/метаданные и повторите.",
+      code="marking_not_ready",
+    )
 
 
 def parse_wb_supply_move_error(exc: WBApiError) -> str:
@@ -990,6 +1221,7 @@ def _apply_shipping_method(
     return
   if not supply.wb_supply_id:
     raise SupplyFlowError("У поставки нет ID WB", code="no_supply")
+  _validate_shipping_date(shipping_date)
   try:
     client.set_supplies_shipping_method([{
       "supplyId": supply.wb_supply_id,
@@ -999,9 +1231,47 @@ def _apply_shipping_method(
     }])
   except WBApiError as exc:
     raise SupplyFlowError(
-      f"Не удалось установить параметры отгрузки WB: {exc}",
+      _parse_shipping_method_error(exc),
       code="wb_shipping_method_failed",
     ) from exc
+  _assert_wb_supply_shipping_applied(
+    client,
+    supply,
+    shipping_point_id=shipping_point_id,
+    shipping_date=shipping_date,
+  )
+
+
+def _prepare_wb_supply_deliver(
+  client,
+  supply: Supply,
+  *,
+  shipping_point_id: int,
+  shipping_date: date,
+  shipping_type: str = "selfShipping",
+) -> bool:
+  """
+  Установить параметры отгрузки и проверить поставку в WB.
+  Возвращает True, если поставка уже закрыта в WB (deliver вызывать не нужно).
+  """
+  if not supply.wb_supply_id:
+    raise SupplyFlowError("У поставки нет ID WB", code="no_supply")
+  try:
+    details = client.fetch_supply(supply.wb_supply_id)
+  except WBApiError as exc:
+    logger.warning("WB fetch_supply before deliver failed supply=%s: %s", supply.wb_supply_id, exc)
+    details = {}
+  if _wb_supply_closed(details if isinstance(details, dict) else {}):
+    return True
+  _apply_shipping_method(
+    client,
+    supply,
+    shipping_point_id=shipping_point_id,
+    shipping_date=shipping_date,
+    shipping_type=shipping_type,
+  )
+  _assert_wb_supply_orders_ready(client, supply)
+  return False
 
 
 def _ensure_marking_verified_for_delivery(seller: Seller, order: Order, *, user=None) -> None:
@@ -1910,14 +2180,15 @@ def send_order_to_delivery(
         "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
         code="shipping_required",
       )
-    _apply_shipping_method(
+    already_delivered = _prepare_wb_supply_deliver(
       client,
       supply,
       shipping_point_id=shipping_point_id,
       shipping_date=shipping_date,
       shipping_type=shipping_type,
     )
-    client.deliver_supply(supply.wb_supply_id)
+    if not already_delivered:
+      client.deliver_supply(supply.wb_supply_id)
   except WBApiError as exc:
     AuditLog.objects.create(
       user=user,
@@ -1928,6 +2199,8 @@ def send_order_to_delivery(
         "order_id": order.id,
         "wb_supply_id": supply.wb_supply_id,
         "status_code": exc.status_code,
+        "wb_code": getattr(exc, "code", ""),
+        "wb_payload": getattr(exc, "payload", {}),
       },
     )
     raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
@@ -2419,14 +2692,15 @@ def send_supply_to_delivery(
           "Укажите пункт отгрузки (СЦ/ПВЗ) и дату отгрузки — это обязательно для WB.",
           code="shipping_required",
         )
-      _apply_shipping_method(
+      already_delivered = _prepare_wb_supply_deliver(
         client,
         supply,
         shipping_point_id=shipping_point_id,
         shipping_date=shipping_date,
         shipping_type=shipping_type,
       )
-      client.deliver_supply(supply.wb_supply_id)
+      if not already_delivered:
+        client.deliver_supply(supply.wb_supply_id)
     except WBApiError as exc:
       raise SupplyFlowError(_parse_deliver_error(exc), code="wb_deliver_failed") from exc
     supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
