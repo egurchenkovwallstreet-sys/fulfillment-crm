@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchAssemblySellers, type SellerAssemblyCounters } from '../api/assembly'
 import { syncOrders } from '../api/orders'
@@ -8,6 +8,8 @@ import { readAssemblySellersCache, writeAssemblySellersCache } from '../utils/as
 import { uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
+const ASSEMBLY_SELLERS_POLL_MS = 60_000
+
 export function AssemblySellersPage() {
   const { marketplace } = useMarketplace()
   const { showSuccess, showError } = useCrmNotice()
@@ -16,13 +18,21 @@ export function AssemblySellersPage() {
   )
   const [loading, setLoading] = useState(() => !(readAssemblySellersCache(marketplace)?.length))
   const [syncing, setSyncing] = useState(false)
-  const load = useCallback(async () => {
+  const loadInFlightRef = useRef(false)
+
+  const load = useCallback(async (opts?: { silent?: boolean; refresh?: boolean }) => {
+    if (loadInFlightRef.current) return
+    loadInFlightRef.current = true
     try {
-      const list = await fetchAssemblySellers()
+      const list = await fetchAssemblySellers({ refresh: opts?.refresh })
       setSellers(list)
       writeAssemblySellersCache(marketplace, list)
     } catch (err) {
-      showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки')
+      if (!opts?.silent) {
+        showError('Загрузка', err instanceof Error ? err.message : 'Ошибка загрузки')
+      }
+    } finally {
+      loadInFlightRef.current = false
     }
   }, [marketplace, showError])
 
@@ -44,6 +54,22 @@ export function AssemblySellersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marketplace])
 
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void load({ silent: true })
+    }
+    const timer = window.setInterval(tick, ASSEMBLY_SELLERS_POLL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [load])
+
   async function handleSyncAll() {
     setSyncing(true)
     try {
@@ -64,7 +90,7 @@ export function AssemblySellersPage() {
           ? 'Счётчики Ozon обновлены'
           : `ScanDt: ${scanned}/${pending} поставок, ${closed} заказов закрыто. WB: ${fetched} новых, статусов ${statusesUpdated}`,
       )
-      await load()
+      await load({ refresh: true })
     } catch (err) {
       showError('Синхронизация', err instanceof Error ? err.message : 'Ошибка синхронизации')
     } finally {

@@ -492,41 +492,11 @@ class AssemblySellerListView(APIView):
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request):
-    marketplace = parse_marketplace(request)
-    sellers = filter_sellers_qs(
-      sellers_for_user(request.user).filter(is_active=True),
-      marketplace,
-    ).order_by("company_name")
-    payload = []
-    for seller in sellers:
-      if marketplace == OZON:
-        from apps.orders.services.ozon_counts import get_seller_ozon_tab_counts
+    from apps.orders.services.assembly_seller_list import get_assembly_seller_list
 
-        tab_counts = get_seller_ozon_tab_counts(seller, assembly_only=True)
-        stage_counts = {
-          "assembled": 0,
-          "label_printed": 0,
-          "marked": 0,
-          "in_supply": 0,
-          "shipped": 0,
-          "cancelled": 0,
-        }
-      else:
-        assembly_counts = get_assembly_stage_counts(seller)
-        stage_counts = get_seller_stage_counts(seller, assembly_only=True)
-        tab_counts = assembly_counts
-      total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
-      payload.append({
-        "id": seller.id,
-        "company_name": seller.company_name,
-        **stage_counts,
-        "new": tab_counts["new"],
-        "in_picking": tab_counts["in_picking"],
-        "in_delivery": tab_counts["in_delivery"],
-        "total_active": total_active,
-        "marketplace": marketplace,
-        "has_ozon_api": bool(seller.ozon_client_id and seller.ozon_api_key_encrypted),
-      })
+    marketplace = parse_marketplace(request)
+    refresh = request.query_params.get("refresh") == "1"
+    payload = get_assembly_seller_list(request.user, marketplace, refresh=refresh)
     return Response(SellerAssemblyCountersSerializer(payload, many=True).data)
 
 

@@ -263,8 +263,9 @@ export interface ShippingPointsResult {
   shipping_points_pp?: ShippingPoint[]
 }
 
-export function fetchAssemblySellers() {
-  return apiFetch<SellerAssemblyCounters[]>('/api/orders/assembly/sellers/')
+export function fetchAssemblySellers(options?: { refresh?: boolean }) {
+  const qs = options?.refresh ? '?refresh=1' : ''
+  return apiFetch<SellerAssemblyCounters[]>(`/api/orders/assembly/sellers/${qs}`)
 }
 
 export function fetchAssemblySeller(sellerId: number, stage?: string) {
