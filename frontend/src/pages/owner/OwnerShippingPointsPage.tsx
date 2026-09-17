@@ -7,8 +7,6 @@ import {
 import { uiHint } from '../../utils/uiHint'
 import './OwnerLayout.css'
 
-type PointKind = 'sc' | 'pp'
-
 function cargoLabel(types: number[] | undefined): string {
   if (!types?.length) return '—'
   const labels = types.map((value) => (value === 3 ? 'КГТ' : value === 1 ? 'МГТ' : String(value)))
@@ -28,7 +26,6 @@ export function OwnerShippingPointsPage() {
   const [data, setData] = useState<OwnerShippingPointsResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [pointKind, setPointKind] = useState<PointKind>('sc')
   const [searchQuery, setSearchQuery] = useState('')
 
   const load = useCallback(async (refresh = false) => {
@@ -45,18 +42,18 @@ export function OwnerShippingPointsPage() {
     }
   }, [])
 
-  const activePoints = pointKind === 'pp' ? data?.shipping_points_pp ?? [] : data?.shipping_points_sc ?? []
+  const points = data?.shipping_points_sc ?? []
 
   const visiblePoints = useMemo(() => {
     const query = searchQuery.trim().toLowerCase().replace(/ё/g, 'е')
-    if (!query) return activePoints
-    return activePoints.filter((point) => {
+    if (!query) return points
+    return points.filter((point) => {
       const haystack = `${point.id} ${point.zone_label ?? ''} ${point.city} ${point.name} ${point.address}`
         .toLowerCase()
         .replace(/ё/g, 'е')
       return haystack.includes(query)
     })
-  }, [activePoints, searchQuery])
+  }, [points, searchQuery])
 
   return (
     <>
@@ -64,8 +61,8 @@ export function OwnerShippingPointsPage() {
         <div>
           <h1>Пункты отгрузки WB</h1>
           <p>
-            Справочник СЦ, складов и ППТ по Москве и МО (~50 км). Только просмотр — заказы в доставку
-            не отправляются. Кеш общий для всего фулфилмента.
+            Справочник СЦ и складов по Москве и МО (~50 км). Только просмотр — заказы в доставку
+            не отправляются. Список из WB API, кеш общий для всего фулфилмента.
           </p>
         </div>
         <div className="owner-actions-row">
@@ -96,7 +93,7 @@ export function OwnerShippingPointsPage() {
         <div className="owner-card owner-shipping-meta">
           <p>
             <strong>Регион:</strong> {data.city} · <strong>СЦ/склады:</strong>{' '}
-            {data.shipping_points_sc.length} · <strong>ППТ:</strong> {data.shipping_points_pp.length}
+            {data.shipping_points_sc.length}
           </p>
           <p>
             <strong>Токен WB:</strong> {data.reference_seller_name} (#{data.reference_seller_id}) ·{' '}
@@ -108,28 +105,6 @@ export function OwnerShippingPointsPage() {
 
       <div className="owner-card">
         <div className="owner-shipping-toolbar">
-          <div className="delivery-destination-modal__type-row">
-            <button
-              type="button"
-              className={`btn btn--ghost delivery-destination-modal__type${
-                pointKind === 'sc' ? ' delivery-destination-modal__type--active' : ''
-              }`}
-              disabled={loading}
-              onClick={() => setPointKind('sc')}
-            >
-              СЦ / склад ({data?.shipping_points_sc.length ?? 0})
-            </button>
-            <button
-              type="button"
-              className={`btn btn--ghost delivery-destination-modal__type${
-                pointKind === 'pp' ? ' delivery-destination-modal__type--active' : ''
-              }`}
-              disabled={loading}
-              onClick={() => setPointKind('pp')}
-            >
-              ППТ ({data?.shipping_points_pp.length ?? 0})
-            </button>
-          </div>
           <input
             type="search"
             className="owner-shipping-search"
@@ -160,7 +135,7 @@ export function OwnerShippingPointsPage() {
               </thead>
               <tbody>
                 {visiblePoints.map((point: OwnerShippingPoint) => (
-                  <tr key={point.id} className={point.is_pinned ? 'owner-shipping-row--pinned' : undefined}>
+                  <tr key={point.id}>
                     <td>{point.id}</td>
                     <td>{point.zone_label || '—'}</td>
                     <td>{point.officeType || '—'}</td>

@@ -1264,7 +1264,7 @@ class AssemblySendToAssemblyView(APIView):
 
 
 class AssemblyShippingPointsView(APIView):
-  """Пункты отгрузки WB (СЦ/склады и ППТ) для модалки передачи в доставку."""
+  """Пункты отгрузки WB (СЦ и склады) для модалки передачи в доставку."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def get(self, request, seller_id):

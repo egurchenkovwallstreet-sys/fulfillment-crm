@@ -251,8 +251,6 @@ export interface DeliveryShippingParams {
   shipping_type?: 'selfShipping' | 'transportCompany'
 }
 
-export type ShippingPointKind = 'sc' | 'pp'
-
 export interface ShippingPointsResult {
   success: boolean
   city: string
