@@ -440,7 +440,10 @@ def fetch_seller_shipping_points(
 
 
 SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
-SHIPPING_POINTS_CACHE_VERSION = "v10"
+SHIPPING_POINTS_CACHE_VERSION = "v11"
+SHIPPING_PREFETCH_NEAR_DONE_THRESHOLD = 10
+SHIPPING_PREFETCH_DEBOUNCE_SEC = 300
+SHIPPING_SUPPLY_PREFETCH_FLAG_TTL = 3600
 
 PINNED_SHIPPING_EXTRA_CITIES: tuple[str, ...] = (
   "Липкинское",
@@ -555,11 +558,24 @@ def _all_sc_fetch_cities() -> tuple[str, ...]:
   return _dedupe_shipping_cities(MOSCOW_REGION_50KM_CITIES, PINNED_SHIPPING_EXTRA_CITIES)
 
 
-def _fulfillment_shipping_cache_key(fulfillment_id: int, cargo_type: int) -> str:
-  return (
+def _seller_shipping_cache_key(
+  seller_id: int,
+  cargo_type: int,
+  *,
+  wb_supply_id: str | None = None,
+) -> str:
+  base = (
     f"wb_sc_points:{SHIPPING_POINTS_CACHE_VERSION}:moscow:"
-    f"ff:{fulfillment_id}:cargo:{int(cargo_type)}"
+    f"seller:{seller_id}:cargo:{int(cargo_type)}"
   )
+  if wb_supply_id:
+    return f"{base}:supply:{wb_supply_id}"
+  return base
+
+
+def _shipping_prefetch_lock_key(seller_id: int, wb_supply_id: str | None = None) -> str:
+  suffix = wb_supply_id or "general"
+  return f"wb_shipping_prefetch_lock:seller:{seller_id}:{suffix}"
 
 
 def _reference_wb_seller_for_fulfillment(user) -> Seller:
@@ -765,7 +781,7 @@ def fetch_moscow_region_sc_shipping_points(
   wb_supply_id: str | None = None,
   force_refresh: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
-  """СЦ/склады и ППТ WB: Москва и МО ~50 км (общий кеш фулфилмента, 1 ч)."""
+  """СЦ/склады и ППТ WB: Москва и МО ~50 км (кеш на селлера, 1 ч)."""
   if not seller.fulfillment_id:
     raise SupplyFlowError("У селлера не указан фулфилмент", code="no_fulfillment")
   client = _get_client(seller)
@@ -774,7 +790,11 @@ def fetch_moscow_region_sc_shipping_points(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = _fulfillment_shipping_cache_key(seller.fulfillment_id, resolved_cargo)
+  cache_key = _seller_shipping_cache_key(
+    seller.id,
+    resolved_cargo,
+    wb_supply_id=wb_supply_id,
+  )
   if not force_refresh:
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
@@ -821,11 +841,107 @@ def fetch_moscow_region_sc_shipping_points(
         "sc": sc_points,
         "pp": pp_points,
         "cached_at": timezone.now().isoformat(),
-        "reference_seller_id": seller.id,
+        "seller_id": seller.id,
       },
       ALL_SC_SHIPPING_CACHE_TTL,
     )
   return sc_points, pp_points, resolved_cargo
+
+
+def count_supply_orders_pending_scan(supply: Supply, seller: Seller) -> int:
+  """Сколько заказов поставки ещё не отсканированы (стикер не напечатан в CRM)."""
+  return sum(
+    1
+    for order in assembly_supply_orders(supply, seller)
+    if not order_sticker_printed_in_crm(order)
+  )
+
+
+def _active_forming_supplies_for_order(order: Order, seller: Seller) -> list[Supply]:
+  return list(
+    Supply.objects.filter(
+      seller=seller,
+      orders=order,
+      status__in=(Supply.Status.FORMING, Supply.Status.READY),
+    ).exclude(wb_supply_id="")
+  )
+
+
+def schedule_shipping_points_prefetch(
+  seller: Seller,
+  *,
+  wb_supply_id: str | None = None,
+  force_refresh: bool = False,
+) -> None:
+  """Фоновая подгрузка пунктов отгрузки WB токеном селлера."""
+  if not seller.wb_api_token_encrypted:
+    return
+  from apps.integrations.tasks import prefetch_seller_shipping_points_task
+
+  prefetch_seller_shipping_points_task.delay(
+    seller.id,
+    wb_supply_id=wb_supply_id or "",
+    force_refresh=force_refresh,
+  )
+
+
+def prefetch_seller_shipping_points_sync(
+  seller_id: int,
+  *,
+  wb_supply_id: str | None = None,
+  force_refresh: bool = False,
+) -> dict:
+  seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+  if not seller or not seller.wb_api_token_encrypted:
+    return {"success": False, "detail": "seller_or_token_missing"}
+  sc_points, pp_points, resolved_cargo = fetch_moscow_region_sc_shipping_points(
+    seller,
+    wb_supply_id=wb_supply_id,
+    force_refresh=force_refresh,
+  )
+  return {
+    "success": True,
+    "seller_id": seller.id,
+    "wb_supply_id": wb_supply_id or "",
+    "cargo_type": resolved_cargo,
+    "sc_count": len(sc_points),
+    "pp_count": len(pp_points),
+  }
+
+
+def maybe_prefetch_shipping_points_after_assembly_progress(
+  seller: Seller,
+  order: Order,
+  *,
+  on_assembly_start: bool = False,
+) -> None:
+  """
+  После «На сборку» — общий список СЦ селлера.
+  Когда в поставке осталось ≤10 неотсканированных — свежий список для этой поставки.
+  """
+  if not seller.wb_api_token_encrypted:
+    return
+  if on_assembly_start:
+    if cache.add(
+      _shipping_prefetch_lock_key(seller.id),
+      "1",
+      SHIPPING_PREFETCH_DEBOUNCE_SEC,
+    ):
+      schedule_shipping_points_prefetch(seller)
+    return
+
+  for supply in _active_forming_supplies_for_order(order, seller):
+    pending = count_supply_orders_pending_scan(supply, seller)
+    if pending > SHIPPING_PREFETCH_NEAR_DONE_THRESHOLD:
+      continue
+    lock_key = _shipping_prefetch_lock_key(seller.id, supply.wb_supply_id)
+    if not cache.add(lock_key, "1", SHIPPING_SUPPLY_PREFETCH_FLAG_TTL):
+      continue
+    schedule_shipping_points_prefetch(
+      seller,
+      wb_supply_id=supply.wb_supply_id,
+      force_refresh=True,
+    )
 
 
 def fetch_fulfillment_shipping_points_catalog(
@@ -853,7 +969,11 @@ def fetch_fulfillment_shipping_points_catalog(
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
   )
-  cache_key = _fulfillment_shipping_cache_key(fulfillment.id, resolved_cargo)
+  cache_key = _seller_shipping_cache_key(
+    reference.id,
+    resolved_cargo,
+    wb_supply_id=wb_supply_id,
+  )
   cached_before = cache.get(cache_key) if not force_refresh else None
   from_cache = (
     isinstance(cached_before, dict)
@@ -1866,6 +1986,13 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
     },
   )
 
+  if added > 0:
+    maybe_prefetch_shipping_points_after_assembly_progress(
+      seller,
+      order,
+      on_assembly_start=True,
+    )
+
   return {
     "order": order,
     "wb_supply_id": supply.wb_supply_id,
@@ -2537,6 +2664,13 @@ def send_orders_to_assembly_bulk(
       "errors": errors,
     },
   )
+
+  if sent > 0 and orders:
+    maybe_prefetch_shipping_points_after_assembly_progress(
+      seller,
+      orders[0],
+      on_assembly_start=True,
+    )
 
   return {
     "sent": sent,

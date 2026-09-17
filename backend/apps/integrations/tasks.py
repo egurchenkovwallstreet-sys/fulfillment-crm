@@ -234,3 +234,36 @@ def refresh_all_admin_billing_caches():
       )
   logger.info("Admin billing cache refresh all: %s jobs", len(results))
   return {"jobs": len(results), "results": results}
+
+
+@shared_task(queue="sync", bind=True, max_retries=2, default_retry_delay=30)
+def prefetch_seller_shipping_points_task(
+  self,
+  seller_id: int,
+  wb_supply_id: str = "",
+  force_refresh: bool = False,
+):
+  """Фоновая подгрузка СЦ/ППТ WB — отдельно для каждого селлера."""
+  from apps.orders.services.supply_flow import prefetch_seller_shipping_points_sync
+
+  try:
+    result = prefetch_seller_shipping_points_sync(
+      seller_id,
+      wb_supply_id=wb_supply_id or None,
+      force_refresh=force_refresh,
+    )
+    if not result.get("success"):
+      logger.info("Shipping points prefetch skipped seller=%s: %s", seller_id, result)
+    else:
+      logger.info(
+        "Shipping points prefetch seller=%s supply=%s sc=%s pp=%s cargo=%s",
+        seller_id,
+        wb_supply_id or "-",
+        result.get("sc_count"),
+        result.get("pp_count"),
+        result.get("cargo_type"),
+      )
+    return result
+  except Exception as exc:
+    logger.warning("Shipping points prefetch failed seller=%s: %s", seller_id, exc)
+    raise self.retry(exc=exc) from exc

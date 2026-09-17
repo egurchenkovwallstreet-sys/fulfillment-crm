@@ -3,7 +3,7 @@ from django.test import SimpleTestCase
 from apps.orders.services.supply_flow import (
   SC_LIST_CARGO_TYPES,
   SHIPPING_POINTS_CACHE_VERSION,
-  _fulfillment_shipping_cache_key,
+  _seller_shipping_cache_key,
   _is_consumer_pvz_point,
   _is_explicit_ppt_point,
   _is_ppt_shipment_point,
@@ -89,11 +89,16 @@ class ShippingPointMatchersTests(SimpleTestCase):
     self.assertEqual(merged["cargoTypes"], [1, 3])
     self.assertEqual(merged["address"], "addr")
 
-  def test_fulfillment_cache_key_includes_cargo(self):
-    key = _fulfillment_shipping_cache_key(42, 3)
-    self.assertIn("ff:42", key)
+  def test_seller_cache_key_includes_cargo(self):
+    key = _seller_shipping_cache_key(42, 3)
+    self.assertIn("seller:42", key)
     self.assertIn("cargo:3", key)
     self.assertIn(SHIPPING_POINTS_CACHE_VERSION, key)
+
+  def test_seller_cache_key_includes_supply(self):
+    key = _seller_shipping_cache_key(42, 1, wb_supply_id="WB-GI-99")
+    self.assertIn("seller:42", key)
+    self.assertIn("supply:WB-GI-99", key)
 
   def test_merge_pinned_does_not_replace_veshki_ids(self):
     veshki_sc = {

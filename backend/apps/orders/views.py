@@ -1326,6 +1326,7 @@ class AssemblyShippingPointsView(APIView):
       "success": True,
       "city": city,
       "scope": scope,
+      "seller_id": seller.id,
       "cargo_type": resolved_cargo,
       "shipping_points": sc_payload,
       "shipping_points_sc": sc_payload,
