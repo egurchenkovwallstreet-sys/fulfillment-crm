@@ -5,8 +5,7 @@ from django.core.cache import cache
 
 from apps.accounts.tenant import get_user_fulfillment, sellers_for_user
 from apps.integrations.marketplace import OZON, filter_sellers_qs
-from apps.orders.services.assembly import get_seller_stage_counts
-from apps.orders.services.supply_flow import get_assembly_stage_counts
+from apps.orders.services.assembly import get_seller_stage_counts, get_seller_wb_tab_counts
 
 ASSEMBLY_SELLERS_CACHE_TTL = 55
 
@@ -39,9 +38,8 @@ def build_assembly_seller_list(user, marketplace: str) -> list[dict]:
         "cancelled": 0,
       }
     else:
-      assembly_counts = get_assembly_stage_counts(seller)
       stage_counts = get_seller_stage_counts(seller, assembly_only=True)
-      tab_counts = assembly_counts
+      tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
 
     total_active = tab_counts["new"] + tab_counts["in_picking"] + tab_counts["in_delivery"]
     payload.append({

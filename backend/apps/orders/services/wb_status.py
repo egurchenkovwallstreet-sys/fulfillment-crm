@@ -317,3 +317,7 @@ def save_wb_counts_to_seller(
     seller.wb_new_order_ids = new_order_ids
     update_fields.append("wb_new_order_ids")
   seller.save(update_fields=update_fields)
+  if seller.fulfillment_id:
+    from apps.orders.services.assembly_seller_list import invalidate_assembly_seller_list_cache
+
+    invalidate_assembly_seller_list_cache(fulfillment_id=seller.fulfillment_id)

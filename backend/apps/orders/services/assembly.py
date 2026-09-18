@@ -1354,8 +1354,7 @@ def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> d
     qs = base_qs
   active = qs.exclude(status=Order.Status.CANCELLED)
 
-  # Кэш WB — по всем складам ЛК; для сборки FBS и дашборда фулфилмента считаем из БД.
-  if seller.wb_counts_synced_at and not assembly_only:
+  if seller.wb_counts_synced_at:
     in_delivery = seller.wb_count_delivery
   else:
     in_delivery = active.filter(wb_in_delivery_q()).count()
@@ -1374,8 +1373,8 @@ def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> d
 
 
 def get_seller_wb_tab_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
-  """Счётчики вкладок как в ЛК WB — из live API после синка."""
-  if seller.wb_counts_synced_at and not assembly_only:
+  """Счётчики вкладок как в ЛК WB — из фонового sync (поля seller.wb_count_*)."""
+  if seller.wb_counts_synced_at:
     return {
       "new": seller.wb_count_new,
       "in_picking": seller.wb_count_assembly,
