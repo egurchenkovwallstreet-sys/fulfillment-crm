@@ -14,7 +14,9 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_LABELS,
   WB_SUPPLIER_NEW,
+  get_wb_lk_tab_counts,
   is_wb_cancelled,
+  save_wb_counts_to_seller,
   wb_in_delivery_q,
 )
 from apps.sellers.services.warehouse_filter import (
@@ -1197,21 +1199,13 @@ def restore_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> di
     except Exception:
       logger.exception("sticker fetch after restore failed for order %s", order.id)
 
-  seller_update_fields: list[str] = []
   wb_supplier = (order.wb_supplier_status or "").strip()
   if wb_supplier == WB_SUPPLIER_NEW:
     wb_new_ids = list(seller.wb_new_order_ids or [])
     if order.wb_order_id not in wb_new_ids:
       seller.wb_new_order_ids = [*wb_new_ids, order.wb_order_id]
-      seller.wb_count_new = (seller.wb_count_new or 0) + 1
-      seller_update_fields.extend(["wb_new_order_ids", "wb_count_new"])
-  elif wb_supplier == WB_SUPPLIER_ASSEMBLY:
-    seller.wb_count_assembly = (seller.wb_count_assembly or 0) + 1
-    seller_update_fields.append("wb_count_assembly")
-
-  if seller_update_fields:
-    seller_update_fields.append("updated_at")
-    seller.save(update_fields=seller_update_fields)
+      seller.save(update_fields=["wb_new_order_ids", "updated_at"])
+  _refresh_wb_lk_counts(seller)
 
   AuditLog.objects.create(
     user=user,
@@ -1302,21 +1296,11 @@ def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> d
     ],
   )
 
-  seller_update_fields: list[str] = []
   wb_new_ids = list(seller.wb_new_order_ids or [])
   if order.wb_order_id in wb_new_ids:
     seller.wb_new_order_ids = [wid for wid in wb_new_ids if wid != order.wb_order_id]
-    seller.wb_count_new = max(0, (seller.wb_count_new or 0) - 1)
-    seller_update_fields.extend(["wb_new_order_ids", "wb_count_new"])
-
-  wb_supplier = (order.wb_supplier_status or "").strip()
-  if wb_supplier == WB_SUPPLIER_ASSEMBLY:
-    seller.wb_count_assembly = max(0, (seller.wb_count_assembly or 0) - 1)
-    seller_update_fields.append("wb_count_assembly")
-
-  if seller_update_fields:
-    seller_update_fields.append("updated_at")
-    seller.save(update_fields=seller_update_fields)
+    seller.save(update_fields=["wb_new_order_ids", "updated_at"])
+  _refresh_wb_lk_counts(seller)
 
   AuditLog.objects.create(
     user=user,
@@ -1345,24 +1329,24 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
   return result["order"]
 
 
+def _refresh_wb_lk_counts(seller: Seller) -> None:
+  save_wb_counts_to_seller(seller, get_wb_lk_tab_counts(seller))
+
+
 def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
-  """Счётчики по БД; assembly_only — только включённые склады сборки FBS."""
+  """CRM-счётчики по БД; assembly_only — только включённые склады сборки FBS."""
+  from apps.orders.services.wb_status import get_wb_lk_tab_counts
+
   base_qs = Order.objects.filter(seller=seller)
   if assembly_only:
     qs = filter_orders_for_assembly(base_qs, seller)
   else:
     qs = base_qs
   active = qs.exclude(status=Order.Status.CANCELLED)
-
-  if seller.wb_counts_synced_at:
-    in_delivery = seller.wb_count_delivery
-  else:
-    in_delivery = active.filter(wb_in_delivery_q()).count()
+  wb_tabs = get_wb_lk_tab_counts(seller)
 
   return {
-    "new": active.filter(wb_supplier_status=WB_SUPPLIER_NEW).count(),
-    "in_picking": active.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY).count(),
-    "in_delivery": in_delivery,
+    **wb_tabs,
     "assembled": active.filter(status=Order.Status.ASSEMBLED).count(),
     "label_printed": active.filter(status=Order.Status.LABEL_PRINTED).count(),
     "marked": active.filter(status=Order.Status.MARKED).count(),
@@ -1373,19 +1357,10 @@ def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> d
 
 
 def get_seller_wb_tab_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:
-  """Счётчики вкладок как в ЛК WB — из фонового sync (поля seller.wb_count_*)."""
-  if seller.wb_counts_synced_at:
-    return {
-      "new": seller.wb_count_new,
-      "in_picking": seller.wb_count_assembly,
-      "in_delivery": seller.wb_count_delivery,
-    }
-  stage = get_seller_stage_counts(seller, assembly_only=assembly_only)
-  return {
-    "new": stage["new"],
-    "in_picking": stage["in_picking"],
-    "in_delivery": stage["in_delivery"],
-  }
+  """Счётчики вкладок как в ЛК WB — только включённые FBS-склады."""
+  from apps.orders.services.wb_status import get_wb_lk_tab_counts
+
+  return get_wb_lk_tab_counts(seller)
 
 
 def get_wb_stage_label(wb_supplier_status: str) -> str:

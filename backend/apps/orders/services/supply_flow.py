@@ -1814,18 +1814,9 @@ def send_order_to_delivery(
 
 
 def delivery_stage_orders_queryset(seller: Seller) -> QuerySet:
-  """Вкладка «В доставке»: в поставке WB, ШК поставки ещё не отсканирован на складе."""
-  confirmed_unscanned_supply = Supply.objects.filter(
-    seller=seller,
-    status=Supply.Status.CONFIRMED,
-    wb_scanned_at__isnull=True,
-    orders__id=OuterRef("pk"),
-  )
+  """Вкладка «В доставке»: complete + waiting — как в ЛК WB, только включённые FBS-склады."""
   return filter_orders_for_assembly(
-    Order.objects.filter(seller=seller, assembly_hidden=False)
-    .filter(wb_in_delivery_q())
-    .annotate(_awaiting_supply_scan=Exists(confirmed_unscanned_supply))
-    .filter(_awaiting_supply_scan=True),
+    Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
     seller,
   )
 
@@ -2027,13 +2018,10 @@ def count_orders_ready_for_assembly(seller: Seller) -> int:
 
 
 def get_assembly_stage_counts(seller: Seller) -> dict[str, int]:
-  """Счётчики вкладок сборки FBS (без скрытых заказов)."""
-  confirm_qs = picking_stage_orders_queryset(seller)
-  return {
-    "new": new_stage_orders_queryset(seller).count(),
-    "in_picking": confirm_qs.count(),
-    "in_delivery": count_delivery_stage_orders(seller),
-  }
+  """Счётчики вкладок сборки FBS — как в ЛК WB, только включённые FBS-склады."""
+  from apps.orders.services.wb_status import get_wb_lk_tab_counts
+
+  return get_wb_lk_tab_counts(seller)
 
 
 def send_orders_to_assembly_bulk(

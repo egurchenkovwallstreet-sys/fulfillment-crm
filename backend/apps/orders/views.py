@@ -15,7 +15,6 @@ from apps.orders.services.assembly import AssemblyError
 from apps.orders.services.supply_flow import (
   delivery_stage_orders_queryset,
   delivery_stage_supplies_queryset,
-  get_assembly_stage_counts,
   new_stage_orders_queryset,
   picking_stage_orders_queryset,
 )
@@ -529,16 +528,7 @@ class AssemblySellerDetailView(APIView):
       stage = request.query_params.get("stage", "new")
       return Response(OzonAssemblySellerDetailView.payload(seller, stage))
 
-    stage_counts = get_seller_stage_counts(seller, assembly_only=True)
-    tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
-    assembly_counts = get_assembly_stage_counts(seller)
-    counts = {
-      **stage_counts,
-      **tab_counts,
-      "new": assembly_counts["new"],
-      "in_picking": assembly_counts["in_picking"],
-      "in_delivery": assembly_counts["in_delivery"],
-    }
+    counts = get_seller_stage_counts(seller, assembly_only=True)
     stage = request.query_params.get("stage", "")
     visible_orders = Order.objects.filter(seller=seller, assembly_hidden=False)
     if stage == "new":

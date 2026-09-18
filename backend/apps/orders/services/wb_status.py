@@ -272,6 +272,47 @@ def apply_wb_status_to_order(order: Order, supplier_status: str, wb_status: str)
   return False
 
 
+def _wb_new_order_ids(seller) -> list[int]:
+  raw = seller.wb_new_order_ids or []
+  if not isinstance(raw, list):
+    return []
+  ids: list[int] = []
+  for item in raw:
+    try:
+      ids.append(int(item))
+    except (TypeError, ValueError):
+      continue
+  return ids
+
+
+def get_wb_lk_tab_counts(seller) -> dict[str, int]:
+  """
+  Счётчики вкладок ЛК WB: new / confirm / complete+waiting.
+  Только включённые FBS-склады сборки и видимые заказы (не assembly_hidden).
+  """
+  from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
+
+  base = filter_orders_for_assembly(
+    Order.objects.filter(seller=seller, assembly_hidden=False),
+    seller,
+  ).exclude(status=Order.Status.CANCELLED)
+
+  new_qs = base.filter(wb_supplier_status=WB_SUPPLIER_NEW).exclude(
+    status__in=[Order.Status.SHIPPED, Order.Status.IN_DELIVERY],
+  )
+  new_ids = _wb_new_order_ids(seller)
+  if new_ids:
+    new_qs = new_qs.filter(wb_order_id__in=new_ids)
+
+  return {
+    "new": new_qs.count(),
+    "in_picking": base.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY)
+    .exclude(status=Order.Status.SHIPPED)
+    .count(),
+    "in_delivery": base.filter(wb_in_delivery_q()).count(),
+  }
+
+
 def compute_live_wb_counts(
   status_map: dict[int, dict],
   *,

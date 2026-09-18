@@ -17,13 +17,14 @@ from apps.orders.services.wb_status import (
   WB_TERMINAL_WB_STATUSES,
   apply_wb_status_to_order,
   compute_live_wb_counts,
+  get_wb_lk_tab_counts,
   is_wb_in_delivery,
   order_accepted_at_wb_sc,
   save_wb_counts_to_seller,
   wb_in_delivery_q,
 )
 from apps.sellers.models import Seller
-from apps.sellers.services.warehouse_filter import filter_orders_for_seller
+from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, filter_orders_for_seller
 
 SYNC_VERSION = "delivery-v15"
 
@@ -75,7 +76,7 @@ def _collect_quick_poll_order_ids(
 ) -> set[int]:
   """Быстрый опрос: только активные стадии + новые из WB + поставки в доставке."""
   poll_ids: set[int] = set(new_wb_ids or [])
-  active_ids = filter_orders_for_seller(
+  active_ids = filter_orders_for_assembly(
     Order.objects.filter(seller=seller)
     .filter(
       Q(wb_supplier_status__in=[WB_SUPPLIER_NEW, "", WB_SUPPLIER_ASSEMBLY])
@@ -98,7 +99,7 @@ def _collect_poll_order_ids(
 ) -> set[int]:
   """Все ID для POST /orders/status — БД + архив WB + поставки в доставке."""
   poll_ids = set(
-    filter_orders_for_seller(Order.objects.filter(seller=seller), seller).values_list(
+    filter_orders_for_assembly(Order.objects.filter(seller=seller), seller).values_list(
       "wb_order_id",
       flat=True,
     )
@@ -192,7 +193,7 @@ def reconcile_stale_delivery_orders(
   Именно из-за рассинхрона счётчик показывал 303 вместо 209 как в ЛК WB.
   """
   stale_orders = list(
-    filter_orders_for_seller(
+    filter_orders_for_assembly(
       Order.objects.filter(seller=seller, assembly_hidden=False).filter(wb_in_delivery_q()),
       seller,
     ).only("id", "wb_order_id", "wb_supplier_status", "wb_status", "status")
@@ -266,7 +267,7 @@ def reconcile_stale_new_orders(
   Снять «новый» с заказов, которых нет в GET /api/v3/orders/new.
   Именно из-за рассинхрона здесь список сборки показывал больше строк, чем счётчик WB.
   """
-  stale_qs = filter_orders_for_seller(
+  stale_qs = filter_orders_for_assembly(
     Order.objects.filter(seller=seller)
     .filter(Q(wb_supplier_status=WB_SUPPLIER_NEW) | Q(wb_supplier_status=""))
     .exclude(status__in=[Order.Status.CANCELLED, Order.Status.SHIPPED]),
@@ -450,14 +451,10 @@ def sync_order_statuses_for_seller(
   reconciled += stale_delivery.get("stale_delivery_cleared", 0)
 
   live_counts = compute_live_wb_counts(status_map, allowed_ids=scoped_ids)
-  if new_orders_total > 0:
-    live_counts["new"] = new_orders_total
-  elif new_wb_ids is not None:
-    live_counts["new"] = len(new_ids_set & scoped_ids)
-
   scoped_new_ids = sorted(new_ids_set & scoped_ids)
-  save_wb_counts_to_seller(seller, live_counts, new_order_ids=scoped_new_ids)
-  db_counts = get_seller_stage_counts(seller)
+  tab_counts = get_wb_lk_tab_counts(seller)
+  save_wb_counts_to_seller(seller, tab_counts, new_order_ids=scoped_new_ids)
+  db_counts = get_seller_stage_counts(seller, assembly_only=True)
 
   return {
     "sync_version": SYNC_VERSION,
@@ -473,7 +470,7 @@ def sync_order_statuses_for_seller(
     "delivery_breakdown": reconcile.get("delivery_status_breakdown", {}),
     "delivery_waiting_raw": reconcile.get("delivery_waiting_in_status_map"),
     "reconcile": reconcile,
-    "counts": live_counts,
+    "counts": tab_counts,
     "db_counts": db_counts,
     "warehouse_backfilled": warehouse_backfilled,
   }
