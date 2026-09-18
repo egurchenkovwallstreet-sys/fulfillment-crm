@@ -716,11 +716,6 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       message=f"Печать стикера заказа WB #{order.wb_order_id}",
       details={"order_id": order.id, "barcode": order.barcode},
     )
-    from apps.orders.services.supply_flow import (
-      maybe_prefetch_shipping_points_after_assembly_progress,
-    )
-
-    maybe_prefetch_shipping_points_after_assembly_progress(seller, order)
     return {
       "action": "print",
       "requires_marking": False,
@@ -890,12 +885,8 @@ def bind_marking_and_print(
   )
 
   from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
-  from apps.orders.services.supply_flow import (
-    maybe_prefetch_shipping_points_after_assembly_progress,
-  )
 
   immediate_verify = queue_last_pick_list_marking_verify(seller)
-  maybe_prefetch_shipping_points_after_assembly_progress(seller, order)
 
   return {
     "action": "print",

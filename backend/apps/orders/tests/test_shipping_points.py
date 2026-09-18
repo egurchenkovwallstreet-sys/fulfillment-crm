@@ -1,7 +1,9 @@
-from django.test import SimpleTestCase
+from django.core.cache import cache
+from django.test import SimpleTestCase, TestCase
 
 from apps.orders.services import supply_flow
 from apps.orders.services.shipping_points_catalog import (
+  ALL_SC_SHIPPING_CACHE_TTL,
   SC_LIST_CARGO_TYPES,
   SHIPPING_POINTS_CACHE_VERSION,
   _filter_sc_sw_points,
@@ -10,6 +12,7 @@ from apps.orders.services.shipping_points_catalog import (
   _seller_shipping_cache_key,
   _shipping_point_zone_label,
   _union_shipping_point,
+  read_cached_sc_shipping_points,
   serialize_shipping_point_for_api,
 )
 
@@ -75,3 +78,27 @@ class ShippingPointsCatalogTests(SimpleTestCase):
     payload = serialize_shipping_point_for_api(point)
     self.assertFalse(payload["is_pinned"])
     self.assertEqual(payload["id"], 100)
+
+
+class ShippingPointsCacheReadTests(TestCase):
+  def setUp(self):
+    cache.clear()
+
+  def test_read_cached_prefers_supply_specific_list(self):
+    general_key = _seller_shipping_cache_key(7, 1)
+    supply_key = _seller_shipping_cache_key(7, 1, wb_supply_id="WB-1")
+    cache.set(
+      general_key,
+      {"sc": [{"id": 1, "name": "General", "officeType": "sc"}]},
+      ALL_SC_SHIPPING_CACHE_TTL,
+    )
+    cache.set(
+      supply_key,
+      {"sc": [{"id": 99, "name": "Supply", "officeType": "sc"}]},
+      ALL_SC_SHIPPING_CACHE_TTL,
+    )
+
+    points = read_cached_sc_shipping_points(7, cargo_type=1, wb_supply_id="WB-1")
+
+    self.assertIsNotNone(points)
+    self.assertEqual(points[0]["id"], 99)

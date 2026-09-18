@@ -19,6 +19,7 @@ SHIPPING_PREFETCH_NEAR_DONE_THRESHOLD = 10
 SHIPPING_PREFETCH_DEBOUNCE_SEC = 300
 SHIPPING_SUPPLY_PREFETCH_FLAG_TTL = 3600
 ALL_SC_SHIPPING_CACHE_TTL = 3600
+SUPPLY_CARGO_CACHE_TTL = 86400
 
 
 def _normalize_text(value: object) -> str:
@@ -148,22 +149,73 @@ def shipping_prefetch_lock_key(seller_id: int, wb_supply_id: str | None = None) 
   return f"wb_shipping_prefetch_lock:seller:{seller_id}:{suffix}"
 
 
+def _supply_cargo_cache_key(seller_id: int, wb_supply_id: str) -> str:
+  return f"wb_supply_cargo:{SHIPPING_POINTS_CACHE_VERSION}:seller:{seller_id}:supply:{wb_supply_id}"
+
+
+def cache_supply_cargo_type(seller_id: int, wb_supply_id: str, cargo_type: int) -> None:
+  if not wb_supply_id or not cargo_type:
+    return
+  cache.set(
+    _supply_cargo_cache_key(seller_id, wb_supply_id),
+    int(cargo_type),
+    SUPPLY_CARGO_CACHE_TTL,
+  )
+
+
 def resolve_shipping_cargo_type(
   client,
   *,
   cargo_type: int | None,
   wb_supply_id: str | None,
+  seller_id: int | None = None,
 ) -> int:
   resolved_cargo = cargo_type
+  if resolved_cargo is None and wb_supply_id and seller_id:
+    cached_cargo = cache.get(_supply_cargo_cache_key(seller_id, wb_supply_id))
+    if cached_cargo is not None:
+      resolved_cargo = int(cached_cargo)
   if resolved_cargo is None and wb_supply_id:
     try:
       details = client.fetch_supply(wb_supply_id)
       resolved_cargo = int(details.get("cargoType") or 1)
+      if seller_id:
+        cache_supply_cargo_type(seller_id, wb_supply_id, resolved_cargo)
     except WBApiError:
       resolved_cargo = 1
   if not resolved_cargo or resolved_cargo == 0:
     resolved_cargo = 1
   return int(resolved_cargo)
+
+
+def read_cached_sc_shipping_points(
+  seller_id: int,
+  *,
+  cargo_type: int,
+  wb_supply_id: str | None = None,
+) -> list[dict] | None:
+  """Список СЦ из Redis — сначала по поставке, затем общий кэш селлера."""
+  cargo_candidates = [int(cargo_type)]
+  for fallback in SC_LIST_CARGO_TYPES:
+    if fallback not in cargo_candidates:
+      cargo_candidates.append(fallback)
+  key_variants: list[str | None] = []
+  if wb_supply_id:
+    key_variants.append(wb_supply_id)
+  key_variants.append(None)
+  for cargo in cargo_candidates:
+    for supply_suffix in key_variants:
+      cache_key = _seller_shipping_cache_key(
+        seller_id,
+        cargo,
+        wb_supply_id=supply_suffix,
+      )
+      cached = cache.get(cache_key)
+      if isinstance(cached, dict):
+        sc_cached = cached.get("sc")
+        if isinstance(sc_cached, list) and sc_cached:
+          return sc_cached
+  return None
 
 
 def fetch_moscow_region_sc_shipping_points(
@@ -172,6 +224,7 @@ def fetch_moscow_region_sc_shipping_points(
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
   force_refresh: bool = False,
+  cache_only: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
   """СЦ и склады WB: Москва и МО ~50 км. Только то, что вернул API селлера."""
   from apps.orders.services.assembly import _get_client
@@ -184,18 +237,25 @@ def fetch_moscow_region_sc_shipping_points(
     client,
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
+    seller_id=seller.id,
   )
+  if not force_refresh:
+    sc_cached = read_cached_sc_shipping_points(
+      seller.id,
+      cargo_type=resolved_cargo,
+      wb_supply_id=wb_supply_id,
+    )
+    if sc_cached:
+      return sc_cached, [], resolved_cargo
+
+  if cache_only:
+    return [], [], resolved_cargo
+
   cache_key = _seller_shipping_cache_key(
     seller.id,
     resolved_cargo,
     wb_supply_id=wb_supply_id,
   )
-  if not force_refresh:
-    cached = cache.get(cache_key)
-    if isinstance(cached, dict):
-      sc_cached = cached.get("sc")
-      if isinstance(sc_cached, list) and sc_cached:
-        return sc_cached, [], resolved_cargo
 
   merged: dict[int, dict] = {}
   for fetch_city in MOSCOW_REGION_50KM_CITIES:
@@ -221,6 +281,8 @@ def fetch_moscow_region_sc_shipping_points(
       },
       ALL_SC_SHIPPING_CACHE_TTL,
     )
+    if wb_supply_id:
+      cache_supply_cargo_type(seller.id, wb_supply_id, resolved_cargo)
   return sc_points, [], resolved_cargo
 
 

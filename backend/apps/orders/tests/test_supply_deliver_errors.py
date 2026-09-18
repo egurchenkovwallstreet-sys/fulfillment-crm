@@ -130,10 +130,6 @@ class PrepareDeliverTests(SimpleTestCase):
 
   def test_apply_shipping_method_runs_when_supply_confirmed(self):
     client = MagicMock()
-    client.fetch_supply.return_value = {
-      "shippingPointId": 100,
-      "shippingDt": date.today().isoformat(),
-    }
     supply = Supply(wb_supply_id="WB-GI-77", status=Supply.Status.CONFIRMED)
     _apply_shipping_method(
       client,

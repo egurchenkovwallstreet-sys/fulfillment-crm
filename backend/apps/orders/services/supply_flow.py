@@ -491,6 +491,7 @@ def fetch_moscow_region_sc_shipping_points(
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
   force_refresh: bool = False,
+  cache_only: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
   """СЦ и склады WB: Москва и МО ~50 км — только ответ API селлера."""
   try:
@@ -499,6 +500,7 @@ def fetch_moscow_region_sc_shipping_points(
       cargo_type=cargo_type,
       wb_supply_id=wb_supply_id,
       force_refresh=force_refresh,
+      cache_only=cache_only,
     )
   except ValueError as exc:
     _shipping_points_no_fulfillment(exc)
@@ -567,36 +569,44 @@ def prefetch_seller_shipping_points_sync(
 
 def maybe_prefetch_shipping_points_after_assembly_progress(
   seller: Seller,
-  order: Order,
+  order: Order | None = None,
   *,
   on_assembly_start: bool = False,
+  wb_supply_ids: list[str] | None = None,
 ) -> None:
   """
-  После «На сборку» — общий список СЦ селлера.
-  Когда в поставке осталось ≤10 неотсканированных — свежий список для этой поставки.
+  Сразу после «На сборку» — фоновая подгрузка СЦ в кэш (общий + по поставкам).
+  При «В доставку» список берётся из кэша, без повторного обхода WB по городам.
   """
-  if not seller.wb_api_token_encrypted:
-    return
-  if on_assembly_start:
-    if cache.add(
-      _shipping_prefetch_lock_key(seller.id),
-      "1",
-      SHIPPING_PREFETCH_DEBOUNCE_SEC,
-    ):
-      schedule_shipping_points_prefetch(seller)
+  if not on_assembly_start or not seller.wb_api_token_encrypted:
     return
 
-  for supply in _active_forming_supplies_for_order(order, seller):
-    pending = count_supply_orders_pending_scan(supply, seller)
-    if pending > SHIPPING_PREFETCH_NEAR_DONE_THRESHOLD:
-      continue
-    lock_key = _shipping_prefetch_lock_key(seller.id, supply.wb_supply_id)
+  if cache.add(
+    _shipping_prefetch_lock_key(seller.id),
+    "1",
+    SHIPPING_PREFETCH_DEBOUNCE_SEC,
+  ):
+    schedule_shipping_points_prefetch(seller)
+
+  supply_ids: set[str] = set()
+  for raw_id in wb_supply_ids or []:
+    normalized = str(raw_id or "").strip()
+    if normalized:
+      supply_ids.add(normalized)
+  if order is not None:
+    for supply in _active_forming_supplies_for_order(order, seller):
+      normalized = str(supply.wb_supply_id or "").strip()
+      if normalized:
+        supply_ids.add(normalized)
+
+  for wb_supply_id in supply_ids:
+    lock_key = _shipping_prefetch_lock_key(seller.id, wb_supply_id)
     if not cache.add(lock_key, "1", SHIPPING_SUPPLY_PREFETCH_FLAG_TTL):
       continue
     schedule_shipping_points_prefetch(
       seller,
-      wb_supply_id=supply.wb_supply_id,
-      force_refresh=True,
+      wb_supply_id=wb_supply_id,
+      force_refresh=False,
     )
 
 
@@ -668,12 +678,14 @@ def fetch_all_russia_sc_shipping_points(
   *,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
+  cache_only: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
   """Обратная совместимость scope=all_sc → Москва и МО (СЦ и склады)."""
   return fetch_moscow_region_sc_shipping_points(
     seller,
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
+    cache_only=cache_only,
   )
 
 
@@ -710,12 +722,6 @@ def _apply_shipping_method(
       _parse_shipping_method_error(exc),
       code="wb_shipping_method_failed",
     ) from exc
-  _assert_wb_supply_shipping_applied(
-    client,
-    supply,
-    shipping_point_id=shipping_point_id,
-    shipping_date=shipping_date,
-  )
 
 
 def _prepare_wb_supply_deliver(
@@ -1421,6 +1427,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
       seller,
       order,
       on_assembly_start=True,
+      wb_supply_ids=[supply.wb_supply_id],
     )
 
   return {
@@ -2063,6 +2070,7 @@ def send_orders_to_assembly_bulk(
   sent = 0
   stickers_total = 0
   sent_order_ids: list[int] = []
+  prefetch_supply_ids: list[str] = []
 
   for wb_warehouse_id, wh_orders in by_warehouse.items():
     try:
@@ -2077,6 +2085,8 @@ def send_orders_to_assembly_bulk(
       sent += len(added_orders)
       stickers_total += stickers_fetched
       sent_order_ids.extend(order.id for order in added_orders)
+      if supply.wb_supply_id:
+        prefetch_supply_ids.append(supply.wb_supply_id)
       if sticker_error:
         errors.append({
           "wb_warehouse_id": wb_warehouse_id,
@@ -2142,6 +2152,7 @@ def send_orders_to_assembly_bulk(
       seller,
       orders[0],
       on_assembly_start=True,
+      wb_supply_ids=prefetch_supply_ids,
     )
 
   return {

@@ -82,6 +82,7 @@ from .services.supply_flow import (
   move_orders_to_new_supply,
   list_move_target_supplies,
   refresh_supply_readiness,
+  schedule_shipping_points_prefetch,
   send_order_to_assembly,
   send_order_to_delivery,
   send_orders_to_assembly_bulk,
@@ -1284,6 +1285,7 @@ class AssemblyShippingPointsView(APIView):
           seller,
           cargo_type=cargo_type,
           wb_supply_id=wb_supply_id,
+          cache_only=True,
         )
         city = "Москва и Московская область"
       else:
@@ -1295,6 +1297,19 @@ class AssemblyShippingPointsView(APIView):
         )
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
+
+    if not sc_points:
+      schedule_shipping_points_prefetch(
+        seller,
+        wb_supply_id=wb_supply_id,
+      )
+      return _assembly_error_response(
+        SupplyFlowError(
+          "Список СЦ ещё загружается в фоне (обычно 1–2 мин после «На сборку»). "
+          "Подождите и откройте «В доставку» снова.",
+          code="shipping_points_loading",
+        ),
+      )
 
     sc_payload = [_serialize_shipping_point_for_api(item) for item in sc_points]
     pp_payload = [_serialize_shipping_point_for_api(item) for item in pp_points]

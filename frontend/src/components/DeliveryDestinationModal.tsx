@@ -197,8 +197,8 @@ export function DeliveryDestinationModal({
         <p className="assembly-modal__message delivery-destination-modal__message">{message}</p>
 
         <p className="delivery-destination-modal__hint">
-          Москва и Московская область: СЦ и склады WB — {points.length}.
-          Выберите пункт в списке — пропуск оформится строго на него (#ID в строке).
+          Список СЦ загружается в фоне после «На сборку». Москва и МО — {points.length}.
+          Выберите пункт (#ID в строке) — пропуск оформится строго на него.
         </p>
 
         <label className="delivery-destination-modal__field">

@@ -732,12 +732,6 @@ def bind_wb_batch_scan(
         f"(яч. №{stock_info['cell_number']})"
       )
 
-  from apps.orders.services.supply_flow import (
-    maybe_prefetch_shipping_points_after_assembly_progress,
-  )
-
-  maybe_prefetch_shipping_points_after_assembly_progress(seller, order)
-
   return {
     "complete": True,
     "requires_marking": requires_marking,
