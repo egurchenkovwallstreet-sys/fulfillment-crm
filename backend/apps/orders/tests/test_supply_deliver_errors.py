@@ -7,6 +7,8 @@ from django.utils import timezone
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.orders.models import Supply
 from apps.orders.services.supply_flow import (
+  SupplyFlowError,
+  _apply_shipping_method,
   _parse_deliver_error,
   _parse_shipping_method_error,
   _prepare_wb_supply_deliver,
@@ -91,9 +93,13 @@ class DeliverErrorParserTests(SimpleTestCase):
 
 
 class PrepareDeliverTests(SimpleTestCase):
-  def test_skips_deliver_when_wb_supply_already_closed(self):
+  def test_skips_deliver_when_wb_supply_already_closed_with_same_point(self):
     client = MagicMock()
-    client.fetch_supply.return_value = {"done": True, "closedAt": "2026-09-17T10:00:00Z"}
+    client.fetch_supply.return_value = {
+      "done": True,
+      "closedAt": "2026-09-17T10:00:00Z",
+      "shippingPointId": 100,
+    }
     supply = Supply(wb_supply_id="WB-GI-99", status=Supply.Status.READY)
     already = _prepare_wb_supply_deliver(
       client,
@@ -103,7 +109,39 @@ class PrepareDeliverTests(SimpleTestCase):
     )
     self.assertTrue(already)
     client.set_supplies_shipping_method.assert_not_called()
-    client.deliver_supply.assert_not_called()
+
+  def test_rejects_closed_supply_with_different_shipping_point(self):
+    client = MagicMock()
+    client.fetch_supply.return_value = {
+      "done": True,
+      "closedAt": "2026-09-17T10:00:00Z",
+      "shippingPointId": 200,
+    }
+    supply = Supply(wb_supply_id="WB-GI-99", status=Supply.Status.CONFIRMED)
+    with self.assertRaises(SupplyFlowError) as ctx:
+      _prepare_wb_supply_deliver(
+        client,
+        supply,
+        shipping_point_id=100,
+        shipping_date=date.today(),
+      )
+    self.assertEqual(ctx.exception.code, "wb_shipping_locked")
+    client.set_supplies_shipping_method.assert_not_called()
+
+  def test_apply_shipping_method_runs_when_supply_confirmed(self):
+    client = MagicMock()
+    client.fetch_supply.return_value = {
+      "shippingPointId": 100,
+      "shippingDt": date.today().isoformat(),
+    }
+    supply = Supply(wb_supply_id="WB-GI-77", status=Supply.Status.CONFIRMED)
+    _apply_shipping_method(
+      client,
+      supply,
+      shipping_point_id=100,
+      shipping_date=date.today(),
+    )
+    client.set_supplies_shipping_method.assert_called_once()
 
 
 class ShippingDateValidationTests(SimpleTestCase):

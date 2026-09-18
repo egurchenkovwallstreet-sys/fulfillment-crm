@@ -106,6 +106,19 @@ def order_can_send_to_delivery(order: Order) -> bool:
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 
+def _unwrap_wb_supply_dict(payload: dict) -> dict:
+  if not payload:
+    return {}
+  for key in ("supply", "data", "result"):
+    nested = payload.get(key)
+    if isinstance(nested, dict) and (
+      nested.get("id") or nested.get("scanDt") or nested.get("scan_dt")
+      or nested.get("shippingPointId") is not None
+    ):
+      return nested
+  return payload
+
+
 def _wb_error_tokens(exc: WBApiError) -> str:
   payload = getattr(exc, "payload", {}) or {}
   chunks = [str(exc), str(getattr(exc, "code", "") or "")]
@@ -249,23 +262,22 @@ def _assert_wb_supply_shipping_applied(
 ) -> None:
   """Убедиться, что WB сохранил пункт и дату отгрузки перед deliver."""
   try:
-    details = client.fetch_supply(supply.wb_supply_id)
+    raw = client.fetch_supply(supply.wb_supply_id)
   except WBApiError as exc:
-    logger.warning(
-      "WB fetch_supply after shipping-method failed supply=%s: %s",
-      supply.wb_supply_id,
-      exc,
-    )
-    return
-  if not isinstance(details, dict):
-    return
+    raise SupplyFlowError(
+      "WB не подтвердил пункт отгрузки — повторите передачу в доставку "
+      f"или выберите другой пункт (#{shipping_point_id}).",
+      code="wb_shipping_verify_failed",
+    ) from exc
+  details = _unwrap_wb_supply_dict(raw if isinstance(raw, dict) else {})
   wb_point = details.get("shippingPointId")
   wb_date = str(details.get("shippingDt") or "").strip()[:10]
   expected_date = shipping_date.isoformat()
   if wb_point is None or int(wb_point) != int(shipping_point_id) or wb_date != expected_date:
     raise SupplyFlowError(
       "WB не сохранил параметры отгрузки для поставки "
-      f"{supply.wb_supply_id}. Выберите пункт из актуального списка (#ID) "
+      f"{supply.wb_supply_id}. Выбрали #{shipping_point_id}, "
+      f"в WB сейчас #{wb_point or '—'}. Выберите пункт из актуального списка "
       "и повторите передачу в доставку.",
       code="wb_shipping_not_applied",
     )
@@ -677,11 +689,15 @@ def _apply_shipping_method(
   shipping_date: date,
   shipping_type: str = "selfShipping",
 ) -> None:
-  if supply.status == Supply.Status.CONFIRMED:
-    return
   if not supply.wb_supply_id:
     raise SupplyFlowError("У поставки нет ID WB", code="no_supply")
   _validate_shipping_date(shipping_date)
+  logger.info(
+    "WB set shipping point supply=%s point_id=%s date=%s",
+    supply.wb_supply_id,
+    shipping_point_id,
+    shipping_date.isoformat(),
+  )
   try:
     client.set_supplies_shipping_method([{
       "supplyId": supply.wb_supply_id,
@@ -717,11 +733,20 @@ def _prepare_wb_supply_deliver(
   if not supply.wb_supply_id:
     raise SupplyFlowError("У поставки нет ID WB", code="no_supply")
   try:
-    details = client.fetch_supply(supply.wb_supply_id)
+    raw = client.fetch_supply(supply.wb_supply_id)
   except WBApiError as exc:
     logger.warning("WB fetch_supply before deliver failed supply=%s: %s", supply.wb_supply_id, exc)
-    details = {}
-  if _wb_supply_closed(details if isinstance(details, dict) else {}):
+    raw = {}
+  details = _unwrap_wb_supply_dict(raw if isinstance(raw, dict) else {})
+  if _wb_supply_closed(details):
+    wb_point = details.get("shippingPointId")
+    if wb_point is not None and int(wb_point) != int(shipping_point_id):
+      raise SupplyFlowError(
+        "Поставка уже закрыта в WB на другой пункт отгрузки "
+        f"(#{wb_point}, вы выбрали #{shipping_point_id}). "
+        "Сменить СЦ после передачи в доставку нельзя.",
+        code="wb_shipping_locked",
+      )
     return True
   _apply_shipping_method(
     client,
@@ -1687,6 +1712,18 @@ def send_order_to_delivery(
   supply_barcode_error = ""
 
   if supply.status == Supply.Status.CONFIRMED:
+    if not shipping_point_id or not shipping_date:
+      raise SupplyFlowError(
+        "Укажите пункт отгрузки (СЦ) и дату — CRM отправит их в WB перед печатью QR.",
+        code="shipping_required",
+      )
+    _prepare_wb_supply_deliver(
+      client,
+      supply,
+      shipping_point_id=shipping_point_id,
+      shipping_date=shipping_date,
+      shipping_type=shipping_type,
+    )
     supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
       client,
       supply.wb_supply_id,
@@ -2280,6 +2317,18 @@ def send_supply_to_delivery(
     supply.supply_barcode_printed = bool(supply_barcode_file)
     supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
   elif supply.status == Supply.Status.CONFIRMED:
+    if not shipping_point_id or not shipping_date:
+      raise SupplyFlowError(
+        "Укажите пункт отгрузки (СЦ) и дату — CRM отправит их в WB перед печатью QR.",
+        code="shipping_required",
+      )
+    _prepare_wb_supply_deliver(
+      client,
+      supply,
+      shipping_point_id=shipping_point_id,
+      shipping_date=shipping_date,
+      shipping_type=shipping_type,
+    )
     supply_barcode_file, supply_barcode_value, supply_barcode_error = _fetch_supply_barcode_payload(
       client,
       supply.wb_supply_id,

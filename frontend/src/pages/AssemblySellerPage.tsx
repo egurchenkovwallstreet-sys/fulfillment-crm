@@ -1084,6 +1084,19 @@ function WbAssemblySellerPage() {
     })
   }
 
+  function findOrderWbSupplyId(order: AssemblyOrder): string | undefined {
+    const supplies = [
+      ...(data?.active_supplies ?? []),
+      ...(data?.delivery_supplies ?? []),
+    ]
+    for (const supply of supplies) {
+      if ((supply.orders ?? []).some((item) => item.id === order.id)) {
+        return supply.wb_supply_id
+      }
+    }
+    return undefined
+  }
+
   function handleSendToDelivery(order: AssemblyOrder) {
     if (!id) return
     if (!orderCanDeliver(order)) {
@@ -1098,6 +1111,7 @@ function WbAssemblySellerPage() {
       'Передача в доставку WB',
       buildDeliveryConfirmMessage(order),
       (shipping, printWin) => void runSendToDelivery(order, shipping, printWin),
+      findOrderWbSupplyId(order),
     )
   }
 
