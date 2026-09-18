@@ -196,10 +196,9 @@ def _pick_photo_url(card: dict) -> str:
   return ""
 
 
-def fetch_all_seller_cards(token: str, *, max_pages: int = 200) -> list[dict]:
-  """Загрузить все карточки селлера из Content API (пагинация)."""
+def iter_seller_card_pages(token: str, *, max_pages: int = 200):
+  """Постраничная загрузка карточек WB (генератор, без накопления всего каталога)."""
   client = WBClient(token, base_url=_content_base_url())
-  cards: list[dict] = []
   cursor: dict = {"limit": PAGE_LIMIT}
   pages = 0
 
@@ -220,7 +219,7 @@ def fetch_all_seller_cards(token: str, *, max_pages: int = 200) -> list[dict]:
         ) from exc
       raise
 
-    cards.extend(batch)
+    yield batch
 
     if not _has_next_page(batch, response_cursor):
       break
@@ -228,4 +227,10 @@ def fetch_all_seller_cards(token: str, *, max_pages: int = 200) -> list[dict]:
     cursor = _next_cursor(response_cursor)
     time.sleep(REQUEST_INTERVAL_SEC)
 
+
+def fetch_all_seller_cards(token: str, *, max_pages: int = 200) -> list[dict]:
+  """Загрузить все карточки селлера из Content API (пагинация)."""
+  cards: list[dict] = []
+  for batch in iter_seller_card_pages(token, max_pages=max_pages):
+    cards.extend(batch)
   return cards

@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 
 from apps.integrations.marketplace import WB
 from apps.integrations.wb_client import WBApiError
-from apps.integrations.wb_content import _pick_photo_url, fetch_all_seller_cards
+from django.core.cache import cache
+
+from apps.integrations.wb_content import _pick_photo_url, fetch_all_seller_cards, iter_seller_card_pages
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
@@ -18,6 +20,8 @@ from apps.warehouse.services.wb_stocks import (
 
 CATALOG_MODE_ALL = "all"
 CATALOG_MODE_WITH_STOCK = "with_stock"
+CATALOG_ITEMS_CACHE_VERSION = "v1"
+CATALOG_ITEMS_CACHE_TTL = 3600
 
 
 class CatalogError(Exception):
@@ -186,13 +190,78 @@ def _assign_cell_numbers(items: list[CatalogBarcodeItem], start_from: int = 1) -
     num += 1
 
 
-def fetch_seller_catalog_items(seller: Seller) -> list[CatalogBarcodeItem]:
+def _catalog_items_cache_key(seller_id: int) -> str:
+  return f"wb_catalog_items:{CATALOG_ITEMS_CACHE_VERSION}:seller:{seller_id}"
+
+
+def _serialize_catalog_item(item: CatalogBarcodeItem) -> dict:
+  return {
+    "barcode": item.barcode,
+    "wb_nm_id": item.wb_nm_id,
+    "vendor_code": item.vendor_code,
+    "title": item.title,
+    "tech_size": item.tech_size,
+    "wb_size": item.wb_size,
+    "photo_url": item.photo_url,
+    "requires_marking": item.requires_marking,
+    "color_label": item.color_label,
+  }
+
+
+def _deserialize_catalog_item(data: dict) -> CatalogBarcodeItem:
+  return CatalogBarcodeItem(
+    barcode=str(data.get("barcode") or ""),
+    wb_nm_id=int(data.get("wb_nm_id") or 0),
+    vendor_code=str(data.get("vendor_code") or ""),
+    title=str(data.get("title") or ""),
+    tech_size=str(data.get("tech_size") or ""),
+    wb_size=str(data.get("wb_size") or ""),
+    photo_url=str(data.get("photo_url") or ""),
+    requires_marking=bool(data.get("requires_marking")),
+    color_label=str(data.get("color_label") or ""),
+  )
+
+
+def _store_seller_catalog_items_cache(seller_id: int, items: list[CatalogBarcodeItem]) -> None:
+  cache.set(
+    _catalog_items_cache_key(seller_id),
+    [_serialize_catalog_item(item) for item in items],
+    CATALOG_ITEMS_CACHE_TTL,
+  )
+
+
+def get_seller_catalog_items_cached(
+  seller: Seller,
+  *,
+  force_refresh: bool = False,
+) -> list[CatalogBarcodeItem] | None:
+  """Кэш метаданных каталога WB (без остатков). None — нужна загрузка из API."""
+  if force_refresh:
+    return None
+  cached = cache.get(_catalog_items_cache_key(seller.id))
+  if not isinstance(cached, list):
+    return None
+  return [_deserialize_catalog_item(row) for row in cached if isinstance(row, dict)]
+
+
+def fetch_seller_catalog_items(seller: Seller, *, force_refresh: bool = False) -> list[CatalogBarcodeItem]:
   """Карточки WB селлера, размеры внутри артикула уже по возрастанию."""
+  if not force_refresh:
+    cached = get_seller_catalog_items_cached(seller)
+    if cached is not None:
+      return cached
+
+  items: list[CatalogBarcodeItem] = []
   try:
-    cards = fetch_all_seller_cards(_get_token(seller))
+    token = _get_token(seller)
+    for card_batch in iter_seller_card_pages(token):
+      items.extend(_parse_cards_to_items(card_batch))
   except WBApiError as exc:
     raise CatalogError(str(exc)) from exc
-  return _parse_cards_to_items(cards)
+
+  if items:
+    _store_seller_catalog_items_cache(seller.id, items)
+  return items
 
 
 def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
@@ -212,11 +281,17 @@ def build_catalog_index_for_barcodes(
   if not needed:
     return {}
   index: dict[str, CatalogBarcodeItem] = {}
-  for item in fetch_seller_catalog_items(seller):
-    if item.barcode in needed:
-      index[item.barcode] = item
-      if len(index) >= len(needed):
-        break
+  try:
+    token = _get_token(seller)
+    for card_batch in iter_seller_card_pages(token):
+      for item in _parse_cards_to_items(card_batch):
+        if item.barcode not in needed:
+          continue
+        index[item.barcode] = item
+        if len(index) >= len(needed):
+          return index
+  except WBApiError as exc:
+    raise CatalogError(str(exc)) from exc
   return index
 
 

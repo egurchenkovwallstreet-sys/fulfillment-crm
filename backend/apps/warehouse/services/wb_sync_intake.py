@@ -1,8 +1,9 @@
 """Сверка с WB при приёмке: автоматически или по сканированию."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
+from django.core.cache import cache
 from django.db import transaction
 
 from apps.integrations.marketplace import WB
@@ -10,22 +11,25 @@ from apps.integrations.models import AuditLog
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, StockOperation
 from apps.warehouse.services.catalog_fetch import (
-  CATALOG_MODE_WITH_STOCK,
   CatalogBarcodeItem,
   CatalogError,
-  build_onboarding_preview,
+  fetch_seller_catalog_items,
 )
 from apps.warehouse.services.cell_label import build_cell_label_data
-from apps.warehouse.services.cells import create_cell_with_next_number, refresh_cell_occupied
+from apps.warehouse.services.cells import _next_cell_number, create_cell_with_next_number, refresh_cell_occupied
 from apps.warehouse.services.product_catalog import (
   catalog_item_to_create_kwargs,
   try_enrich_product_from_catalog,
 )
-from apps.warehouse.services.wb_stocks import WBStockError, get_seller_warehouse
+from apps.warehouse.services.wb_stocks import WBStockError, fetch_wb_stocks_for_warehouses, get_seller_warehouse
 
 
 class WbSyncIntakeError(Exception):
   pass
+
+
+WB_SYNC_PREVIEW_CACHE_VERSION = "v1"
+WB_SYNC_PREVIEW_CACHE_TTL = 900
 
 
 @dataclass
@@ -62,66 +66,127 @@ class WbSyncApplyResult:
   cell_labels: list[dict] = field(default_factory=list)
 
 
-def _warehouse_stock(item: dict, warehouse_pk: int) -> int:
-  by_wh = item.get("wb_stock_by_warehouse") or {}
-  for key, qty in by_wh.items():
-    try:
-      if int(key) == warehouse_pk:
-        return max(0, int(qty))
-    except (TypeError, ValueError):
-      continue
-  return max(0, int(item.get("wb_stock_total") or 0))
+def _wb_sync_preview_cache_key(seller_id: int, warehouse_pk: int) -> str:
+  return f"wb_sync_preview:{WB_SYNC_PREVIEW_CACHE_VERSION}:{seller_id}:{warehouse_pk}"
 
 
-def preview_wb_sync_intake(seller: Seller, warehouse_pk: int) -> WbSyncPreviewResult:
+def _warehouse_stock(stock_row: dict, warehouse_pk: int) -> int:
+  by_wh = stock_row.get("by_warehouse") or {}
+  try:
+    return max(0, int(by_wh.get(warehouse_pk) or by_wh.get(str(warehouse_pk)) or 0))
+  except (TypeError, ValueError):
+    return max(0, int(stock_row.get("total") or 0))
+
+
+def _preview_item_from_catalog(
+  catalog_item: CatalogBarcodeItem,
+  *,
+  wb_stock: int,
+  product: Product | None,
+  cell_number: str,
+) -> WbSyncPreviewItem:
+  return WbSyncPreviewItem(
+    barcode=catalog_item.barcode,
+    title=catalog_item.title,
+    tech_size=catalog_item.tech_size,
+    wb_size=catalog_item.wb_size,
+    vendor_code=catalog_item.vendor_code,
+    wb_nm_id=catalog_item.wb_nm_id or None,
+    photo_url=catalog_item.photo_url,
+    color_label=catalog_item.color_label,
+    wb_stock=wb_stock,
+    cell_number=cell_number,
+    already_in_crm=product is not None,
+    requires_marking=catalog_item.requires_marking,
+    product_id=product.id if product else None,
+    crm_quantity=product.quantity if product else None,
+  )
+
+
+def _load_wb_sync_items(seller: Seller, warehouse_pk: int) -> list[WbSyncPreviewItem]:
+  """
+  Лёгкая загрузка: кэш каталога WB + один запрос остатков по складу.
+  Без build_onboarding_preview (лишняя группировка и двойная работа).
+  """
   warehouse = get_seller_warehouse(seller, warehouse_pk)
   try:
-    preview = build_onboarding_preview(
-      seller,
-      catalog_mode=CATALOG_MODE_WITH_STOCK,
-      warehouse_ids=[warehouse.id],
-    )
+    catalog_items = fetch_seller_catalog_items(seller)
   except CatalogError as exc:
     raise WbSyncIntakeError(str(exc)) from exc
 
+  if not catalog_items:
+    raise WbSyncIntakeError("На WB не найдено карточек с баркодами")
+
+  catalog_by_barcode = {item.barcode: item for item in catalog_items}
   existing = {
     p.barcode: p
     for p in Product.objects.filter(seller=seller, marketplace=WB).select_related("cell")
   }
 
-  items: list[WbSyncPreviewItem] = []
-  for row in preview.get("items") or []:
-    wb_stock = _warehouse_stock(row, warehouse.id)
+  try:
+    stock_map = fetch_wb_stocks_for_warehouses(
+      seller,
+      [warehouse],
+      list(catalog_by_barcode.keys()),
+    )
+  except WBStockError as exc:
+    raise WbSyncIntakeError(str(exc)) from exc
+
+  preview_items: list[WbSyncPreviewItem] = []
+  new_items: list[WbSyncPreviewItem] = []
+  for barcode, catalog_item in catalog_by_barcode.items():
+    stock_row = stock_map.get(barcode) or {}
+    wb_stock = _warehouse_stock(stock_row, warehouse.id)
     if wb_stock < 1:
       continue
-    barcode = str(row.get("barcode") or "").strip()
-    if not barcode:
-      continue
     product = existing.get(barcode)
-    items.append(
-      WbSyncPreviewItem(
-        barcode=barcode,
-        title=str(row.get("title") or ""),
-        tech_size=str(row.get("tech_size") or row.get("size_label") or ""),
-        wb_size=str(row.get("wb_size") or ""),
-        vendor_code=str(row.get("vendor_code") or ""),
-        wb_nm_id=int(row["wb_nm_id"]) if row.get("wb_nm_id") else None,
-        photo_url=str(row.get("photo_url") or ""),
-        color_label=str(row.get("color_label") or ""),
-        wb_stock=wb_stock,
-        cell_number=str(row.get("cell_number") or ""),
-        already_in_crm=bool(row.get("already_in_crm")),
-        requires_marking=bool(row.get("requires_marking")),
-        product_id=product.id if product else None,
-        crm_quantity=product.quantity if product else None,
-      )
+    preview = _preview_item_from_catalog(
+      catalog_item,
+      wb_stock=wb_stock,
+      product=product,
+      cell_number=product.cell.number if product and product.cell_id else "",
     )
+    if not product:
+      new_items.append(preview)
+    preview_items.append(preview)
+
+  if new_items:
+    start_from = int(_next_cell_number(seller, WB))
+    for offset, preview in enumerate(new_items):
+      preview.cell_number = str(start_from + offset)
+
+  return preview_items
+
+
+def _store_preview_cache(seller_id: int, warehouse_pk: int, items: list[WbSyncPreviewItem]) -> None:
+  cache.set(
+    _wb_sync_preview_cache_key(seller_id, warehouse_pk),
+    [asdict(item) for item in items],
+    WB_SYNC_PREVIEW_CACHE_TTL,
+  )
+
+
+def _load_preview_cache(seller_id: int, warehouse_pk: int) -> list[WbSyncPreviewItem] | None:
+  cached = cache.get(_wb_sync_preview_cache_key(seller_id, warehouse_pk))
+  if not isinstance(cached, list) or not cached:
+    return None
+  items: list[WbSyncPreviewItem] = []
+  for row in cached:
+    if isinstance(row, dict):
+      items.append(WbSyncPreviewItem(**row))
+  return items or None
+
+
+def preview_wb_sync_intake(seller: Seller, warehouse_pk: int) -> WbSyncPreviewResult:
+  warehouse = get_seller_warehouse(seller, warehouse_pk)
+  items = _load_wb_sync_items(seller, warehouse_pk)
 
   if not items:
     raise WbSyncIntakeError(
       f"На складе «{warehouse.name or warehouse.wb_warehouse_id}» нет остатков в ЛК WB"
     )
 
+  _store_preview_cache(seller.id, warehouse_pk, items)
   return WbSyncPreviewResult(
     warehouse_id=warehouse.id,
     warehouse_name=warehouse.name or str(warehouse.wb_warehouse_id),
@@ -158,13 +223,16 @@ def apply_wb_sync_auto(
   barcodes: list[str] | None = None,
   user=None,
 ) -> WbSyncApplyResult:
-  preview = preview_wb_sync_intake(seller, warehouse_pk)
   warehouse = get_seller_warehouse(seller, warehouse_pk)
+  cached_items = _load_preview_cache(seller.id, warehouse_pk)
+  if cached_items is None:
+    cached_items = _load_wb_sync_items(seller, warehouse_pk)
+
   selected = {b.strip() for b in (barcodes or []) if b and b.strip()}
   apply_all = not selected
 
   outcome = WbSyncApplyResult()
-  for item in preview.items:
+  for item in cached_items:
     if not apply_all and item.barcode not in selected:
       outcome.skipped += 1
       continue
@@ -253,4 +321,5 @@ def apply_wb_sync_auto(
       "skipped": outcome.skipped,
     },
   )
+  cache.delete(_wb_sync_preview_cache_key(seller.id, warehouse_pk))
   return outcome
