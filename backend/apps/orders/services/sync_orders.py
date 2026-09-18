@@ -1,6 +1,7 @@
 import logging
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.integrations.models import AuditLog
@@ -13,7 +14,10 @@ from apps.orders.services.sync_statuses import sync_order_statuses_for_seller
 from apps.orders.services.wb_status import WB_SUPPLIER_NEW, apply_wb_status_to_order
 from apps.sellers.models import Seller
 from apps.sellers.services.sync_warehouses import WarehouseSyncError, sync_seller_warehouses
-from apps.sellers.services.warehouse_filter import is_warehouse_enabled
+from apps.sellers.services.warehouse_filter import (
+  is_warehouse_enabled,
+  resolve_wb_order_warehouse_id,
+)
 from apps.warehouse.models import Product
 
 
@@ -36,8 +40,13 @@ def _link_product(seller: Seller, barcode: str) -> Product | None:
 
 def _touch_order_warehouse(seller: Seller, wb_order) -> None:
   updates: dict = {}
-  if wb_order.warehouse_id is not None:
-    updates["wb_warehouse_id"] = wb_order.warehouse_id
+  resolved_wh_id = resolve_wb_order_warehouse_id(
+    seller,
+    wb_order.warehouse_id,
+    wb_order.office_id,
+  )
+  if resolved_wh_id is not None:
+    updates["wb_warehouse_id"] = resolved_wh_id
   if wb_order.created_at is not None:
     updates["wb_created_at"] = wb_order.created_at
   if not updates:
@@ -45,12 +54,60 @@ def _touch_order_warehouse(seller: Seller, wb_order) -> None:
   Order.objects.filter(seller=seller, wb_order_id=wb_order.wb_order_id).update(**updates)
 
 
+def _repair_orders_warehouse_ids(seller: Seller, wb_orders: list) -> int:
+  """Проставить wb_warehouse_id заказам, пропущенным из‑за officeId вместо warehouseId."""
+  if not wb_orders:
+    return 0
+  from apps.sellers.services.warehouse_filter import (
+    get_enabled_wb_warehouse_ids,
+    seller_has_warehouse_config,
+  )
+
+  by_id = {order.wb_order_id: order for order in wb_orders}
+  qs = Order.objects.filter(seller=seller)
+  if seller_has_warehouse_config(seller):
+    enabled = get_enabled_wb_warehouse_ids(seller)
+    qs = qs.filter(Q(wb_warehouse_id__isnull=True) | ~Q(wb_warehouse_id__in=enabled))
+  fixed = 0
+  now = timezone.now()
+  for order in qs.only("id", "wb_order_id", "wb_warehouse_id"):
+    wb_order = by_id.get(order.wb_order_id)
+    if not wb_order:
+      continue
+    resolved = resolve_wb_order_warehouse_id(
+      seller,
+      wb_order.warehouse_id,
+      wb_order.office_id,
+    )
+    if resolved is None or resolved == order.wb_warehouse_id:
+      continue
+    Order.objects.filter(pk=order.pk).update(wb_warehouse_id=resolved, updated_at=now)
+    fixed += 1
+  return fixed
+
+
+def _merge_new_order_ids(seller: Seller, new_wb_ids: list[int]) -> None:
+  if not new_wb_ids:
+    return
+  current = {int(item) for item in (seller.wb_new_order_ids or []) if item is not None}
+  merged = sorted(current | {int(item) for item in new_wb_ids})
+  if merged == sorted(current):
+    return
+  seller.wb_new_order_ids = merged
+  seller.save(update_fields=["wb_new_order_ids", "updated_at"])
+
+
 def _backfill_orders_meta(seller: Seller, wb_orders: list) -> int:
   updated = 0
   for wb_order in wb_orders:
     updates: dict = {}
-    if wb_order.warehouse_id is not None:
-      updates["wb_warehouse_id"] = wb_order.warehouse_id
+    resolved_wh_id = resolve_wb_order_warehouse_id(
+      seller,
+      wb_order.warehouse_id,
+      wb_order.office_id,
+    )
+    if resolved_wh_id is not None:
+      updates["wb_warehouse_id"] = resolved_wh_id
     if wb_order.created_at is not None:
       updates["wb_created_at"] = wb_order.created_at
     if not updates:
@@ -73,8 +130,12 @@ def _import_wb_orders(
   skipped_warehouse = 0
 
   for wb_order in wb_orders:
-    _touch_order_warehouse(seller, wb_order)
-    if not is_warehouse_enabled(seller, wb_order.warehouse_id):
+    resolved_wh_id = resolve_wb_order_warehouse_id(
+      seller,
+      wb_order.warehouse_id,
+      wb_order.office_id,
+    )
+    if not is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id):
       skipped_warehouse += 1
       continue
 
@@ -83,7 +144,7 @@ def _import_wb_orders(
       "seller": seller,
       "barcode": wb_order.barcode,
       "product": product,
-      "wb_warehouse_id": wb_order.warehouse_id,
+      "wb_warehouse_id": resolved_wh_id,
     }
     if wb_order.created_at is not None:
       defaults["wb_created_at"] = wb_order.created_at
@@ -216,6 +277,7 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     archive_import = _import_wb_orders_atomic(seller, archive_orders, user=user)
     archive_import["raw_total"] = archive_result.raw_total
     archive_import["meta_backfill"] = _backfill_orders_meta(seller, archive_orders)
+    archive_import["warehouse_repaired"] = _repair_orders_warehouse_ids(seller, archive_orders)
     created += archive_import["created"]
     updated += archive_import["updated"]
     skipped += archive_import["without_product"]
@@ -240,10 +302,17 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
   status_error = ""
   cancelled_in_supplies: list[dict] = []
-  new_wb_ids = [wb_order.wb_order_id for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)]
+  new_wb_ids = [
+    wb_order.wb_order_id
+    for wb_order in wb_orders
+    if is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id)
+  ]
   enabled_new_total = sum(
-    1 for wb_order in wb_orders if is_warehouse_enabled(seller, wb_order.warehouse_id)
+    1
+    for wb_order in wb_orders
+    if is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id)
   )
+  _merge_new_order_ids(seller, new_wb_ids)
   from apps.orders.services.supply_flow import (
     cancelled_orders_in_active_supplies,
     orders_at_risk_in_active_supplies,

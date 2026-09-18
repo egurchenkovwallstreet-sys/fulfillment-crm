@@ -415,9 +415,15 @@ def sync_order_statuses_for_seller(
   scoped_ids = poll_ids
 
   if not poll_ids:
-    counts = {"new": 0, "in_picking": 0, "in_delivery": 0, "cancelled": 0}
-    save_wb_counts_to_seller(seller, counts, new_order_ids=[])
-    return {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": counts}
+    scoped_new_ids = sorted(new_ids_set)
+    tab_counts = get_wb_lk_tab_counts(seller)
+    save_wb_counts_to_seller(seller, tab_counts, new_order_ids=scoped_new_ids)
+    return {
+      "statuses_fetched": 0,
+      "statuses_updated": 0,
+      "reconciled": 0,
+      "counts": tab_counts,
+    }
 
   try:
     wb_statuses = client.fetch_order_statuses(list(poll_ids))

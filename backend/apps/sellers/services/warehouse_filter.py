@@ -86,13 +86,57 @@ def order_matches_enabled_warehouse(
   return False
 
 
-def is_warehouse_enabled(seller: Seller, wb_warehouse_id: int | None) -> bool:
+def resolve_enabled_seller_warehouse(
+  seller: Seller,
+  warehouse_id: int | None,
+  office_id: int | None = None,
+) -> SellerWarehouse | None:
+  """
+  Найти включённый склад селлера по warehouseId и/или officeId из заказа WB.
+  WB в API часто отдаёт officeId вместо warehouseId — без этого заказы не импортировались.
+  """
+  if not seller_has_warehouse_config(seller):
+    return None
+  wh_id = int(warehouse_id) if warehouse_id is not None else None
+  off_id = int(office_id) if office_id is not None else None
+  if wh_id is None and off_id is None:
+    return None
+  for warehouse in SellerWarehouse.objects.filter(seller=seller, is_enabled=True):
+    match_ids = {warehouse.wb_warehouse_id}
+    if warehouse.office_id:
+      match_ids.add(int(warehouse.office_id))
+    if wh_id is not None and wh_id in match_ids:
+      return warehouse
+    if off_id is not None and off_id in match_ids:
+      return warehouse
+  return None
+
+
+def resolve_wb_order_warehouse_id(
+  seller: Seller,
+  warehouse_id: int | None,
+  office_id: int | None = None,
+) -> int | None:
+  """Канонический wb_warehouse_id для Order — из включённого склада селлера."""
+  if not seller_has_warehouse_config(seller):
+    if warehouse_id is not None:
+      return int(warehouse_id)
+    if office_id is not None:
+      return int(office_id)
+    return None
+  resolved = resolve_enabled_seller_warehouse(seller, warehouse_id, office_id)
+  return resolved.wb_warehouse_id if resolved else None
+
+
+def is_warehouse_enabled(
+  seller: Seller,
+  wb_warehouse_id: int | None,
+  office_id: int | None = None,
+) -> bool:
   """Склад включён для обслуживания фулфилментом (импорт заказов, сборка, дашборд)."""
   if not seller_has_warehouse_config(seller):
     return True
-  if wb_warehouse_id is None:
-    return False
-  return wb_warehouse_id in get_enabled_wb_warehouse_ids(seller)
+  return resolve_enabled_seller_warehouse(seller, wb_warehouse_id, office_id) is not None
 
 
 def filter_orders_for_seller(qs: QuerySet, seller: Seller) -> QuerySet:
