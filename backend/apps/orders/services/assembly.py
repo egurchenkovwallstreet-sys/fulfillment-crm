@@ -587,16 +587,35 @@ def fetch_missing_assembly_stickers(
 
 
 def start_assembly(seller: Seller, *, user=None) -> dict:
-  """Передать новые заказы на сборку в WB — одна поставка на склад."""
+  """Подтянуть новые из WB, передать на сборку и сформировать листы подбора."""
+  from apps.orders.services.pick_list import (  # noqa: PLC0415
+    PickListError,
+    generate_pick_lists,
+  )
   from apps.orders.services.supply_flow import (  # noqa: PLC0415
     SupplyFlowError,
     send_orders_to_assembly_bulk,
   )
+  from apps.orders.services.sync_orders import SyncError, sync_orders_for_seller  # noqa: PLC0415
+
+  sync_summary: dict = {}
+  try:
+    sync_summary = sync_orders_for_seller(seller, user=user, mode="quick")
+  except SyncError as exc:
+    raise AssemblyError(str(exc), code="sync_failed") from exc
 
   try:
     result = send_orders_to_assembly_bulk(seller, user=user)
   except SupplyFlowError as exc:
     raise AssemblyError(str(exc), code=getattr(exc, "code", "error")) from exc
+
+  pick_list_error = ""
+  pick_lists_count = 0
+  try:
+    pick_lists = generate_pick_lists(seller, user=user, force=True, stage="confirm")
+    pick_lists_count = len(pick_lists)
+  except PickListError as exc:
+    pick_list_error = str(exc)
 
   wb_errors = [
     item.get("error", "")
@@ -620,6 +639,9 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     "stickers_fetched": fetched,
     "sticker_errors": sticker_errors,
     "supplies": result.get("supplies", 0),
+    "sync_fetched": sync_summary.get("fetched", 0),
+    "pick_lists_count": pick_lists_count,
+    "pick_list_error": pick_list_error,
   }
 
 

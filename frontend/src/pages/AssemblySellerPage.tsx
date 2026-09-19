@@ -37,7 +37,7 @@ import {
   type MoveSupplyTarget,
 } from '../api/assembly'
 import { ApiError } from '../api/client'
-import { syncOrders, generatePickList, fetchPickList } from '../api/orders'
+import { syncOrders, fetchPickList } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
 import {
   WORKFLOW_STEPS,
@@ -57,7 +57,6 @@ import {
 import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } from '../components/AssemblyModal'
 import { DeliveryDestinationModal } from '../components/DeliveryDestinationModal'
 import { BatchBindPanel } from '../components/BatchBindPanel'
-import { AssemblySyncOverlay } from '../components/AssemblySyncOverlay'
 import {
   AssemblyQueueListModal,
   AssemblyQueuePanels,
@@ -228,7 +227,6 @@ function WbAssemblySellerPage() {
   } | null>(null)
   const [pickListPreviews, setPickListPreviews] = useState<PickList[]>([])
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
-  const [pickListRefreshing, setPickListRefreshing] = useState(false)
   const [pickListDownloading, setPickListDownloading] = useState(false)
   const [stickersFetching, setStickersFetching] = useState(false)
   const [stickerFetchingOrderId, setStickerFetchingOrderId] = useState<number | null>(null)
@@ -636,7 +634,8 @@ function WbAssemblySellerPage() {
       title: 'Передать на сборку',
       message:
         `Передать на сборку ${count} заказов в Wildberries?\n\n` +
-        'Лист подбора формируется отдельной кнопкой «Сформировать лист подбора».',
+        'CRM подтянет актуальные новые заказы из WB, создаст поставки по складам ' +
+        'и автоматически сформирует листы подбора.',
       confirmLabel: 'Передать',
       onConfirm: () => void runTransferToAssembly(),
     })
@@ -659,9 +658,25 @@ function WbAssemblySellerPage() {
         msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
       }
       if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
+      const lists = result.active_pick_lists?.length
+        ? result.active_pick_lists
+        : result.pick_lists?.length
+          ? result.pick_lists
+          : result.pick_list
+            ? [result.pick_list]
+            : []
+      if (lists.length) {
+        setPickListPreviews(lists)
+        if (result.pick_lists_count) {
+          msg += `, листов подбора: ${result.pick_lists_count}`
+        }
+      }
       noticeOk(msg, 'На сборке')
       if (result.sticker_errors) {
         showError('Стикеры не подтянулись', result.sticker_errors)
+      }
+      if (result.pick_list_error) {
+        showError('Лист подбора', result.pick_list_error)
       }
       setStage('confirm')
       await load({ stageKey: 'confirm' })
@@ -849,39 +864,6 @@ function WbAssemblySellerPage() {
     }
   }
 
-  async function handleGeneratePickList() {
-    if (!id || !data) return
-    const enabled = data.warehouses.some((warehouse) => warehouse.is_enabled)
-    if (!enabled) {
-      showError('Нет складов', 'Включите хотя бы один склад FBS — лист подбора строится только по выбранным складам.')
-      return
-    }
-    setError('')
-    setPickListRefreshing(true)
-    try {
-      const pickStage = stage === 'confirm' ? 'confirm' : 'new'
-      const result = await generatePickList(id, { force: true, stage: pickStage })
-      const lists = result.pick_lists?.length
-        ? result.pick_lists
-        : result.pick_list
-          ? [result.pick_list]
-          : []
-      setPickListPreviews(lists)
-      setData(await fetchAssemblySeller(id, stage || undefined))
-      const totalOrders = lists.reduce((sum, list) => sum + (list.total_quantity || 0), 0)
-      showSuccess(
-        'Лист подбора готов',
-        lists.length > 1
-          ? `Сформировано ${lists.length} листов (${totalOrders} зак.) — по одному на склад. Можно сканировать.`
-          : `Лист подбора №${lists[0]?.id ?? '—'}: ${totalOrders} зак. Можно сканировать.`,
-      )
-    } catch (err) {
-      showError('Ошибка листа подбора', err instanceof Error ? err.message : 'Не удалось сформировать лист подбора')
-    } finally {
-      setPickListRefreshing(false)
-    }
-  }
-
   async function resolvePickListsForDownload(target?: PickList): Promise<PickList[]> {
     if (target?.items?.length) return [target]
 
@@ -898,8 +880,7 @@ function WbAssemblySellerPage() {
 
     if (!id) return []
 
-    const pickStage = stage === 'confirm' ? 'confirm' : 'new'
-    const preview = await previewPickList(id, pickStage)
+    const preview = await previewPickList(id, 'confirm')
     const fromApi = preview.pick_lists?.length
       ? preview.pick_lists
       : preview.pick_list?.pick_lists?.length
@@ -919,9 +900,7 @@ function WbAssemblySellerPage() {
       if (!lists.length) {
         showError(
           'Лист подбора',
-          stage === 'confirm'
-            ? 'Нет заказов на сборке для листа подбора. Обновите заказы из WB.'
-            : 'Сначала нажмите «Сформировать лист подбора» или добавьте новые заказы.',
+          'Нет заказов на сборке для листа подбора. Обновите заказы из WB.',
         )
         return
       }
@@ -1874,7 +1853,8 @@ function WbAssemblySellerPage() {
       ? displayPickListTotal
       : assemblyEligible ?? counts.new ?? 0
   const canDownloadPickList =
-    (stage === 'new' || stage === 'confirm') && (hasPickLists || pickListStageOrders > 0)
+    stage === 'confirm' &&
+    ((counts.in_picking ?? 0) > 0 || hasPickLists || pickListStageOrders > 0)
   const orders = data?.orders ?? []
   const missingStickersCount = orders.filter(
     (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
@@ -2188,28 +2168,13 @@ function WbAssemblySellerPage() {
                   : 'Подтянуть стикеры'}
             </button>
           )}
-          {(stage === 'new' || stage === 'confirm') && (
-            <button
-              type="button"
-              className={`btn ${!isBatchMode ? 'btn--primary' : 'btn--secondary'}`}
-              onClick={() => void handleGeneratePickList()}
-              disabled={loading || pickListRefreshing || togglingWarehouseId !== null}
-              {...uiHint('Собрать лист подбора только по включённым складам FBS текущей вкладки')}
-            >
-              {pickListRefreshing ? 'Формируем…' : 'Сформировать лист подбора'}
-            </button>
-          )}
-          {(stage === 'new' || stage === 'confirm') && canDownloadPickList ? (
+          {stage === 'confirm' && canDownloadPickList ? (
             <button
               type="button"
               className="btn btn--secondary"
               onClick={() => void handleDownloadPickListPdf()}
-              disabled={loading || pickListRefreshing || pickListDownloading}
-              {...uiHint(
-                stage === 'confirm'
-                  ? 'Скачать лист подбора по заказам на сборке (даже после передачи из «Новые»)'
-                  : 'Скачать листы подбора формата A4 — отдельный PDF на каждый склад',
-              )}
+              disabled={loading || pickListDownloading}
+              {...uiHint('Скачать актуальный лист подбора по всем заказам на сборке — отдельный PDF на каждый склад')}
             >
               {pickListDownloading
                 ? 'PDF…'
@@ -2365,32 +2330,10 @@ function WbAssemblySellerPage() {
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
-            Листы подбора формируются <strong>отдельно на каждый включённый склад</strong>.
-            «Передать на сборку» создаёт в WB отдельную поставку на каждый склад.
+            Нажмите «Передать на сборку» — CRM подтянет актуальные новые заказы из WB,
+            создаст в WB отдельную поставку на каждый включённый склад и автоматически
+            сформирует листы подбора. Скачать PDF можно на вкладке «На сборке».
           </p>
-          {hasPickLists && displayPickLists.length > 0 && (
-            <ul className="assembly-picklists">
-              {displayPickLists.map((list) => (
-                <li key={list.id}>
-                  <strong>{list.warehouse_name || `Склад #${list.wb_warehouse_id ?? list.id}`}</strong>
-                  {' — '}
-                  {list.total_quantity} зак.
-                  {list.items?.length ? (
-                    <>
-                      {' '}
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--small"
-                        onClick={() => void handleDownloadPickListPdf(list)}
-                      >
-                        PDF
-                      </button>
-                    </>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
         </section>
       )}
 
@@ -2403,7 +2346,7 @@ function WbAssemblySellerPage() {
                 type="button"
                 className="btn btn--secondary btn--small"
                 onClick={() => void handleDownloadPickListPdf()}
-                disabled={loading || pickListRefreshing || pickListDownloading || !canDownloadPickList}
+                disabled={loading || pickListDownloading || !canDownloadPickList}
                 {...uiHint('Скачать PDF для сборщика — доступно и после передачи заказов на сборку')}
               >
                 {pickListDownloading ? 'PDF…' : 'Скачать PDF (A4)'}
@@ -2411,8 +2354,8 @@ function WbAssemblySellerPage() {
             </div>
           </div>
           <p>
-            Лист можно скачать повторно на вкладке «На сборке» — по сохранённому списку или по текущим заказам.
-            {hasPickLists ? '' : ' Если кнопка в шапке пропала — нажмите «Скачать PDF» здесь.'}
+            Лист формируется автоматически при «Передать на сборку».
+            PDF всегда можно скачать повторно — по сохранённому списку или по текущим заказам на сборке.
           </p>
           {hasPickLists && displayPickLists.length > 0 && (
             <ul className="assembly-picklists">
@@ -2471,7 +2414,7 @@ function WbAssemblySellerPage() {
             <div>
               <h2 className="section-title">Сканируйте баркод заказа</h2>
               <p className="assembly-scan-hint">
-                Курсор уже в поле. Сначала «Сформировать лист подбора» и «Скачать PDF» в шапке.
+                Курсор уже в поле. При необходимости скачайте PDF листа подбора в шапке.
                 После скана товара с ЧЗ сразу откроется окно DataMatrix, затем печать стикера.
               </p>
               <form onSubmit={handleBarcodeSubmit}>
@@ -2635,8 +2578,7 @@ function WbAssemblySellerPage() {
         </div>
         <p className="assembly-warehouses__hint">
           Включите склады вашего фулфилмента. Количество заказов обновится сразу.
-          Лист подбора — отдельной кнопкой «Сформировать лист подбора» (режим скана и режим ленты не смешиваются).
-          {pickListRefreshing ? ' Формируем лист подбора…' : ''}
+          Листы подбора формируются автоматически при «Передать на сборку» — отдельно на каждый склад.
         </p>
         {(data?.warehouses?.length ?? 0) === 0 ? (
           <p className="assembly-warehouses__empty">Нажмите «Загрузить из WB»</p>
@@ -3086,7 +3028,6 @@ function WbAssemblySellerPage() {
         </div>
       )}
 
-      <AssemblySyncOverlay visible={pickListRefreshing} marketplace="wb" />
     </>
   )
 }

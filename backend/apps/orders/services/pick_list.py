@@ -131,26 +131,9 @@ def _crm_assembly_supply_order_ids(seller: Seller) -> set[int]:
 
 def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
   if stage == "confirm":
-    crm_order_ids = _crm_assembly_supply_order_ids(seller)
-    if not crm_order_ids:
-      return []
-    qs = (
-      filter_orders_for_assembly(
-        Order.objects.filter(
-          seller=seller,
-          assembly_hidden=False,
-          id__in=crm_order_ids,
-        ).filter(WB_STAGE_QUERIES["confirm"]()),
-        seller,
-      )
-      .exclude(
-        status__in=[
-          Order.Status.CANCELLED,
-          Order.Status.SHIPPED,
-        ],
-      )
-      .select_related("product", "product__cell")
-    )
+    from apps.orders.services.supply_flow import picking_stage_orders_queryset
+
+    qs = picking_stage_orders_queryset(seller).select_related("product", "product__cell")
   else:
     from apps.orders.services.supply_flow import new_stage_orders_queryset
 

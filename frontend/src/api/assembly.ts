@@ -108,6 +108,11 @@ export interface StartAssemblyResult {
   stickers_fetched: number
   sticker_errors: string
   supplies?: number
+  sync_fetched?: number
+  pick_lists_count?: number
+  pick_list_error?: string
+  pick_lists?: PickList[]
+  active_pick_lists?: PickList[]
   pick_list: PickList | null
 }
 

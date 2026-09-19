@@ -691,10 +691,13 @@ class AssemblyStartView(APIView):
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 
+    active_lists = active_wb_pick_lists(seller)
     return Response({
       "success": True,
       **result,
-      "pick_list": None,
+      "pick_lists": PickListSerializer(active_lists, many=True).data,
+      "active_pick_lists": PickListSerializer(active_lists, many=True).data,
+      "pick_list": PickListSerializer(active_lists[0]).data if active_lists else None,
     }, status=status.HTTP_201_CREATED)
 
 
