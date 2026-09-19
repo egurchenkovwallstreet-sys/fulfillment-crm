@@ -179,6 +179,7 @@ export function AssemblySellerPage() {
 
 function WbAssemblySellerPage() {
   const { sellerId } = useParams<{ sellerId: string }>()
+  const { marketplace } = useMarketplace()
   const { showSuccess, showError, flashPrintOk } = useCrmNotice()
   const noticeOk = (message: string, title = 'Готово') => showSuccess(title, message)
   const noticeFail = (title: string, err: unknown, fallback: string) => {
