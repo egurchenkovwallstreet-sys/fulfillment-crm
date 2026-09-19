@@ -1863,7 +1863,7 @@ function WbAssemblySellerPage() {
   const pickListStageOrders =
     stage === 'confirm'
       ? displayPickListTotal
-      : assemblyEligible ?? counts.new ?? 0
+      : assemblyReady ?? counts.new ?? 0
   const canDownloadPickList =
     stage === 'confirm' &&
     ((counts.in_picking ?? 0) > 0 || hasPickLists || pickListStageOrders > 0)
