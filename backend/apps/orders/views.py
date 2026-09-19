@@ -658,11 +658,22 @@ class AssemblySellerDetailView(APIView):
         cancelled_order_ids,
       )
 
+    from apps.orders.services.supply_flow import get_assembly_transfer_readiness
+
+    transfer_readiness = get_assembly_transfer_readiness(seller)
+
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
       "counts": {**counts, "new": tab_counts["new"]},
-      "assembly_eligible": tab_counts["new"],
+      "assembly_eligible": transfer_readiness["assembly_ready"],
+      "assembly_ready": transfer_readiness["assembly_ready"],
+      "assembly_pending": transfer_readiness["assembly_pending"],
+      "wb_counts_synced_at": (
+        seller.wb_counts_synced_at.isoformat()
+        if seller.wb_counts_synced_at
+        else None
+      ),
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": [order_data_map[o.id] for o in orders if o.id in order_data_map],

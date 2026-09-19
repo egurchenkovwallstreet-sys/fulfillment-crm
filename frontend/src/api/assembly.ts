@@ -85,6 +85,9 @@ export interface AssemblySellerDetail {
   assembly_workflow_mode?: 'scan' | 'batch'
   counts: Record<string, number>
   assembly_eligible?: number
+  assembly_ready?: number
+  assembly_pending?: number
+  wb_counts_synced_at?: string | null
   supplies_forming: number
   warehouses: SellerWarehouse[]
   orders: AssemblyOrder[]
@@ -109,6 +112,10 @@ export interface StartAssemblyResult {
   sticker_errors: string
   supplies?: number
   sync_fetched?: number
+  stickers_deferred?: boolean
+  sync_stale_message?: string
+  assembly_ready?: number
+  assembly_pending?: number
   pick_lists_count?: number
   pick_list_error?: string
   pick_lists?: PickList[]

@@ -95,6 +95,68 @@ def scan_off_crm_shipments():
   return result
 
 
+@shared_task(
+  bind=True,
+  queue="sync",
+  max_retries=5,
+  default_retry_delay=30,
+)
+def fetch_assembly_stickers_task(
+  self,
+  seller_id: int,
+  order_ids: list[int],
+  *,
+  user_id: int | None = None,
+) -> dict:
+  """Подтянуть стикеры WB после передачи на сборку — не блокирует кнопку."""
+  from django.db.models import Q
+
+  from apps.accounts.models import User
+  from apps.orders.models import Order
+  from apps.orders.services.assembly import AssemblyError, fetch_stickers_for_orders
+  from apps.sellers.models import Seller
+
+  seller = Seller.objects.filter(pk=seller_id, is_active=True).first()
+  if not seller or not order_ids:
+    return {"success": False, "detail": "Селлер или заказы не найдены"}
+
+  orders = list(
+    Order.objects.filter(
+      seller=seller,
+      pk__in=order_ids,
+      assembly_hidden=False,
+    ).filter(
+      Q(sticker_file="")
+      | Q(sticker_file__isnull=True)
+      | Q(has_sticker=False),
+    ),
+  )
+  if not orders:
+    return {"success": True, "fetched": 0, "skipped": len(order_ids)}
+
+  user = User.objects.filter(pk=user_id).first() if user_id else None
+  try:
+    fetched = fetch_stickers_for_orders(seller, orders, user=user)
+  except AssemblyError as exc:
+    status_code = getattr(getattr(exc, "__cause__", None), "status_code", None)
+    if status_code == 429 or "лимит" in str(exc).lower():
+      logger.warning(
+        "WB sticker fetch rate limit seller=%s, retry task",
+        seller_id,
+      )
+      raise self.retry(exc=exc) from exc
+    logger.warning("WB sticker fetch failed seller=%s: %s", seller_id, exc)
+    return {"success": False, "detail": str(exc)}
+
+  logger.info(
+    "WB assembly stickers fetched seller=%s count=%s/%s",
+    seller_id,
+    fetched,
+    len(orders),
+  )
+  return {"success": True, "fetched": fetched, "requested": len(orders)}
+
+
 @shared_task(queue="sync")
 def sync_wb_delivery_scans():
   """Каждые 2 мин — подтянуть scanDt поставок для всех селлеров WB."""

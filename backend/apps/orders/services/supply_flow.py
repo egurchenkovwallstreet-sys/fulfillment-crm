@@ -89,6 +89,38 @@ def order_can_send_to_assembly(order: Order) -> bool:
   return supplier in ("", WB_SUPPLIER_NEW)
 
 
+def new_orders_ready_for_transfer_queryset(seller: Seller) -> QuerySet:
+  """Новые заказы в CRM, готовые к передаче на сборку без доп. запросов к WB."""
+  return (
+    new_stage_orders_queryset(seller)
+    .filter(wb_warehouse_id__isnull=False)
+    .exclude(barcode="")
+    .exclude(barcode__isnull=True)
+  )
+
+
+def get_assembly_transfer_readiness(seller: Seller) -> dict[str, int]:
+  """Сколько новых заказов уже в CRM и готовы к кнопке «Передать на сборку»."""
+  from apps.orders.services.wb_status import get_wb_lk_tab_counts
+
+  tab_counts = get_wb_lk_tab_counts(seller)
+  wb_new_total = int(tab_counts.get("new") or 0)
+  ready = 0
+  for order in new_orders_ready_for_transfer_queryset(seller).only(
+    "id",
+    "status",
+    "wb_supplier_status",
+  ):
+    if order_can_send_to_assembly(order):
+      ready += 1
+  pending = max(0, wb_new_total - ready)
+  return {
+    "assembly_ready": ready,
+    "assembly_pending": pending,
+    "wb_new_total": wb_new_total,
+  }
+
+
 def order_can_send_to_delivery(order: Order) -> bool:
   if (order.marking_verify_status or "").strip() == VERIFY_ERROR:
     return False
@@ -1288,6 +1320,7 @@ def _append_orders_to_forming_supply(
   *,
   client,
   user=None,
+  skip_stickers: bool = False,
 ) -> tuple[int, str, list[Order], Supply]:
   """Добавить заказы в поставку WB. Возвращает (стикеры, ошибка, добавленные, поставка)."""
   existing_wb_ids = set(supply.orders.values_list("wb_order_id", flat=True))
@@ -1335,21 +1368,23 @@ def _append_orders_to_forming_supply(
     order.wb_supplier_status = WB_SUPPLIER_ASSEMBLY
     order.save(update_fields=["status", "wb_supplier_status", "updated_at"])
 
-  time.sleep(SUPPLY_CREATE_SETTLE_SEC)
+  if not skip_stickers:
+    time.sleep(SUPPLY_CREATE_SETTLE_SEC)
 
   stickers_fetched = 0
   sticker_error = ""
-  try:
-    stickers_fetched = fetch_stickers_for_orders(seller, new_orders, user=user)
-    missing = [
-      order for order in new_orders
-      if not (order.sticker_file or "").strip()
-    ]
-    if missing:
-      time.sleep(1.5)
-      stickers_fetched += fetch_stickers_for_orders(seller, missing, user=user)
-  except AssemblyError as exc:
-    sticker_error = str(exc)
+  if not skip_stickers:
+    try:
+      stickers_fetched = fetch_stickers_for_orders(seller, new_orders, user=user)
+      missing = [
+        order for order in new_orders
+        if not (order.sticker_file or "").strip()
+      ]
+      if missing:
+        time.sleep(1.5)
+        stickers_fetched += fetch_stickers_for_orders(seller, missing, user=user)
+    except AssemblyError as exc:
+      sticker_error = str(exc)
 
   return stickers_fetched, sticker_error, new_orders, active_supply
 
@@ -2029,16 +2064,18 @@ def send_orders_to_assembly_bulk(
   *,
   order_ids: list[int] | None = None,
   user=None,
+  defer_stickers: bool = False,
 ) -> dict:
   """Отправить на сборку заказы: одна поставка WB на каждый склад."""
-  qs = new_stage_orders_queryset(seller).select_related("product")
+  qs = new_orders_ready_for_transfer_queryset(seller).select_related("product")
   if order_ids is not None:
     qs = qs.filter(pk__in=order_ids)
 
   orders = [order for order in qs if order_can_send_to_assembly(order)]
   if not orders:
     raise SupplyFlowError(
-      "Нет заказов для отправки на сборку. Обновите заказы из WB.",
+      "Нет готовых заказов для отправки на сборку. "
+      "Дождитесь фоновой синхронизации (до 2 мин) или нажмите «Обновить заказы».",
       code="no_orders",
     )
 
@@ -2069,6 +2106,7 @@ def send_orders_to_assembly_bulk(
         wh_orders,
         client=client,
         user=user,
+        skip_stickers=defer_stickers,
       )
       sent += len(added_orders)
       stickers_total += stickers_fetched
@@ -2090,7 +2128,7 @@ def send_orders_to_assembly_bulk(
           "error": message,
         })
 
-  if sent_order_ids:
+  if sent_order_ids and not defer_stickers:
     missing_stickers = list(
       Order.objects.filter(
         seller=seller,
@@ -2148,6 +2186,8 @@ def send_orders_to_assembly_bulk(
     "total": len(orders),
     "supplies": len(by_warehouse),
     "stickers_fetched": stickers_total,
+    "stickers_deferred": defer_stickers and sent > 0,
+    "sent_order_ids": sent_order_ids,
     "errors": errors,
   }
 

@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 PAGE_LIMIT = 1000
 REQUEST_INTERVAL_SEC = 0.1
+RATE_LIMIT_MAX_RETRIES = 5
+RATE_LIMIT_BASE_DELAY_SEC = 2.0
 # После POST /supplies WB не сразу принимает PATCH заказов — иначе 409.
 SUPPLY_CREATE_SETTLE_SEC = 0.8
 # PATCH .../supplies/{id}/orders — не более 100 заказов за запрос (WB API)
@@ -131,11 +133,30 @@ class WBClient:
 
   def _request(self, method: str, path: str, **kwargs) -> dict | list:
     url = f"{self._base_url}{path}"
-    try:
-      with httpx.Client(timeout=30.0) as client:
-        response = client.request(method, url, headers=self._headers(), **kwargs)
-    except httpx.RequestError as exc:
-      raise WBApiError(f"Ошибка сети WB API: {exc}") from exc
+    response: httpx.Response | None = None
+    for attempt in range(RATE_LIMIT_MAX_RETRIES):
+      try:
+        with httpx.Client(timeout=30.0) as client:
+          response = client.request(method, url, headers=self._headers(), **kwargs)
+      except httpx.RequestError as exc:
+        raise WBApiError(f"Ошибка сети WB API: {exc}") from exc
+
+      if response.status_code == 429 and attempt < RATE_LIMIT_MAX_RETRIES - 1:
+        delay = min(RATE_LIMIT_BASE_DELAY_SEC * (2 ** attempt), 15.0)
+        logger.warning(
+          "WB rate limit %s %s, retry in %.1fs (attempt %s/%s)",
+          method,
+          path,
+          delay,
+          attempt + 1,
+          RATE_LIMIT_MAX_RETRIES,
+        )
+        time.sleep(delay)
+        continue
+      break
+
+    if response is None:
+      raise WBApiError("WB API: пустой ответ")
 
     if response.status_code == 401:
       raise WBApiError("Токен WB недействителен", status_code=401, code="unauthorized")

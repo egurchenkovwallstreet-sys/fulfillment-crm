@@ -587,25 +587,36 @@ def fetch_missing_assembly_stickers(
 
 
 def start_assembly(seller: Seller, *, user=None) -> dict:
-  """Подтянуть новые из WB, передать на сборку и сформировать листы подбора."""
+  """Передать готовые заказы на сборку; стикеры — в фоне (без лишних запросов к WB)."""
+  from datetime import timedelta
+
+  from apps.integrations.tasks import fetch_assembly_stickers_task  # noqa: PLC0415
   from apps.orders.services.pick_list import (  # noqa: PLC0415
     PickListError,
     generate_pick_lists,
   )
   from apps.orders.services.supply_flow import (  # noqa: PLC0415
     SupplyFlowError,
+    get_assembly_transfer_readiness,
     send_orders_to_assembly_bulk,
   )
-  from apps.orders.services.sync_orders import SyncError, sync_orders_for_seller  # noqa: PLC0415
 
-  sync_summary: dict = {}
-  try:
-    sync_summary = sync_orders_for_seller(seller, user=user, mode="quick")
-  except SyncError as exc:
-    raise AssemblyError(str(exc), code="sync_failed") from exc
+  readiness = get_assembly_transfer_readiness(seller)
+  sync_stale_message = ""
+  if seller.wb_counts_synced_at:
+    age = timezone.now() - seller.wb_counts_synced_at
+    if age > timedelta(minutes=5):
+      sync_stale_message = (
+        f"Заказы обновлялись {int(age.total_seconds() // 60)} мин назад. "
+        "Передаём только уже загруженные в CRM."
+      )
+  else:
+    sync_stale_message = (
+      "Заказы ещё не синхронизировались с WB. Передаём только уже загруженные в CRM."
+    )
 
   try:
-    result = send_orders_to_assembly_bulk(seller, user=user)
+    result = send_orders_to_assembly_bulk(seller, user=user, defer_stickers=True)
   except SupplyFlowError as exc:
     raise AssemblyError(str(exc), code=getattr(exc, "code", "error")) from exc
 
@@ -624,24 +635,35 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   ]
 
   sent = result["sent"]
-  fetched = result["stickers_fetched"]
+  sent_order_ids = result.get("sent_order_ids") or []
+  stickers_deferred = bool(result.get("stickers_deferred"))
+  if sent_order_ids:
+    fetch_assembly_stickers_task.apply_async(
+      args=[seller.id, sent_order_ids],
+      kwargs={"user_id": user.id if user else None},
+      countdown=5,
+    )
+
   sticker_errors = ""
-  if fetched < sent:
+  if stickers_deferred:
     sticker_errors = (
-      f"Стикеры загружены {fetched} из {sent}. "
-      "На вкладке «На сборке» нажмите «Подтянуть стикеры» — Честный знак для этого не нужен."
+      "Стикеры подтягиваются в фоне (обычно 10–30 сек). "
+      "Если скан не находит заказ — нажмите «Подтянуть стикеры» на вкладке «На сборке»."
     )
 
   return {
     "orders_count": result["total"],
     "wb_assembly_sent": sent,
     "wb_assembly_errors": wb_errors,
-    "stickers_fetched": fetched,
+    "stickers_fetched": 0,
+    "stickers_deferred": stickers_deferred,
     "sticker_errors": sticker_errors,
     "supplies": result.get("supplies", 0),
-    "sync_fetched": sync_summary.get("fetched", 0),
     "pick_lists_count": pick_lists_count,
     "pick_list_error": pick_list_error,
+    "assembly_ready": readiness["assembly_ready"],
+    "assembly_pending": readiness["assembly_pending"],
+    "sync_stale_message": sync_stale_message,
   }
 
 
@@ -1243,6 +1265,9 @@ def restore_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> di
   )
 
   counts = get_assembly_stage_counts(seller)
+  from apps.orders.services.supply_flow import get_assembly_transfer_readiness
+
+  readiness = get_assembly_transfer_readiness(seller)
   message = f"Заказ WB #{order.wb_order_id} снова в сборке."
   if pick_list_linked:
     message += " Добавлен в текущий лист подбора — можно сканировать баркод."
@@ -1254,7 +1279,9 @@ def restore_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> di
   return {
     "order": order,
     "counts": counts,
-    "assembly_eligible": counts["new"],
+    "assembly_eligible": readiness["assembly_ready"],
+    "assembly_ready": readiness["assembly_ready"],
+    "assembly_pending": readiness["assembly_pending"],
     "pick_list_linked": pick_list_linked,
     "sticker_fetched": sticker_fetched,
     "message": message,
@@ -1333,10 +1360,15 @@ def remove_order_from_assembly(seller: Seller, order_id: int, *, user=None) -> d
   )
 
   counts = get_assembly_stage_counts(seller)
+  from apps.orders.services.supply_flow import get_assembly_transfer_readiness
+
+  readiness = get_assembly_transfer_readiness(seller)
   return {
     "order": order,
     "counts": counts,
-    "assembly_eligible": counts["new"],
+    "assembly_eligible": readiness["assembly_ready"],
+    "assembly_ready": readiness["assembly_ready"],
+    "assembly_pending": readiness["assembly_pending"],
   }
 
 

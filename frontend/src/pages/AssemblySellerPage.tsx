@@ -627,15 +627,19 @@ function WbAssemblySellerPage() {
   }
 
   function handleTransferToAssembly() {
-    const count = data?.assembly_eligible ?? 0
+    const count = data?.assembly_ready ?? data?.assembly_eligible ?? 0
     if (!id || count < 1) return
+    const pending = data?.assembly_pending ?? 0
     setModal({
       kind: 'confirm',
       title: 'Передать на сборку',
       message:
         `Передать на сборку ${count} заказов в Wildberries?\n\n` +
-        'CRM подтянет актуальные новые заказы из WB, создаст поставки по складам ' +
-        'и автоматически сформирует листы подбора.',
+        (pending > 0
+          ? `Ещё ${pending} зак. ждут фоновой загрузки из WB — они не войдут в эту передачу.\n\n`
+          : '') +
+        'CRM создаст поставки по складам, сформирует листы подбора. ' +
+        'Стикеры подтянутся в фоне через несколько секунд.',
       confirmLabel: 'Передать',
       onConfirm: () => void runTransferToAssembly(),
     })
@@ -657,7 +661,11 @@ function WbAssemblySellerPage() {
       if (result.wb_assembly_errors?.length) {
         msg += `. Ошибки WB: ${result.wb_assembly_errors.length}`
       }
-      if (result.sticker_errors) msg += `. Ошибка стикеров: ${result.sticker_errors}`
+      if (result.stickers_deferred) {
+        msg += '. Стикеры подтягиваются в фоне'
+      } else if (result.sticker_errors) {
+        msg += `. Ошибка стикеров: ${result.sticker_errors}`
+      }
       const lists = result.active_pick_lists?.length
         ? result.active_pick_lists
         : result.pick_lists?.length
@@ -672,7 +680,10 @@ function WbAssemblySellerPage() {
         }
       }
       noticeOk(msg, 'На сборке')
-      if (result.sticker_errors) {
+      if (result.sync_stale_message) {
+        showSuccess('Синхронизация WB', result.sync_stale_message)
+      }
+      if (result.sticker_errors && !result.stickers_deferred) {
         showError('Стикеры не подтянулись', result.sticker_errors)
       }
       if (result.pick_list_error) {
@@ -1824,18 +1835,19 @@ function WbAssemblySellerPage() {
   const isBatchMode = workflowMode === 'batch'
 
   const counts = data?.counts ?? {}
-  const assemblyEligible = data?.assembly_eligible
+  const assemblyReady = data?.assembly_ready ?? data?.assembly_eligible
+  const assemblyPending = data?.assembly_pending ?? 0
   const sellerName = data?.seller?.company_name ?? 'Сборка FBS'
 
   function stageCount(key: string): number {
     if (key === 'confirm') return counts.in_picking ?? 0
     if (key === 'complete') return counts.in_delivery ?? 0
-    if (key === 'new') return assemblyEligible ?? counts.new ?? 0
+    if (key === 'new') return counts.new ?? assemblyReady ?? 0
     return counts.new ?? 0
   }
 
   const ordersBusy = refreshing || syncing || togglingWarehouseId !== null
-  const bulkAssemblyCount = assemblyEligible ?? 0
+  const bulkAssemblyCount = assemblyReady ?? 0
   const displayPickLists = pickListPreviews.length > 0
     ? pickListPreviews
     : data?.active_pick_lists?.length
@@ -2330,9 +2342,21 @@ function WbAssemblySellerPage() {
         <section className="panel assembly-step-card assembly-step-card--new">
           <h2 className="section-title">Шаг 1 — подготовка</h2>
           <p>
-            Нажмите «Передать на сборку» — CRM подтянет актуальные новые заказы из WB,
-            создаст в WB отдельную поставку на каждый включённый склад и автоматически
-            сформирует листы подбора. Скачать PDF можно на вкладке «На сборке».
+            Новые заказы подтягиваются из WB в фоне каждые 2 минуты.
+            {' '}
+            <strong>Готово к передаче: {bulkAssemblyCount}</strong>
+            {assemblyPending > 0 ? (
+              <>
+                {' '}
+                · ждут загрузки: {assemblyPending}
+              </>
+            ) : null}
+            .
+          </p>
+          <p>
+            «Передать на сборку» отправляет только уже загруженные заказы — быстро,
+            без лишних запросов к WB. Поставки и листы подбора создаются автоматически,
+            стикеры подтягиваются в фоне. PDF — на вкладке «На сборке».
           </p>
         </section>
       )}
