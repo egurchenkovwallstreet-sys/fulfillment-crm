@@ -529,6 +529,7 @@ class AssemblySellerDetailView(APIView):
       return Response(OzonAssemblySellerDetailView.payload(seller, stage))
 
     counts = get_seller_stage_counts(seller, assembly_only=True)
+    tab_counts = get_seller_wb_tab_counts(seller, assembly_only=True)
     stage = request.query_params.get("stage", "")
     visible_orders = Order.objects.filter(seller=seller, assembly_hidden=False)
     if stage == "new":
@@ -660,8 +661,8 @@ class AssemblySellerDetailView(APIView):
     return Response({
       "seller": {"id": seller.id, "company_name": seller.company_name},
       "assembly_workflow_mode": seller.assembly_workflow_mode,
-      "counts": counts,
-      "assembly_eligible": assembly_counts["new"],
+      "counts": {**counts, "new": tab_counts["new"]},
+      "assembly_eligible": tab_counts["new"],
       "supplies_forming": supplies_forming,
       "warehouses": SellerWarehouseSerializer(warehouses, many=True).data,
       "orders": [order_data_map[o.id] for o in orders if o.id in order_data_map],

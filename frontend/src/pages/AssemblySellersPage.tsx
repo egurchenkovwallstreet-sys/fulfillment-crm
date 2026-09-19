@@ -8,7 +8,7 @@ import { readAssemblySellersCache, writeAssemblySellersCache } from '../utils/as
 import { uiHint } from '../utils/uiHint'
 import './AssemblyPage.css'
 
-const ASSEMBLY_SELLERS_POLL_MS = 60_000
+const ASSEMBLY_SELLERS_POLL_MS = 120_000
 
 export function AssemblySellersPage() {
   const { marketplace } = useMarketplace()

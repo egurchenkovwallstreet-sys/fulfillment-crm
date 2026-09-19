@@ -24,6 +24,7 @@ class WbLkTabCountsTests(TestCase):
       wb_enabled=True,
       wb_api_token_encrypted="token",
       wb_new_order_ids=[1001, 1002],
+      wb_count_new=1,
       wb_counts_synced_at=timezone.now(),
     )
     SellerWarehouse.objects.create(
@@ -81,6 +82,8 @@ class WbLkTabCountsTests(TestCase):
     self.assertEqual(counts["in_delivery"], 1)
 
   def test_all_count_sources_match(self):
+    self.seller.wb_count_new = 1
+    self.seller.save(update_fields=["wb_count_new", "updated_at"])
     self._create_order(
       wb_order_id=1001,
       wb_warehouse_id=501,
@@ -120,6 +123,9 @@ class WbLkTabCountsTests(TestCase):
     self.assertEqual(counts["in_delivery"], 1)
 
   def test_hidden_orders_excluded(self):
+    self.seller.wb_count_new = 0
+    self.seller.wb_new_order_ids = []
+    self.seller.save(update_fields=["wb_count_new", "wb_new_order_ids", "updated_at"])
     self._create_order(
       wb_order_id=1001,
       wb_warehouse_id=501,

@@ -87,6 +87,7 @@ import './AssemblyPage.css'
 
 const MARKING_STATUS_POLL_MS = 5_000
 const MARKING_VERIFY_POLL_MS = 5_000
+const WB_COUNTS_POLL_MS = 120_000
 
 const EMPTY_MARKING_STATUS: MarkingStatusResult = {
   success: true,
@@ -349,6 +350,23 @@ function WbAssemblySellerPage() {
       cancelled = true
     }
   }, [id, stage, applySavedPickList])
+
+  useEffect(() => {
+    if (!id) return
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void load({ silent: true })
+    }
+    const timer = window.setInterval(tick, WB_COUNTS_POLL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [id, load])
 
   useEffect(() => {
     cancelledNoticeShownRef.current = false

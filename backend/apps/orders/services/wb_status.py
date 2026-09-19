@@ -288,7 +288,8 @@ def _wb_new_order_ids(seller) -> list[int]:
 def get_wb_lk_tab_counts(seller) -> dict[str, int]:
   """
   Счётчики вкладок ЛК WB: new / confirm / complete+waiting.
-  Только включённые FBS-склады сборки и видимые заказы (не assembly_hidden).
+  «Новые» — из последнего опроса GET /api/v3/orders/new (seller.wb_count_new).
+  Остальные вкладки — по БД CRM, только включённые FBS-склады.
   """
   from apps.sellers.services.warehouse_filter import filter_orders_for_assembly
 
@@ -297,20 +298,30 @@ def get_wb_lk_tab_counts(seller) -> dict[str, int]:
     seller,
   ).exclude(status=Order.Status.CANCELLED)
 
-  new_qs = base.filter(wb_supplier_status=WB_SUPPLIER_NEW).exclude(
-    status__in=[Order.Status.SHIPPED, Order.Status.IN_DELIVERY],
-  )
-  new_ids = _wb_new_order_ids(seller)
-  if new_ids:
-    new_qs = new_qs.filter(wb_order_id__in=new_ids)
-
   return {
-    "new": new_qs.count(),
+    "new": int(getattr(seller, "wb_count_new", 0) or 0),
     "in_picking": base.filter(wb_supplier_status=WB_SUPPLIER_ASSEMBLY)
     .exclude(status=Order.Status.SHIPPED)
     .count(),
     "in_delivery": base.filter(wb_in_delivery_q()).count(),
   }
+
+
+def enabled_wb_new_order_ids_from_api(seller, wb_orders) -> list[int]:
+  """ID заказов из GET /api/v3/orders/new только на включённых FBS-складах."""
+  from apps.sellers.services.warehouse_filter import is_warehouse_enabled
+
+  ids: list[int] = []
+  seen: set[int] = set()
+  for wb_order in wb_orders:
+    if not is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id):
+      continue
+    wb_id = int(wb_order.wb_order_id)
+    if wb_id in seen:
+      continue
+    seen.add(wb_id)
+    ids.append(wb_id)
+  return sorted(ids)
 
 
 def compute_live_wb_counts(

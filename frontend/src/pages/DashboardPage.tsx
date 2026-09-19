@@ -14,7 +14,7 @@ import { useMarketplace } from '../context/MarketplaceContext'
 import { uiHint } from '../utils/uiHint'
 import '../components/OffCrmShipmentsModal.css'
 
-const STATS_POLL_MS = 60_000
+const STATS_POLL_MS = 120_000
 
 function mergeDashboardStats(prev: OrderStats, patch: Partial<OrderStats>): OrderStats {
   return { ...prev, ...patch }
@@ -117,7 +117,7 @@ export function DashboardPage() {
           <p>
             {isSeller && user.seller_name
               ? `Кабинет селлера: ${user.seller_name}`
-              : 'Обзор операций фулфилмента · автообновление табло каждую минуту'}
+              : 'Обзор операций фулфилмента · автообновление табло каждые 2 минуты'}
           </p>
           <p className="dashboard-sync-meta">
             {statsLoading ? 'Загрузка счётчиков…' : syncedLabel}

@@ -1330,7 +1330,16 @@ def scan_and_print(seller: Seller, scan_value: str, *, user=None) -> Order:
 
 
 def _refresh_wb_lk_counts(seller: Seller) -> None:
-  save_wb_counts_to_seller(seller, get_wb_lk_tab_counts(seller))
+  """Обновить «На сборке»/«В доставке» в кэше; «Новые» — только из последнего опроса WB."""
+  db_counts = get_wb_lk_tab_counts(seller)
+  save_wb_counts_to_seller(
+    seller,
+    {
+      "new": int(seller.wb_count_new or 0),
+      "in_picking": db_counts["in_picking"],
+      "in_delivery": db_counts["in_delivery"],
+    },
+  )
 
 
 def get_seller_stage_counts(seller: Seller, *, assembly_only: bool = False) -> dict[str, int]:

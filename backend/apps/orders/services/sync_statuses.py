@@ -26,7 +26,7 @@ from apps.orders.services.wb_status import (
 from apps.sellers.models import Seller
 from apps.sellers.services.warehouse_filter import filter_orders_for_assembly, filter_orders_for_seller
 
-SYNC_VERSION = "delivery-v15"
+SYNC_VERSION = "delivery-v16"
 
 # warehouse_id по wb_order_id — для фильтра при подсчёте live-счётчиков
 WarehouseMap = dict[int, int | None]
@@ -417,7 +417,10 @@ def sync_order_statuses_for_seller(
   if not poll_ids:
     scoped_new_ids = sorted(new_ids_set)
     tab_counts = get_wb_lk_tab_counts(seller)
+    tab_counts["new"] = new_orders_total
     save_wb_counts_to_seller(seller, tab_counts, new_order_ids=scoped_new_ids)
+    seller.refresh_from_db(fields=["wb_count_new", "wb_new_order_ids", "wb_counts_synced_at"])
+    tab_counts["new"] = int(seller.wb_count_new or 0)
     return {
       "statuses_fetched": 0,
       "statuses_updated": 0,
@@ -457,9 +460,12 @@ def sync_order_statuses_for_seller(
   reconciled += stale_delivery.get("stale_delivery_cleared", 0)
 
   live_counts = compute_live_wb_counts(status_map, allowed_ids=scoped_ids)
-  scoped_new_ids = sorted(new_ids_set & scoped_ids)
+  scoped_new_ids = sorted(new_ids_set)
   tab_counts = get_wb_lk_tab_counts(seller)
+  tab_counts["new"] = new_orders_total
   save_wb_counts_to_seller(seller, tab_counts, new_order_ids=scoped_new_ids)
+  seller.refresh_from_db(fields=["wb_count_new", "wb_new_order_ids", "wb_counts_synced_at"])
+  tab_counts["new"] = int(seller.wb_count_new or 0)
   db_counts = get_seller_stage_counts(seller, assembly_only=True)
 
   return {

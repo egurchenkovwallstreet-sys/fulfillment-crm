@@ -18,7 +18,7 @@ class WbTabCountsTests(TestCase):
       wb_enabled=True,
       wb_api_token_encrypted="token",
       wb_new_order_ids=[101, 102],
-      wb_count_new=99,
+      wb_count_new=1,
       wb_count_assembly=99,
       wb_count_delivery=99,
       wb_counts_synced_at=timezone.now(),
@@ -46,7 +46,7 @@ class WbTabCountsTests(TestCase):
       status=Order.Status.IN_PICKING,
     )
 
-  def test_counts_from_db_not_stale_cache_fields(self):
+  def test_new_count_from_wb_sync_cache(self):
     counts = get_seller_wb_tab_counts(self.seller, assembly_only=True)
     self.assertEqual(counts["new"], 1)
     self.assertEqual(counts["in_picking"], 1)

@@ -86,17 +86,6 @@ def _repair_orders_warehouse_ids(seller: Seller, wb_orders: list) -> int:
   return fixed
 
 
-def _merge_new_order_ids(seller: Seller, new_wb_ids: list[int]) -> None:
-  if not new_wb_ids:
-    return
-  current = {int(item) for item in (seller.wb_new_order_ids or []) if item is not None}
-  merged = sorted(current | {int(item) for item in new_wb_ids})
-  if merged == sorted(current):
-    return
-  seller.wb_new_order_ids = merged
-  seller.save(update_fields=["wb_new_order_ids", "updated_at"])
-
-
 def _backfill_orders_meta(seller: Seller, wb_orders: list) -> int:
   updated = 0
   for wb_order in wb_orders:
@@ -302,17 +291,10 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   status_result = {"statuses_fetched": 0, "statuses_updated": 0, "reconciled": 0, "counts": {}}
   status_error = ""
   cancelled_in_supplies: list[dict] = []
-  new_wb_ids = [
-    wb_order.wb_order_id
-    for wb_order in wb_orders
-    if is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id)
-  ]
-  enabled_new_total = sum(
-    1
-    for wb_order in wb_orders
-    if is_warehouse_enabled(seller, wb_order.warehouse_id, wb_order.office_id)
-  )
-  _merge_new_order_ids(seller, new_wb_ids)
+  from apps.orders.services.wb_status import enabled_wb_new_order_ids_from_api
+
+  new_wb_ids = enabled_wb_new_order_ids_from_api(seller, wb_orders)
+  enabled_new_total = len(new_wb_ids)
   from apps.orders.services.supply_flow import (
     cancelled_orders_in_active_supplies,
     orders_at_risk_in_active_supplies,
