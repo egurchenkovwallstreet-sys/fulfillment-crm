@@ -79,7 +79,11 @@ import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { useCrmNotice } from '../context/CrmNoticeContext'
 import { uiHint, hintWrapProps } from '../utils/uiHint'
-import { readAssemblySellerCache, writeAssemblySellerCache } from '../utils/assemblyCache'
+import {
+  patchAssemblySellersCache,
+  readAssemblySellerCache,
+  writeAssemblySellerCache,
+} from '../utils/assemblyCache'
 import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
@@ -688,6 +692,17 @@ function WbAssemblySellerPage() {
       }
       if (result.pick_list_error) {
         showError('Лист подбора', result.pick_list_error)
+      }
+      if (id && result.counts) {
+        patchAssemblySellersCache(marketplace, Number(id), {
+          new: result.counts.new ?? 0,
+          in_picking: result.counts.in_picking ?? 0,
+          in_delivery: result.counts.in_delivery ?? 0,
+          total_active:
+            (result.counts.new ?? 0)
+            + (result.counts.in_picking ?? 0)
+            + (result.counts.in_delivery ?? 0),
+        })
       }
       setStage('confirm')
       await load({ stageKey: 'confirm' })

@@ -116,6 +116,7 @@ export interface StartAssemblyResult {
   sync_stale_message?: string
   assembly_ready?: number
   assembly_pending?: number
+  counts?: Record<string, number>
   pick_lists_count?: number
   pick_list_error?: string
   pick_lists?: PickList[]

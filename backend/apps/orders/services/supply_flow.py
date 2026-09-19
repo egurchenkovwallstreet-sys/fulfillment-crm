@@ -1458,6 +1458,18 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   )
 
   if added_orders:
+    from apps.orders.services.wb_status import remove_wb_orders_from_new_cache
+
+    remove_wb_orders_from_new_cache(seller, [order.wb_order_id])
+    seller.refresh_from_db(
+      fields=[
+        "wb_count_new",
+        "wb_new_order_ids",
+        "wb_count_assembly",
+        "wb_count_delivery",
+        "wb_counts_synced_at",
+      ],
+    )
     maybe_prefetch_shipping_points_after_assembly_progress(
       seller,
       order,
@@ -2095,6 +2107,7 @@ def send_orders_to_assembly_bulk(
   sent = 0
   stickers_total = 0
   sent_order_ids: list[int] = []
+  sent_wb_order_ids: list[int] = []
   prefetch_supply_ids: list[str] = []
 
   for wb_warehouse_id, wh_orders in by_warehouse.items():
@@ -2111,6 +2124,7 @@ def send_orders_to_assembly_bulk(
       sent += len(added_orders)
       stickers_total += stickers_fetched
       sent_order_ids.extend(order.id for order in added_orders)
+      sent_wb_order_ids.extend(order.wb_order_id for order in added_orders)
       if supply.wb_supply_id:
         prefetch_supply_ids.append(supply.wb_supply_id)
       if sticker_error:
@@ -2173,6 +2187,20 @@ def send_orders_to_assembly_bulk(
     },
   )
 
+  if sent_wb_order_ids:
+    from apps.orders.services.wb_status import remove_wb_orders_from_new_cache
+
+    remove_wb_orders_from_new_cache(seller, sent_wb_order_ids)
+    seller.refresh_from_db(
+      fields=[
+        "wb_count_new",
+        "wb_new_order_ids",
+        "wb_count_assembly",
+        "wb_count_delivery",
+        "wb_counts_synced_at",
+      ],
+    )
+
   if sent > 0 and orders:
     maybe_prefetch_shipping_points_after_assembly_progress(
       seller,
@@ -2188,6 +2216,7 @@ def send_orders_to_assembly_bulk(
     "stickers_fetched": stickers_total,
     "stickers_deferred": defer_stickers and sent > 0,
     "sent_order_ids": sent_order_ids,
+    "sent_wb_order_ids": sent_wb_order_ids,
     "errors": errors,
   }
 

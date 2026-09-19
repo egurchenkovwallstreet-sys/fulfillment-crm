@@ -620,6 +620,17 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   except SupplyFlowError as exc:
     raise AssemblyError(str(exc), code=getattr(exc, "code", "error")) from exc
 
+  seller.refresh_from_db(
+    fields=[
+      "wb_count_new",
+      "wb_new_order_ids",
+      "wb_count_assembly",
+      "wb_count_delivery",
+      "wb_counts_synced_at",
+    ],
+  )
+  readiness = get_assembly_transfer_readiness(seller)
+
   pick_list_error = ""
   pick_lists_count = 0
   try:
@@ -663,6 +674,7 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     "pick_list_error": pick_list_error,
     "assembly_ready": readiness["assembly_ready"],
     "assembly_pending": readiness["assembly_pending"],
+    "counts": get_seller_wb_tab_counts(seller, assembly_only=True),
     "sync_stale_message": sync_stale_message,
   }
 

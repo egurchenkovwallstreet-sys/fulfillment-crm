@@ -346,6 +346,32 @@ def compute_live_wb_counts(
   return counts
 
 
+def remove_wb_orders_from_new_cache(seller, wb_order_ids: list[int]) -> None:
+  """Сразу убрать переданные на сборку заказы из счётчика «Новые» (до следующего sync WB)."""
+  if not wb_order_ids:
+    return
+
+  remove_set = {int(order_id) for order_id in wb_order_ids}
+  current = _wb_new_order_ids(seller)
+  if current:
+    updated_ids = [order_id for order_id in current if order_id not in remove_set]
+    new_count = len(updated_ids)
+  else:
+    updated_ids = None
+    new_count = max(0, int(getattr(seller, "wb_count_new", 0) or 0) - len(remove_set))
+
+  db_counts = get_wb_lk_tab_counts(seller)
+  save_wb_counts_to_seller(
+    seller,
+    {
+      "new": new_count,
+      "in_picking": db_counts["in_picking"],
+      "in_delivery": db_counts["in_delivery"],
+    },
+    new_order_ids=updated_ids,
+  )
+
+
 def save_wb_counts_to_seller(
   seller,
   counts: dict[str, int],

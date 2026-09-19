@@ -11,6 +11,7 @@ from apps.orders.services.wb_status import (
   WB_SUPPLIER_DELIVERY,
   WB_SUPPLIER_NEW,
   get_wb_lk_tab_counts,
+  remove_wb_orders_from_new_cache,
 )
 from apps.sellers.models import Seller, SellerWarehouse
 
@@ -121,6 +122,32 @@ class WbLkTabCountsTests(TestCase):
 
     counts = get_wb_lk_tab_counts(self.seller)
     self.assertEqual(counts["in_delivery"], 1)
+
+  def test_remove_transferred_orders_from_new_cache(self):
+    self.seller.wb_count_new = 2
+    self.seller.wb_new_order_ids = [1001, 1002]
+    self.seller.save(update_fields=["wb_count_new", "wb_new_order_ids", "updated_at"])
+    self._create_order(
+      wb_order_id=1001,
+      wb_warehouse_id=501,
+      wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+      status=Order.Status.IN_PICKING,
+    )
+    self._create_order(
+      wb_order_id=1002,
+      wb_warehouse_id=501,
+      wb_supplier_status=WB_SUPPLIER_NEW,
+      status=Order.Status.NEW,
+    )
+
+    remove_wb_orders_from_new_cache(self.seller, [1001])
+    self.seller.refresh_from_db()
+
+    self.assertEqual(self.seller.wb_count_new, 1)
+    self.assertEqual(self.seller.wb_new_order_ids, [1002])
+    counts = get_wb_lk_tab_counts(self.seller)
+    self.assertEqual(counts["new"], 1)
+    self.assertEqual(counts["in_picking"], 1)
 
   def test_hidden_orders_excluded(self):
     self.seller.wb_count_new = 0

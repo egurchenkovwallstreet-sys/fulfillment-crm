@@ -30,6 +30,19 @@ export function writeAssemblySellersCache(marketplace: string, sellers: SellerAs
   }
 }
 
+export function patchAssemblySellersCache(
+  marketplace: string,
+  sellerId: number,
+  patch: Partial<SellerAssemblyCounters>,
+): void {
+  const current = readAssemblySellersCache(marketplace)
+  if (!current?.length) return
+  writeAssemblySellersCache(
+    marketplace,
+    current.map((seller) => (seller.id === sellerId ? { ...seller, ...patch } : seller)),
+  )
+}
+
 export function readAssemblySellerCache(
   sellerId: number,
   stage: string,
