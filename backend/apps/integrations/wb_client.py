@@ -29,12 +29,15 @@ class WBApiError(Exception):
     status_code: int | None = None,
     code: str = "",
     *,
-    payload: dict | None = None,
+    payload: dict | list | None = None,
   ):
     super().__init__(message)
     self.status_code = status_code
     self.code = code or ""
-    self.payload = payload if isinstance(payload, dict) else {}
+    if isinstance(payload, (dict, list)):
+      self.payload = payload
+    else:
+      self.payload = {}
 
 
 def _looks_like_order_meta_item(item: dict) -> bool:
@@ -163,21 +166,34 @@ class WBClient:
     if response.status_code == 429:
       raise WBApiError("Превышен лимит запросов WB API", status_code=429, code="rate_limit")
     if response.status_code >= 400:
-      payload: dict = {}
+      payload: dict | list = {}
       try:
         raw = response.json()
-        if isinstance(raw, dict):
+        if isinstance(raw, (dict, list)):
           payload = raw
       except ValueError:
         payload = {}
-      wb_code = str(payload.get("code") or payload.get("title") or payload.get("error") or "")
-      wb_message = str(
-        payload.get("message")
-        or payload.get("detail")
-        or payload.get("error")
-        or response.text[:300]
-        or f"WB API ошибка {response.status_code}",
-      )
+      wb_code = ""
+      wb_message = ""
+      if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        first = payload[0]
+        wb_code = str(first.get("code") or "")
+        wb_message = str(
+          first.get("message")
+          or first.get("errorText")
+          or first.get("detail")
+          or ""
+        )
+      elif isinstance(payload, dict):
+        wb_code = str(payload.get("code") or payload.get("title") or payload.get("error") or "")
+        wb_message = str(
+          payload.get("message")
+          or payload.get("detail")
+          or payload.get("error")
+          or ""
+        )
+      if not wb_message:
+        wb_message = str(response.text[:500] or f"WB API ошибка {response.status_code}")
       raise WBApiError(
         f"WB API ошибка {response.status_code}: {wb_message}",
         status_code=response.status_code,
@@ -671,10 +687,14 @@ class WBClient:
       chrt_id = item.get("chrtId")
       if chrt_id is None:
         chrt_id = item.get("chrtID")
-      if chrt_id is None:
+      try:
+        chrt_id = int(chrt_id)
+      except (TypeError, ValueError):
+        continue
+      if chrt_id <= 0:
         continue
       payload_stocks.append({
-        "chrtId": int(chrt_id),
+        "chrtId": chrt_id,
         "amount": max(0, int(item.get("amount") or 0)),
       })
     if not payload_stocks:

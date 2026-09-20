@@ -49,9 +49,20 @@ class WbStockErrorFormatTests(SimpleTestCase):
       payload=[{"code": "CargoWarehouseRestriction", "message": "LCL"}],
     )
     warehouse = SellerWarehouse(name="ФФ Центр", cargo_type=1)
-    text = _format_wb_stock_error(exc, warehouse=warehouse)
+    text = _format_wb_stock_error(
+      exc,
+      warehouse=warehouse,
+      barcode="2038749695810",
+      chrt_id=123456789,
+    )
     self.assertIn("ФФ Центр", text)
-    self.assertIn("Wildberries", text)
+    self.assertIn("chrtId", text)
+
+  def test_validate_rejects_barcode_as_chrt_id(self):
+    from apps.warehouse.services.wb_stocks import _validate_chrt_id_for_stock
+
+    with self.assertRaises(WBStockError):
+      _validate_chrt_id_for_stock(2038749695810, "2038749695810")
 
 
 class WbChrtResolveTests(TestCase):

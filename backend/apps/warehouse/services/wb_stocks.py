@@ -5,11 +5,7 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
-from apps.warehouse.services.wb_cargo import (
-  assert_fbs_warehouse_for_stocks,
-  cargo_type_label,
-  seller_warehouse_alternatives_text,
-)
+from apps.warehouse.services.wb_cargo import assert_fbs_warehouse_for_stocks
 
 
 def _normalize_barcode(value: str) -> str:
@@ -97,22 +93,14 @@ def _format_wb_stock_error(
       "Обновите CRM на сервере и повторите приёмку."
     )
   if "cargowarehouserestriction" in joined or " lcl" in joined:
-    cargo_hint = ""
-    if warehouse is not None and warehouse.cargo_type:
-      cargo_hint = f" Склад принимает: {cargo_type_label(warehouse.cargo_type)}."
-    alt_hint = ""
-    if seller is not None and warehouse is not None:
-      alt_hint = seller_warehouse_alternatives_text(seller, current=warehouse)
-    if warehouse_label:
-      return (
-        f"WB не принимает остаток на склад «{warehouse_label}» — "
-        "тип груза товара не подходит для этого склада."
-        f"{cargo_hint}{alt_hint} "
-        "Это не ошибка CRM и не проблема токена — так отвечает Wildberries."
-      )
+    chrt_hint = f" chrtId={chrt_id}" if chrt_id else ""
     return (
-      "WB не принимает остаток на выбранный склад — тип груза товара не подходит."
-      f"{alt_hint} Это ответ Wildberries, не ошибка CRM."
+      f"WB отклонил остаток на склад «{warehouse_label or '—'}»{chrt_hint}. "
+      "Для обычного FBS-склада и МГТ-товара это часто значит, что CRM отправила "
+      "неверный chrtId (ID размера из карточки WB), а не что склад «не подходит». "
+      "Проверьте: токен селлера с правами «Маркетплейс» и «Контент», "
+      "карточка активна, баркод есть в размере M. "
+      f"Баркод {barcode or '—'}."
     )
   if exc.status_code in (401, 403) or "unauthorized" in joined or "forbidden" in joined:
     return (
@@ -129,6 +117,20 @@ def _format_wb_stock_error(
   return f"Не удалось обновить остатки в WB{suffix}: {exc}"
 
 
+def _validate_chrt_id_for_stock(chrt_id: int, barcode: str) -> None:
+  code = _normalize_barcode(barcode)
+  if chrt_id <= 0:
+    raise WBStockError(
+      f"WB не вернул ID размера (chrtId) для баркода {code or '—'}. "
+      "Проверьте карточку в ЛК WB и токен с правами «Контент»."
+    )
+  if code.isdigit() and len(code) >= 11 and str(chrt_id) == code:
+    raise WBStockError(
+      f"CRM не смогла получить chrtId для баркода {code}. "
+      "Без chrtId WB не принимает остатки — проверьте карточку и токен селлера."
+    )
+
+
 def _resolve_chrt_id(
   seller: Seller,
   barcode: str,
@@ -139,9 +141,11 @@ def _resolve_chrt_id(
   from apps.warehouse.services.product_catalog import resolve_wb_chrt_id_for_barcode
 
   try:
-    return resolve_wb_chrt_id_for_barcode(seller, barcode, product=product)
+    chrt_id = resolve_wb_chrt_id_for_barcode(seller, barcode, product=product)
   except CatalogError as exc:
     raise WBStockError(str(exc)) from exc
+  _validate_chrt_id_for_stock(chrt_id, barcode)
+  return chrt_id
 
 
 def _resolve_chrt_ids_map(

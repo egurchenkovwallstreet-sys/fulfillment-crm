@@ -10,6 +10,7 @@ from apps.warehouse.services.catalog_fetch import (
   CatalogError,
   _get_token,
   barcode_lookup_variants,
+  build_catalog_index_for_barcodes,
   normalize_barcode,
   parse_wb_card_to_items,
 )
@@ -110,6 +111,14 @@ def lookup_catalog_item_for_barcode(
   if mp == OZON:
     item, _meta = fetch_ozon_item_by_barcode(seller, barcode)
     return item
+
+  try:
+    index = build_catalog_index_for_barcodes(seller, [barcode])
+    item = index.get(barcode)
+    if item:
+      return item
+  except CatalogError:
+    raise
 
   token = _get_token(seller)
   card = search_wb_card_by_barcode(token, barcode)
