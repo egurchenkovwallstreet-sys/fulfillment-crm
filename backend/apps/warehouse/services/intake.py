@@ -88,14 +88,20 @@ def _write_wb_balance_for_intake(
   reserved_new_orders: int,
 ) -> tuple[dict, bool, int, bool, int, int]:
   wb_target, restock_required = compute_wb_amount_from_crm(crm_quantity, reserved_new_orders)
-  wb_before = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
-  push_result = push_wb_stock_absolute(seller, warehouse, barcode, wb_target)
+  wb_before = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
+  push_result = push_wb_stock_absolute(
+    seller,
+    warehouse,
+    barcode,
+    wb_target,
+    product=product,
+  )
   ProductWarehouseStock.objects.update_or_create(
     product=product,
     seller_warehouse=warehouse,
     defaults={"quantity": wb_target},
   )
-  wb_actual = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+  wb_actual = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
   verified = wb_actual == wb_target
   wb_sync = {
     **push_result,

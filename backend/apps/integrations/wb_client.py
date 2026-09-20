@@ -618,23 +618,24 @@ class WBClient:
     )
     return payload if isinstance(payload, dict) else {}
 
-  def fetch_warehouse_stocks_by_skus(
+  def fetch_warehouse_stocks_by_chrt_ids(
     self,
     warehouse_id: int,
-    skus: list[str],
+    chrt_ids: list[int],
   ) -> list[dict]:
-    """POST /api/v3/stocks/{warehouseId} — остатки по баркодам (SKU)."""
-    if not skus:
+    """POST /api/v3/stocks/{warehouseId} — остатки по chrtId (ID размера WB)."""
+    normalized = sorted({int(item) for item in chrt_ids if int(item) > 0})
+    if not normalized:
       return []
 
     stocks: list[dict] = []
     batch_size = 1000
-    for i in range(0, len(skus), batch_size):
-      batch = skus[i : i + batch_size]
+    for i in range(0, len(normalized), batch_size):
+      batch = normalized[i : i + batch_size]
       payload = self._request(
         "POST",
         f"/api/v3/stocks/{warehouse_id}",
-        json={"skus": batch},
+        json={"chrtIds": batch},
       )
       if isinstance(payload, dict):
         stocks.extend(payload.get("stocks") or [])
@@ -643,18 +644,45 @@ class WBClient:
       time.sleep(REQUEST_INTERVAL_SEC)
     return stocks
 
+  def fetch_warehouse_stocks_by_skus(
+    self,
+    warehouse_id: int,
+    skus: list[str],
+  ) -> list[dict]:
+    """Обратная совместимость — не используйте, WB отключил sku в API остатков."""
+    return self.fetch_warehouse_stocks_by_chrt_ids(
+      warehouse_id,
+      [int(sku) for sku in skus if str(sku).isdigit()],
+    )
+
   def update_warehouse_stocks(
     self,
     warehouse_id: int,
     stocks: list[dict],
   ) -> None:
-    """PUT /api/v3/stocks/{warehouseId} — установить остатки."""
+    """PUT /api/v3/stocks/{warehouseId} — установить остатки по chrtId."""
     if not stocks:
       return
 
+    payload_stocks: list[dict] = []
+    for item in stocks:
+      if not isinstance(item, dict):
+        continue
+      chrt_id = item.get("chrtId")
+      if chrt_id is None:
+        chrt_id = item.get("chrtID")
+      if chrt_id is None:
+        continue
+      payload_stocks.append({
+        "chrtId": int(chrt_id),
+        "amount": max(0, int(item.get("amount") or 0)),
+      })
+    if not payload_stocks:
+      return
+
     batch_size = 1000
-    for i in range(0, len(stocks), batch_size):
-      batch = stocks[i : i + batch_size]
+    for i in range(0, len(payload_stocks), batch_size):
+      batch = payload_stocks[i : i + batch_size]
       self._request(
         "PUT",
         f"/api/v3/stocks/{warehouse_id}",

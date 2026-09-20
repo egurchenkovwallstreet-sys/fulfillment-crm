@@ -24,6 +24,7 @@ CATALOG_PRODUCT_FIELDS = (
   "name",
   "requires_marking",
   "wb_nm_id",
+  "wb_chrt_id",
   "vendor_code",
   "tech_size",
   "wb_size",
@@ -61,6 +62,33 @@ def build_ozon_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
   return index
 
 
+def resolve_wb_chrt_id_for_barcode(
+  seller: Seller,
+  barcode: str,
+  *,
+  product: Product | None = None,
+) -> int:
+  """ID размера WB (chrtId) — обязателен для API остатков FBS с 2026."""
+  barcode = normalize_barcode(barcode)
+  if not barcode:
+    raise CatalogError("Пустой баркод")
+
+  if product is not None and product.wb_chrt_id:
+    return int(product.wb_chrt_id)
+
+  item = lookup_catalog_item_for_barcode(seller, barcode, WB)
+  if item and item.wb_chrt_id:
+    chrt_id = int(item.wb_chrt_id)
+    if product is not None:
+      Product.objects.filter(pk=product.pk).update(wb_chrt_id=chrt_id)
+    return chrt_id
+
+  raise CatalogError(
+    f"Баркод {barcode} не найден в каталоге WB селлера «{seller.company_name}». "
+    "Проверьте, что карточка активна в ЛК WB и баркод принадлежит этому селлеру."
+  )
+
+
 def lookup_catalog_item_for_barcode(
   seller: Seller,
   barcode: str,
@@ -94,6 +122,7 @@ def catalog_item_to_create_kwargs(
     "name": name,
     "requires_marking": item.requires_marking,
     "wb_nm_id": item.wb_nm_id or None,
+    "wb_chrt_id": item.wb_chrt_id or None,
     "vendor_code": item.vendor_code or "",
     "tech_size": item.tech_size or "",
     "wb_size": item.wb_size or "",
@@ -117,6 +146,10 @@ def apply_catalog_item_to_product(product: Product, item: CatalogBarcodeItem) ->
   if item.wb_nm_id and product.wb_nm_id != item.wb_nm_id:
     product.wb_nm_id = item.wb_nm_id
     changed.append("wb_nm_id")
+
+  if item.wb_chrt_id and product.wb_chrt_id != item.wb_chrt_id:
+    product.wb_chrt_id = item.wb_chrt_id
+    changed.append("wb_chrt_id")
 
   vendor_code = item.vendor_code or ""
   if vendor_code and product.vendor_code != vendor_code:

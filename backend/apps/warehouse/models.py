@@ -91,6 +91,13 @@ class Product(models.Model):
   )
   requires_marking = models.BooleanField("Требует маркировку (ЧЗ)", default=False)
   wb_nm_id = models.BigIntegerField("Артикул WB (nmID)", null=True, blank=True, db_index=True)
+  wb_chrt_id = models.BigIntegerField(
+    "ID размера WB (chrtId)",
+    null=True,
+    blank=True,
+    db_index=True,
+    help_text="Нужен для остатков FBS — WB больше не принимает баркод (sku) в API остатков",
+  )
   vendor_code = models.CharField("Артикул продавца", max_length=200, blank=True)
   tech_size = models.CharField("Размер (EU/тех.)", max_length=50, blank=True)
   wb_size = models.CharField("Размер (RU)", max_length=50, blank=True)

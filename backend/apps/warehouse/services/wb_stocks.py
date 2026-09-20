@@ -4,6 +4,9 @@ from __future__ import annotations
 from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
+from apps.warehouse.models import Product
+from apps.warehouse.services.catalog_fetch import CatalogError, build_catalog_index_for_barcodes, normalize_barcode
+from apps.warehouse.services.product_catalog import resolve_wb_chrt_id_for_barcode
 
 
 class WBStockError(Exception):
@@ -31,29 +34,113 @@ def get_seller_warehouse(seller: Seller, warehouse_pk: int) -> SellerWarehouse:
   return warehouse
 
 
+def _parse_stock_amount(item: dict) -> int:
+  try:
+    return max(0, int(item.get("amount") or 0))
+  except (TypeError, ValueError):
+    return 0
+
+
+def _stock_item_chrt_id(item: dict) -> int | None:
+  raw = item.get("chrtId")
+  if raw is None:
+    raw = item.get("chrtID")
+  try:
+    value = int(raw)
+  except (TypeError, ValueError):
+    return None
+  return value if value > 0 else None
+
+
+def _format_wb_stock_error(exc: WBApiError) -> str:
+  text = str(exc)
+  payload = getattr(exc, "payload", {}) or {}
+  chunks = [text]
+  if isinstance(payload, list):
+    for item in payload:
+      if isinstance(item, dict):
+        code = str(item.get("code") or "")
+        error_text = str(item.get("errorText") or item.get("message") or "")
+        if code or error_text:
+          chunks.append(f"{code}: {error_text}".strip(": "))
+  elif isinstance(payload, dict):
+    chunks.append(str(payload.get("message") or payload.get("detail") or ""))
+  joined = " ".join(part for part in chunks if part).lower()
+  if "notfound" in joined or "not found" in joined:
+    return (
+      "WB не нашёл размер товара (chrtId) для выставления остатка. "
+      "Проверьте баркод в каталоге WB этого селлера и обновите карточки."
+    )
+  if "skuuploaddisabled" in joined:
+    return (
+      "WB отключил обновление остатков по баркоду — CRM уже переведена на chrtId. "
+      "Обновите CRM на сервере и повторите."
+    )
+  if "cargowarehouserestriction" in joined:
+    return (
+      "WB отклонил остаток: склад не подходит для типа груза карточки. "
+      "Если склад обычный FBS — обновите CRM (нужен chrtId вместо баркода) и повторите."
+    )
+  return f"Не удалось обновить остатки в WB: {exc}"
+
+
+def _resolve_chrt_id(
+  seller: Seller,
+  barcode: str,
+  *,
+  product: Product | None = None,
+) -> int:
+  try:
+    return resolve_wb_chrt_id_for_barcode(seller, barcode, product=product)
+  except CatalogError as exc:
+    raise WBStockError(str(exc)) from exc
+
+
+def _resolve_chrt_ids_map(
+  seller: Seller,
+  barcodes: list[str],
+) -> dict[str, int]:
+  normalized = [normalize_barcode(code) for code in barcodes if normalize_barcode(code)]
+  if not normalized:
+    return {}
+
+  index = build_catalog_index_for_barcodes(seller, normalized)
+  resolved: dict[str, int] = {}
+  missing: list[str] = []
+  for barcode in normalized:
+    item = index.get(barcode)
+    if item and item.wb_chrt_id:
+      resolved[barcode] = int(item.wb_chrt_id)
+    else:
+      missing.append(barcode)
+
+  for barcode in missing:
+    resolved[barcode] = _resolve_chrt_id(seller, barcode)
+  return resolved
+
+
 def fetch_wb_stock_for_barcode(
   seller: Seller,
   warehouse: SellerWarehouse,
   barcode: str,
+  *,
+  product: Product | None = None,
 ) -> int:
   """Текущий остаток баркода на складе FBS в ЛК WB."""
-  barcode = barcode.strip()
+  barcode = normalize_barcode(barcode)
   if not barcode:
     raise WBStockError("Пустой баркод")
 
+  chrt_id = _resolve_chrt_id(seller, barcode, product=product)
   client = _get_wb_client(seller)
   try:
-    items = client.fetch_warehouse_stocks_by_skus(warehouse.wb_warehouse_id, [barcode])
+    items = client.fetch_warehouse_stocks_by_chrt_ids(warehouse.wb_warehouse_id, [chrt_id])
   except WBApiError as exc:
     raise WBStockError(f"Не удалось получить остаток из WB: {exc}") from exc
 
   for item in items:
-    sku = str(item.get("sku") or "").strip()
-    if sku == barcode:
-      try:
-        return max(0, int(item.get("amount") or 0))
-      except (TypeError, ValueError):
-        return 0
+    if _stock_item_chrt_id(item) == chrt_id:
+      return _parse_stock_amount(item)
   return 0
 
 
@@ -62,23 +149,29 @@ def push_wb_stock_increment(
   warehouse: SellerWarehouse,
   barcode: str,
   add_quantity: int,
+  *,
+  product: Product | None = None,
 ) -> dict:
   """Режим приёмки: текущий остаток WB + принятое количество."""
   if add_quantity <= 0:
     raise WBStockError("Количество должно быть больше 0")
 
-  barcode = barcode.strip()
-  current = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
+  barcode = normalize_barcode(barcode)
+  current = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
   new_amount = current + add_quantity
+  chrt_id = _resolve_chrt_id(seller, barcode, product=product)
 
   client = _get_wb_client(seller)
   try:
     client.update_warehouse_stocks(
       warehouse.wb_warehouse_id,
-      [{"sku": barcode, "amount": new_amount}],
+      [{"chrtId": chrt_id, "amount": new_amount}],
     )
   except WBApiError as exc:
-    raise WBStockError(f"Не удалось обновить остаток в WB: {exc}") from exc
+    raise WBStockError(_format_wb_stock_error(exc)) from exc
+
+  if product is not None and not product.wb_chrt_id:
+    Product.objects.filter(pk=product.pk).update(wb_chrt_id=chrt_id)
 
   return {
     "wb_warehouse_id": warehouse.wb_warehouse_id,
@@ -86,6 +179,7 @@ def push_wb_stock_increment(
     "previous_wb_amount": current,
     "new_wb_amount": new_amount,
     "added": add_quantity,
+    "wb_chrt_id": chrt_id,
   }
 
 
@@ -94,18 +188,22 @@ def push_wb_stock_absolute(
   warehouse: SellerWarehouse,
   barcode: str,
   amount: int,
+  *,
+  product: Product | None = None,
 ) -> dict:
   """Режим фактического остатка: установить абсолютное значение в ЛК WB."""
-  barcode = barcode.strip()
+  barcode = normalize_barcode(barcode)
   amount = max(0, int(amount))
-  current = fetch_wb_stock_for_barcode(seller, warehouse, barcode)
-  new_amount = set_wb_stock_absolute(seller, warehouse, barcode, amount)
+  current = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
+  new_amount = set_wb_stock_absolute(seller, warehouse, barcode, amount, product=product)
+  chrt_id = _resolve_chrt_id(seller, barcode, product=product)
   return {
     "wb_warehouse_id": warehouse.wb_warehouse_id,
     "warehouse_name": warehouse.name,
     "previous_wb_amount": current,
     "new_wb_amount": new_amount,
     "set_to": new_amount,
+    "wb_chrt_id": chrt_id,
   }
 
 
@@ -120,9 +218,10 @@ def build_wb_stock_lines(
   barcode: str,
   *,
   warehouses: list[SellerWarehouse] | None = None,
+  product: Product | None = None,
 ) -> tuple[list[dict], str | None]:
   """Остатки баркода на включённых FBS-складах WB (для экрана «Ячейки»)."""
-  barcode = barcode.strip()
+  barcode = normalize_barcode(barcode)
   if not barcode:
     return [], None
 
@@ -131,7 +230,12 @@ def build_wb_stock_lines(
     return [], "Нет включённых FBS-складов WB"
 
   try:
-    stock_map = fetch_wb_stocks_for_warehouses(seller, wh_list, [barcode])
+    stock_map = fetch_wb_stocks_for_warehouses(
+      seller,
+      wh_list,
+      [barcode],
+      products={barcode: product} if product else None,
+    )
   except WBStockError as exc:
     return [], str(exc)
 
@@ -158,7 +262,7 @@ def build_wb_stock_lines_batch(
   normalized: list[str] = []
   seen: set[str] = set()
   for value in barcodes:
-    code = str(value or "").strip()
+    code = normalize_barcode(value)
     if not code or code in seen:
       continue
     seen.add(code)
@@ -193,48 +297,55 @@ def build_wb_stock_lines_batch(
   return result, None
 
 
-def _parse_stock_amount(item: dict) -> int:
-  try:
-    return max(0, int(item.get("amount") or 0))
-  except (TypeError, ValueError):
-    return 0
-
-
 def fetch_wb_stocks_for_warehouses(
   seller: Seller,
   warehouses: list[SellerWarehouse],
   barcodes: list[str],
+  *,
+  products: dict[str, Product | None] | None = None,
 ) -> dict[str, dict]:
   """Остатки по баркодам на указанных FBS-складах (сумма total + by_warehouse)."""
   if not warehouses:
     raise WBStockError("Не выбраны FBS-склады")
 
-  normalized = [b.strip() for b in barcodes if b and b.strip()]
+  normalized = [normalize_barcode(b) for b in barcodes if normalize_barcode(b)]
   result: dict[str, dict] = {
     barcode: {"total": 0, "by_warehouse": {}} for barcode in normalized
   }
   if not normalized:
     return result
 
+  chrt_by_barcode = _resolve_chrt_ids_map(seller, normalized)
+  if products:
+    for barcode, product in products.items():
+      if product and product.wb_chrt_id:
+        chrt_by_barcode[normalize_barcode(barcode)] = int(product.wb_chrt_id)
+
+  chrt_ids = sorted(set(chrt_by_barcode.values()))
+  barcode_by_chrt = {chrt_id: barcode for barcode, chrt_id in chrt_by_barcode.items()}
+
   client = _get_wb_client(seller)
-  stock_by_sku: dict[str, dict[int, int]] = {barcode: {} for barcode in normalized}
+  stock_by_barcode: dict[str, dict[int, int]] = {barcode: {} for barcode in normalized}
 
   for warehouse in warehouses:
     try:
-      items = client.fetch_warehouse_stocks_by_skus(warehouse.wb_warehouse_id, normalized)
+      items = client.fetch_warehouse_stocks_by_chrt_ids(warehouse.wb_warehouse_id, chrt_ids)
     except WBApiError as exc:
       raise WBStockError(
         f"Ошибка остатков склада {warehouse.name or warehouse.wb_warehouse_id}: {exc}"
       ) from exc
 
     for item in items:
-      sku = str(item.get("sku") or "").strip()
-      if sku not in stock_by_sku:
+      chrt_id = _stock_item_chrt_id(item)
+      if chrt_id is None:
         continue
-      stock_by_sku[sku][warehouse.id] = _parse_stock_amount(item)
+      barcode = barcode_by_chrt.get(chrt_id)
+      if not barcode or barcode not in stock_by_barcode:
+        continue
+      stock_by_barcode[barcode][warehouse.id] = _parse_stock_amount(item)
 
   for barcode in normalized:
-    by_wh = stock_by_sku[barcode]
+    by_wh = stock_by_barcode[barcode]
     result[barcode] = {"total": sum(by_wh.values()), "by_warehouse": by_wh}
 
   return result
@@ -271,37 +382,7 @@ def fetch_summed_wb_stocks(
   warehouses = get_enabled_seller_warehouses(seller)
   if not warehouses:
     raise WBStockError("Нет включённых FBS-складов у селлера")
-
-  normalized = [b.strip() for b in barcodes if b and b.strip()]
-  result: dict[str, dict] = {
-    barcode: {"total": 0, "by_warehouse": {}} for barcode in normalized
-  }
-  if not normalized:
-    return result
-
-  client = _get_wb_client(seller)
-  stock_by_sku: dict[str, dict[int, int]] = {barcode: {} for barcode in normalized}
-
-  for warehouse in warehouses:
-    try:
-      items = client.fetch_warehouse_stocks_by_skus(warehouse.wb_warehouse_id, normalized)
-    except WBApiError as exc:
-      raise WBStockError(
-        f"Ошибка остатков склада {warehouse.name or warehouse.wb_warehouse_id}: {exc}"
-      ) from exc
-
-    for item in items:
-      sku = str(item.get("sku") or "").strip()
-      if sku not in stock_by_sku:
-        continue
-      stock_by_sku[sku][warehouse.id] = _parse_stock_amount(item)
-
-  for barcode in normalized:
-    by_wh = stock_by_sku[barcode]
-    total = sum(by_wh.values())
-    result[barcode] = {"total": total, "by_warehouse": by_wh}
-
-  return result
+  return fetch_wb_stocks_for_warehouses(seller, warehouses, barcodes)
 
 
 def set_wb_stock_absolute(
@@ -309,11 +390,18 @@ def set_wb_stock_absolute(
   warehouse: SellerWarehouse,
   barcode: str,
   amount: int,
+  *,
+  product: Product | None = None,
 ) -> int:
   """Установить абсолютный остаток на складе WB."""
-  barcode = barcode.strip()
+  barcode = normalize_barcode(barcode)
   amount = max(0, int(amount))
-  set_wb_stocks_absolute_batch(seller, warehouse, [(barcode, amount)])
+  set_wb_stocks_absolute_batch(
+    seller,
+    warehouse,
+    [(barcode, amount)],
+    products={barcode: product} if product else None,
+  )
   return amount
 
 
@@ -321,20 +409,30 @@ def set_wb_stocks_absolute_batch(
   seller: Seller,
   warehouse: SellerWarehouse,
   items: list[tuple[str, int]],
+  *,
+  products: dict[str, Product | None] | None = None,
 ) -> int:
   """Пакетно выставить абсолютные остатки на складе WB."""
-  stocks = [
-    {"sku": barcode.strip(), "amount": max(0, int(amount))}
-    for barcode, amount in items
-    if str(barcode or "").strip()
-  ]
+  stocks: list[dict] = []
+  product_updates: list[tuple[int, int]] = []
+  for barcode, amount in items:
+    code = normalize_barcode(barcode)
+    if not code:
+      continue
+    product = (products or {}).get(code)
+    chrt_id = _resolve_chrt_id(seller, code, product=product)
+    stocks.append({"chrtId": chrt_id, "amount": max(0, int(amount))})
+    if product is not None and not product.wb_chrt_id:
+      product_updates.append((product.pk, chrt_id))
   if not stocks:
     return 0
   client = _get_wb_client(seller)
   try:
     client.update_warehouse_stocks(warehouse.wb_warehouse_id, stocks)
   except WBApiError as exc:
-    raise WBStockError(f"Не удалось обновить остатки в WB: {exc}") from exc
+    raise WBStockError(_format_wb_stock_error(exc)) from exc
+  for product_id, chrt_id in product_updates:
+    Product.objects.filter(pk=product_id).update(wb_chrt_id=chrt_id)
   return len(stocks)
 
 
@@ -345,6 +443,7 @@ def transfer_wb_stock_between_warehouses(
   from_warehouse_id: int,
   to_warehouse_id: int,
   quantity: int,
+  product: Product | None = None,
 ) -> dict:
   """Переместить остаток между FBS-складами WB без изменения суммы."""
   if from_warehouse_id == to_warehouse_id:
@@ -355,9 +454,9 @@ def transfer_wb_stock_between_warehouses(
   from_wh = get_seller_warehouse(seller, from_warehouse_id)
   to_wh = get_seller_warehouse(seller, to_warehouse_id)
 
-  barcode = barcode.strip()
-  from_amount = fetch_wb_stock_for_barcode(seller, from_wh, barcode)
-  to_amount = fetch_wb_stock_for_barcode(seller, to_wh, barcode)
+  barcode = normalize_barcode(barcode)
+  from_amount = fetch_wb_stock_for_barcode(seller, from_wh, barcode, product=product)
+  to_amount = fetch_wb_stock_for_barcode(seller, to_wh, barcode, product=product)
 
   if from_amount < quantity:
     raise WBStockError(
@@ -367,8 +466,8 @@ def transfer_wb_stock_between_warehouses(
   new_from = from_amount - quantity
   new_to = to_amount + quantity
 
-  set_wb_stock_absolute(seller, from_wh, barcode, new_from)
-  set_wb_stock_absolute(seller, to_wh, barcode, new_to)
+  set_wb_stock_absolute(seller, from_wh, barcode, new_from, product=product)
+  set_wb_stock_absolute(seller, to_wh, barcode, new_to, product=product)
 
   return {
     "barcode": barcode,

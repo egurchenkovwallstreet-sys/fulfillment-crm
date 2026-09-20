@@ -20,7 +20,7 @@ from apps.warehouse.services.wb_stocks import (
 
 CATALOG_MODE_ALL = "all"
 CATALOG_MODE_WITH_STOCK = "with_stock"
-CATALOG_ITEMS_CACHE_VERSION = "v1"
+CATALOG_ITEMS_CACHE_VERSION = "v2"
 CATALOG_ITEMS_CACHE_TTL = 3600
 
 
@@ -55,6 +55,16 @@ def barcode_lookup_variants(value: str, marketplace: str) -> list[str]:
   return variants
 
 
+def _size_chrt_id(size: dict) -> int:
+  raw = size.get("chrtID")
+  if raw is None:
+    raw = size.get("chrtId")
+  try:
+    return int(raw or 0)
+  except (TypeError, ValueError):
+    return 0
+
+
 @dataclass
 class CatalogBarcodeItem:
   barcode: str
@@ -65,6 +75,7 @@ class CatalogBarcodeItem:
   wb_size: str
   photo_url: str
   requires_marking: bool
+  wb_chrt_id: int = 0
   color_label: str = ""
   wb_stock_total: int = 0
   wb_stock_by_warehouse: dict[int, int] = field(default_factory=dict)
@@ -126,17 +137,18 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
     for size in card.get("sizes") or []:
       tech_size = str(size.get("techSize") or "").strip()
       wb_size = str(size.get("wbSize") or "").strip()
+      chrt_id = _size_chrt_id(size)
       skus = [
         normalize_barcode(str(sku))
         for sku in (size.get("skus") or [])
         if normalize_barcode(str(sku))
       ]
       if skus:
-        size_rows.append((wb_size, tech_size, skus))
+        size_rows.append((wb_size, tech_size, chrt_id, skus))
 
     size_rows.sort(key=lambda row: size_sort_key(row[1], row[0]))
 
-    for wb_size, tech_size, skus in size_rows:
+    for wb_size, tech_size, chrt_id, skus in size_rows:
       for barcode in skus:
         if barcode in seen_barcodes:
           continue
@@ -151,6 +163,7 @@ def _parse_cards_to_items(cards: list[dict]) -> list[CatalogBarcodeItem]:
             wb_size=wb_size,
             photo_url=photo_url,
             requires_marking=need_kiz,
+            wb_chrt_id=chrt_id,
             color_label=color_label,
           )
         )
@@ -204,6 +217,7 @@ def _serialize_catalog_item(item: CatalogBarcodeItem) -> dict:
     "wb_size": item.wb_size,
     "photo_url": item.photo_url,
     "requires_marking": item.requires_marking,
+    "wb_chrt_id": item.wb_chrt_id,
     "color_label": item.color_label,
   }
 
@@ -218,6 +232,7 @@ def _deserialize_catalog_item(data: dict) -> CatalogBarcodeItem:
     wb_size=str(data.get("wb_size") or ""),
     photo_url=str(data.get("photo_url") or ""),
     requires_marking=bool(data.get("requires_marking")),
+    wb_chrt_id=int(data.get("wb_chrt_id") or 0),
     color_label=str(data.get("color_label") or ""),
   )
 
