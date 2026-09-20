@@ -5,6 +5,11 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
+from apps.warehouse.services.wb_cargo import (
+  assert_fbs_warehouse_for_stocks,
+  cargo_type_label,
+  seller_warehouse_alternatives_text,
+)
 
 
 def _normalize_barcode(value: str) -> str:
@@ -60,6 +65,7 @@ def _stock_item_chrt_id(item: dict) -> int | None:
 def _format_wb_stock_error(
   exc: WBApiError,
   *,
+  seller: Seller | None = None,
   warehouse: SellerWarehouse | None = None,
   barcode: str = "",
   chrt_id: int | None = None,
@@ -90,16 +96,27 @@ def _format_wb_stock_error(
       "WB больше не принимает остатки по баркоду. "
       "Обновите CRM на сервере и повторите приёмку."
     )
-  if "cargowarehouserestriction" in joined:
+  if "cargowarehouserestriction" in joined or " lcl" in joined:
+    cargo_hint = ""
+    if warehouse is not None and warehouse.cargo_type:
+      cargo_hint = f" Склад принимает: {cargo_type_label(warehouse.cargo_type)}."
+    alt_hint = ""
+    if seller is not None and warehouse is not None:
+      alt_hint = seller_warehouse_alternatives_text(seller, current=warehouse)
     if warehouse_label:
       return (
         f"WB не принимает остаток на склад «{warehouse_label}» — "
-        "этот товар не подходит для этого склада (тип груза LCL или ограничения ODC/CD+). "
-        "Выберите другой FBS-склад в приёмке или проверьте склады в ЛК WB."
+        "тип груза товара не подходит для этого склада."
+        f"{cargo_hint}{alt_hint} "
+        "Это не ошибка CRM и не проблема токена — так отвечает Wildberries."
       )
     return (
-      "WB не принимает остаток на выбранный склад — "
-      "товар не подходит для этого склада. Выберите другой FBS-склад в приёмке."
+      "WB не принимает остаток на выбранный склад — тип груза товара не подходит."
+      f"{alt_hint} Это ответ Wildberries, не ошибка CRM."
+    )
+  if exc.status_code in (401, 403) or "unauthorized" in joined or "forbidden" in joined:
+    return (
+      "WB отклонил запрос — проверьте токен селлера: нужны права «Маркетплейс» / остатки FBS."
     )
   details = []
   if warehouse_label:
@@ -204,6 +221,7 @@ def push_wb_stock_increment(
     raise WBStockError(
       _format_wb_stock_error(
         exc,
+        seller=seller,
         warehouse=warehouse,
         barcode=barcode,
         chrt_id=chrt_id,
@@ -466,6 +484,10 @@ def set_wb_stocks_absolute_batch(
       product_updates.append((product.pk, chrt_id))
   if not stocks:
     return 0
+  try:
+    assert_fbs_warehouse_for_stocks(warehouse)
+  except ValueError as exc:
+    raise WBStockError(str(exc)) from exc
   client = _get_wb_client(seller)
   try:
     client.update_warehouse_stocks(warehouse.wb_warehouse_id, stocks)
@@ -474,6 +496,7 @@ def set_wb_stocks_absolute_batch(
     raise WBStockError(
       _format_wb_stock_error(
         exc,
+        seller=seller,
         warehouse=warehouse,
         chrt_id=first.get("chrtId"),
       )

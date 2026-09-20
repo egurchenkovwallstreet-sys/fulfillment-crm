@@ -6,6 +6,8 @@ export interface SellerWarehouse {
   name: string
   address: string
   office_id: number | null
+  cargo_type?: number | null
+  delivery_type?: number | null
   is_enabled: boolean
   synced_at: string | null
 }

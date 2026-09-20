@@ -98,6 +98,19 @@ class SellerWarehouse(models.Model):
   name = models.CharField("Название", max_length=255, blank=True)
   address = models.CharField("Адрес", max_length=500, blank=True)
   office_id = models.BigIntegerField("ID офиса WB", null=True, blank=True)
+  cargo_type = models.PositiveSmallIntegerField(
+    "Тип груза склада WB",
+    null=True,
+    blank=True,
+    db_index=True,
+    help_text="1=МГТ, 2=СГТ, 3=КГТ+ — из GET /api/v3/warehouses",
+  )
+  delivery_type = models.PositiveSmallIntegerField(
+    "Тип доставки склада WB",
+    null=True,
+    blank=True,
+    help_text="1=FBS — из GET /api/v3/warehouses",
+  )
   is_enabled = models.BooleanField(
     "Обслуживаем в CRM",
     default=True,

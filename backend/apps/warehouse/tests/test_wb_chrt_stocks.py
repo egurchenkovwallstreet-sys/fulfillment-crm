@@ -48,10 +48,10 @@ class WbStockErrorFormatTests(SimpleTestCase):
       status_code=409,
       payload=[{"code": "CargoWarehouseRestriction", "message": "LCL"}],
     )
-    warehouse = SellerWarehouse(name="ФФ Центр")
+    warehouse = SellerWarehouse(name="ФФ Центр", cargo_type=1)
     text = _format_wb_stock_error(exc, warehouse=warehouse)
     self.assertIn("ФФ Центр", text)
-    self.assertIn("другой FBS-склад", text)
+    self.assertIn("Wildberries", text)
 
 
 class WbChrtResolveTests(TestCase):

@@ -8,6 +8,7 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.sellers.services.warehouse_manage import excluded_wb_warehouse_ids
+from apps.warehouse.services.wb_cargo import parse_wb_int
 
 
 class WarehouseSyncError(Exception):
@@ -58,6 +59,8 @@ def sync_seller_warehouses(seller: Seller, *, user=None) -> dict:
         "name": str(item.get("name") or "").strip(),
         "address": str(item.get("address") or "").strip(),
         "office_id": item.get("officeId"),
+        "cargo_type": parse_wb_int(item.get("cargoType") or item.get("cargo_type")),
+        "delivery_type": parse_wb_int(item.get("deliveryType") or item.get("delivery_type")),
         "synced_at": now,
       },
     )

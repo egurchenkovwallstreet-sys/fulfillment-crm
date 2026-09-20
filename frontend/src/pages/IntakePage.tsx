@@ -20,6 +20,7 @@ import {
   type WbSyncPreviewResult,
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
+import { wbWarehouseLabel } from '../utils/wbCargo'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { printCellLabels } from '../utils/cellLabelPrint'
@@ -562,7 +563,7 @@ export function IntakePage() {
                 <option value="">— выберите склад —</option>
                 {enabledWarehouses.map((wh) => (
                   <option key={wh.id} value={wh.id}>
-                    {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                    {wbWarehouseLabel(wh)}
                   </option>
                 ))}
               </select>

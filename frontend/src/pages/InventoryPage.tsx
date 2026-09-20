@@ -13,6 +13,7 @@ import {
   type Seller,
 } from '../api/warehouse'
 import { fetchSellerWarehouses, syncSellerWarehouses, type SellerWarehouse } from '../api/sellers'
+import { wbWarehouseLabel } from '../utils/wbCargo'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { StockBalanceModal, type StockBalanceModalData } from '../components/StockBalanceModal'
 import { useMarketplace } from '../context/MarketplaceContext'
@@ -419,7 +420,7 @@ export function InventoryPage() {
                           checked={warehouseIds.includes(wh.id)}
                           onChange={(e) => toggleWarehouse(wh.id, e.target.checked)}
                         />
-                        {wh.name || `Склад #${wh.wb_warehouse_id}`}
+                        {wbWarehouseLabel(wh)}
                       </label>
                     </li>
                   ))}

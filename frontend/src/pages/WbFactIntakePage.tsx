@@ -15,6 +15,7 @@ import {
 } from '../api/wbFactIntake'
 import { fetchProductCellLabel, fetchSellers, type Seller } from '../api/warehouse'
 import { fetchSellerWarehouses, type SellerWarehouse } from '../api/sellers'
+import { wbWarehouseLabel } from '../utils/wbCargo'
 import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import { printCellLabel } from '../utils/cellLabelPrint'
@@ -368,7 +369,7 @@ export function WbFactIntakePage() {
                 <option value="">— выберите склад —</option>
                 {warehouses.map((wh) => (
                   <option key={wh.id} value={wh.id}>
-                    {wh.name}{wh.is_enabled ? '' : ' (выкл.)'}
+                    {wbWarehouseLabel(wh)}{wh.is_enabled ? '' : ' (выкл.)'}
                   </option>
                 ))}
               </select>

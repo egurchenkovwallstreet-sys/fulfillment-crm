@@ -15,6 +15,8 @@ class SellerWarehouseSerializer(serializers.ModelSerializer):
       "name",
       "address",
       "office_id",
+      "cargo_type",
+      "delivery_type",
       "is_enabled",
       "synced_at",
     )
@@ -24,6 +26,8 @@ class SellerWarehouseSerializer(serializers.ModelSerializer):
       "name",
       "address",
       "office_id",
+      "cargo_type",
+      "delivery_type",
       "synced_at",
     )
 
