@@ -21,7 +21,7 @@ echo "=== up db/redis ==="
 docker compose up -d db redis
 
 echo "=== up web (migrations + gunicorn) ==="
-docker compose up -d --force-recreate web beat
+docker compose up -d --force-recreate web
 
 echo "=== wait for backend health ==="
 EXPECTED_BUILD="$(cat backend/BUILD_VERSION)"
@@ -47,6 +47,9 @@ if [[ "$ok" -ne 1 ]]; then
   exit 1
 fi
 echo "OK: backend build=${EXPECTED_BUILD}"
+
+echo "=== up beat ==="
+docker compose up -d --force-recreate beat
 
 echo "=== storage snapshots + accruals ==="
 if docker compose exec -T web python manage.py rebuild_storage_daily_quantities; then

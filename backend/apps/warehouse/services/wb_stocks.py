@@ -5,8 +5,13 @@ from apps.integrations.wb_client import WBApiError, WBClient
 from apps.integrations.wb_crypto import TokenCryptoError, decrypt_token
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Product
-from apps.warehouse.services.catalog_fetch import CatalogError, build_catalog_index_for_barcodes, normalize_barcode
-from apps.warehouse.services.product_catalog import resolve_wb_chrt_id_for_barcode
+
+
+def _normalize_barcode(value: str) -> str:
+  """Ленивый импорт — иначе цикл catalog_fetch ↔ wb_stocks ломает старт сервера."""
+  from apps.warehouse.services.catalog_fetch import normalize_barcode as normalize
+
+  return normalize(value)
 
 
 class WBStockError(Exception):
@@ -90,6 +95,9 @@ def _resolve_chrt_id(
   *,
   product: Product | None = None,
 ) -> int:
+  from apps.warehouse.services.catalog_fetch import CatalogError
+  from apps.warehouse.services.product_catalog import resolve_wb_chrt_id_for_barcode
+
   try:
     return resolve_wb_chrt_id_for_barcode(seller, barcode, product=product)
   except CatalogError as exc:
@@ -100,7 +108,9 @@ def _resolve_chrt_ids_map(
   seller: Seller,
   barcodes: list[str],
 ) -> dict[str, int]:
-  normalized = [normalize_barcode(code) for code in barcodes if normalize_barcode(code)]
+  from apps.warehouse.services.catalog_fetch import build_catalog_index_for_barcodes
+
+  normalized = [_normalize_barcode(code) for code in barcodes if _normalize_barcode(code)]
   if not normalized:
     return {}
 
@@ -127,7 +137,7 @@ def fetch_wb_stock_for_barcode(
   product: Product | None = None,
 ) -> int:
   """Текущий остаток баркода на складе FBS в ЛК WB."""
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   if not barcode:
     raise WBStockError("Пустой баркод")
 
@@ -156,7 +166,7 @@ def push_wb_stock_increment(
   if add_quantity <= 0:
     raise WBStockError("Количество должно быть больше 0")
 
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   current = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
   new_amount = current + add_quantity
   chrt_id = _resolve_chrt_id(seller, barcode, product=product)
@@ -192,7 +202,7 @@ def push_wb_stock_absolute(
   product: Product | None = None,
 ) -> dict:
   """Режим фактического остатка: установить абсолютное значение в ЛК WB."""
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   amount = max(0, int(amount))
   current = fetch_wb_stock_for_barcode(seller, warehouse, barcode, product=product)
   new_amount = set_wb_stock_absolute(seller, warehouse, barcode, amount, product=product)
@@ -221,7 +231,7 @@ def build_wb_stock_lines(
   product: Product | None = None,
 ) -> tuple[list[dict], str | None]:
   """Остатки баркода на включённых FBS-складах WB (для экрана «Ячейки»)."""
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   if not barcode:
     return [], None
 
@@ -262,7 +272,7 @@ def build_wb_stock_lines_batch(
   normalized: list[str] = []
   seen: set[str] = set()
   for value in barcodes:
-    code = normalize_barcode(value)
+    code = _normalize_barcode(value)
     if not code or code in seen:
       continue
     seen.add(code)
@@ -308,7 +318,7 @@ def fetch_wb_stocks_for_warehouses(
   if not warehouses:
     raise WBStockError("Не выбраны FBS-склады")
 
-  normalized = [normalize_barcode(b) for b in barcodes if normalize_barcode(b)]
+  normalized = [_normalize_barcode(b) for b in barcodes if _normalize_barcode(b)]
   result: dict[str, dict] = {
     barcode: {"total": 0, "by_warehouse": {}} for barcode in normalized
   }
@@ -319,7 +329,7 @@ def fetch_wb_stocks_for_warehouses(
   if products:
     for barcode, product in products.items():
       if product and product.wb_chrt_id:
-        chrt_by_barcode[normalize_barcode(barcode)] = int(product.wb_chrt_id)
+        chrt_by_barcode[_normalize_barcode(barcode)] = int(product.wb_chrt_id)
 
   chrt_ids = sorted(set(chrt_by_barcode.values()))
   barcode_by_chrt = {chrt_id: barcode for barcode, chrt_id in chrt_by_barcode.items()}
@@ -394,7 +404,7 @@ def set_wb_stock_absolute(
   product: Product | None = None,
 ) -> int:
   """Установить абсолютный остаток на складе WB."""
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   amount = max(0, int(amount))
   set_wb_stocks_absolute_batch(
     seller,
@@ -416,7 +426,7 @@ def set_wb_stocks_absolute_batch(
   stocks: list[dict] = []
   product_updates: list[tuple[int, int]] = []
   for barcode, amount in items:
-    code = normalize_barcode(barcode)
+    code = _normalize_barcode(barcode)
     if not code:
       continue
     product = (products or {}).get(code)
@@ -454,7 +464,7 @@ def transfer_wb_stock_between_warehouses(
   from_wh = get_seller_warehouse(seller, from_warehouse_id)
   to_wh = get_seller_warehouse(seller, to_warehouse_id)
 
-  barcode = normalize_barcode(barcode)
+  barcode = _normalize_barcode(barcode)
   from_amount = fetch_wb_stock_for_barcode(seller, from_wh, barcode, product=product)
   to_amount = fetch_wb_stock_for_barcode(seller, to_wh, barcode, product=product)
 
