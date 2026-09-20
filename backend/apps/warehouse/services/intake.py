@@ -294,6 +294,8 @@ def perform_intake(
   )
 
   if stock_mode in (STOCK_MODE_INTAKE, STOCK_MODE_SET_ACTUAL) and mp != OZON and warehouse is not None:
+    try_enrich_product_from_catalog(product, seller)
+    product.refresh_from_db()
     reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
     try:
       wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (

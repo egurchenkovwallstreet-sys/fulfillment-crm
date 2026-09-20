@@ -73,15 +73,22 @@ def resolve_wb_chrt_id_for_barcode(
   if not barcode:
     raise CatalogError("Пустой баркод")
 
-  if product is not None and product.wb_chrt_id:
-    return int(product.wb_chrt_id)
-
+  # Всегда сверяем с карточкой WB — старый wb_chrt_id в CRM мог быть неверным.
   item = lookup_catalog_item_for_barcode(seller, barcode, WB)
   if item and item.wb_chrt_id:
     chrt_id = int(item.wb_chrt_id)
-    if product is not None:
+    if product is not None and product.wb_chrt_id != chrt_id:
       Product.objects.filter(pk=product.pk).update(wb_chrt_id=chrt_id)
     return chrt_id
+
+  if product is not None and product.wb_chrt_id:
+    stored = int(product.wb_chrt_id)
+    if barcode.isdigit() and len(barcode) >= 11 and str(stored) == barcode:
+      raise CatalogError(
+        f"Баркод {barcode} не найден в каталоге WB селлера «{seller.company_name}». "
+        "Проверьте, что карточка активна в ЛК WB и баркод принадлежит этому селлеру."
+      )
+    return stored
 
   raise CatalogError(
     f"Баркод {barcode} не найден в каталоге WB селлера «{seller.company_name}». "

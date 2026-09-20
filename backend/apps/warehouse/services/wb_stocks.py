@@ -57,7 +57,13 @@ def _stock_item_chrt_id(item: dict) -> int | None:
   return value if value > 0 else None
 
 
-def _format_wb_stock_error(exc: WBApiError) -> str:
+def _format_wb_stock_error(
+  exc: WBApiError,
+  *,
+  warehouse: SellerWarehouse | None = None,
+  barcode: str = "",
+  chrt_id: int | None = None,
+) -> str:
   text = str(exc)
   payload = getattr(exc, "payload", {}) or {}
   chunks = [text]
@@ -71,22 +77,39 @@ def _format_wb_stock_error(exc: WBApiError) -> str:
   elif isinstance(payload, dict):
     chunks.append(str(payload.get("message") or payload.get("detail") or ""))
   joined = " ".join(part for part in chunks if part).lower()
+  warehouse_label = ""
+  if warehouse is not None:
+    warehouse_label = warehouse.name or f"склад #{warehouse.wb_warehouse_id}"
   if "notfound" in joined or "not found" in joined:
     return (
-      "WB не нашёл размер товара (chrtId) для выставления остатка. "
-      "Проверьте баркод в каталоге WB этого селлера и обновите карточки."
+      f"WB не нашёл этот товар у селлера (баркод {barcode or '—'}). "
+      "Проверьте, что баркод из карточки WB этого ИП и карточка активна."
     )
   if "skuuploaddisabled" in joined:
     return (
-      "WB отключил обновление остатков по баркоду — CRM уже переведена на chrtId. "
-      "Обновите CRM на сервере и повторите."
+      "WB больше не принимает остатки по баркоду. "
+      "Обновите CRM на сервере и повторите приёмку."
     )
   if "cargowarehouserestriction" in joined:
+    if warehouse_label:
+      return (
+        f"WB не принимает остаток на склад «{warehouse_label}» — "
+        "этот товар не подходит для этого склада (тип груза LCL или ограничения ODC/CD+). "
+        "Выберите другой FBS-склад в приёмке или проверьте склады в ЛК WB."
+      )
     return (
-      "WB отклонил остаток: склад не подходит для типа груза карточки. "
-      "Если склад обычный FBS — обновите CRM (нужен chrtId вместо баркода) и повторите."
+      "WB не принимает остаток на выбранный склад — "
+      "товар не подходит для этого склада. Выберите другой FBS-склад в приёмке."
     )
-  return f"Не удалось обновить остатки в WB: {exc}"
+  details = []
+  if warehouse_label:
+    details.append(f"склад «{warehouse_label}»")
+  if barcode:
+    details.append(f"баркод {barcode}")
+  if chrt_id:
+    details.append(f"chrtId {chrt_id}")
+  suffix = f" ({', '.join(details)})" if details else ""
+  return f"Не удалось обновить остатки в WB{suffix}: {exc}"
 
 
 def _resolve_chrt_id(
@@ -178,7 +201,14 @@ def push_wb_stock_increment(
       [{"chrtId": chrt_id, "amount": new_amount}],
     )
   except WBApiError as exc:
-    raise WBStockError(_format_wb_stock_error(exc)) from exc
+    raise WBStockError(
+      _format_wb_stock_error(
+        exc,
+        warehouse=warehouse,
+        barcode=barcode,
+        chrt_id=chrt_id,
+      )
+    ) from exc
 
   if product is not None and not product.wb_chrt_id:
     Product.objects.filter(pk=product.pk).update(wb_chrt_id=chrt_id)
@@ -440,7 +470,14 @@ def set_wb_stocks_absolute_batch(
   try:
     client.update_warehouse_stocks(warehouse.wb_warehouse_id, stocks)
   except WBApiError as exc:
-    raise WBStockError(_format_wb_stock_error(exc)) from exc
+    first = stocks[0] if stocks else {}
+    raise WBStockError(
+      _format_wb_stock_error(
+        exc,
+        warehouse=warehouse,
+        chrt_id=first.get("chrtId"),
+      )
+    ) from exc
   for product_id, chrt_id in product_updates:
     Product.objects.filter(pk=product_id).update(wb_chrt_id=chrt_id)
   return len(stocks)
