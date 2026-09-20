@@ -17,7 +17,7 @@ SC_LIST_CARGO_TYPES: tuple[int, ...] = (1, 3)
 SHIPPING_POINTS_CACHE_VERSION = "v12"
 SHIPPING_PREFETCH_NEAR_DONE_THRESHOLD = 10
 SHIPPING_PREFETCH_DEBOUNCE_SEC = 300
-SHIPPING_SUPPLY_PREFETCH_FLAG_TTL = 3600
+SHIPPING_SUPPLY_PREFETCH_FLAG_TTL = 900
 ALL_SC_SHIPPING_CACHE_TTL = 3600
 SUPPLY_CARGO_CACHE_TTL = 86400
 
@@ -51,6 +51,13 @@ def _point_supports_any_cargo(point: dict, cargo_types: tuple[int, ...]) -> bool
     return True
   allowed = {int(item) for item in supported}
   return any(int(cargo_type) in allowed for cargo_type in cargo_types)
+
+
+def _filter_points_for_cargo(points: list[dict], cargo_type: int) -> list[dict]:
+  return [
+    point for point in points
+    if _point_supports_any_cargo(point, (int(cargo_type),))
+  ]
 
 
 def _union_shipping_point(left: dict, right: dict) -> dict:
@@ -163,6 +170,21 @@ def cache_supply_cargo_type(seller_id: int, wb_supply_id: str, cargo_type: int) 
   )
 
 
+def _unwrap_supply_payload(payload: dict) -> dict:
+  if not payload:
+    return {}
+  for key in ("supply", "data", "result"):
+    nested = payload.get(key)
+    if isinstance(nested, dict) and (
+      nested.get("id")
+      or nested.get("cargoType") is not None
+      or nested.get("scanDt") is not None
+      or nested.get("scan_dt") is not None
+    ):
+      return nested
+  return payload
+
+
 def resolve_shipping_cargo_type(
   client,
   *,
@@ -177,7 +199,7 @@ def resolve_shipping_cargo_type(
       resolved_cargo = int(cached_cargo)
   if resolved_cargo is None and wb_supply_id:
     try:
-      details = client.fetch_supply(wb_supply_id)
+      details = _unwrap_supply_payload(client.fetch_supply(wb_supply_id))
       resolved_cargo = int(details.get("cargoType") or 1)
       if seller_id:
         cache_supply_cargo_type(seller_id, wb_supply_id, resolved_cargo)
@@ -246,7 +268,9 @@ def fetch_moscow_region_sc_shipping_points(
       wb_supply_id=wb_supply_id,
     )
     if sc_cached:
-      return sc_cached, [], resolved_cargo
+      filtered = _filter_points_for_cargo(sc_cached, resolved_cargo)
+      if filtered:
+        return filtered, [], resolved_cargo
 
   if cache_only:
     return [], [], resolved_cargo
@@ -269,7 +293,10 @@ def fetch_moscow_region_sc_shipping_points(
         merged[point_id] = point
     time.sleep(0.06)
 
-  sc_points = _sort_sc_points(_filter_sc_sw_points(list(merged.values())))
+  sc_points = _filter_points_for_cargo(
+    _sort_sc_points(_filter_sc_sw_points(list(merged.values()))),
+    resolved_cargo,
+  )
   if sc_points:
     cache.set(
       cache_key,

@@ -1240,7 +1240,10 @@ function WbAssemblySellerPage() {
     setLoading(true)
     try {
       const result = await sendOrderToDelivery(id, order.id, shipping)
-      const msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку`
+      const scLabel = result.shipping_point_id
+        ? `, СЦ #${result.shipping_point_id}`
+        : `, СЦ #${shipping.shipping_point_id}`
+      const msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку${scLabel}`
       setLastPrinted(null)
       setStickerPreview(null)
       setStage('complete')

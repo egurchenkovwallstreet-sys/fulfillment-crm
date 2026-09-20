@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 from django.utils import timezone
@@ -138,6 +138,45 @@ class PrepareDeliverTests(SimpleTestCase):
       shipping_date=date.today(),
     )
     client.set_supplies_shipping_method.assert_called_once()
+
+  def test_prepare_deliver_verifies_shipping_applied_in_wb(self):
+    client = MagicMock()
+    today = date.today()
+    client.fetch_supply.side_effect = [
+      {"done": False},
+      {"shippingPointId": 100, "shippingDt": today.isoformat()},
+    ]
+    supply = Supply(wb_supply_id="WB-GI-88", status=Supply.Status.READY, seller_id=1)
+    with patch("apps.orders.services.supply_flow.sync_supply_marking_from_wb"), patch(
+      "apps.orders.services.supply_flow._assert_wb_supply_orders_ready",
+    ):
+      already = _prepare_wb_supply_deliver(
+        client,
+        supply,
+        shipping_point_id=100,
+        shipping_date=today,
+      )
+    self.assertFalse(already)
+    client.set_supplies_shipping_method.assert_called_once()
+    self.assertEqual(client.fetch_supply.call_count, 2)
+
+  def test_prepare_deliver_rejects_when_wb_saved_different_point(self):
+    client = MagicMock()
+    today = date.today()
+    client.fetch_supply.side_effect = [
+      {"done": False},
+      {"shippingPointId": 200, "shippingDt": today.isoformat()},
+    ]
+    supply = Supply(wb_supply_id="WB-GI-89", status=Supply.Status.READY, seller_id=1)
+    with patch("apps.orders.services.supply_flow.sync_supply_marking_from_wb"):
+      with self.assertRaises(SupplyFlowError) as ctx:
+        _prepare_wb_supply_deliver(
+          client,
+          supply,
+          shipping_point_id=100,
+          shipping_date=today,
+        )
+    self.assertEqual(ctx.exception.code, "wb_shipping_not_applied")
 
 
 class ShippingDateValidationTests(SimpleTestCase):

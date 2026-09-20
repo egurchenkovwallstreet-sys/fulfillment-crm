@@ -6,6 +6,7 @@ from apps.orders.services.shipping_points_catalog import (
   ALL_SC_SHIPPING_CACHE_TTL,
   SC_LIST_CARGO_TYPES,
   SHIPPING_POINTS_CACHE_VERSION,
+  _filter_points_for_cargo,
   _filter_sc_sw_points,
   _is_sc_office_type,
   _point_supports_any_cargo,
@@ -43,6 +44,15 @@ class ShippingPointsCatalogTests(SimpleTestCase):
     point = {"cargoTypes": [1]}
     self.assertTrue(_point_supports_any_cargo(point, (1, 3)))
     self.assertFalse(_point_supports_any_cargo(point, (3,)))
+
+  def test_filter_points_for_cargo(self):
+    points = [
+      {"id": 1, "cargoTypes": [1]},
+      {"id": 2, "cargoTypes": [3]},
+      {"id": 3, "cargoTypes": [1, 3]},
+    ]
+    filtered = _filter_points_for_cargo(points, 3)
+    self.assertEqual({point["id"] for point in filtered}, {2, 3})
 
   def test_union_shipping_point_merges_cargo_types(self):
     left = {"id": 1, "cargoTypes": [1], "name": "A"}

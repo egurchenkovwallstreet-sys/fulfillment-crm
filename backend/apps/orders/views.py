@@ -1283,6 +1283,8 @@ class AssemblyShippingPointsView(APIView):
     cargo_type_raw = request.query_params.get("cargo_type")
     wb_supply_id = (request.query_params.get("wb_supply_id") or "").strip() or None
     cargo_type = int(cargo_type_raw) if cargo_type_raw else None
+    force_refresh = request.query_params.get("refresh") in ("1", "true", "yes")
+    cache_only = not force_refresh
 
     try:
       if scope == "all_sc":
@@ -1290,9 +1292,20 @@ class AssemblyShippingPointsView(APIView):
           seller,
           cargo_type=cargo_type,
           wb_supply_id=wb_supply_id,
-          cache_only=True,
+          cache_only=cache_only,
+          force_refresh=force_refresh,
         )
         city = "Москва и Московская область"
+        from_cache = cache_only and bool(sc_points)
+        if not sc_points and cache_only:
+          sc_points, pp_points, resolved_cargo = fetch_all_russia_sc_shipping_points(
+            seller,
+            cargo_type=cargo_type,
+            wb_supply_id=wb_supply_id,
+            cache_only=False,
+            force_refresh=False,
+          )
+          from_cache = False
       else:
         sc_points, pp_points, resolved_cargo = fetch_seller_shipping_points(
           seller,
@@ -1300,6 +1313,7 @@ class AssemblyShippingPointsView(APIView):
           cargo_type=cargo_type,
           wb_supply_id=wb_supply_id,
         )
+        from_cache = False
     except SupplyFlowError as exc:
       return _assembly_error_response(exc)
 
@@ -1307,11 +1321,12 @@ class AssemblyShippingPointsView(APIView):
       schedule_shipping_points_prefetch(
         seller,
         wb_supply_id=wb_supply_id,
+        force_refresh=force_refresh,
       )
       return _assembly_error_response(
         SupplyFlowError(
           "Список СЦ ещё загружается в фоне (обычно 1–2 мин после «На сборку»). "
-          "Подождите и откройте «В доставку» снова.",
+          "Подождите — CRM обновит список автоматически.",
           code="shipping_points_loading",
         ),
       )
@@ -1324,6 +1339,7 @@ class AssemblyShippingPointsView(APIView):
       "scope": scope,
       "seller_id": seller.id,
       "cargo_type": resolved_cargo,
+      "from_cache": from_cache,
       "shipping_points": sc_payload,
       "shipping_points_sc": sc_payload,
       "shipping_points_pp": pp_payload,
@@ -1426,6 +1442,10 @@ class AssemblySendToDeliveryView(APIView):
       "order": OrderAssemblySerializer(result["order"]).data,
       "wb_supply_id": result["wb_supply_id"],
     }
+    if result.get("shipping_point_id") is not None:
+      payload["shipping_point_id"] = result["shipping_point_id"]
+    if result.get("shipping_date"):
+      payload["shipping_date"] = result["shipping_date"]
     if result.get("supply_barcode_file"):
       payload["supply_barcode_file"] = result["supply_barcode_file"]
     if result.get("supply_barcode"):

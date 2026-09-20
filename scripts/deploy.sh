@@ -12,9 +12,9 @@ echo "BUILD_VERSION=$(cat backend/BUILD_VERSION)"
 echo "=== build ==="
 # Без --no-cache: базовые образы (node/python) берутся из кэша и не упираются в лимит Docker Hub (429).
 if [[ "${FULL_REBUILD:-0}" == "1" ]]; then
-  docker compose build --no-cache frontend web worker
+  docker compose build --no-cache frontend web worker beat
 else
-  docker compose build frontend web worker
+  docker compose build frontend web worker beat
 fi
 
 echo "=== up db/redis ==="

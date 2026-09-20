@@ -710,6 +710,7 @@ def fetch_all_russia_sc_shipping_points(
   *,
   cargo_type: int | None = None,
   wb_supply_id: str | None = None,
+  force_refresh: bool = False,
   cache_only: bool = False,
 ) -> tuple[list[dict], list[dict], int]:
   """Обратная совместимость scope=all_sc → Москва и МО (СЦ и склады)."""
@@ -717,6 +718,7 @@ def fetch_all_russia_sc_shipping_points(
     seller,
     cargo_type=cargo_type,
     wb_supply_id=wb_supply_id,
+    force_refresh=force_refresh,
     cache_only=cache_only,
   )
 
@@ -792,6 +794,12 @@ def _prepare_wb_supply_deliver(
     shipping_point_id=shipping_point_id,
     shipping_date=shipping_date,
     shipping_type=shipping_type,
+  )
+  _assert_wb_supply_shipping_applied(
+    client,
+    supply,
+    shipping_point_id=shipping_point_id,
+    shipping_date=shipping_date,
   )
   sync_supply_marking_from_wb(supply.seller, supply, client=client)
   _assert_wb_supply_orders_ready(client, supply)
@@ -1662,6 +1670,8 @@ def _delivery_result(
   *,
   seller: Seller,
   user=None,
+  shipping_point_id: int | None = None,
+  shipping_date: date | None = None,
 ) -> dict:
   if supply_barcode_error and not supply_barcode_file:
     AuditLog.objects.create(
@@ -1683,6 +1693,10 @@ def _delivery_result(
     "supply_barcode": supply_barcode_value,
     "stock": stock_info,
   }
+  if shipping_point_id is not None:
+    result["shipping_point_id"] = int(shipping_point_id)
+  if shipping_date is not None:
+    result["shipping_date"] = shipping_date.isoformat()
   if supply_barcode_error and not supply_barcode_file:
     result["supply_barcode_error"] = supply_barcode_error
   return result
@@ -1797,6 +1811,8 @@ def send_order_to_delivery(
       supply_barcode_error,
       user=user,
       seller=seller,
+      shipping_point_id=shipping_point_id,
+      shipping_date=shipping_date,
     )
 
   _prepare_supply_orders_for_deliver(seller, supply, user=user)
@@ -1857,6 +1873,8 @@ def send_order_to_delivery(
     supply_barcode_error,
     user=user,
     seller=seller,
+    shipping_point_id=shipping_point_id,
+    shipping_date=shipping_date,
   )
 
 

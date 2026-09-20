@@ -241,6 +241,8 @@ export interface SendToDeliveryResult {
   order: AssemblyOrder
   wb_supply_id: string
   supply_id?: number
+  shipping_point_id?: number
+  shipping_date?: string
   supply_barcode_file?: string
   supply_barcode?: string
   supply_barcode_error?: string
@@ -269,6 +271,7 @@ export interface ShippingPointsResult {
   city: string
   scope?: string
   cargo_type: number
+  from_cache?: boolean
   shipping_points: ShippingPoint[]
   shipping_points_sc?: ShippingPoint[]
   shipping_points_pp?: ShippingPoint[]
@@ -574,6 +577,7 @@ export function fetchShippingPoints(
     scope?: 'all_sc' | 'city'
     cargo_type?: number
     wb_supply_id?: string
+    refresh?: boolean
   },
 ) {
   const qs = new URLSearchParams()
@@ -584,6 +588,7 @@ export function fetchShippingPoints(
   }
   if (params.cargo_type != null) qs.set('cargo_type', String(params.cargo_type))
   if (params.wb_supply_id) qs.set('wb_supply_id', params.wb_supply_id)
+  if (params.refresh) qs.set('refresh', '1')
   return apiFetch<ShippingPointsResult>(
     `/api/orders/assembly/sellers/${sellerId}/shipping-points/?${qs.toString()}`,
   )

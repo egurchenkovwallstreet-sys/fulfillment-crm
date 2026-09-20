@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ApiError } from '../api/client'
 import {
   fetchShippingPoints,
   type DeliveryShippingParams,
@@ -27,6 +28,8 @@ type Props = {
 }
 
 const STORAGE_KEY = (sellerId: number) => `wb-delivery-shipping-v7-${sellerId}`
+const POLL_INTERVAL_MS = 4000
+const MAX_POLL_ATTEMPTS = 30
 
 const DEFAULT_PREFS: DeliveryDestinationPrefs = {
   city: 'Москва и Московская область',
@@ -88,6 +91,10 @@ function normalizeSearch(value: string): string {
   return value.trim().toLowerCase().replace(/ё/g, 'е')
 }
 
+function isShippingPointsLoadingError(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 'shipping_points_loading'
+}
+
 export function DeliveryDestinationModal({
   sellerId,
   title,
@@ -110,7 +117,15 @@ export function DeliveryDestinationModal({
   const [points, setPoints] = useState<ShippingPoint[]>([])
   const [pointsLoading, setPointsLoading] = useState(false)
   const [pointsError, setPointsError] = useState('')
+  const [pointsPolling, setPointsPolling] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const pollAttemptRef = useRef(0)
+  const pollTimerRef = useRef<number | null>(null)
+
+  const selectedPoint = useMemo(
+    () => points.find((point) => point.id === selectedPointId) ?? null,
+    [points, selectedPointId],
+  )
 
   const visiblePoints = useMemo(() => {
     const query = normalizeSearch(searchQuery)
@@ -123,43 +138,112 @@ export function DeliveryDestinationModal({
     })
   }, [points, searchQuery])
 
+  const clearPollTimer = useCallback(() => {
+    if (pollTimerRef.current != null) {
+      window.clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }, [])
+
   const loadPoints = useCallback(
-    async (preferredPointId?: number | null) => {
-      setPointsLoading(true)
-      setPointsError('')
+    async (options?: {
+      preferredPointId?: number | null
+      refresh?: boolean
+      silent?: boolean
+    }) => {
+      const silent = options?.silent ?? false
+      if (!silent) {
+        setPointsLoading(true)
+        setPointsError('')
+      }
       try {
         const result = await fetchShippingPoints(sellerId, {
           scope: 'all_sc',
           wb_supply_id: wbSupplyId,
+          refresh: options?.refresh,
         })
         const loaded = result.shipping_points_sc ?? result.shipping_points ?? []
         setCity(result.city || 'Москва и Московская область')
         setPoints(loaded)
+        pollAttemptRef.current = 0
+        setPointsPolling(false)
+        clearPollTimer()
 
         if (loaded.length === 0) {
           setPointsError('WB не вернул пункты отгрузки по Москве и МО')
           setSelectedPointId('')
-          return
+          return false
         }
 
-        setSelectedPointId(
-          resolvePreferredPointId(loaded, preferredPointId ?? saved.shippingPointId),
-        )
+        setSelectedPointId((current) => {
+          if (current !== '' && loaded.some((point) => point.id === current)) {
+            return current
+          }
+          return resolvePreferredPointId(
+            loaded,
+            options?.preferredPointId ?? saved.shippingPointId,
+          )
+        })
         setPointsError('')
+        return true
       } catch (err) {
+        if (isShippingPointsLoadingError(err)) {
+          setPoints([])
+          setSelectedPointId('')
+          setPointsPolling(true)
+          setPointsError(
+            'Список СЦ загружается в фоне — CRM обновит его автоматически…',
+          )
+          return false
+        }
         setPoints([])
         setSelectedPointId('')
+        setPointsPolling(false)
+        pollAttemptRef.current = 0
+        clearPollTimer()
         setPointsError(err instanceof Error ? err.message : 'Ошибка загрузки пунктов отгрузки')
+        return false
       } finally {
-        setPointsLoading(false)
+        if (!silent) {
+          setPointsLoading(false)
+        }
       }
     },
-    [sellerId, wbSupplyId, saved.shippingPointId],
+    [sellerId, wbSupplyId, saved.shippingPointId, clearPollTimer],
   )
 
   useEffect(() => {
-    void loadPoints(saved.shippingPointId)
-  }, [loadPoints, saved.shippingPointId])
+    void loadPoints({ preferredPointId: saved.shippingPointId })
+    return () => {
+      clearPollTimer()
+    }
+  }, [loadPoints, saved.shippingPointId, clearPollTimer])
+
+  useEffect(() => {
+    if (!pointsPolling || pointsLoading) return
+
+    if (pollAttemptRef.current >= MAX_POLL_ATTEMPTS) {
+      setPointsPolling(false)
+      setPointsError(
+        'Список СЦ не загрузился — нажмите «Обновить список» или подождите минуту после «На сборку».',
+      )
+      return
+    }
+
+    pollTimerRef.current = window.setTimeout(() => {
+      pollAttemptRef.current += 1
+      const forceRefresh = pollAttemptRef.current >= 8
+      void loadPoints({
+        preferredPointId: saved.shippingPointId,
+        refresh: forceRefresh,
+        silent: true,
+      })
+    }, POLL_INTERVAL_MS)
+
+    return () => {
+      clearPollTimer()
+    }
+  }, [pointsPolling, pointsLoading, loadPoints, saved.shippingPointId, clearPollTimer])
 
   function handleConfirm() {
     if (selectedPointId === '' || !Number.isFinite(selectedPointId)) {
@@ -230,7 +314,7 @@ export function DeliveryDestinationModal({
               <p className="delivery-destination-modal__points-empty">Загрузка пунктов…</p>
             ) : points.length === 0 ? (
               <p className="delivery-destination-modal__points-empty">
-                — нет СЦ в этом регионе —
+                {pointsPolling ? 'Список СЦ подгружается в фоне…' : '— нет СЦ в этом регионе —'}
               </p>
             ) : visiblePoints.length === 0 ? (
               <p className="delivery-destination-modal__points-empty">— ничего не найдено —</p>
@@ -255,6 +339,12 @@ export function DeliveryDestinationModal({
             )}
           </div>
         </div>
+
+        {selectedPoint ? (
+          <p className="delivery-destination-modal__hint delivery-destination-modal__selected">
+            Пропуск будет оформлен на: <strong>{formatPointLabel(selectedPoint)}</strong>
+          </p>
+        ) : null}
 
         <div className="delivery-destination-modal__field">
           <span>Дата отгрузки</span>
@@ -283,6 +373,14 @@ export function DeliveryDestinationModal({
         ) : null}
 
         <div className="assembly-modal__actions">
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled={loading || pointsLoading}
+            onClick={() => void loadPoints({ refresh: true, preferredPointId: selectedPointId || saved.shippingPointId })}
+          >
+            Обновить список
+          </button>
           <button
             type="button"
             className="btn btn--primary"

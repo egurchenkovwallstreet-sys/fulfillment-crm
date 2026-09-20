@@ -306,12 +306,19 @@ def prefetch_seller_shipping_points_task(
   force_refresh: bool = False,
 ):
   """Фоновая подгрузка СЦ/ППТ WB — отдельно для каждого селлера."""
-  from apps.orders.services.supply_flow import prefetch_seller_shipping_points_sync
+  from django.core.cache import cache
 
+  from apps.orders.services.supply_flow import (
+    _shipping_prefetch_lock_key,
+    prefetch_seller_shipping_points_sync,
+  )
+
+  supply_key = (wb_supply_id or "").strip() or None
+  lock_key = _shipping_prefetch_lock_key(seller_id, supply_key)
   try:
     result = prefetch_seller_shipping_points_sync(
       seller_id,
-      wb_supply_id=wb_supply_id or None,
+      wb_supply_id=supply_key,
       force_refresh=force_refresh,
     )
     if not result.get("success"):
@@ -320,7 +327,7 @@ def prefetch_seller_shipping_points_task(
       logger.info(
         "Shipping points prefetch seller=%s supply=%s sc=%s pp=%s cargo=%s",
         seller_id,
-        wb_supply_id or "-",
+        supply_key or "-",
         result.get("sc_count"),
         result.get("pp_count"),
         result.get("cargo_type"),
@@ -329,3 +336,6 @@ def prefetch_seller_shipping_points_task(
   except Exception as exc:
     logger.warning("Shipping points prefetch failed seller=%s: %s", seller_id, exc)
     raise self.retry(exc=exc) from exc
+  finally:
+    if supply_key:
+      cache.delete(lock_key)
