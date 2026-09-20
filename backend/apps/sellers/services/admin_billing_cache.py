@@ -14,9 +14,10 @@ from apps.sellers.services.seller_billing_stats import load_admin_billing_dashbo
 logger = logging.getLogger(__name__)
 
 CACHE_PREFIX = "admin_billing_v2"
-CACHE_TTL_SEC = 900
-REFRESH_LOCK_TTL_SEC = 600
-STALE_AFTER_SEC = 600
+CACHE_TTL_SEC = 86400 * 7
+REFRESH_LOCK_TTL_SEC = 1800
+STALE_AFTER_SEC = 7200
+BILLING_EVENT_DEBOUNCE_SEC = 300
 
 
 def _fulfillment_cache_part(fulfillment_id: int | None) -> str:
@@ -29,6 +30,10 @@ def billing_cache_key(*, fulfillment_id: int | None, marketplace: str) -> str:
 
 def billing_lock_key(*, fulfillment_id: int | None, marketplace: str) -> str:
   return f"{billing_cache_key(fulfillment_id=fulfillment_id, marketplace=marketplace)}:lock"
+
+
+def _billing_event_debounce_key(*, fulfillment_id: int, marketplace: str) -> str:
+  return f"{CACHE_PREFIX}:debounce:ff_{fulfillment_id}:{marketplace}"
 
 
 def _serialize_payload(payload: dict) -> dict:
@@ -121,11 +126,52 @@ def rebuild_admin_billing_cache(
     cache.delete(lock_key)
 
 
+def ensure_admin_billing_cached(
+  *,
+  fulfillment_id: int | None,
+  marketplace: str,
+) -> tuple[dict | None, dict | None]:
+  """Вернуть кеш; при первом обращении — синхронный пересчёт."""
+  data, meta = get_cached_admin_billing(
+    fulfillment_id=fulfillment_id,
+    marketplace=marketplace,
+  )
+  if data is not None:
+    return data, meta
+  rebuild_admin_billing_cache(
+    fulfillment_id=fulfillment_id,
+    marketplace=marketplace,
+  )
+  return get_cached_admin_billing(
+    fulfillment_id=fulfillment_id,
+    marketplace=marketplace,
+  )
+
+
 def invalidate_admin_billing_for_fulfillment(fulfillment_id: int | None) -> None:
-  """Сбросить кеш отгрузок фулфилмента и поставить пересчёт WB и Ozon."""
+  """Поставить фоновый пересчёт WB и Ozon, не удаляя последние данные."""
   for marketplace in ("wb", "ozon"):
-    cache.delete(billing_cache_key(fulfillment_id=fulfillment_id, marketplace=marketplace))
-    queue_admin_billing_refresh(fulfillment_id=fulfillment_id, marketplace=marketplace)
+    queue_admin_billing_refresh(
+      fulfillment_id=fulfillment_id,
+      marketplace=marketplace,
+    )
+
+
+def schedule_admin_billing_refresh_after_delivery(*, fulfillment_id: int | None) -> None:
+  """После «В доставку» — один пересчёт на фулфилмент (debounce 5 мин)."""
+  if not fulfillment_id:
+    return
+  for marketplace in ("wb", "ozon"):
+    debounce_key = _billing_event_debounce_key(
+      fulfillment_id=fulfillment_id,
+      marketplace=marketplace,
+    )
+    if not cache.add(debounce_key, "1", BILLING_EVENT_DEBOUNCE_SEC):
+      continue
+    queue_admin_billing_refresh(
+      fulfillment_id=fulfillment_id,
+      marketplace=marketplace,
+    )
 
 
 def queue_admin_billing_refresh(

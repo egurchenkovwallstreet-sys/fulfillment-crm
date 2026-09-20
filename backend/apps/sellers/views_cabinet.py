@@ -49,9 +49,11 @@ from apps.sellers.services.liter_billing import (
 from apps.warehouse.services.liter_pricing import seller_uses_liter_pricing
 from apps.sellers.services.seller_analytics import build_barcode_detail, build_seller_cabinet_payload
 from apps.sellers.services.admin_billing_cache import (
+  ensure_admin_billing_cached,
   get_cached_admin_billing,
   is_cache_stale,
   queue_admin_billing_refresh,
+  rebuild_admin_billing_cache,
 )
 from apps.sellers.services.crm_product_stats import (
   PERIOD_CHOICES,
@@ -440,10 +442,24 @@ class AdminBillingDashboardView(APIView):
         fulfillment_id=fulfillment_id,
         marketplace=marketplace,
       )
+      if data is None and not force_refresh:
+        data, meta = ensure_admin_billing_cached(
+          fulfillment_id=fulfillment_id,
+          marketplace=marketplace,
+        )
+      elif force_refresh and data is None:
+        rebuild_admin_billing_cache(
+          fulfillment_id=fulfillment_id,
+          marketplace=marketplace,
+        )
+        data, meta = get_cached_admin_billing(
+          fulfillment_id=fulfillment_id,
+          marketplace=marketplace,
+        )
+
       stale = is_cache_stale(meta)
       refreshing = False
-
-      if force_refresh or data is None or stale:
+      if data is not None and (force_refresh or stale):
         refreshing = queue_admin_billing_refresh(
           fulfillment_id=fulfillment_id,
           marketplace=marketplace,
@@ -451,18 +467,14 @@ class AdminBillingDashboardView(APIView):
 
       if data is None:
         return Response(
-          {
-            "status": "pending",
-            "detail": "Статистика загружается в фоне — повторите запрос через несколько секунд",
-            "refreshing": True,
-          },
-          status=status.HTTP_202_ACCEPTED,
+          {"detail": "Не удалось подготовить статистику отгрузок"},
+          status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
       response_payload = {
         **data,
         "cached_at": meta.get("cached_at") if meta else None,
-        "refreshing": refreshing or stale,
+        "refreshing": refreshing or (stale and not force_refresh),
       }
       return Response(response_payload)
     except Exception as exc:

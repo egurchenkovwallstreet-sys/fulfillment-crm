@@ -43,16 +43,16 @@ export function AdminBillingPage() {
     try {
       const result = await fetchAdminBilling(marketplace, {
         refresh: options?.refresh,
-        poll: true,
       })
-      if (result.status === 'pending' || !result.combined) {
-        setError(result.detail || 'Статистика загружается — попробуйте обновить через минуту')
+      if (!result.combined) {
+        setError(result.detail || 'Не удалось загрузить статистику отгрузок')
         setData(null)
         setRefreshing(Boolean(result.refreshing))
         return
       }
       setData(result)
       setRefreshing(Boolean(result.refreshing))
+      setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки')
     } finally {
@@ -168,13 +168,7 @@ export function AdminBillingPage() {
           {data?.cached_at ? ` · последние данные от ${new Date(data.cached_at).toLocaleString('ru-RU')}` : ''}
         </div>
       )}
-      {loading && !data && (
-        <p>
-          {isOzon
-            ? 'Загрузка… (данные считаются в фоне, это может занять до 2 минут)'
-            : 'Загрузка… (данные считаются в фоне, запросы к WB могут занять несколько минут)'}
-        </p>
-      )}
+      {loading && !data && <p>Загрузка статистики…</p>}
 
       {data?.combined && (
         <WeeklyShipmentsPanel

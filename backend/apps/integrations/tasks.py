@@ -252,7 +252,7 @@ def accrue_daily_storage_charges():
   return result
 
 
-@shared_task
+@shared_task(queue="heavy")
 def refresh_admin_billing_cache(fulfillment_id: int | None, marketplace: str = "wb"):
   """Пересчитать кеш статистики отгрузок для кабинета владельца."""
   from apps.sellers.services.admin_billing_cache import rebuild_admin_billing_cache
@@ -279,7 +279,7 @@ def rebuild_supply_report_snapshots():
   return result
 
 
-@shared_task
+@shared_task(queue="heavy")
 def refresh_all_admin_billing_caches():
   """Пересчитать кеш статистики для всех фулфилментов и маркетплейсов."""
   from apps.accounts.models import Fulfillment

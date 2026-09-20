@@ -12,9 +12,9 @@ echo "BUILD_VERSION=$(cat backend/BUILD_VERSION)"
 echo "=== build ==="
 # Без --no-cache: базовые образы (node/python) берутся из кэша и не упираются в лимит Docker Hub (429).
 if [[ "${FULL_REBUILD:-0}" == "1" ]]; then
-  docker compose build --no-cache frontend web worker beat
+  docker compose build --no-cache frontend web worker worker-heavy beat
 else
-  docker compose build frontend web worker beat
+  docker compose build frontend web worker worker-heavy beat
 fi
 
 echo "=== up db/redis ==="
@@ -55,8 +55,15 @@ else
   echo "WARN: rebuild_storage_daily_quantities failed — run manually on server"
 fi
 
+echo "=== admin billing cache ==="
+if docker compose exec -T web python manage.py rebuild_admin_billing_cache; then
+  echo "OK: admin billing cache"
+else
+  echo "WARN: rebuild_admin_billing_cache failed — run manually on server"
+fi
+
 echo "=== up worker + frontend ==="
-docker compose up -d --force-recreate worker frontend
+docker compose up -d --force-recreate worker worker-heavy frontend
 
 echo "=== frontend bundle check ==="
 if docker compose exec -T frontend sh -c 'grep -rq "Удалённые из сборки" /usr/share/nginx/html/assets/ 2>/dev/null'; then

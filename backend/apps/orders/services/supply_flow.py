@@ -58,6 +58,17 @@ from apps.warehouse.services.stock_deduction import (
 logger = logging.getLogger(__name__)
 
 
+def _schedule_billing_refresh_after_delivery(seller: Seller) -> None:
+  try:
+    from apps.sellers.services.admin_billing_cache import (
+      schedule_admin_billing_refresh_after_delivery,
+    )
+
+    schedule_admin_billing_refresh_after_delivery(fulfillment_id=seller.fulfillment_id)
+  except Exception:
+    logger.exception("billing refresh schedule failed seller=%s", seller.id)
+
+
 class SupplyFlowError(Exception):
   def __init__(self, message: str, *, code: str = "error"):
     super().__init__(message)
@@ -1802,6 +1813,7 @@ def send_order_to_delivery(
       user=user,
       primary_order=order,
     )
+    _schedule_billing_refresh_after_delivery(seller)
     return _delivery_result(
       order,
       supply,
@@ -1864,6 +1876,7 @@ def send_order_to_delivery(
   supply.supply_barcode_printed = bool(supply_barcode_file)
   supply.save(update_fields=["status", "supply_barcode_printed", "updated_at"])
 
+  _schedule_billing_refresh_after_delivery(seller)
   return _delivery_result(
     order,
     supply,
@@ -2447,6 +2460,7 @@ def send_supply_to_delivery(
     seller=seller,
   )
 
+  _schedule_billing_refresh_after_delivery(seller)
   return last_result
 
 

@@ -59,6 +59,6 @@ app.conf.beat_schedule = {
     },
     "refresh-admin-billing-cache": {
         "task": "apps.integrations.tasks.refresh_all_admin_billing_caches",
-        "schedule": crontab(minute="*/10"),
+        "schedule": 7200.0,
     },
 }
