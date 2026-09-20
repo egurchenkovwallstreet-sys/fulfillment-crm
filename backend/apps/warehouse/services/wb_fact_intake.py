@@ -100,6 +100,25 @@ def _serialize_line(line: WbFactIntakeLine, extra: dict | None = None) -> dict:
   return data
 
 
+def _session_wb_warehouse_id(session: WbFactIntakeSession) -> int | None:
+  if session.warehouse_id and session.warehouse:
+    return int(session.warehouse.wb_warehouse_id)
+  if session.wb_warehouse_id_snapshot:
+    return int(session.wb_warehouse_id_snapshot)
+  return None
+
+
+def _session_warehouse_name(session: WbFactIntakeSession) -> str:
+  if session.warehouse_id and session.warehouse:
+    wh = session.warehouse
+    return wh.name or f"Склад #{wh.wb_warehouse_id}"
+  if session.warehouse_name_snapshot:
+    return session.warehouse_name_snapshot
+  if session.wb_warehouse_id_snapshot:
+    return f"Склад #{session.wb_warehouse_id_snapshot}"
+  return "Склад удалён"
+
+
 def serialize_session(
   session: WbFactIntakeSession,
   *,
@@ -113,9 +132,9 @@ def serialize_session(
     "status": session.status,
     "seller_id": session.seller_id,
     "seller_name": session.seller.company_name,
-    "warehouse_id": warehouse.id,
-    "warehouse_name": warehouse.name or f"Склад #{warehouse.wb_warehouse_id}",
-    "wb_warehouse_id": warehouse.wb_warehouse_id,
+    "warehouse_id": warehouse.id if warehouse else None,
+    "warehouse_name": _session_warehouse_name(session),
+    "wb_warehouse_id": _session_wb_warehouse_id(session),
     "marketplace": session.marketplace,
     "catalog_count": session.catalog_count,
     "accepted_count": session.accepted_count,
@@ -139,7 +158,9 @@ def serialize_session(
 
 
 def _open_order_maps(session: WbFactIntakeSession) -> tuple[dict[str, int], dict[str, int]]:
-  wb_wh = session.warehouse.wb_warehouse_id
+  wb_wh = _session_wb_warehouse_id(session)
+  if wb_wh is None:
+    return {}, {}
   new_map = order_counts_by_barcode_on_warehouse(
     new_stage_orders_queryset(session.seller),
     wb_wh,
@@ -152,7 +173,7 @@ def _open_order_maps(session: WbFactIntakeSession) -> tuple[dict[str, int], dict
 
 
 def _live_wb_stocks(session: WbFactIntakeSession, barcodes: list[str]) -> dict[str, int]:
-  if not barcodes:
+  if not barcodes or not session.warehouse_id or not session.warehouse:
     return {}
   stock_map = fetch_wb_stocks_for_warehouses(session.seller, [session.warehouse], barcodes)
   live: dict[str, int] = {}
@@ -341,9 +362,12 @@ def create_session(
     raise WbFactIntakeError(str(exc)) from exc
 
   with transaction.atomic():
+    wh_label = warehouse.name or f"Склад #{warehouse.wb_warehouse_id}"
     session = WbFactIntakeSession.objects.create(
       seller=seller,
       warehouse=warehouse,
+      warehouse_name_snapshot=wh_label,
+      wb_warehouse_id_snapshot=warehouse.wb_warehouse_id,
       created_by=user if getattr(user, "is_authenticated", False) else None,
       catalog_count=len(items),
     )

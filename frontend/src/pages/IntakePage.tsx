@@ -68,8 +68,11 @@ export function IntakePage() {
     try {
       const data = await fetchSellerWarehouses(id)
       setWarehouses(data)
-      if (data.length === 1) {
-        setWarehouseId(data[0].id)
+      const active = data.filter((wh) => wh.is_enabled)
+      if (active.length === 1) {
+        setWarehouseId(active[0].id)
+      } else if (warehouseId && !active.some((wh) => wh.id === warehouseId)) {
+        setWarehouseId('')
       }
     } catch {
       setWarehouses([])
@@ -496,7 +499,7 @@ export function IntakePage() {
   const isSetActualMode = stockMode === 'set_actual'
   const isSyncAuto = isSyncMode && syncVariant === 'auto'
   const isSyncScan = isSyncMode && syncVariant === 'scan'
-  const enabledWarehouses = warehouses
+  const enabledWarehouses = warehouses.filter((wh) => wh.is_enabled)
   const allSelected =
     wbSyncPreview != null &&
     wbSyncPreview.items.length > 0 &&

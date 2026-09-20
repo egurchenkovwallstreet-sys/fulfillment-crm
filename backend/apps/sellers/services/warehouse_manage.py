@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 
 from apps.integrations.marketplace import OZON, WB
 from apps.integrations.models import AuditLog
@@ -34,11 +35,38 @@ def excluded_ozon_warehouse_ids(seller: Seller) -> set[int]:
   return _excluded_external_ids(seller, OZON)
 
 
+def _assert_wb_warehouse_can_be_deleted(warehouse: SellerWarehouse) -> None:
+  from apps.warehouse.models import WbFactIntakeSession
+
+  active_sessions = WbFactIntakeSession.objects.filter(
+    warehouse=warehouse,
+    status=WbFactIntakeSession.Status.SCANNING,
+  ).count()
+  if active_sessions:
+    raise WarehouseManageError(
+      "Нельзя удалить склад: на нём есть незавершённая приёмка карточек WB. "
+      "Завершите или удалите её в разделе «Приёмка карточек WB», затем повторите."
+    )
+
+
+def _snapshot_wb_fact_intake_warehouse(warehouse: SellerWarehouse) -> None:
+  from apps.warehouse.models import WbFactIntakeSession
+
+  label = warehouse.name or f"Склад #{warehouse.wb_warehouse_id}"
+  WbFactIntakeSession.objects.filter(warehouse=warehouse).update(
+    warehouse_name_snapshot=label,
+    wb_warehouse_id_snapshot=warehouse.wb_warehouse_id,
+  )
+
+
 @transaction.atomic
 def delete_seller_wb_warehouse(seller: Seller, warehouse_id: int, *, user=None) -> dict:
   warehouse = SellerWarehouse.objects.filter(pk=warehouse_id, seller=seller).first()
   if not warehouse:
     raise WarehouseManageError("Склад не найден")
+
+  _assert_wb_warehouse_can_be_deleted(warehouse)
+  _snapshot_wb_fact_intake_warehouse(warehouse)
 
   label = warehouse.name or f"Склад #{warehouse.wb_warehouse_id}"
   ExcludedSellerWarehouse.objects.update_or_create(
@@ -48,7 +76,13 @@ def delete_seller_wb_warehouse(seller: Seller, warehouse_id: int, *, user=None) 
     defaults={"name": label},
   )
   external_id = warehouse.wb_warehouse_id
-  warehouse.delete()
+  try:
+    warehouse.delete()
+  except ProtectedError as exc:
+    raise WarehouseManageError(
+      "Склад связан с данными CRM и не может быть удалён. "
+      "Обратитесь в поддержку или завершите активные операции на этом складе."
+    ) from exc
 
   AuditLog.objects.create(
     user=user,

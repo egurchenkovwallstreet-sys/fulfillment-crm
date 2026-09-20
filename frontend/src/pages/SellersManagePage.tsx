@@ -221,6 +221,7 @@ export function SellersManagePage() {
     }
     setWarehouseDeletingId(warehouse.id)
     setError('')
+    setMessage('')
     try {
       const result =
         marketplace === 'wb'
@@ -229,7 +230,9 @@ export function SellersManagePage() {
       await loadSellerWarehouses(editSeller)
       setMessage(result.detail)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить склад')
+      const text = err instanceof Error ? err.message : 'Не удалось удалить склад'
+      setError(text)
+      window.alert(text)
     } finally {
       setWarehouseDeletingId(null)
     }
@@ -723,6 +726,12 @@ export function SellersManagePage() {
                     : ' Вернуть удалённый склад может только владелец фулфилмента.'}{' '}
                   Чтобы временно скрыть склад без удаления — используйте сборку FBS (галочка «Обслуживаем»).
                 </p>
+                {error && (
+                  <div className="dashboard-sync-msg dashboard-sync-msg--error">{error}</div>
+                )}
+                {message && (
+                  <div className="dashboard-sync-msg dashboard-sync-msg--ok">{message}</div>
+                )}
                 {warehousesLoading ? (
                   <p className="sellers-warehouses-block__empty">Загрузка складов…</p>
                 ) : (

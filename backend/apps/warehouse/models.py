@@ -354,9 +354,22 @@ class WbFactIntakeSession(models.Model):
   )
   warehouse = models.ForeignKey(
     "sellers.SellerWarehouse",
-    on_delete=models.PROTECT,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
     related_name="wb_fact_intake_sessions",
     verbose_name="Склад FBS WB",
+  )
+  warehouse_name_snapshot = models.CharField(
+    "Название склада (снимок)",
+    max_length=255,
+    blank=True,
+    help_text="Сохраняется при удалении склада из CRM для истории приёмок",
+  )
+  wb_warehouse_id_snapshot = models.BigIntegerField(
+    "ID склада WB (снимок)",
+    null=True,
+    blank=True,
   )
   status = models.CharField(
     max_length=20,
