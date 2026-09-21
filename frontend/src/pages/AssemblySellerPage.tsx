@@ -203,6 +203,7 @@ function WbAssemblySellerPage() {
   const markingLockRef = useRef(false)
   const scanBusyRef = useRef(false)
   const barcodeApiInFlightRef = useRef(false)
+  const pendingOrderRef = useRef<PrintOrder | null>(null)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(
     () => readAssemblySellerCache(id, 'new'),
@@ -450,9 +451,13 @@ function WbAssemblySellerPage() {
     if (inMarking) {
       focusMarkingInput()
     } else if (!scanBusy) {
-      window.setTimeout(() => scanRef.current?.focus(), 0)
+      focusBarcodeInput()
     }
   }, [scanPhase, pendingOrder, scanBusy, stage])
+
+  useEffect(() => {
+    pendingOrderRef.current = pendingOrder
+  }, [pendingOrder])
 
   useEffect(() => {
     if (scanPhase !== 'marking') return
@@ -564,6 +569,36 @@ function WbAssemblySellerPage() {
     markingRef.current?.focus()
   }
 
+  function focusBarcodeInput() {
+    scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+    scanRef.current?.focus()
+    scanRef.current?.select()
+  }
+
+  function findLocalMarkingOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
+    const code = normalizeScanCode(barcode)
+    return orderList.find(
+      (order) =>
+        normalizeScanCode(order.barcode) === code &&
+        orderNeedsMarkingScan(order) &&
+        order.has_sticker,
+    )
+  }
+
+  async function resolvePendingSticker(): Promise<string | null> {
+    const read = () => (pendingOrderRef.current?.sticker_file || '').trim()
+    let sticker = read()
+    if (sticker) return sticker
+    if (!barcodeApiInFlightRef.current) return null
+    const started = Date.now()
+    while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
+      await new Promise((resolve) => window.setTimeout(resolve, 40))
+      sticker = read()
+      if (sticker) return sticker
+    }
+    return read() || null
+  }
+
   function showScanError(
     message: string,
     title: string,
@@ -585,15 +620,14 @@ function WbAssemblySellerPage() {
     }
     markingLockRef.current = false
     scanPhaseRef.current = 'barcode'
-    setScanPhase('barcode')
-    setPendingOrder(null)
     markingBufferRef.current = ''
-    setMarkingValue('')
-    setScanValue('')
-    window.setTimeout(() => {
-      scanRef.current?.focus()
-      scanRef.current?.select()
-    }, 50)
+    flushSync(() => {
+      setScanPhase('barcode')
+      setPendingOrder(null)
+      setMarkingValue('')
+      setScanValue('')
+    })
+    focusBarcodeInput()
   }
 
   async function printSticker(base64: string, preopened?: Window | null) {
@@ -624,10 +658,6 @@ function WbAssemblySellerPage() {
     flashPrintOk()
     resetScanFlow(true)
     setStage('confirm')
-    window.setTimeout(() => {
-      scanRef.current?.focus()
-      scanRef.current?.select()
-    }, 50)
     void refreshMarkingStatus()
   }
 
@@ -1670,6 +1700,15 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
+    const localMarkingOrder = findLocalMarkingOrder(barcode, data?.orders ?? [])
+    let optimisticMarking = false
+    if (localMarkingOrder) {
+      optimisticMarking = true
+      openMarkingScan(localMarkingOrder as unknown as PrintOrder)
+      scanBusyRef.current = false
+      setScanBusy(false)
+    }
+
     let printWin: Window | null = openPrintHolder()
 
     try {
@@ -1682,8 +1721,14 @@ function WbAssemblySellerPage() {
           result.message ||
             `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
         )
+        scanBusyRef.current = false
+        setScanBusy(false)
         void refreshMarkingStatus()
         return
+      }
+
+      if (optimisticMarking) {
+        resetScanFlow(true)
       }
 
       if (!printWin) {
@@ -1775,7 +1820,7 @@ function WbAssemblySellerPage() {
   async function handleMarkingSubmit(e?: FormEvent, rawCode?: string) {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
-    if (!id || !pendingOrder || !code || scanBusyRef.current) return
+    if (!id || !pendingOrder || !code) return
 
     const quickError = quickMarkingCodeCheck(code)
     if (quickError) {
@@ -1783,10 +1828,11 @@ function WbAssemblySellerPage() {
       return
     }
 
-    const sticker = (pendingOrder.sticker_file || '').trim()
+    const orderSnapshot = pendingOrderRef.current ?? pendingOrder
+    const sticker = await resolvePendingSticker()
     if (!sticker) {
       showScanError(
-        `WB не отдал стикер для заказа #${pendingOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите.`,
+        `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите.`,
         'Стикер не загружен',
         () => focusMarkingInput(),
       )
@@ -1794,19 +1840,14 @@ function WbAssemblySellerPage() {
     }
 
     setError('')
-    scanBusyRef.current = true
-    setScanBusy(true)
     markingBufferRef.current = ''
     setMarkingValue('')
 
-    const orderSnapshot = pendingOrder
     const printWin = openPrintHolder()
 
     setStickerPreview(sticker)
     setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
     resetScanFlow(true)
-    scanBusyRef.current = false
-    setScanBusy(false)
 
     void printSticker(sticker, printWin)
       .then((channel) => {
@@ -2559,87 +2600,86 @@ function WbAssemblySellerPage() {
           ref={scanPanelRef}
           className={`panel assembly-scan-panel assembly-scan-live${markingInProgress ? ' assembly-scan-panel--marking-active' : ''}`}
         >
-          {!markingInProgress ? (
-            <div>
-              <h2 className="section-title">Сканируйте баркод заказа</h2>
-              <p className="assembly-scan-hint">
-                Курсор уже в поле. При необходимости скачайте PDF листа подбора в шапке.
-                После скана товара с ЧЗ сразу откроется поле DataMatrix, затем печать стикера.
-              </p>
-              <form onSubmit={handleBarcodeSubmit}>
-                <input
-                  ref={scanRef}
-                  type="text"
-                  className="assembly-scan-input"
-                  value={scanValue}
-                  onChange={(e) => setScanValue(e.target.value)}
-                  onKeyDown={handleScanKeyDown}
-                  placeholder={scanBusy ? 'Проверяем заказ…' : 'Баркод заказа...'}
-                  autoComplete="off"
-                  autoFocus
-                  disabled={scanBusy}
-                />
-              </form>
-            </div>
-          ) : (
-            <div>
-              <h2 className="section-title assembly-scan-panel--marking">Сканируйте Честный знак</h2>
-              {pendingOrder && (
-                <div className="assembly-pending-order">
-                  <p>Заказ WB <strong>#{pendingOrder.wb_order_id}</strong></p>
-                  <p>Баркод: <code>{pendingOrder.barcode}</code></p>
-                  {formatStickerNumber(pendingOrder) && (
-                    <p className="assembly-pending-order__sticker">
-                      Номер стикера: <strong>{formatStickerNumber(pendingOrder)}</strong>
-                    </p>
-                  )}
-                </div>
-              )}
-              <p className="assembly-scan-hint">
-                DataMatrix с упаковки. Стикер печатается сразу; привязка ЧЗ в WB и проверка — в фоне.
-              </p>
-              <form onSubmit={handleMarkingSubmit}>
-                <input
-                  ref={markingRef}
-                  type="text"
-                  className="assembly-scan-input assembly-scan-input--marking"
-                  value={markingValue}
-                  onChange={(e) => {
-                    markingBufferRef.current = e.target.value
-                    setMarkingValue(e.target.value)
-                  }}
-                  onKeyDown={handleMarkingKeyDown}
-                  onPaste={handleMarkingPaste}
-                  placeholder="Код Честного знака (DataMatrix)..."
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  autoFocus
-                />
-              </form>
-              <div className="assembly-scan-actions">
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={handleReplaceOrder}
-                  disabled={loading}
-                  {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
-                >
-                  Заменить товар
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => resetScanFlow(true)}
-                  disabled={loading}
-                  {...uiHint('Вернуться к сканированию баркода без привязки ЧЗ')}
-                >
-                  Отмена
-                </button>
+          <div hidden={markingInProgress}>
+            <h2 className="section-title">Сканируйте баркод заказа</h2>
+            <p className="assembly-scan-hint">
+              Курсор уже в поле. При необходимости скачайте PDF листа подбора в шапке.
+              После скана товара с ЧЗ сразу откроется поле DataMatrix, затем печать стикера.
+            </p>
+            <form onSubmit={handleBarcodeSubmit}>
+              <input
+                ref={scanRef}
+                type="text"
+                className="assembly-scan-input"
+                value={scanValue}
+                onChange={(e) => setScanValue(e.target.value)}
+                onKeyDown={handleScanKeyDown}
+                placeholder={scanBusy ? 'Проверяем заказ…' : 'Баркод заказа...'}
+                autoComplete="off"
+                autoFocus={!markingInProgress}
+                disabled={scanBusy}
+                tabIndex={markingInProgress ? -1 : 0}
+              />
+            </form>
+          </div>
+          <div hidden={!markingInProgress}>
+            <h2 className="section-title assembly-scan-panel--marking">Сканируйте Честный знак</h2>
+            {pendingOrder && (
+              <div className="assembly-pending-order">
+                <p>Заказ WB <strong>#{pendingOrder.wb_order_id}</strong></p>
+                <p>Баркод: <code>{pendingOrder.barcode}</code></p>
+                {formatStickerNumber(pendingOrder) && (
+                  <p className="assembly-pending-order__sticker">
+                    Номер стикера: <strong>{formatStickerNumber(pendingOrder)}</strong>
+                  </p>
+                )}
               </div>
+            )}
+            <p className="assembly-scan-hint">
+              DataMatrix с упаковки. Стикер печатается сразу; привязка ЧЗ в WB и проверка — в фоне.
+            </p>
+            <form onSubmit={handleMarkingSubmit}>
+              <input
+                ref={markingRef}
+                type="text"
+                className="assembly-scan-input assembly-scan-input--marking"
+                value={markingValue}
+                onChange={(e) => {
+                  markingBufferRef.current = e.target.value
+                  setMarkingValue(e.target.value)
+                }}
+                onKeyDown={handleMarkingKeyDown}
+                onPaste={handleMarkingPaste}
+                placeholder="Код Честного знака (DataMatrix)..."
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                autoFocus={markingInProgress}
+                tabIndex={markingInProgress ? 0 : -1}
+              />
+            </form>
+            <div className="assembly-scan-actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={handleReplaceOrder}
+                disabled={loading}
+                {...uiHint('Снять заказ и подставить другой товар с тем же баркодом')}
+              >
+                Заменить товар
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => resetScanFlow(true)}
+                disabled={loading}
+                {...uiHint('Вернуться к сканированию баркода без привязки ЧЗ')}
+              >
+                Отмена
+              </button>
             </div>
-          )}
+          </div>
 
           {lastPrintedFresh && !markingInProgress && (
             <div className={`assembly-last-print${lastPrintedCanDeliver ? ' assembly-last-print--ready' : ''}`}>

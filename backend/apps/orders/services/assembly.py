@@ -711,18 +711,9 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
     _reset_marking_for_retry(order, seller, user=user)
 
   if not order.has_sticker or not (order.sticker_file or "").strip():
-    try:
-      fetch_stickers_for_orders(seller, [order], user=user)
-      order.refresh_from_db()
-    except AssemblyError as exc:
-      raise AssemblyError(
-        f"Не удалось загрузить стикер WB #{order.wb_order_id}: {exc}",
-        code="no_sticker",
-      ) from exc
-  if not order.has_sticker or not (order.sticker_file or "").strip():
     raise AssemblyError(
       f"WB ещё не отдал стикер для заказа #{order.wb_order_id}. "
-      "Нажмите «Подтянуть стикеры» и повторите скан. Честный знак для печати стикера не нужен.",
+      "Нажмите «Подтянуть стикеры» и повторите скан.",
       code="no_sticker",
     )
 
@@ -736,7 +727,8 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       order.product = product
       order.save(update_fields=["product", "updated_at"])
 
-  requires_marking = _order_requires_marking(order, seller=seller, refresh_from_wb=True)
+  # ЧЗ известен с приёмки на остатки — WB needKiz на каждый скан не дергаем.
+  requires_marking = _order_requires_marking(order, seller=seller, refresh_from_wb=False)
 
   if requires_marking:
     wb_status = (order.wb_supplier_status or "").strip()
