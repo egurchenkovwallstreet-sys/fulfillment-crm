@@ -1,6 +1,7 @@
 import type { AssemblyOrder } from '../api/assembly'
 import { ProductPhotoThumb } from './ProductPhotoThumb'
 import { formatStickerNumber } from '../utils/stickerLabel'
+import { chzStatusLabel } from '../utils/markingVerify'
 import { uiHint } from '../utils/uiHint'
 
 export type AssemblyQueuePanelKind = 'in_assembly' | 'ready' | 'errors'
@@ -71,6 +72,8 @@ type AssemblyQueueListModalProps = {
   onReprint?: (order: AssemblyOrder) => void
   onDeliver?: (order: AssemblyOrder) => void
   onMove?: (order: AssemblyOrder) => void
+  onVerifyChz?: (order: AssemblyOrder) => void
+  verifyingChzOrderId?: number | null
 }
 
 export function AssemblyQueueListModal({
@@ -83,6 +86,8 @@ export function AssemblyQueueListModal({
   onReprint,
   onDeliver,
   onMove,
+  onVerifyChz,
+  verifyingChzOrderId = null,
 }: AssemblyQueueListModalProps) {
   const markingOrders = orders.filter((order) => order.requires_marking)
   const markingCount = markingOrders.length
@@ -162,6 +167,19 @@ export function AssemblyQueueListModal({
                         Стикер: <strong>{sticker}</strong>
                       </div>
                     )}
+                    {order.requires_marking && (
+                      <p
+                        className={`assembly-marking-list__chz${
+                          order.marking_verify_status === 'error'
+                            ? ' assembly-marking-list__chz--error'
+                            : order.marking_verify_status === 'verified' || order.marking_bound
+                              ? ' assembly-marking-list__chz--ok'
+                              : ''
+                        }`}
+                      >
+                        ЧЗ: {chzStatusLabel(order.marking_verify_status)}
+                      </p>
+                    )}
                     {kind === 'errors' && order.marking_verify_error && (
                       <p className="assembly-marking-list__error">{order.marking_verify_error}</p>
                     )}
@@ -189,6 +207,17 @@ export function AssemblyQueueListModal({
                         {...uiHint('Сбросить ЧЗ по этому заказу для повторного скана')}
                       >
                         Сброс ЧЗ
+                      </button>
+                    )}
+                    {order.requires_marking && onVerifyChz && (
+                      <button
+                        type="button"
+                        className="btn btn--small btn--secondary"
+                        onClick={() => onVerifyChz(order)}
+                        disabled={loading || verifyingChzOrderId === order.id}
+                        {...uiHint('Спросить WB прямо сейчас: принят ЧЗ или отклонён')}
+                      >
+                        {verifyingChzOrderId === order.id ? 'Проверяем…' : 'Проверить ЧЗ'}
                       </button>
                     )}
                     {kind === 'errors' && onReplace && (

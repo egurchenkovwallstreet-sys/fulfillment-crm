@@ -966,6 +966,30 @@
   font-size: 0.88rem;
 }
 
+.assembly-marking-list__chz {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: #92400e;
+}
+
+.assembly-marking-list__chz--ok {
+  color: #15803d;
+}
+
+.assembly-marking-list__chz--error {
+  color: #b91c1c;
+}
+
+.assembly-chz-notice {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 0.92rem;
+}
+
 .assembly-warehouse {
   display: inline-flex;
   align-items: center;

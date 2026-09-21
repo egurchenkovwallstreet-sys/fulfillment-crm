@@ -32,6 +32,7 @@ import {
   type PickList,
   type PrintOrder,
   type MarkingStatusResult,
+  type VerifyMarkingResult,
   type SendToDeliveryResult,
   type DeliveryShippingParams,
   type MoveSupplyTarget,
@@ -54,6 +55,14 @@ import {
   type ScanPhase,
   type StageKey,
 } from '../utils/assemblyWorkflow'
+import {
+  buildChzVerifyReport,
+  chzStatusLabel,
+  MARKING_STATUS_POLL_MS,
+  MARKING_VERIFY_POLL_MS,
+  pickVerifyItemsForOrder,
+  summarizeChzVerifyResult,
+} from '../utils/markingVerify'
 import { AssemblyModal, playAssemblyScanErrorBeep, type AssemblyModalState } from '../components/AssemblyModal'
 import { DeliveryDestinationModal } from '../components/DeliveryDestinationModal'
 import { BatchBindPanel } from '../components/BatchBindPanel'
@@ -88,8 +97,6 @@ import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 
-const MARKING_STATUS_POLL_MS = 5_000
-const MARKING_VERIFY_POLL_MS = 5_000
 const WB_COUNTS_POLL_MS = 120_000
 
 const EMPTY_MARKING_STATUS: MarkingStatusResult = {
@@ -217,7 +224,10 @@ function WbAssemblySellerPage() {
   const [markingListKind, setMarkingListKind] = useState<AssemblyQueuePanelKind | null>(null)
   const [scanBusy, setScanBusy] = useState(false)
   const [verifyingChz, setVerifyingChz] = useState(false)
+  const [verifyingChzOrderId, setVerifyingChzOrderId] = useState<number | null>(null)
+  const [chzVerifyNotice, setChzVerifyNotice] = useState('')
   const verifyInFlightRef = useRef(false)
+  const chzVerifyFailStreakRef = useRef(0)
   const [modal, setModal] = useState<AssemblyModalState | null>(null)
   const [movePicker, setMovePicker] = useState<{
     orderIds: number[]
@@ -391,7 +401,11 @@ function WbAssemblySellerPage() {
     }
   }, [id])
 
-  const runMarkingVerify = useCallback(async (opts?: { silent?: boolean }) => {
+  const runMarkingVerify = useCallback(async (opts?: {
+    silent?: boolean
+    forceRecheck?: boolean
+    orderIds?: number[]
+  }) => {
     if (!id) return null
     const silent = opts?.silent ?? true
     if (verifyInFlightRef.current) {
@@ -403,11 +417,25 @@ function WbAssemblySellerPage() {
     }
     verifyInFlightRef.current = true
     try {
-      const result = await verifyMarking(id)
+      const result = await verifyMarking(id, opts?.orderIds, {
+        forceRecheck: opts?.forceRecheck ?? !silent,
+      })
       await refreshMarkingStatus()
+      chzVerifyFailStreakRef.current = 0
+      if (silent) {
+        setChzVerifyNotice('')
+      }
       return result
     } catch (err) {
       if (!silent) throw err
+      chzVerifyFailStreakRef.current += 1
+      if (chzVerifyFailStreakRef.current >= 3) {
+        setChzVerifyNotice(
+          err instanceof Error
+            ? `${err.message} CRM продолжит опрос каждые 4 секунды. Нажмите «Проверить ЧЗ» для ответа по каждому заказу.`
+            : 'WB не ответил по ЧЗ. CRM продолжит опрос каждые 4 секунды.',
+        )
+      }
       return null
     } finally {
       verifyInFlightRef.current = false
@@ -454,7 +482,7 @@ function WbAssemblySellerPage() {
     if (!id || stage !== 'confirm') return
     const tick = () => {
       if (document.visibilityState !== 'visible') return
-      void runMarkingVerify({ silent: true })
+      void runMarkingVerify({ silent: true, forceRecheck: false })
     }
     tick()
     const verifyTimer = window.setInterval(tick, MARKING_VERIFY_POLL_MS)
@@ -1270,19 +1298,36 @@ function WbAssemblySellerPage() {
     }
   }
 
-  async function handleForceVerifyChz() {
+  function showChzVerifyModal(result: VerifyMarkingResult) {
+    const summary = summarizeChzVerifyResult(result)
+    setModal({
+      kind: 'block',
+      title: summary.title,
+      message: buildChzVerifyReport(result),
+    })
+    if (summary.tone === 'error') {
+      setMarkingListKind('errors')
+    }
+  }
+
+  async function handleForceVerifyChz(orderIds?: number[]) {
     if (!id) return
-    setVerifyingChz(true)
+    if (orderIds?.length === 1) {
+      setVerifyingChzOrderId(orderIds[0])
+    } else {
+      setVerifyingChz(true)
+    }
     try {
-      const result = await runMarkingVerify({ silent: false })
+      const result = await runMarkingVerify({
+        silent: false,
+        forceRecheck: true,
+        orderIds,
+      })
       await load({ silent: true })
       if (!result) {
         showError('Проверка ЧЗ', 'Не удалось спросить WB. Нажмите «Проверить ЧЗ» ещё раз.')
         return
       }
-      const verified = result.verified_count ?? result.results.filter((item) => item.status === 'verified').length
-      const errors = result.error_count ?? result.results.filter((item) => item.status === 'error').length
-      const pending = result.pending_count ?? result.results.filter((item) => item.status === 'pending').length
       if (!result.results.length) {
         showError(
           'Проверка ЧЗ',
@@ -1290,30 +1335,55 @@ function WbAssemblySellerPage() {
         )
         return
       }
-      if (errors > 0) {
-        setMarkingListKind('errors')
-        showError(
-          'Ошибки ЧЗ',
-          `WB не принял ${errors} код(ов) — они в списке «Ошибки ЧЗ». Принято: ${verified}.`,
-        )
-        return
-      }
-      if (verified > 0 && pending === 0) {
-        noticeOk(`WB принял ЧЗ у ${verified} заказ(ов). Кнопка «В доставку» зелёная.`, 'Проверка ЧЗ')
-        return
-      }
-      if (pending > 0) {
-        noticeOk(
-          `WB ещё проверяет ${pending} код(ов). Повтор каждые 12 секунд — кнопка станет зелёной, когда примет, или коды уйдут в «Ошибки ЧЗ».`,
-          'Проверка ЧЗ',
-        )
-        return
-      }
-      noticeOk('Проверка ЧЗ завершена.', 'Проверка ЧЗ')
+      showChzVerifyModal(result)
     } catch (err) {
       noticeFail('Проверка ЧЗ', err, 'Не удалось проверить Честный знак в WB')
     } finally {
       setVerifyingChz(false)
+      setVerifyingChzOrderId(null)
+    }
+  }
+
+  async function handleVerifyOrderChz(order: AssemblyOrder) {
+    if (!id) return
+    setVerifyingChzOrderId(order.id)
+    try {
+      const result = await runMarkingVerify({
+        silent: false,
+        forceRecheck: true,
+        orderIds: [order.id],
+      })
+      await refreshMarkingStatus()
+      await load({ silent: true })
+      if (!result) {
+        showError('Проверка ЧЗ', `Не удалось спросить WB по заказу #${order.wb_order_id}.`)
+        return
+      }
+      const item = pickVerifyItemsForOrder(result, order.id)
+      if (!item) {
+        showError(
+          'Проверка ЧЗ',
+          `WB не вернул статус по заказу #${order.wb_order_id}. Повторите через несколько секунд.`,
+        )
+        return
+      }
+      setModal({
+        kind: 'block',
+        title: `WB #${order.wb_order_id}: ${chzStatusLabel(item.status)}`,
+        message:
+          item.status === 'error' && item.error
+            ? `${item.error}\n\nЕсли сканер передал код не полностью — нажмите «Сброс ЧЗ» и отсканируйте DataMatrix заново.`
+            : item.status === 'pending'
+              ? 'WB ещё не дал финальный ответ. CRM спросит снова автоматически каждые 4 секунды.'
+              : 'Честный знак принят WB — заказ можно передавать в доставку.',
+      })
+      if (item.status === 'error') {
+        setMarkingListKind('errors')
+      }
+    } catch (err) {
+      noticeFail('Проверка ЧЗ', err, 'Не удалось проверить Честный знак в WB')
+    } finally {
+      setVerifyingChzOrderId(null)
     }
   }
 
@@ -2266,9 +2336,9 @@ function WbAssemblySellerPage() {
               className="btn btn--secondary"
               onClick={() => void handleForceVerifyChz()}
               disabled={loading || verifyingChz}
-              {...uiHint('Спросить WB по всем заказам на сборке: принял ЧЗ — зелёная кнопка, не принял — «Ошибки ЧЗ»')}
+              {...uiHint('Спросить WB по всем заказам с ЧЗ: ответ «принят» или «отклонён» по каждому заказу')}
             >
-              {verifyingChz ? 'Проверяем ЧЗ…' : 'Проверить ЧЗ'}
+              {verifyingChz ? 'Проверяем ЧЗ…' : 'Проверить все ЧЗ'}
             </button>
           )}
           {stage === 'confirm' && showDeliverButton && (
@@ -2330,12 +2400,20 @@ function WbAssemblySellerPage() {
       </section>
 
       {stage === 'confirm' && (
-        <AssemblyQueuePanels
-          inAssemblyCount={markingStatus.in_assembly_count}
-          readyCount={markingStatus.ready_count}
-          errorsCount={markingStatus.errors_count}
-          onOpenList={setMarkingListKind}
-        />
+        <>
+          <AssemblyQueuePanels
+            inAssemblyCount={markingStatus.in_assembly_count}
+            readyCount={markingStatus.ready_count}
+            errorsCount={markingStatus.errors_count}
+            onOpenList={setMarkingListKind}
+          />
+          {(waitingWbCount > 0 || chzVerifyNotice) && (
+            <p className="assembly-chz-notice">
+              {chzVerifyNotice ||
+                `WB проверяет ЧЗ у ${waitingWbCount} заказ(ов). CRM спрашивает WB каждые 4 секунды — лимита попыток нет.`}
+            </p>
+          )}
+        </>
       )}
 
       <section className="assembly-pipeline">
@@ -2955,6 +3033,8 @@ function WbAssemblySellerPage() {
                 }
               : undefined
           }
+          onVerifyChz={(order) => void handleVerifyOrderChz(order)}
+          verifyingChzOrderId={verifyingChzOrderId}
         />
       )}
 

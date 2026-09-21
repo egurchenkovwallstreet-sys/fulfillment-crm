@@ -75,7 +75,7 @@ export function orderBlockReason(order: AssemblyOrder): string | null {
   }
   if (order.requires_marking && !order.marking_bound) {
     if (order.marking_verify_status === 'pending') {
-      return 'WB проверяет ЧЗ (несколько минут) — в доставку после подтверждения'
+      return 'WB проверяет ЧЗ — CRM спрашивает каждые 4 секунды, лимита попыток нет'
     }
     if (order.marking_verify_status === 'error') {
       return appendStickerHint(
