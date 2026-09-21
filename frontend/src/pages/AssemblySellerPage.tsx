@@ -617,7 +617,7 @@ function WbAssemblySellerPage() {
     window.setTimeout(() => {
       scanRef.current?.focus()
       scanRef.current?.select()
-    }, 900)
+    }, 350)
     void refreshMarkingStatus()
   }
 
@@ -1771,12 +1771,18 @@ function WbAssemblySellerPage() {
     scanBusyRef.current = true
     setScanBusy(true)
     const printWin = openPrintHolder()
+    if (printWin) {
+      setPrintHolderMessage(printWin, 'Привязка ЧЗ в WB…')
+    }
     try {
       const started = Date.now()
       while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
         await new Promise((resolve) => window.setTimeout(resolve, 40))
       }
       const result = await bindMarking(id, pendingOrder.id, code)
+      if (printWin) {
+        setPrintHolderMessage(printWin, 'Печать стикера…')
+      }
       try {
         await finishPrint(result.order, printWin)
       } catch (printErr) {

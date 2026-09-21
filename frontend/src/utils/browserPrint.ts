@@ -37,7 +37,7 @@ function autoPrintScript(): string {
     if (printed) return;
     printed = true;
     try { window.focus(); window.print(); } catch (e) {}
-    window.setTimeout(closeOnce, 1200);
+    window.setTimeout(closeOnce, 500);
   }
   if (!img) { doPrint(); return; }
   if (img.complete && img.naturalWidth > 0) doPrint();
