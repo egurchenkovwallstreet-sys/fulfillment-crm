@@ -882,19 +882,6 @@ def bind_marking_and_print(
       code="duplicate_marking",
     )
 
-  client = _get_client(seller)
-  try:
-    client.bind_order_sgtin(order.wb_order_id, [normalized])
-  except WBApiError as exc:
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message=f"Ошибка привязки ЧЗ WB #{order.wb_order_id}: {exc}",
-      details={"order_id": order.id, "status_code": exc.status_code},
-    )
-    raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
-
   from apps.warehouse.services.stock_deduction import (
     StockDeductionError,
     deduct_stock_for_sticker_print,
@@ -942,18 +929,22 @@ def bind_marking_and_print(
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
-  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
+  from apps.integrations.tasks import bind_order_marking_wb_task
 
-  immediate_verify = queue_last_pick_list_marking_verify(seller)
+  bind_order_marking_wb_task.delay(
+    order.id,
+    normalized,
+    user.id if getattr(user, "is_authenticated", False) else None,
+  )
 
   return {
     "action": "print",
     "order": order,
     "stock": stock_info,
-    "immediate_verify": immediate_verify,
+    "immediate_verify": False,
     "message": (
-      f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
-      "Стикер печатается сразу; проверка WB — в фоне."
+      f"Стикер заказа #{order.wb_order_id} отправлен на печать. "
+      "Привязка ЧЗ в WB и проверка — в фоне."
     ),
   }
 

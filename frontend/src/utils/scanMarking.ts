@@ -46,3 +46,18 @@ export function applyMarkingScanKey(
 export function appendPastedMarking(buffer: string, pasted: string): string {
   return buffer + pasted.replace(/\r\n|\r|\n/g, '')
 }
+
+const MARKING_MIN_LEN = 16
+
+/** Быстрая проверка до печати — полная валидация остаётся на сервере. */
+export function quickMarkingCodeCheck(raw: string): string | null {
+  const code = raw.trim()
+  if (!code) return 'Код Честного знака пустой — отсканируйте DataMatrix с упаковки'
+  if (/[\u0400-\u04FF]/.test(code)) {
+    return 'Сканер печатает русскими буквами. Переключите раскладку Windows на ENG и отсканируйте код заново.'
+  }
+  if (code.length < MARKING_MIN_LEN) {
+    return `Код слишком короткий (${code.length} симв.). Проверьте, что сканер считал DataMatrix полностью.`
+  }
+  return null
+}

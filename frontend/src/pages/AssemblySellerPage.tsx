@@ -84,7 +84,7 @@ import {
 import { downloadPickListPdf } from '../utils/pickListPrint'
 import { printBatchRibbon } from '../utils/batchRibbonPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
-import { applyMarkingScanKey, appendPastedMarking } from '../utils/scanMarking'
+import { applyMarkingScanKey, appendPastedMarking, quickMarkingCodeCheck } from '../utils/scanMarking'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { useCrmNotice } from '../context/CrmNoticeContext'
 import { uiHint, hintWrapProps } from '../utils/uiHint'
@@ -1767,67 +1767,90 @@ function WbAssemblySellerPage() {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
     if (!id || !pendingOrder || !code || scanBusyRef.current) return
+
+    const quickError = quickMarkingCodeCheck(code)
+    if (quickError) {
+      showScanError(quickError, 'Ошибка сканирования ЧЗ', () => focusMarkingInput())
+      return
+    }
+
+    const sticker = (pendingOrder.sticker_file || '').trim()
+    if (!sticker) {
+      showScanError(
+        `WB не отдал стикер для заказа #${pendingOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите.`,
+        'Стикер не загружен',
+        () => focusMarkingInput(),
+      )
+      return
+    }
+
     setError('')
     scanBusyRef.current = true
     setScanBusy(true)
+    markingBufferRef.current = ''
+    setMarkingValue('')
+
+    const orderSnapshot = pendingOrder
     const printWin = openPrintHolder()
     if (printWin) {
-      setPrintHolderMessage(printWin, 'Привязка ЧЗ в WB…')
+      setPrintHolderMessage(printWin, 'Печать стикера…')
     }
-    try {
-      const started = Date.now()
-      while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
-        await new Promise((resolve) => window.setTimeout(resolve, 40))
-      }
-      const result = await bindMarking(id, pendingOrder.id, code)
-      if (printWin) {
-        setPrintHolderMessage(printWin, 'Печать стикера…')
-      }
+
+    void (async () => {
       try {
-        await finishPrint(result.order, printWin)
+        setStickerPreview(sticker)
+        setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
+        await printSticker(sticker, printWin)
+        flashPrintOk()
+        resetScanFlow(true)
+        window.setTimeout(() => {
+          scanRef.current?.focus()
+          scanRef.current?.select()
+        }, 80)
       } catch (printErr) {
-        const printMsg = assemblyErrorMessage(
-          printErr,
-          `ЧЗ привязан к заказу WB #${result.order.wb_order_id}, но стикер не напечатан. ` +
-            'Проверьте принтер и нажмите «Печать ещё раз» в списке «Готовые».',
-          result.order,
-        )
+        closePrintHolder(printWin)
         showScanError(
-          printMsg,
+          printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
           'Стикер не напечатан',
           () => focusMarkingInput(),
         )
+      }
+    })()
+
+    void (async () => {
+      try {
+        const started = Date.now()
+        while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
+          await new Promise((resolve) => window.setTimeout(resolve, 40))
+        }
+        await bindMarking(id, orderSnapshot.id, code)
         void refreshMarkingStatus()
         void load({ silent: true })
-        return
-      }
-      if (result.immediate_verify) {
-        void runMarkingVerify()
-      }
-      void refreshMarkingStatus()
-      void load({ silent: true })
-    } catch (err) {
-      closePrintHolder(printWin)
-      if (err instanceof ApiError && err.code === 'already_printed') {
+        void runMarkingVerify({ silent: true })
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'already_printed') {
+          void refreshMarkingStatus()
+          void load({ silent: true })
+          resetScanFlow(true)
+          return
+        }
+        const markingErrMsg = assemblyErrorMessage(
+          err,
+          'Стикер напечатан, но CRM не приняла код ЧЗ. Проверьте «Ошибки ЧЗ».',
+          orderSnapshot,
+        )
+        showScanError(
+          markingErrMsg,
+          assemblyScanErrorTitle(err, 'Ошибка ЧЗ'),
+          () => resetScanFlow(true),
+        )
         void refreshMarkingStatus()
         void load({ silent: true })
-        resetScanFlow(true)
+      } finally {
+        scanBusyRef.current = false
+        setScanBusy(false)
       }
-      const markingErrMsg = assemblyErrorMessage(
-        err,
-        'Не удалось привязать Честный знак и напечатать стикер',
-        pendingOrder,
-      )
-      showScanError(
-        markingErrMsg,
-        assemblyScanErrorTitle(err, 'Ошибка сканирования ЧЗ'),
-        () => focusMarkingInput(),
-      )
-      focusMarkingInput()
-    } finally {
-      scanBusyRef.current = false
-      setScanBusy(false)
-    }
+    })()
   }
 
   async function handleReplaceOrderFromList(order: AssemblyOrder) {
@@ -2572,7 +2595,7 @@ function WbAssemblySellerPage() {
                 </div>
               )}
               <p className="assembly-scan-hint">
-                DataMatrix с упаковки. Код привяжется к заказу в WB, стикер FBS отправится на печать сразу.
+                DataMatrix с упаковки. Стикер печатается сразу; привязка ЧЗ в WB и проверка — в фоне.
               </p>
               <form onSubmit={handleMarkingSubmit}>
                 <input
