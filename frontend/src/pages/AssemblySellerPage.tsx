@@ -79,8 +79,11 @@ import {
   printSupplySticker,
   refreshPrintBridgeStatus,
   setPrintHolderMessage,
+  warmFbsPrintWindow,
+  preloadFbsSticker,
   type PrintChannel,
 } from '../utils/printService'
+import { isKioskPrintMode } from '../utils/printMode'
 import { downloadPickListPdf } from '../utils/pickListPrint'
 import { printBatchRibbon } from '../utils/batchRibbonPrint'
 import { formatStickerNumber, appendStickerHint } from '../utils/stickerLabel'
@@ -459,6 +462,11 @@ function WbAssemblySellerPage() {
   }, [scanPhase])
 
   useEffect(() => {
+    if (stage !== 'confirm' || !isKioskPrintMode()) return
+    warmFbsPrintWindow()
+  }, [stage])
+
+  useEffect(() => {
     if (!id || stage !== 'confirm') return
 
     const tick = () => {
@@ -547,6 +555,8 @@ function WbAssemblySellerPage() {
         setMarkingValue('')
       }
     })
+    const sticker = (order.sticker_file || '').trim()
+    if (sticker) preloadFbsSticker(sticker)
     focusMarkingInput()
   }
 
@@ -610,6 +620,7 @@ function WbAssemblySellerPage() {
     }
     setStickerPreview(file)
     setLastPrinted(order as unknown as AssemblyOrder)
+    preloadFbsSticker(file)
     await printSticker(file, preopened)
     flashPrintOk()
     resetScanFlow(true)
@@ -617,7 +628,7 @@ function WbAssemblySellerPage() {
     window.setTimeout(() => {
       scanRef.current?.focus()
       scanRef.current?.select()
-    }, 350)
+    }, 50)
     void refreshMarkingStatus()
   }
 
@@ -1660,7 +1671,7 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
-    let printWin: Window | null = null
+    let printWin: Window | null = openPrintHolder()
 
     try {
       const result = await scanOrderBarcode(id, barcode)
@@ -1676,9 +1687,8 @@ function WbAssemblySellerPage() {
         return
       }
 
-      printWin = openPrintHolder()
-      if (printWin) {
-        setPrintHolderMessage(printWin, 'Печать стикера…')
+      if (!printWin) {
+        printWin = openPrintHolder()
       }
 
       try {
@@ -1792,30 +1802,26 @@ function WbAssemblySellerPage() {
 
     const orderSnapshot = pendingOrder
     const printWin = openPrintHolder()
-    if (printWin) {
-      setPrintHolderMessage(printWin, 'Печать стикера…')
-    }
 
-    void (async () => {
-      try {
-        setStickerPreview(sticker)
-        setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
-        await printSticker(sticker, printWin)
+    setStickerPreview(sticker)
+    setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
+    resetScanFlow(true)
+    scanBusyRef.current = false
+    setScanBusy(false)
+
+    void printSticker(sticker, printWin)
+      .then((channel) => {
+        if (channel === 'bridge') setBridgeOk(true)
         flashPrintOk()
-        resetScanFlow(true)
-        window.setTimeout(() => {
-          scanRef.current?.focus()
-          scanRef.current?.select()
-        }, 80)
-      } catch (printErr) {
+      })
+      .catch((printErr) => {
         closePrintHolder(printWin)
         showScanError(
           printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
           'Стикер не напечатан',
-          () => focusMarkingInput(),
+          () => resetScanFlow(true),
         )
-      }
-    })()
+      })
 
     void (async () => {
       try {
@@ -1831,7 +1837,6 @@ function WbAssemblySellerPage() {
         if (err instanceof ApiError && err.code === 'already_printed') {
           void refreshMarkingStatus()
           void load({ silent: true })
-          resetScanFlow(true)
           return
         }
         const markingErrMsg = assemblyErrorMessage(
@@ -1846,9 +1851,6 @@ function WbAssemblySellerPage() {
         )
         void refreshMarkingStatus()
         void load({ silent: true })
-      } finally {
-        scanBusyRef.current = false
-        setScanBusy(false)
       }
     })()
   }

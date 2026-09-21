@@ -12,6 +12,9 @@ export const PRINT_SIZES = {
 } as const
 
 const PRINT_POPUP_NAME = 'crm_fbs_print'
+const PRINT_POPUP_FEATURES = 'popup=1,width=220,height=160,left=-2400,top=80'
+
+let cachedPrintWindow: Window | null = null
 
 export function normalizeImageBase64(value: string): string {
   let raw = (value || '').trim()
@@ -22,31 +25,34 @@ export function normalizeImageBase64(value: string): string {
   return raw.replace(/\s/g, '')
 }
 
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
 function autoPrintScript(): string {
   return `(function () {
-  var img = document.querySelector('img');
-  var printed = false;
-  var closed = false;
-  function closeOnce() {
-    if (closed) return;
-    closed = true;
-    window.setTimeout(function () { try { window.close(); } catch (e) {} }, 500);
-  }
-  window.onafterprint = closeOnce;
-  function doPrint() {
-    if (printed) return;
-    printed = true;
+  var done = false;
+  function finish() {
+    if (done) return;
+    done = true;
     try { window.focus(); window.print(); } catch (e) {}
-    window.setTimeout(closeOnce, 500);
   }
-  if (!img) { doPrint(); return; }
-  if (img.complete && img.naturalWidth > 0) doPrint();
-  else img.addEventListener('load', doPrint, { once: true });
+  var img = document.querySelector('img');
+  if (!img) { finish(); return; }
+  function go() { finish(); }
+  if (img.complete && img.naturalWidth > 0) go();
+  else if (img.decode) img.decode().then(go).catch(go);
+  else img.addEventListener('load', go, { once: true });
+  window.setTimeout(go, 15);
 })();`
 }
 
-function fbsStickerHtml(base64: string, autoPrint: boolean): string {
-  const payload = normalizeImageBase64(base64)
+function fbsStickerHtml(imgSrc: string, autoPrint: boolean): string {
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -72,7 +78,7 @@ function fbsStickerHtml(base64: string, autoPrint: boolean): string {
   </style>
 </head>
 <body>
-  <img src="data:image/png;base64,${payload}" alt="" />
+  <img src="${imgSrc}" alt="" decoding="sync" />
   ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
 </body>
 </html>`)
@@ -92,20 +98,58 @@ function writeHtmlToPopup(win: Window, html: string): boolean {
 function openHtmlBlobWindow(html: string): boolean {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
-  const win = window.open(url, '_blank', 'popup=1,width=420,height=640')
+  const win = window.open(url, PRINT_POPUP_NAME, PRINT_POPUP_FEATURES)
   if (!win) {
     URL.revokeObjectURL(url)
     return false
   }
+  cachedPrintWindow = win
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
   return true
 }
 
-export function openPrintHolder(): Window | null {
-  const win = window.open('about:blank', PRINT_POPUP_NAME, 'popup=1,width=420,height=640')
+/** Декодируем PNG в кэш браузера до скана ЧЗ — popup печатает без ожидания загрузки. */
+export function preloadFbsSticker(base64: string): void {
+  const payload = normalizeImageBase64(base64)
+  if (!payload) return
+  try {
+    const blob = new Blob([base64ToBytes(payload)], { type: 'image/png' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.decoding = 'sync'
+    const release = () => URL.revokeObjectURL(url)
+    img.onload = release
+    img.onerror = release
+    img.src = url
+  } catch {
+    const img = new Image()
+    img.decoding = 'sync'
+    img.src = `data:image/png;base64,${payload}`
+  }
+}
+
+/** Держим окно печати открытым — следующий стикер без window.open и без «Печать…». */
+export function warmFbsPrintWindow(): Window | null {
+  if (cachedPrintWindow && !cachedPrintWindow.closed) {
+    return cachedPrintWindow
+  }
+  const win = window.open('about:blank', PRINT_POPUP_NAME, PRINT_POPUP_FEATURES)
   if (!win) return null
-  setPrintHolderMessage(win, 'Печать стикера…')
+  cachedPrintWindow = win
+  try {
+    win.document.open()
+    win.document.write(
+      '<!DOCTYPE html><html><head><title></title></head><body style="margin:0;background:#fff"></body></html>',
+    )
+    win.document.close()
+  } catch {
+    // ignore
+  }
   return win
+}
+
+export function openPrintHolder(): Window | null {
+  return warmFbsPrintWindow()
 }
 
 export function setPrintHolderMessage(win: Window | null, message: string) {
@@ -122,25 +166,50 @@ export function setPrintHolderMessage(win: Window | null, message: string) {
 }
 
 export function closePrintHolder(win?: Window | null) {
-  if (!win || win.closed) return
+  const target = win ?? cachedPrintWindow
+  if (!target || target.closed) return
   try {
-    win.close()
+    target.close()
   } catch {
     // ignore
   }
+  if (target === cachedPrintWindow) {
+    cachedPrintWindow = null
+  }
 }
 
-/** Стикер FBS 58×40 мм. Печать и закрытие popup — inline script внутри окна. */
+/** Стикер FBS 58×40 мм. Blob URL вместо inline base64 — быстрее загрузка в popup. */
 export function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): boolean {
-  const html = fbsStickerHtml(base64, autoPrint)
-  if (preopened && !preopened.closed) {
-    return writeHtmlToPopup(preopened, html)
+  const payload = normalizeImageBase64(base64)
+  if (!payload) return false
+
+  let imgUrl = ''
+  try {
+    const blob = new Blob([base64ToBytes(payload)], { type: 'image/png' })
+    imgUrl = URL.createObjectURL(blob)
+  } catch {
+    imgUrl = `data:image/png;base64,${payload}`
   }
-  return openHtmlBlobWindow(html)
+
+  const html = fbsStickerHtml(imgUrl, autoPrint)
+  const win = (preopened && !preopened.closed) ? preopened : warmFbsPrintWindow()
+  if (win) {
+    const ok = writeHtmlToPopup(win, html)
+    if (imgUrl.startsWith('blob:')) {
+      window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
+    }
+    return ok
+  }
+
+  const ok = openHtmlBlobWindow(html)
+  if (imgUrl.startsWith('blob:')) {
+    window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
+  }
+  return ok
 }
 
 /** QR/ШК поставки WB — preview без автопечати в kiosk. */

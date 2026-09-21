@@ -15,7 +15,13 @@ import {
 import { isKioskPrintMode, shouldBrowserAutoPrint } from './printMode'
 
 export type PrintChannel = 'bridge' | 'browser'
-export { openPrintHolder, closePrintHolder, setPrintHolderMessage }
+export {
+  openPrintHolder,
+  closePrintHolder,
+  setPrintHolderMessage,
+  warmFbsPrintWindow,
+  preloadFbsSticker,
+} from './browserPrint'
 
 let cachedHealth: PrintBridgeHealth | null = null
 
@@ -59,20 +65,21 @@ async function printFbsStickerInWindow(
  * Kiosk Chrome (без агента): сразу popup + autoprint, bridge не трогаем.
  * С агентом: bridge → browser fallback.
  */
+const BRIDGE_PRINT_RACE_MS = 250
+
 export async function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
-  const kiosk = isKioskPrintMode()
 
-  if (!kiosk && cachedHealth?.ok === true) {
+  if (!isKioskPrintMode() && cachedHealth?.ok === true) {
     const bridgeAttempt = printViaBridge('fbs_sticker', base64)
     const winner = await Promise.race([
       bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
       new Promise<'no'>((resolve) => {
-        window.setTimeout(() => resolve('no'), 800)
+        window.setTimeout(() => resolve('no'), BRIDGE_PRINT_RACE_MS)
       }),
     ])
     if (winner === 'bridge') {
