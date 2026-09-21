@@ -551,11 +551,8 @@ function WbAssemblySellerPage() {
   }
 
   function focusMarkingInput() {
-    scanPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    window.requestAnimationFrame(() => {
-      markingRef.current?.focus()
-      window.setTimeout(() => markingRef.current?.focus(), 0)
-    })
+    scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+    markingRef.current?.focus()
   }
 
   function showScanError(
@@ -1663,17 +1660,13 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
-    const printWin = openPrintHolder()
-    if (printWin) {
-      setPrintHolderMessage(printWin, 'Сканирование…')
-    }
+    let printWin: Window | null = null
 
     try {
       const result = await scanOrderBarcode(id, barcode)
       const needsMarking = result.action === 'await_marking'
 
       if (needsMarking) {
-        closePrintHolder(printWin)
         openMarkingScan(
           result.order,
           result.message ||
@@ -1681,6 +1674,11 @@ function WbAssemblySellerPage() {
         )
         void refreshMarkingStatus()
         return
+      }
+
+      printWin = openPrintHolder()
+      if (printWin) {
+        setPrintHolderMessage(printWin, 'Печать стикера…')
       }
 
       try {
@@ -2536,7 +2534,7 @@ function WbAssemblySellerPage() {
               <h2 className="section-title">Сканируйте баркод заказа</h2>
               <p className="assembly-scan-hint">
                 Курсор уже в поле. При необходимости скачайте PDF листа подбора в шапке.
-                После скана товара с ЧЗ сразу откроется окно DataMatrix, затем печать стикера.
+                После скана товара с ЧЗ сразу откроется поле DataMatrix, затем печать стикера.
               </p>
               <form onSubmit={handleBarcodeSubmit}>
                 <input
@@ -2546,7 +2544,7 @@ function WbAssemblySellerPage() {
                   value={scanValue}
                   onChange={(e) => setScanValue(e.target.value)}
                   onKeyDown={handleScanKeyDown}
-                  placeholder="Баркод заказа..."
+                  placeholder={scanBusy ? 'Проверяем заказ…' : 'Баркод заказа...'}
                   autoComplete="off"
                   autoFocus
                   disabled={scanBusy}
