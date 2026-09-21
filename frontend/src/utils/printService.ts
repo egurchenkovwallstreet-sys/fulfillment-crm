@@ -8,9 +8,7 @@ import {
   printFbsSticker as browserPrintFbsSticker,
   printSupplySticker as browserPrintSupplySticker,
   normalizeImageBase64,
-  openPrintHolder,
   closePrintHolder,
-  setPrintHolderMessage,
 } from './browserPrint'
 import { isKioskPrintMode, shouldBrowserAutoPrint } from './printMode'
 

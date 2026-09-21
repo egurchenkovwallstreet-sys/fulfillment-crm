@@ -96,7 +96,6 @@ import {
   readAssemblySellerCache,
   writeAssemblySellerCache,
 } from '../utils/assemblyCache'
-import { isKioskPrintMode } from '../utils/printMode'
 import { OzonAssemblySellerPage } from './OzonAssemblySellerPage'
 import './AssemblyPage.css'
 

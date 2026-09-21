@@ -34,6 +34,10 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
+function bytesToBlob(bytes: Uint8Array, type: string): Blob {
+  return new Blob([Uint8Array.from(bytes)], { type })
+}
+
 function autoPrintScript(): string {
   return `(function () {
   var done = false;
@@ -113,7 +117,7 @@ export function preloadFbsSticker(base64: string): void {
   const payload = normalizeImageBase64(base64)
   if (!payload) return
   try {
-    const blob = new Blob([base64ToBytes(payload)], { type: 'image/png' })
+    const blob = bytesToBlob(base64ToBytes(payload), 'image/png')
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.decoding = 'sync'
@@ -189,7 +193,7 @@ export function printFbsSticker(
 
   let imgUrl = ''
   try {
-    const blob = new Blob([base64ToBytes(payload)], { type: 'image/png' })
+    const blob = bytesToBlob(base64ToBytes(payload), 'image/png')
     imgUrl = URL.createObjectURL(blob)
   } catch {
     imgUrl = `data:image/png;base64,${payload}`
