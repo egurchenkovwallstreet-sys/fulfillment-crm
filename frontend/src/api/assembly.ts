@@ -225,6 +225,7 @@ export interface SendToAssemblyResult {
   order: AssemblyOrder
   wb_supply_id: string
   stickers_fetched: number
+  stickers_deferred?: boolean
   sticker_error?: string
 }
 

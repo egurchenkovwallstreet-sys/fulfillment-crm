@@ -649,16 +649,16 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
   sent_order_ids = result.get("sent_order_ids") or []
   stickers_deferred = bool(result.get("stickers_deferred"))
   if sent_order_ids:
-    fetch_assembly_stickers_task.apply_async(
-      args=[seller.id, sent_order_ids],
-      kwargs={"user_id": user.id if user else None},
-      countdown=5,
+    fetch_assembly_stickers_task.delay(
+      seller.id,
+      sent_order_ids,
+      user_id=user.id if user else None,
     )
 
   sticker_errors = ""
   if stickers_deferred:
     sticker_errors = (
-      "Стикеры подтягиваются в фоне (обычно 10–30 сек). "
+      "Стикеры подтягиваются в фоне сразу после передачи. "
       "Если скан не находит заказ — нажмите «Подтянуть стикеры» на вкладке «На сборке»."
     )
 

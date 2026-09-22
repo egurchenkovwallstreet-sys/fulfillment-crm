@@ -1263,6 +1263,7 @@ class AssemblySendToAssemblyView(APIView):
       "order": OrderAssemblySerializer(result["order"]).data,
       "wb_supply_id": result["wb_supply_id"],
       "stickers_fetched": result["stickers_fetched"],
+      "stickers_deferred": bool(result.get("stickers_deferred")),
     }
     if result.get("sticker_error"):
       payload["sticker_error"] = result["sticker_error"]

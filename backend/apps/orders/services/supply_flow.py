@@ -1438,6 +1438,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
       [order],
       client=client,
       user=user,
+      skip_stickers=True,
     )
     if not added_orders:
       order.refresh_from_db()
@@ -1477,6 +1478,7 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   )
 
   if added_orders:
+    from apps.integrations.tasks import fetch_assembly_stickers_task
     from apps.orders.services.wb_status import remove_wb_orders_from_new_cache
 
     remove_wb_orders_from_new_cache(seller, [order.wb_order_id])
@@ -1489,6 +1491,11 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
         "wb_counts_synced_at",
       ],
     )
+    fetch_assembly_stickers_task.delay(
+      seller.id,
+      [order.id],
+      user_id=user.id if user else None,
+    )
     maybe_prefetch_shipping_points_after_assembly_progress(
       seller,
       order,
@@ -1499,7 +1506,8 @@ def send_order_to_assembly(seller: Seller, order_id: int, *, user=None) -> dict:
   return {
     "order": order,
     "wb_supply_id": supply.wb_supply_id,
-    "stickers_fetched": stickers_fetched,
+    "stickers_fetched": 0 if added_orders else stickers_fetched,
+    "stickers_deferred": bool(added_orders),
     "sticker_error": sticker_error,
     "orders_added": len(added_orders),
   }
