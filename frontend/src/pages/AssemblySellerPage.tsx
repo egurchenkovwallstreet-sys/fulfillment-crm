@@ -258,6 +258,15 @@ function WbAssemblySellerPage() {
   const stickerRefreshTimerRef = useRef<number | null>(null)
   const barcodeFocusTimerRef = useRef<number | null>(null)
 
+  const warmStickerCacheFromOrders = useCallback((orderList: AssemblyOrder[]) => {
+    for (const order of orderList) {
+      const file = (order.sticker_file || '').trim()
+      if (!file || !order.has_sticker) continue
+      orderStickerCacheRef.current.set(order.id, file)
+      preloadFbsSticker(file)
+    }
+  }, [])
+
   const load = useCallback(async (opts?: { silent?: boolean; stageKey?: string }) => {
     if (!id) return
     const pickStage = opts?.stageKey ?? stage
@@ -300,15 +309,6 @@ function WbAssemblySellerPage() {
       }
     }
   }, [id, stage, showError, warmStickerCacheFromOrders])
-
-  const warmStickerCacheFromOrders = useCallback((orderList: AssemblyOrder[]) => {
-    for (const order of orderList) {
-      const file = (order.sticker_file || '').trim()
-      if (!file || !order.has_sticker) continue
-      orderStickerCacheRef.current.set(order.id, file)
-      preloadFbsSticker(file)
-    }
-  }, [])
 
   const refreshAssemblyStickersInBackground = useCallback(() => {
     if (!id) return
