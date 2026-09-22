@@ -1,8 +1,9 @@
+import re
 from collections import defaultdict
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 
 from apps.orders.models import Order, PickList, PickListItem, Supply
@@ -35,12 +36,49 @@ def _product_wb_article(product: Product | None) -> str:
   return (product.vendor_code or "").strip()
 
 
-def _cell_sort_key(cell_number: str) -> tuple[int, int, str]:
+def _cell_sort_key(cell_number: str) -> tuple[int, tuple[int | str, ...], str]:
+  """Сортировка ячеек: 1, 2, 10 (не 1, 10, 2); без ячейки — в конец."""
+  cell_number = (cell_number or "").strip()
   if not cell_number or cell_number == "—":
-    return (1, 999999, "")
+    return (1, (999999,), "")
+  if cell_number.endswith(".0") and cell_number[:-2].isdigit():
+    cell_number = cell_number[:-2]
   if cell_number.isdigit():
-    return (0, int(cell_number), "")
-  return (0, 999998, cell_number)
+    return (0, (int(cell_number),), "")
+  parts = re.findall(r"\d+|\D+", cell_number)
+  natural: list[int | str] = [
+    int(part) if part.isdigit() else part.lower()
+    for part in parts
+  ]
+  return (0, tuple(natural), cell_number.lower())
+
+
+def _pick_list_items_queryset():
+  from apps.orders.models import PickListItem
+
+  return PickListItem.objects.select_related("cell", "product").order_by("sort_order", "id")
+
+
+def _pick_list_item_sort_key(item: PickListItem) -> tuple:
+  return (
+    _cell_sort_key(str(item.cell.number) if item.cell_id else "—"),
+    item.id,
+  )
+
+
+def reorder_pick_list_items(pick_list: PickList) -> None:
+  """Пересчитать sort_order по номерам ячеек (1, 2, 10…)."""
+  items = list(pick_list.items.select_related("cell").all())
+  if not items:
+    return
+  items.sort(key=_pick_list_item_sort_key)
+  changed: list[PickListItem] = []
+  for sort_order, item in enumerate(items, start=1):
+    if item.sort_order != sort_order:
+      item.sort_order = sort_order
+      changed.append(item)
+  if changed:
+    PickListItem.objects.bulk_update(changed, ["sort_order"])
 
 
 def _warehouse_label(seller: Seller, wb_warehouse_id: int) -> str:
@@ -72,7 +110,7 @@ def _group_orders_by_warehouse(
 def active_wb_pick_lists(seller: Seller) -> list[PickList]:
   return list(
     PickList.objects.filter(seller=seller, is_completed=False, marketplace=MARKETPLACE_WB)
-    .prefetch_related("items__cell", "items__product")
+    .prefetch_related(Prefetch("items", queryset=_pick_list_items_queryset()))
     .order_by("warehouse_name", "-created_at")
   )
 
@@ -90,7 +128,7 @@ def archived_wb_pick_lists(seller: Seller, *, days: int = PICK_LIST_ARCHIVE_DAYS
       marketplace=MARKETPLACE_WB,
     )
     .filter(Q(completed_at__gte=since) | Q(completed_at__isnull=True, created_at__gte=since))
-    .prefetch_related("items__cell", "items__product")
+    .prefetch_related(Prefetch("items", queryset=_pick_list_items_queryset()))
     .order_by("-created_at")
   )
 
@@ -106,7 +144,7 @@ def _active_wb_pick_list_for_warehouse(
       marketplace=MARKETPLACE_WB,
       wb_warehouse_id=wb_warehouse_id,
     )
-    .prefetch_related("items__cell", "items__product")
+    .prefetch_related(Prefetch("items", queryset=_pick_list_items_queryset()))
     .order_by("-created_at")
     .first()
   )
@@ -356,7 +394,7 @@ def preview_pick_list(seller: Seller, *, stage: str = "new", user=None) -> dict:
 def _active_wb_pick_list(seller: Seller) -> PickList | None:
   return (
     PickList.objects.filter(seller=seller, is_completed=False, marketplace="wb")
-    .prefetch_related("items__cell", "items__product")
+    .prefetch_related(Prefetch("items", queryset=_pick_list_items_queryset()))
     .order_by("-created_at")
     .first()
   )
@@ -369,9 +407,10 @@ def _pick_list_has_scanned_orders(pick_list: PickList) -> bool:
 
 
 def _fill_pick_list_items(pick_list: PickList, items: list[dict]) -> list[int]:
+  pick_list.items.all().delete()
   db_items: list[PickListItem] = []
   order_ids: list[int] = []
-  for data in items:
+  for sort_order, data in enumerate(items, start=1):
     db_items.append(
       PickListItem(
         pick_list=pick_list,
@@ -379,6 +418,7 @@ def _fill_pick_list_items(pick_list: PickList, items: list[dict]) -> list[int]:
         product=data["product"],
         barcode=data["barcode"],
         quantity=data["quantity"],
+        sort_order=sort_order,
       )
     )
     order_ids.extend(data["order_ids"])
@@ -417,7 +457,6 @@ def _create_or_refresh_warehouse_pick_list(
   pick_list = existing
   if pick_list and force:
     if _pick_list_has_scanned_orders(pick_list):
-      pick_list.items.all().delete()
       keep_ids = {order_id for data in items for order_id in data["order_ids"]}
       Order.objects.filter(pick_list=pick_list).exclude(id__in=keep_ids).update(pick_list=None)
     else:

@@ -1082,9 +1082,12 @@ def generate_ozon_pick_list(seller: Seller, *, user=None) -> PickList:
   pick_list = PickList.objects.create(seller=seller, marketplace=OZON)
   db_items: list[PickListItem] = []
   posting_ids: list[int] = []
-  for data in sorted(
-    grouped.values(),
-    key=lambda entry: _cell_sort_key(str(entry["cell"].number) if entry["cell"] else "—"),
+  for sort_order, data in enumerate(
+    sorted(
+      grouped.values(),
+      key=lambda entry: _cell_sort_key(str(entry["cell"].number) if entry["cell"] else "—"),
+    ),
+    start=1,
   ):
     db_items.append(
       PickListItem(
@@ -1093,6 +1096,7 @@ def generate_ozon_pick_list(seller: Seller, *, user=None) -> PickList:
         product=data["product"],
         barcode=data["barcode"],
         quantity=data["quantity"],
+        sort_order=sort_order,
       )
     )
     posting_ids.extend(data["posting_ids"])

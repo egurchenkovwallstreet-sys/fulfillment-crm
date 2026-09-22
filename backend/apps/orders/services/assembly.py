@@ -1199,6 +1199,9 @@ def _relink_order_to_pick_list(order: Order) -> bool:
       barcode=order.barcode,
       quantity=1,
     )
+    from apps.orders.services.pick_list import reorder_pick_list_items
+
+    reorder_pick_list_items(pick_list)
 
   order.pick_list = pick_list
   return True

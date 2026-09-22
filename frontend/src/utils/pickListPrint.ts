@@ -29,6 +29,37 @@ function formatColor(value: string | undefined): string {
   return trimmed || '—'
 }
 
+function cellSortKey(cellNumber: string): [number, number[], string] {
+  let cell = (cellNumber || '').trim()
+  if (!cell || cell === '—') return [1, [999999], '']
+  if (cell.endsWith('.0') && /^\d+\.0$/.test(cell)) cell = cell.slice(0, -2)
+  if (/^\d+$/.test(cell)) return [0, [Number(cell)], '']
+  const parts = cell.match(/\d+|\D+/g) || [cell]
+  const natural = parts.map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()))
+  return [0, natural as number[], cell.toLowerCase()]
+}
+
+function sortPickListItems(items: PickList['items']): PickList['items'] {
+  return [...items].sort(
+    (a, b) => {
+      const left = cellSortKey(a.cell_number || '—')
+      const right = cellSortKey(b.cell_number || '—')
+      if (left[0] !== right[0]) return left[0] - right[0]
+      const len = Math.max(left[1].length, right[1].length)
+      for (let i = 0; i < len; i += 1) {
+        const lv = left[1][i]
+        const rv = right[1][i]
+        if (lv === rv) continue
+        if (lv === undefined) return -1
+        if (rv === undefined) return 1
+        if (typeof lv === 'number' && typeof rv === 'number') return lv - rv
+        return String(lv).localeCompare(String(rv))
+      }
+      return left[2].localeCompare(right[2])
+    },
+  )
+}
+
 function rowHtml(item: PickList['items'][number]): string {
   const cell = escapeHtml(item.cell_number || '—')
   const qty = escapeHtml(String(item.quantity))
@@ -215,9 +246,10 @@ const PRINT_STYLES = `
 `
 
 function buildPickListPages(pickList: PickList): PickList['items'][] {
+  const items = sortPickListItems(pickList.items)
   const pages: PickList['items'][] = []
-  for (let i = 0; i < pickList.items.length; i += ROWS_PER_PAGE) {
-    pages.push(pickList.items.slice(i, i + ROWS_PER_PAGE))
+  for (let i = 0; i < items.length; i += ROWS_PER_PAGE) {
+    pages.push(items.slice(i, i + ROWS_PER_PAGE))
   }
   return pages
 }

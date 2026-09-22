@@ -151,10 +151,12 @@ class PickListItem(models.Model):
   barcode = models.CharField(max_length=100)
   quantity = models.PositiveIntegerField("Количество собрать")
   picked_quantity = models.PositiveIntegerField("Собрано", default=0)
+  sort_order = models.PositiveIntegerField("Порядок в листе", default=0, db_index=True)
 
   class Meta:
     verbose_name = "Позиция листа подбора"
     verbose_name_plural = "Позиции листа подбора"
+    ordering = ["sort_order", "id"]
 
 
 class Supply(models.Model):

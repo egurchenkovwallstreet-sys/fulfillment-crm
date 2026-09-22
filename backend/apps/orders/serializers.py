@@ -222,7 +222,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
 
 class PickListSerializer(serializers.ModelSerializer):
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
-  items = PickListItemSerializer(many=True, read_only=True)
+  items = serializers.SerializerMethodField()
   items_count = serializers.SerializerMethodField()
   total_quantity = serializers.SerializerMethodField()
 
@@ -240,6 +240,19 @@ class PickListSerializer(serializers.ModelSerializer):
       "items_count",
       "total_quantity",
     )
+
+  def get_items(self, obj):
+    from apps.orders.services.pick_list import _cell_sort_key
+
+    items = list(obj.items.select_related("cell", "product").all())
+    items.sort(
+      key=lambda item: (
+        _cell_sort_key(str(item.cell.number) if item.cell_id else "—"),
+        item.sort_order or 0,
+        item.id,
+      ),
+    )
+    return PickListItemSerializer(items, many=True).data
 
   def get_items_count(self, obj):
     return obj.items.count()
