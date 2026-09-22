@@ -19,14 +19,19 @@ export function buildCrmKioskPrintUrl(origin?: string): string {
   return `${base}/?print_mode=kiosk`
 }
 
+const KIOSK_CHROME_USER_DATA_DIR = '--user-data-dir="%LOCALAPPDATA%\\FulfillmentCRM-Print"'
+
 /** Строка для мастера «Создать ярлык» в Windows (Chrome по умолчанию в Program Files). */
 export function buildChromeKioskShortcutTarget(origin?: string): string {
   const url = buildCrmKioskPrintUrl(origin)
-  return `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing ${url}`
+  return (
+    `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" `
+    + `${KIOSK_CHROME_USER_DATA_DIR} --disable-extensions --kiosk-printing --new-window ${url}`
+  )
 }
 
 /** Дополнение к полю «Объект» существующего ярлыка Chrome. */
 export function buildChromeKioskShortcutSuffix(origin?: string): string {
   const url = buildCrmKioskPrintUrl(origin)
-  return ` --kiosk-printing ${url}`
+  return ` ${KIOSK_CHROME_USER_DATA_DIR} --disable-extensions --kiosk-printing --new-window ${url}`
 }
