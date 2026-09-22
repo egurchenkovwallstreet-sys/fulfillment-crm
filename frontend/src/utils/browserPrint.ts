@@ -90,7 +90,7 @@ function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
         }
         onScheduled?.()
       }, 0)
-    }, 50)
+    }, 0)
   }
 
   try {

@@ -37,8 +37,10 @@ export interface AssemblyOrder {
   wb_status: string
   wb_stage_display: string
   has_sticker: boolean
+  sticker_file?: string
   sticker_part_a: string
   sticker_part_b: string
+  sticker_scan_code?: string
   marking_bound: boolean
   marking_bound_count?: number
   marking_needed_count?: number

@@ -148,13 +148,36 @@ def fetch_assembly_stickers_task(
     logger.warning("WB sticker fetch failed seller=%s: %s", seller_id, exc)
     return {"success": False, "detail": str(exc)}
 
+  for order in orders:
+    order.refresh_from_db(fields=["sticker_file", "has_sticker"])
+
+  still_missing = [
+    order for order in orders
+    if not (order.sticker_file or "").strip() or not order.has_sticker
+  ]
+  if still_missing and self.request.retries < 8:
+    countdown = min(30, 2 + self.request.retries * 3)
+    logger.info(
+      "WB stickers partial seller=%s fetched=%s still_missing=%s retry_in=%ss",
+      seller_id,
+      fetched,
+      len(still_missing),
+      countdown,
+    )
+    raise self.retry(countdown=countdown)
+
   logger.info(
     "WB assembly stickers fetched seller=%s count=%s/%s",
     seller_id,
     fetched,
     len(orders),
   )
-  return {"success": True, "fetched": fetched, "requested": len(orders)}
+  return {
+    "success": True,
+    "fetched": fetched,
+    "requested": len(orders),
+    "still_missing": len(still_missing),
+  }
 
 
 @shared_task(queue="sync")

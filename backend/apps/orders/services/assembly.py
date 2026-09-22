@@ -438,7 +438,7 @@ def fetch_stickers_for_orders(seller: Seller, orders: list[Order], *, user=None)
   updated = 0
   now = timezone.now()
 
-  retry_delays = (SUPPLY_CREATE_SETTLE_SEC, 1.2, 2.0, 3.0)
+  retry_delays = (0.35, 0.7, 1.2, 2.0, 3.0)
   for attempt, delay in enumerate(retry_delays, start=1):
     wb_ids = [order.wb_order_id for order in pending]
     try:

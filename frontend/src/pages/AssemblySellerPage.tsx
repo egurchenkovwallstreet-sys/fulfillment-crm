@@ -271,6 +271,16 @@ function WbAssemblySellerPage() {
       const fresh = await fetchAssemblySeller(id, pickStage || undefined)
       setData(fresh)
       writeAssemblySellerCache(id, pickStage, fresh)
+      if (pickStage === 'confirm' && fresh.orders?.length) {
+        warmStickerCacheFromOrders(fresh.orders)
+        const stillMissingStickers = fresh.orders.some(
+          (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
+        )
+        if (!stillMissingStickers && stickerRefreshTimerRef.current) {
+          window.clearInterval(stickerRefreshTimerRef.current)
+          stickerRefreshTimerRef.current = null
+        }
+      }
       if (pickStage === 'new' || pickStage === 'confirm') {
         if (fresh.active_pick_lists?.length) {
           setPickListPreviews(fresh.active_pick_lists)
@@ -289,25 +299,35 @@ function WbAssemblySellerPage() {
         setRefreshing(false)
       }
     }
-  }, [id, stage, showError])
+  }, [id, stage, showError, warmStickerCacheFromOrders])
+
+  const warmStickerCacheFromOrders = useCallback((orderList: AssemblyOrder[]) => {
+    for (const order of orderList) {
+      const file = (order.sticker_file || '').trim()
+      if (!file || !order.has_sticker) continue
+      orderStickerCacheRef.current.set(order.id, file)
+      preloadFbsSticker(file)
+    }
+  }, [])
 
   const refreshAssemblyStickersInBackground = useCallback(() => {
+    if (!id) return
     if (stickerRefreshTimerRef.current) {
       window.clearInterval(stickerRefreshTimerRef.current)
     }
+    void fetchAssemblyStickers(id).catch(() => {})
     let ticks = 0
     stickerRefreshTimerRef.current = window.setInterval(() => {
       ticks += 1
-      if (ticks > 12) {
+      void load({ silent: true, stageKey: 'confirm' })
+      if (ticks >= 80) {
         if (stickerRefreshTimerRef.current) {
           window.clearInterval(stickerRefreshTimerRef.current)
           stickerRefreshTimerRef.current = null
         }
-        return
       }
-      void load({ silent: true })
-    }, 2500)
-  }, [load])
+    }, 1500)
+  }, [id, load])
 
   const notifyCancelledInSupplies = useCallback((items: CancelledInSupplyNotice[]) => {
     if (!items.length) return
@@ -384,6 +404,9 @@ function WbAssemblySellerPage() {
         if (cancelled) return
         setData(fresh)
         writeAssemblySellerCache(id, stage, fresh)
+        if (stage === 'confirm' && fresh.orders?.length) {
+          warmStickerCacheFromOrders(fresh.orders)
+        }
         applySavedPickList(fresh)
       } catch (err) {
         if (!cancelled && !cached) {
@@ -398,7 +421,17 @@ function WbAssemblySellerPage() {
     return () => {
       cancelled = true
     }
-  }, [id, stage, applySavedPickList])
+  }, [id, stage, applySavedPickList, warmStickerCacheFromOrders])
+
+  useEffect(() => {
+    if (!id || stage !== 'confirm') return
+    const missing = (data?.orders ?? []).some(
+      (order) => (order.wb_supplier_status || '').trim() === 'confirm' && !order.has_sticker,
+    )
+    if (missing && !stickerRefreshTimerRef.current) {
+      void refreshAssemblyStickersInBackground()
+    }
+  }, [id, stage, data?.orders, refreshAssemblyStickersInBackground])
 
   useEffect(() => {
     if (!id) return
@@ -642,29 +675,25 @@ function WbAssemblySellerPage() {
       (order) =>
         normalizeScanCode(order.barcode) === code &&
         orderNeedsMarkingScan(order) &&
-        order.has_sticker,
+        order.has_sticker &&
+        Boolean((order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id)),
     )
   }
 
-  async function resolveStickerForOrder(orderId: number): Promise<string | null> {
-    const cached = orderStickerCacheRef.current.get(orderId)
-    if (cached) return cached
-    const pendingSticker =
-      pendingOrderRef.current?.id === orderId
-        ? (pendingOrderRef.current.sticker_file || '').trim()
-        : ''
-    if (pendingSticker) {
-      orderStickerCacheRef.current.set(orderId, pendingSticker)
-      return pendingSticker
-    }
-    if (!barcodeApiInFlightRef.current) return null
-    const started = Date.now()
-    while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
-      await new Promise((resolve) => window.setTimeout(resolve, 40))
-      const hit = orderStickerCacheRef.current.get(orderId)
-      if (hit) return hit
-    }
-    return orderStickerCacheRef.current.get(orderId) ?? null
+  function findLocalReadyPrintOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
+    const code = normalizeScanCode(barcode)
+    return orderList.find(
+      (order) =>
+        normalizeScanCode(order.barcode) === code &&
+        order.has_sticker &&
+        Boolean((order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id)) &&
+        !orderStickerPrinted(order) &&
+        !orderNeedsMarkingScan(order),
+    )
+  }
+
+  function stickerPayloadForOrder(order: Pick<AssemblyOrder, 'id' | 'sticker_file'>): string {
+    return (order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id) || ''
   }
 
   function showScanError(
@@ -1787,12 +1816,27 @@ function WbAssemblySellerPage() {
     let optimisticMarking = false
     if (localMarkingOrder) {
       optimisticMarking = true
-      openMarkingScan(localMarkingOrder as unknown as PrintOrder)
+      const localSticker = stickerPayloadForOrder(localMarkingOrder)
+      openMarkingScan(
+        { ...localMarkingOrder, sticker_file: localSticker } as unknown as PrintOrder,
+      )
       scanBusyRef.current = false
       setScanBusy(false)
     }
 
+    const localPrintOrder = findLocalReadyPrintOrder(barcode, data?.orders ?? [])
+    let optimisticPrinted = false
     let printWin: Window | null = openPrintHolder()
+    if (localPrintOrder && !optimisticMarking) {
+      const localSticker = stickerPayloadForOrder(localPrintOrder)
+      if (localSticker) {
+        optimisticPrinted = true
+        void finishPrint(
+          { ...localPrintOrder, sticker_file: localSticker } as PrintOrder,
+          printWin,
+        )
+      }
+    }
 
     try {
       const result = await scanOrderBarcode(id, barcode)
@@ -1800,11 +1844,13 @@ function WbAssemblySellerPage() {
 
       if (needsMarking) {
         cacheOrderSticker(result.order)
-        openMarkingScan(
-          result.order,
-          result.message ||
-            `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
-        )
+        if (!optimisticMarking) {
+          openMarkingScan(
+            result.order,
+            result.message ||
+              `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
+          )
+        }
         scanBusyRef.current = false
         setScanBusy(false)
         void refreshMarkingStatus()
@@ -1815,20 +1861,23 @@ function WbAssemblySellerPage() {
         resetScanFlow(true)
       }
 
-      if (!printWin) {
-        printWin = openPrintHolder()
-      }
-
-      try {
-        await finishPrint(result.order, printWin)
-      } catch (printErr) {
-        closePrintHolder(printWin)
-        throw printErr
+      if (!optimisticPrinted) {
+        if (!printWin) {
+          printWin = openPrintHolder()
+        }
+        try {
+          await finishPrint(result.order, printWin)
+        } catch (printErr) {
+          closePrintHolder(printWin)
+          throw printErr
+        }
       }
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
-      closePrintHolder(printWin)
+      if (!optimisticPrinted) {
+        closePrintHolder(printWin)
+      }
       const errOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'
           ? (err.order as AssemblyOrder)
@@ -1922,19 +1971,38 @@ function WbAssemblySellerPage() {
     keepBarcodeFocus()
 
     const printWin = openPrintHolder()
-    const cachedSticker = orderStickerCacheRef.current.get(orderId)
+    const sticker = stickerPayloadForOrder(orderSnapshot)
 
-    void (async () => {
-      try {
-        const started = Date.now()
-        while (barcodeApiInFlightRef.current && Date.now() - started < 15000) {
-          await new Promise((resolve) => window.setTimeout(resolve, 40))
-        }
-        await bindMarking(id, orderId, code)
+    if (!sticker) {
+      showScanError(
+        `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
+        'Стикер не загружен',
+        () => focusBarcodeInput(),
+      )
+      return
+    }
+
+    cacheOrderSticker({ id: orderId, sticker_file: sticker })
+    setStickerPreview(sticker)
+    setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
+    void printSticker(sticker, printWin, keepBarcodeFocus)
+      .then(() => flashPrintOk())
+      .catch((printErr) => {
+        closePrintHolder(printWin)
+        showScanError(
+          printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
+          'Стикер не напечатан',
+          () => focusBarcodeInput(),
+        )
+      })
+
+    void bindMarking(id, orderId, code)
+      .then(() => {
         void refreshMarkingStatus()
         void load({ silent: true })
         void runMarkingVerify({ silent: true })
-      } catch (err) {
+      })
+      .catch((err) => {
         if (err instanceof ApiError && err.code === 'already_printed') {
           void refreshMarkingStatus()
           void load({ silent: true })
@@ -1952,35 +2020,7 @@ function WbAssemblySellerPage() {
         )
         void refreshMarkingStatus()
         void load({ silent: true })
-      }
-    })()
-
-    void (async () => {
-      const sticker = cachedSticker || await resolveStickerForOrder(orderId)
-      if (!sticker) {
-        showScanError(
-          `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите.`,
-          'Стикер не загружен',
-          () => focusBarcodeInput(),
-        )
-        return
-      }
-
-      setStickerPreview(sticker)
-      setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
-
-      try {
-        await printSticker(sticker, printWin, keepBarcodeFocus)
-        flashPrintOk()
-      } catch (printErr) {
-        closePrintHolder(printWin)
-        showScanError(
-          printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
-          'Стикер не напечатан',
-          () => focusBarcodeInput(),
-        )
-      }
-    })()
+      })
   }
 
   async function handleReplaceOrderFromList(order: AssemblyOrder) {
