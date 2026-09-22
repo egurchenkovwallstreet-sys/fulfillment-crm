@@ -49,8 +49,9 @@ async function printFbsStickerInWindow(
   base64: string,
   autoPrint: boolean,
   preopened: Window,
+  onPrintScheduled?: () => void,
 ): Promise<PrintChannel> {
-  const ok = browserPrintFbsSticker(base64, autoPrint, preopened)
+  const ok = browserPrintFbsSticker(base64, autoPrint, preopened, onPrintScheduled)
   if (!ok) {
     closePrintHolder(preopened)
     throw new Error('Не удалось открыть печать — разрешите всплывающие окна')
@@ -69,6 +70,7 @@ export async function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
+  onPrintScheduled?: () => void,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
 
@@ -82,15 +84,16 @@ export async function printFbsSticker(
     ])
     if (winner === 'bridge') {
       closePrintHolder(preopened)
+      onPrintScheduled?.()
       return 'bridge'
     }
   }
 
   if (preopened && !preopened.closed) {
-    return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
+    return printFbsStickerInWindow(base64, browserAutoPrint, preopened, onPrintScheduled)
   }
 
-  const ok = browserPrintFbsSticker(base64, browserAutoPrint, preopened)
+  const ok = browserPrintFbsSticker(base64, browserAutoPrint, preopened, onPrintScheduled)
   if (!ok) {
     throw new Error('Не удалось открыть печать — разрешите всплывающие окна')
   }

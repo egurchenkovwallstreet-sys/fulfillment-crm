@@ -38,25 +38,7 @@ function bytesToBlob(bytes: Uint8Array, type: string): Blob {
   return new Blob([Uint8Array.from(bytes)], { type })
 }
 
-function autoPrintScript(): string {
-  return `(function () {
-  var done = false;
-  function finish() {
-    if (done) return;
-    done = true;
-    try { window.focus(); window.print(); } catch (e) {}
-  }
-  var img = document.querySelector('img');
-  if (!img) { finish(); return; }
-  function go() { finish(); }
-  if (img.complete && img.naturalWidth > 0) go();
-  else if (img.decode) img.decode().then(go).catch(go);
-  else img.addEventListener('load', go, { once: true });
-  window.setTimeout(go, 15);
-})();`
-}
-
-function fbsStickerHtml(imgSrc: string, autoPrint: boolean): string {
+function fbsStickerHtml(imgSrc: string): string {
   return markPrintSurfaceHtml(`<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -82,10 +64,46 @@ function fbsStickerHtml(imgSrc: string, autoPrint: boolean): string {
   </style>
 </head>
 <body>
-  <img src="${imgSrc}" alt="" decoding="sync" />
-  ${autoPrint ? `<script>${autoPrintScript()}<\/script>` : ''}
+  <img src="${imgSrc}" alt="" decoding="async" />
 </body>
 </html>`)
+}
+
+/** Печать из popup отложенно — иначе window.print() блокирует главную вкладку CRM. */
+function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
+  let fired = false
+  const run = () => {
+    if (fired) return
+    fired = true
+    onScheduled?.()
+    window.setTimeout(() => {
+      try {
+        win.print()
+      } catch {
+        // ignore
+      }
+      window.setTimeout(() => {
+        try {
+          window.focus()
+        } catch {
+          // ignore
+        }
+        onScheduled?.()
+      }, 0)
+    }, 50)
+  }
+
+  try {
+    const img = win.document.querySelector('img')
+    if (!img || (img.complete && img.naturalWidth > 0)) {
+      run()
+      return
+    }
+    img.addEventListener('load', run, { once: true })
+    window.setTimeout(run, 80)
+  } catch {
+    run()
+  }
 }
 
 function writeHtmlToPopup(win: Window, html: string): boolean {
@@ -187,6 +205,7 @@ export function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
+  onPrintScheduled?: () => void,
 ): boolean {
   const payload = normalizeImageBase64(base64)
   if (!payload) return false
@@ -199,12 +218,15 @@ export function printFbsSticker(
     imgUrl = `data:image/png;base64,${payload}`
   }
 
-  const html = fbsStickerHtml(imgUrl, autoPrint)
+  const html = fbsStickerHtml(imgUrl)
   const win = (preopened && !preopened.closed) ? preopened : warmFbsPrintWindow()
   if (win) {
     const ok = writeHtmlToPopup(win, html)
     if (imgUrl.startsWith('blob:')) {
       window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
+    }
+    if (ok && autoPrint) {
+      schedulePopupPrint(win, onPrintScheduled)
     }
     return ok
   }
@@ -212,6 +234,9 @@ export function printFbsSticker(
   const ok = openHtmlBlobWindow(html)
   if (imgUrl.startsWith('blob:')) {
     window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
+  }
+  if (ok && autoPrint && cachedPrintWindow && !cachedPrintWindow.closed) {
+    schedulePopupPrint(cachedPrintWindow, onPrintScheduled)
   }
   return ok
 }
