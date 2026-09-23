@@ -625,7 +625,7 @@ function WbAssemblySellerPage() {
     return order.status === 'in_picking' || order.status === 'assembled'
   }
 
-  function cacheOrderSticker(order: Pick<PrintOrder, 'id' | 'sticker_file'>) {
+  function cacheOrderSticker(order: { id: number; sticker_file?: string | null }) {
     const file = (order.sticker_file || '').trim()
     if (file) {
       orderStickerCacheRef.current.set(order.id, file)
@@ -721,25 +721,8 @@ function WbAssemblySellerPage() {
     })
   }
 
-  function findLocalMarkingOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
-    const order = findLocalOrderByBarcode(barcode, orderList)
-    if (!order || !order.requires_marking || !orderNeedsMarkingScan(order)) return undefined
-    if (
-      !order.has_sticker &&
-      !Boolean((order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id))
-    ) {
-      return undefined
-    }
-    return order
-  }
-
-  function stickerPayloadForOrder(order: Pick<AssemblyOrder, 'id' | 'sticker_file'>): string {
+  function stickerPayloadForOrder(order: { id: number; sticker_file?: string | null }): string {
     return (order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id) || ''
-  }
-
-  function canAutoPrintOrder(order: Pick<AssemblyOrder, 'id' | 'status'>): boolean {
-    if (autoPrintedOrderIdsRef.current.has(order.id)) return false
-    return !orderStickerPrinted(order as AssemblyOrder)
   }
 
   function markAutoPrinted(orderId: number): void {
