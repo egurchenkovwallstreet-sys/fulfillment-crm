@@ -57,13 +57,11 @@ def resolve_product_requires_marking(product: Product | None, barcode: str, sell
   """Нужна ли маркировка для товара/баркода WB (не путать с карточкой Ozon)."""
   if product is not None:
     return bool(product.requires_marking)
-  fallback = Product.objects.filter(
-    seller=seller,
-    barcode=barcode,
-    marketplace=MARKETPLACE_WB,
-  ).first()
-  if fallback:
-    return fallback.requires_marking
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  resolved = resolve_product_by_barcode(seller, MARKETPLACE_WB, barcode)
+  if resolved:
+    return bool(resolved.requires_marking)
   return False
 
 
