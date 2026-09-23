@@ -52,7 +52,7 @@ async function printFbsStickerInWindow(
   preopened: Window,
   onPrintScheduled?: () => void,
 ): Promise<PrintChannel> {
-  const ok = browserPrintFbsSticker(base64, autoPrint, preopened, onPrintScheduled)
+  const ok = await browserPrintFbsSticker(base64, autoPrint, preopened, onPrintScheduled)
   if (!ok) {
     closePrintHolder(preopened)
     throw new Error('Не удалось открыть печать — разрешите всплывающие окна')
@@ -91,7 +91,7 @@ export async function printFbsSticker(
     return printFbsStickerInWindow(base64, browserAutoPrint, preopened, onPrintScheduled)
   }
 
-  const ok = browserPrintFbsSticker(base64, browserAutoPrint, preopened, onPrintScheduled)
+  const ok = await browserPrintFbsSticker(base64, browserAutoPrint, preopened, onPrintScheduled)
   if (!ok) {
     throw new Error('Не удалось открыть печать — разрешите всплывающие окна')
   }
@@ -123,6 +123,9 @@ export async function printSupplySticker(
     return printFbsStickerInWindow(base64, browserAutoPrint, preopened)
   }
 
-  browserPrintSupplySticker(base64, browserAutoPrint, preopened)
+  const ok = await browserPrintSupplySticker(base64, browserAutoPrint, preopened)
+  if (!ok) {
+    throw new Error('Не удалось открыть печать QR поставки')
+  }
   return 'browser'
 }

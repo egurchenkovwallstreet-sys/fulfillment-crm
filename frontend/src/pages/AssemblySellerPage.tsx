@@ -73,7 +73,6 @@ import {
 } from '../components/AssemblyMarkingPanels'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
-  blankPrintHolder,
   closePrintHolder,
   openPrintHolder,
   printFbsSticker,
@@ -741,7 +740,6 @@ function WbAssemblySellerPage() {
 
   function resumeBarcodeScanAfterPrint() {
     resetScanFlow(true)
-    blankPrintHolder()
     try {
       window.focus()
     } catch {
@@ -754,8 +752,8 @@ function WbAssemblySellerPage() {
     }
     refocus()
     window.setTimeout(refocus, 0)
-    window.setTimeout(refocus, 100)
-    window.setTimeout(refocus, 350)
+    window.setTimeout(refocus, 150)
+    window.setTimeout(refocus, 450)
     keepBarcodeFocus(20000)
   }
 
@@ -801,9 +799,14 @@ function WbAssemblySellerPage() {
   }
 
   /** Физическая печать — один раз на сессию (status label_printed уже на сервере). */
-  async function spoolStickerPrintOnce(order: PrintOrder, preopened?: Window | null): Promise<void> {
+  async function spoolStickerPrintOnce(
+    order: PrintOrder,
+    preopened?: Window | null,
+    onPrinted?: () => void,
+  ): Promise<void> {
     if (autoPrintedOrderIdsRef.current.has(order.id)) {
       closePrintHolder(preopened)
+      onPrinted?.()
       return
     }
     const file = stickerPayloadForOrder(order)
@@ -816,7 +819,7 @@ function WbAssemblySellerPage() {
     setLastPrinted(order as unknown as AssemblyOrder)
     cacheOrderSticker({ id: order.id, sticker_file: file })
     preloadFbsSticker(file)
-    await printSticker(file, preopened)
+    await printSticker(file, preopened, onPrinted)
     markAutoPrinted(order.id)
     flashPrintOk()
   }
@@ -826,8 +829,7 @@ function WbAssemblySellerPage() {
   }
 
   async function completeBarcodePrintFlow(order: PrintOrder, preopened?: Window | null) {
-    await spoolStickerPrintOnce(order, preopened)
-    resumeBarcodeScanAfterPrint()
+    await spoolStickerPrintOnce(order, preopened, resumeBarcodeScanAfterPrint)
     setStage('confirm')
     await refreshAssemblyUi()
   }
@@ -2036,8 +2038,8 @@ function WbAssemblySellerPage() {
         await spoolStickerPrintOnce(
           { ...orderSnapshot, sticker_file: sticker } as PrintOrder,
           printWin,
+          resumeBarcodeScanAfterPrint,
         )
-        resumeBarcodeScanAfterPrint()
       } catch (printErr) {
         markingSubmitBusyRef.current = false
         showScanError(

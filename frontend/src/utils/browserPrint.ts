@@ -69,46 +69,71 @@ function fbsStickerHtml(imgSrc: string): string {
 </html>`)
 }
 
-/** Печать из popup отложенно — CRM-вкладка не блокируется, фокус возвращается на скан. */
-function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
-  let fired = false
-  const refocusCrm = () => {
+/** Дождаться загрузки PNG в popup — иначе печатается пустой лист. */
+function waitForStickerImage(win: Window): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
     try {
-      window.focus()
-    } catch {
-      // ignore
-    }
-    onScheduled?.()
-  }
-  const run = () => {
-    if (fired) return
-    fired = true
-    refocusCrm()
-    window.setTimeout(() => {
-      try {
-        win.print()
-      } catch {
-        // ignore
+      const img = win.document.querySelector('img')
+      if (!img) {
+        done()
+        return
       }
-      blankPrintHolder(win)
-      refocusCrm()
-      window.setTimeout(refocusCrm, 50)
-      window.setTimeout(refocusCrm, 250)
-      window.setTimeout(refocusCrm, 600)
-    }, 0)
-  }
-
-  try {
-    const img = win.document.querySelector('img')
-    if (!img || (img.complete && img.naturalWidth > 0)) {
-      run()
-      return
+      if (img.complete && img.naturalWidth > 0) {
+        done()
+        return
+      }
+      img.addEventListener('load', done, { once: true })
+      img.addEventListener('error', done, { once: true })
+      window.setTimeout(done, 4000)
+    } catch {
+      done()
     }
-    img.addEventListener('load', run, { once: true })
-    window.setTimeout(run, 30)
-  } catch {
-    run()
-  }
+  })
+}
+
+/** Печать из popup — ждём картинку, печатаем, закрываем окно, возвращаем фокус в CRM. */
+function schedulePopupPrint(win: Window, onDone?: () => void): Promise<void> {
+  return waitForStickerImage(win).then(
+    () =>
+      new Promise((resolve) => {
+        let finished = false
+        const finish = () => {
+          if (finished) return
+          finished = true
+          closePrintHolder(win)
+          try {
+            window.focus()
+          } catch {
+            // ignore
+          }
+          onDone?.()
+          resolve(undefined)
+        }
+
+        try {
+          win.addEventListener('afterprint', finish, { once: true })
+        } catch {
+          // ignore
+        }
+
+        window.setTimeout(() => {
+          try {
+            win.print()
+          } catch {
+            finish()
+          }
+        }, 30)
+
+        // Kiosk autoprint иногда не шлёт afterprint
+        window.setTimeout(finish, 3000)
+      }),
+  )
 }
 
 function writeHtmlToPopup(win: Window, html: string): boolean {
@@ -221,12 +246,12 @@ export function closePrintHolder(win?: Window | null) {
 }
 
 /** Стикер FBS 58×40 мм. Blob URL вместо inline base64 — быстрее загрузка в popup. */
-export function printFbsSticker(
+export async function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
   onPrintScheduled?: () => void,
-): boolean {
+): Promise<boolean> {
   const payload = normalizeImageBase64(base64)
   if (!payload) return false
 
@@ -246,7 +271,9 @@ export function printFbsSticker(
       window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
     }
     if (ok && autoPrint) {
-      schedulePopupPrint(win, onPrintScheduled)
+      await schedulePopupPrint(win, onPrintScheduled)
+    } else {
+      onPrintScheduled?.()
     }
     return ok
   }
@@ -256,18 +283,21 @@ export function printFbsSticker(
     window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
   }
   if (ok && autoPrint && cachedPrintWindow && !cachedPrintWindow.closed) {
-    schedulePopupPrint(cachedPrintWindow, onPrintScheduled)
+    await schedulePopupPrint(cachedPrintWindow, onPrintScheduled)
+  } else {
+    onPrintScheduled?.()
   }
   return ok
 }
 
 /** QR/ШК поставки WB — preview без автопечати в kiosk. */
-export function printSupplySticker(
+export async function printSupplySticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
-): boolean {
-  return printFbsSticker(base64, autoPrint, preopened)
+  onPrintScheduled?: () => void,
+): Promise<boolean> {
+  return printFbsSticker(base64, autoPrint, preopened, onPrintScheduled)
 }
 
 export function openPdfBase64(payload: string, filename: string) {
