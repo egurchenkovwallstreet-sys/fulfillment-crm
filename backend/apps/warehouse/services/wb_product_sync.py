@@ -33,6 +33,8 @@ class SellerProductsRefreshResult:
   updated: int = 0
   not_found: int = 0
   errors: int = 0
+  aliases_added: int = 0
+  orders_relinked: int = 0
   items: list[ProductRefreshResult] = field(default_factory=list)
   error: str = ""
 
@@ -117,6 +119,17 @@ def refresh_seller_products_from_wb(seller: Seller) -> SellerProductsRefreshResu
       result.updated += 1
     else:
       result.not_found += 1
+
+  if wb_index is not None and wb_products:
+    from apps.warehouse.services.wb_barcode_alias_sync import sync_wb_barcode_aliases_from_index
+
+    alias_result = sync_wb_barcode_aliases_from_index(
+      seller,
+      wb_index,
+      relink_orders=True,
+    )
+    result.aliases_added = alias_result.aliases_added
+    result.orders_relinked = alias_result.orders_relinked
 
   return result
 

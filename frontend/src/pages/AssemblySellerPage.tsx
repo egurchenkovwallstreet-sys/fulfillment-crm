@@ -693,9 +693,11 @@ function WbAssemblySellerPage() {
     }, 80)
   }
 
-  /** Локальный предпросмотр: только точный баркод заказа (второй sku — через API). */
+  /** Локальный предпросмотр: основной баркод заказа или доп. sku того же товара. */
   function orderBarcodeMatchesScan(order: AssemblyOrder, code: string): boolean {
-    return normalizeScanCode(order.barcode) === code
+    if (normalizeScanCode(order.barcode) === code) return true
+    const alternates = order.alternate_barcodes ?? []
+    return alternates.some((alt) => normalizeScanCode(alt) === code)
   }
 
   function findLocalOrderByBarcode(

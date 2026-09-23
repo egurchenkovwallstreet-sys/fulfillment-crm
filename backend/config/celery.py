@@ -29,13 +29,9 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.sync_wb_product_cards",
         "schedule": crontab(hour=3, minute=0),
     },
-    "sync-wb-barcode-aliases-morning": {
+    "sync-wb-barcode-aliases": {
         "task": "apps.integrations.tasks.sync_wb_barcode_aliases",
-        "schedule": crontab(hour=6, minute=0),
-    },
-    "sync-wb-barcode-aliases-afternoon": {
-        "task": "apps.integrations.tasks.sync_wb_barcode_aliases",
-        "schedule": crontab(hour=15, minute=0),
+        "schedule": 10800.0,  # каждые 3 часа — новые sku WB → алиасы CRM
     },
     "sync-ozon-orders": {
         "task": "apps.integrations.tasks.sync_ozon_orders",

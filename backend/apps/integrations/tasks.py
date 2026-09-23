@@ -59,7 +59,7 @@ def sync_wb_product_cards():
 
 @shared_task(queue="sync")
 def sync_wb_barcode_aliases():
-  """Подтянуть вторые баркоды WB (skus[]) и привязать к товарам CRM — 06:00 и 15:00 МСК."""
+  """Подтянуть доп. баркоды WB (skus[] на chrtId) и привязать к товарам CRM — каждые 3 часа."""
   from apps.warehouse.services.wb_barcode_alias_sync import sync_wb_barcode_aliases_all_sellers
 
   result = sync_wb_barcode_aliases_all_sellers()

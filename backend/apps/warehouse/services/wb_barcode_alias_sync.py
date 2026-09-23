@@ -103,6 +103,45 @@ def _find_product_for_chrt(
   return None
 
 
+def _backfill_product_chrt_ids(
+  seller: Seller,
+  index: dict,
+  result: BarcodeAliasSyncResult,
+) -> None:
+  """Обновить wb_chrt_id у товаров CRM по основному баркоду в каталоге WB."""
+  for product in Product.objects.filter(seller=seller, marketplace=MARKETPLACE_WB):
+    catalog_item = catalog_index_get(index, product.barcode)
+    if not catalog_item or not catalog_item.wb_chrt_id:
+      continue
+    chrt_id = int(catalog_item.wb_chrt_id)
+    if product.wb_chrt_id != chrt_id:
+      product.wb_chrt_id = chrt_id
+      product.save(update_fields=["wb_chrt_id", "updated_at"])
+      result.chrt_ids_updated += 1
+
+
+def _sync_aliases_from_catalog_by_chrt(
+  seller: Seller,
+  by_chrt: dict[int, set[str]],
+  result: BarcodeAliasSyncResult,
+) -> None:
+  """
+  Для каждого размера WB (chrtId) с несколькими sku — все баркоды к одному Product CRM
+  (та же ячейка, что у первого известного баркода).
+  """
+  for chrt_id, skus in by_chrt.items():
+    if len(skus) < 2:
+      continue
+    product = _find_product_for_chrt(seller, chrt_id, skus)
+    if not product:
+      continue
+    if not product.wb_chrt_id:
+      product.wb_chrt_id = chrt_id
+      product.save(update_fields=["wb_chrt_id", "updated_at"])
+      result.chrt_ids_updated += 1
+    _register_aliases_for_product(seller, product, skus, result)
+
+
 def _register_aliases_for_product(
   seller: Seller,
   product: Product,
@@ -183,48 +222,43 @@ def _sync_aliases_from_orphan_orders(
     _register_aliases_for_product(seller, product, skus, result)
 
 
+def sync_wb_barcode_aliases_from_index(
+  seller: Seller,
+  index: dict,
+  *,
+  relink_orders: bool = True,
+) -> BarcodeAliasSyncResult:
+  """
+  Синхронизация доп. баркодов по уже загруженному каталогу WB (без повторного запроса к API).
+  """
+  result = BarcodeAliasSyncResult(seller_id=seller.id)
+  result.products_checked = Product.objects.filter(
+    seller=seller,
+    marketplace=MARKETPLACE_WB,
+  ).count()
+  by_chrt = _barcodes_by_chrt_id(index)
+  _backfill_product_chrt_ids(seller, index, result)
+  _sync_aliases_from_catalog_by_chrt(seller, by_chrt, result)
+  _sync_aliases_from_orphan_orders(seller, index, by_chrt, result)
+  _sync_aliases_from_linked_orders(seller, index, result)
+  if relink_orders:
+    result.orders_relinked = relink_orders_to_products_for_seller(seller)
+  return result
+
+
 def sync_wb_barcode_aliases_for_seller(seller: Seller) -> BarcodeAliasSyncResult:
   """
   Подтянуть из карточек WB все skus размера (chrtId) и привязать к одному Product.
   Основной баркод — product.barcode; остальные — ProductBarcodeAlias.
   """
-  result = BarcodeAliasSyncResult(seller_id=seller.id)
-  products = list(
-    Product.objects.filter(seller=seller, marketplace=MARKETPLACE_WB).order_by("id")
-  )
-  result.products_checked = len(products)
-
   try:
     index = build_seller_catalog_index(seller, force_refresh=True)
   except CatalogError as exc:
+    result = BarcodeAliasSyncResult(seller_id=seller.id)
     result.error = str(exc)
     return result
 
-  by_chrt = _barcodes_by_chrt_id(index)
-
-  for product in products:
-    chrt_id = product.wb_chrt_id
-    catalog_item = catalog_index_get(index, product.barcode)
-    if catalog_item and catalog_item.wb_chrt_id:
-      chrt_id = int(catalog_item.wb_chrt_id)
-      if product.wb_chrt_id != chrt_id:
-        product.wb_chrt_id = chrt_id
-        product.save(update_fields=["wb_chrt_id", "updated_at"])
-        result.chrt_ids_updated += 1
-
-    if not chrt_id:
-      continue
-
-    all_skus = _skus_for_chrt_id(index, int(chrt_id)) or by_chrt.get(int(chrt_id), set())
-    if len(all_skus) < 2:
-      continue
-
-    _register_aliases_for_product(seller, product, all_skus, result)
-
-  _sync_aliases_from_orphan_orders(seller, index, by_chrt, result)
-  _sync_aliases_from_linked_orders(seller, index, result)
-  result.orders_relinked = relink_orders_to_products_for_seller(seller)
-  return result
+  return sync_wb_barcode_aliases_from_index(seller, index)
 
 
 def _sync_aliases_from_linked_orders(
