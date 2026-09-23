@@ -12,7 +12,7 @@ export const PRINT_SIZES = {
 } as const
 
 const PRINT_POPUP_NAME = 'crm_fbs_print'
-const PRINT_POPUP_FEATURES = 'popup=1,width=220,height=160,left=-2400,top=80'
+const PRINT_POPUP_FEATURES = 'popup=1,width=1,height=1,left=-10000,top=-10000'
 
 let cachedPrintWindow: Window | null = null
 
@@ -64,32 +64,35 @@ function fbsStickerHtml(imgSrc: string): string {
   </style>
 </head>
 <body>
-  <img src="${imgSrc}" alt="" decoding="async" />
+  <img src="${imgSrc}" alt="" decoding="sync" fetchpriority="high" />
 </body>
 </html>`)
 }
 
-/** Печать из popup отложенно — иначе window.print() блокирует главную вкладку CRM. */
+/** Печать из popup отложенно — CRM-вкладка не блокируется, фокус возвращается на скан. */
 function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
   let fired = false
+  const refocusCrm = () => {
+    try {
+      window.focus()
+    } catch {
+      // ignore
+    }
+    onScheduled?.()
+  }
   const run = () => {
     if (fired) return
     fired = true
-    onScheduled?.()
+    refocusCrm()
     window.setTimeout(() => {
       try {
         win.print()
       } catch {
         // ignore
       }
-      window.setTimeout(() => {
-        try {
-          window.focus()
-        } catch {
-          // ignore
-        }
-        onScheduled?.()
-      }, 0)
+      refocusCrm()
+      window.setTimeout(refocusCrm, 50)
+      window.setTimeout(refocusCrm, 250)
     }, 0)
   }
 
@@ -100,7 +103,7 @@ function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
       return
     }
     img.addEventListener('load', run, { once: true })
-    window.setTimeout(run, 80)
+    window.setTimeout(run, 30)
   } catch {
     run()
   }

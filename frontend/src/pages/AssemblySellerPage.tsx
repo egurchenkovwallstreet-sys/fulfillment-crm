@@ -218,6 +218,7 @@ function WbAssemblySellerPage() {
   const [scanValue, setScanValue] = useState('')
   const [markingValue, setMarkingValue] = useState('')
   const [scanPhase, setScanPhase] = useState<ScanPhase>('barcode')
+  const [markingUiOpen, setMarkingUiOpen] = useState(false)
   const [pendingOrder, setPendingOrder] = useState<PrintOrder | null>(null)
   const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
@@ -516,13 +517,12 @@ function WbAssemblySellerPage() {
 
   useLayoutEffect(() => {
     if (stage !== 'confirm') return
-    const inMarking = markingLockRef.current || scanPhase === 'marking' || pendingOrder != null
-    if (inMarking) {
+    if (markingUiOpen) {
       focusMarkingInput()
     } else if (!scanBusy) {
       focusBarcodeInput()
     }
-  }, [scanPhase, pendingOrder, scanBusy, stage])
+  }, [markingUiOpen, scanBusy, stage])
 
   useEffect(() => {
     pendingOrderRef.current = pendingOrder
@@ -535,9 +535,19 @@ function WbAssemblySellerPage() {
   }, [scanPhase])
 
   useEffect(() => {
-    if (stage !== 'confirm' || !isKioskPrintMode()) return
+    if (stage !== 'confirm') return
     warmFbsPrintWindow()
   }, [stage])
+
+  useEffect(() => {
+    if (stage !== 'confirm') return
+    const onWindowFocus = () => {
+      if (markingUiOpen || scanBusyRef.current) return
+      focusBarcodeInput()
+    }
+    window.addEventListener('focus', onWindowFocus)
+    return () => window.removeEventListener('focus', onWindowFocus)
+  }, [stage, markingUiOpen])
 
   useEffect(() => {
     if (!id || stage !== 'confirm') return
@@ -622,11 +632,25 @@ function WbAssemblySellerPage() {
     }
   }
 
+  function shouldOpenMarkingForOrder(orderId: number): boolean {
+    if (autoPrintedOrderIdsRef.current.has(orderId)) return false
+    return true
+  }
+
+  function releaseBarcodeForNextScan(focusDurationMs = 15000) {
+    scanBusyRef.current = false
+    setScanBusy(false)
+    keepBarcodeFocus(focusDurationMs)
+    focusBarcodeInput()
+  }
+
   function openMarkingScan(order: PrintOrder, _message?: string) {
+    if (!shouldOpenMarkingForOrder(order.id)) return
     const alreadyOpen = markingLockRef.current && scanPhaseRef.current === 'marking'
     markingLockRef.current = true
     scanPhaseRef.current = 'marking'
     flushSync(() => {
+      setMarkingUiOpen(true)
       setScanPhase('marking')
       setPendingOrder(order)
       setScanValue('')
@@ -653,7 +677,7 @@ function WbAssemblySellerPage() {
     scanRef.current?.select()
   }
 
-  function keepBarcodeFocus(durationMs = 4000) {
+  function keepBarcodeFocus(durationMs = 15000) {
     if (barcodeFocusTimerRef.current) {
       window.clearInterval(barcodeFocusTimerRef.current)
     }
@@ -669,7 +693,7 @@ function WbAssemblySellerPage() {
       }
       if (markingLockRef.current || scanPhaseRef.current === 'marking') return
       focusBarcodeInput()
-    }, 120)
+    }, 80)
   }
 
   function findLocalOrderByBarcode(
@@ -744,6 +768,7 @@ function WbAssemblySellerPage() {
     scanPhaseRef.current = 'barcode'
     markingBufferRef.current = ''
     flushSync(() => {
+      setMarkingUiOpen(false)
       setScanPhase('barcode')
       setPendingOrder(null)
       setMarkingValue('')
@@ -787,11 +812,14 @@ function WbAssemblySellerPage() {
     setLastPrinted(order as unknown as AssemblyOrder)
     cacheOrderSticker(order)
     preloadFbsSticker(file)
-    keepBarcodeFocus()
-    void printSticker(file, preopened, keepBarcodeFocus)
-      .then(() => flashPrintOk())
+    void printSticker(file, preopened, () => releaseBarcodeForNextScan())
+      .then(() => {
+        flashPrintOk()
+        releaseBarcodeForNextScan()
+      })
       .catch(() => {})
     resetScanFlow(true)
+    releaseBarcodeForNextScan()
     setStage('confirm')
     void refreshMarkingStatus()
     return true
@@ -1874,7 +1902,7 @@ function WbAssemblySellerPage() {
 
       if (needsMarking) {
         cacheOrderSticker(result.order)
-        if (!optimisticMarking) {
+        if (!optimisticMarking && shouldOpenMarkingForOrder(result.order.id)) {
           openMarkingScan(
             result.order,
             result.message ||
@@ -1916,7 +1944,12 @@ function WbAssemblySellerPage() {
       const errNeedsMarking = errOrder ? orderNeedsMarkingScan(errOrder) : false
       const keepMarkingUi = markingLockRef.current || errNeedsMarking
 
-      if (keepMarkingUi && errOrder) {
+      if (
+        keepMarkingUi &&
+        errOrder &&
+        shouldOpenMarkingForOrder(errOrder.id) &&
+        !autoPrintedOrderIdsRef.current.has(errOrder.id)
+      ) {
         openMarkingScan(
           errOrder as unknown as PrintOrder,
           `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
@@ -1984,7 +2017,8 @@ function WbAssemblySellerPage() {
   async function handleMarkingSubmit(e?: FormEvent, rawCode?: string) {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
-    if (!id || !pendingOrder || !code) return
+    const orderSnapshot = pendingOrderRef.current ?? pendingOrder
+    if (!id || !code || !orderSnapshot) return
     if (markingSubmitBusyRef.current) return
 
     const quickError = quickMarkingCodeCheck(code)
@@ -1993,7 +2027,6 @@ function WbAssemblySellerPage() {
       return
     }
 
-    const orderSnapshot = pendingOrderRef.current ?? pendingOrder
     const orderId = orderSnapshot.id
 
     markingSubmitBusyRef.current = true
@@ -2001,21 +2034,20 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
     resetScanFlow(true)
-    keepBarcodeFocus()
+    releaseBarcodeForNextScan()
 
-    const printWin = openPrintHolder()
     const sticker = stickerPayloadForOrder(orderSnapshot)
     const shouldAutoPrint = canAutoPrintOrder(orderSnapshot as AssemblyOrder)
 
     if (shouldAutoPrint) {
       if (!sticker) {
         markingSubmitBusyRef.current = false
-        closePrintHolder(printWin)
         showScanError(
           `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
           'Стикер не загружен',
-          () => focusBarcodeInput(),
+          () => focusMarkingInput(),
         )
+        openMarkingScan(orderSnapshot)
         return
       }
 
@@ -2023,18 +2055,23 @@ function WbAssemblySellerPage() {
       cacheOrderSticker({ id: orderId, sticker_file: sticker })
       setStickerPreview(sticker)
       setLastPrinted(orderSnapshot as unknown as AssemblyOrder)
-      void printSticker(sticker, printWin, keepBarcodeFocus)
-        .then(() => flashPrintOk())
-        .catch((printErr) => {
-          closePrintHolder(printWin)
-          showScanError(
-            printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
-            'Стикер не напечатан',
-            () => focusBarcodeInput(),
-          )
-        })
-    } else {
-      closePrintHolder(printWin)
+      preloadFbsSticker(sticker)
+      const printWin = warmFbsPrintWindow()
+      window.requestAnimationFrame(() => {
+        releaseBarcodeForNextScan()
+        void printSticker(sticker, printWin, () => releaseBarcodeForNextScan())
+          .then(() => {
+            flashPrintOk()
+            releaseBarcodeForNextScan()
+          })
+          .catch((printErr) => {
+            showScanError(
+              printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
+              'Стикер не напечатан',
+              () => releaseBarcodeForNextScan(),
+            )
+          })
+      })
     }
 
     void bindMarking(id, orderId, code)
@@ -2220,7 +2257,7 @@ function WbAssemblySellerPage() {
   const lastPrintedCanDeliver = Boolean(
     lastPrintedFresh && orderCanDeliver(lastPrintedFresh) && !markingQueueBlocked,
   )
-  const markingInProgress = scanPhase === 'marking' || Boolean(pendingOrder)
+  const markingInProgress = markingUiOpen
   const currentWorkflowStep = resolveWorkflowStep(
     stage,
     scanPhase,
