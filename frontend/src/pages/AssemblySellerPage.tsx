@@ -739,6 +739,12 @@ function WbAssemblySellerPage() {
     })
   }
 
+  function resumeBarcodeScanAfterPrint() {
+    setStickerPreview(null)
+    resetScanFlow(true)
+    releaseBarcodeForNextScan()
+  }
+
   function resetScanFlow(force = false) {
     if (markingLockRef.current && !force) {
       focusMarkingInput()
@@ -793,7 +799,6 @@ function WbAssemblySellerPage() {
         `WB не вернул стикер для заказа #${order.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
       )
     }
-    setStickerPreview(file)
     setLastPrinted(order as unknown as AssemblyOrder)
     cacheOrderSticker({ id: order.id, sticker_file: file })
     preloadFbsSticker(file)
@@ -808,8 +813,7 @@ function WbAssemblySellerPage() {
 
   async function completeBarcodePrintFlow(order: PrintOrder, preopened?: Window | null) {
     await spoolStickerPrintOnce(order, preopened)
-    resetScanFlow(true)
-    releaseBarcodeForNextScan()
+    resumeBarcodeScanAfterPrint()
     setStage('confirm')
     await refreshAssemblyUi()
   }
@@ -2020,20 +2024,19 @@ function WbAssemblySellerPage() {
           { ...orderSnapshot, sticker_file: sticker } as PrintOrder,
           printWin,
         )
-        resetScanFlow(true)
-        releaseBarcodeForNextScan()
+        resumeBarcodeScanAfterPrint()
       } catch (printErr) {
         markingSubmitBusyRef.current = false
         showScanError(
           printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
           'Стикер не напечатан',
-          () => releaseBarcodeForNextScan(),
+          () => resumeBarcodeScanAfterPrint(),
         )
         return
       }
     } else {
       closePrintHolder(printWin)
-      releaseBarcodeForNextScan()
+      resumeBarcodeScanAfterPrint()
     }
 
     void bindMarking(id, orderId, code)
@@ -2044,7 +2047,7 @@ function WbAssemblySellerPage() {
             ? (err.order as AssemblyOrder)
             : orderSnapshot
         if (err instanceof ApiError && err.code === 'marking_already_bound' && boundOrder) {
-          showMarkingAlreadyBoundModal(boundOrder as PrintOrder, () => releaseBarcodeForNextScan())
+          showMarkingAlreadyBoundModal(boundOrder as PrintOrder, () => resumeBarcodeScanAfterPrint())
           void refreshAssemblyUi()
           return
         }
@@ -2059,7 +2062,7 @@ function WbAssemblySellerPage() {
             orderSnapshot,
           ),
           assemblyScanErrorTitle(err, 'Ошибка ЧЗ'),
-          () => releaseBarcodeForNextScan(),
+          () => resumeBarcodeScanAfterPrint(),
         )
         void refreshAssemblyUi()
       })
