@@ -11,7 +11,10 @@ from apps.orders.services.assembly import (
 from apps.orders.services.pick_list import _products_by_barcode
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, ProductBarcodeAlias
-from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+from apps.warehouse.services.product_lookup import (
+  relink_orders_to_products_for_seller,
+  resolve_product_by_barcode,
+)
 
 
 class ProductBarcodeAliasTests(TestCase):
@@ -88,3 +91,18 @@ class ProductBarcodeAliasTests(TestCase):
   def test_scan_order_barcode_with_alias(self):
     result = scan_order_barcode(self.seller, "2222222222222")
     self.assertEqual(result["order"].id, self.order.id)
+
+  def test_relink_order_with_second_barcode(self):
+    orphan = Order.objects.create(
+      seller=self.seller,
+      wb_order_id=555002,
+      barcode="2222222222222",
+      wb_warehouse_id=100,
+      status=Order.Status.IN_PICKING,
+      wb_supplier_status="confirm",
+    )
+    self.assertIsNone(orphan.product_id)
+    linked = relink_orders_to_products_for_seller(self.seller)
+    self.assertEqual(linked, 1)
+    orphan.refresh_from_db()
+    self.assertEqual(orphan.product_id, self.product.id)

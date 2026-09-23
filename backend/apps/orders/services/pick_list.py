@@ -17,7 +17,7 @@ from apps.sellers.services.warehouse_filter import (
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-from apps.warehouse.services.product_lookup import products_by_barcodes
+from apps.warehouse.services.product_lookup import products_by_barcodes, resolve_product_by_barcode
 
 
 class PickListError(Exception):
@@ -197,6 +197,8 @@ def _optional_link_orders_to_products(
     if order.product_id:
       continue
     product = products_by_barcode.get(order.barcode)
+    if not product:
+      product = resolve_product_by_barcode(seller, MARKETPLACE_WB, order.barcode)
     if not product:
       continue
     order.product = product

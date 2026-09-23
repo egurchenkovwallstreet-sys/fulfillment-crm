@@ -389,9 +389,14 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
     },
   )
 
+  from apps.warehouse.services.product_lookup import relink_orders_to_products_for_seller
+
+  orders_relinked = relink_orders_to_products_for_seller(seller)
+
   return {
     "seller_id": seller.id,
     "sync_mode": mode,
+    "orders_relinked": orders_relinked,
     "created": created,
     "updated": updated,
     "without_product": skipped,

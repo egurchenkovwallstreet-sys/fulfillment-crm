@@ -1,6 +1,9 @@
 """Поиск товара CRM по основному и дополнительным баркодам WB."""
 from __future__ import annotations
 
+from django.utils import timezone
+
+from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.integrations.marketplace import normalize_marketplace
 from apps.sellers.models import Seller
 from apps.warehouse.models import Product, ProductBarcodeAlias
@@ -83,3 +86,19 @@ def products_by_barcodes(
   for alias in aliases:
     result.setdefault(alias.barcode, alias.product)
   return result
+
+
+def relink_orders_to_products_for_seller(seller: Seller) -> int:
+  """Проставить order.product для заказов с «вторым» баркодом (через алиас)."""
+  from apps.orders.models import Order
+
+  updated = 0
+  now = timezone.now()
+  orders = Order.objects.filter(seller=seller, product__isnull=True).exclude(barcode="")
+  for order in orders.only("id", "barcode").iterator():
+    product = resolve_product_by_barcode(seller, MARKETPLACE_WB, order.barcode)
+    if not product:
+      continue
+    Order.objects.filter(pk=order.pk).update(product=product, updated_at=now)
+    updated += 1
+  return updated

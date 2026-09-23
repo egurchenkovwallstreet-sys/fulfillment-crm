@@ -5,6 +5,16 @@ from apps.sellers.models import Seller
 from .models import Order, PickList, PickListItem, Supply
 
 
+def _resolve_order_product(order: Order):
+  if order.product_id:
+    product = getattr(order, "product", None)
+    if product is not None:
+      return product
+  from apps.warehouse.services.stock_deduction import resolve_order_product
+
+  return resolve_order_product(order)
+
+
 class OrderSerializer(serializers.ModelSerializer):
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
   cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
@@ -28,7 +38,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class OrderAssemblySerializer(serializers.ModelSerializer):
-  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
+  cell_number = serializers.SerializerMethodField()
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   wb_stage_display = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
@@ -76,12 +86,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.warehouse.models import ProductBarcodeAlias
     from apps.warehouse.services.catalog_fetch import normalize_barcode
 
-    product_id = obj.product_id
-    if not product_id:
-      from apps.warehouse.services.product_lookup import resolve_product_by_barcode
-
-      product = resolve_product_by_barcode(obj.seller, "wb", obj.barcode)
-      product_id = product.id if product else None
+    product = _resolve_order_product(obj)
+    product_id = product.id if product else None
     if not product_id:
       return []
     primary = normalize_barcode(obj.barcode)
@@ -108,9 +114,17 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       return "Отменён"
     return get_wb_stage_label(obj.wb_supplier_status)
 
+  def get_cell_number(self, obj):
+    product = _resolve_order_product(obj)
+    if product and product.cell_id:
+      return str(product.cell.number)
+    return ""
+
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
+    product = _resolve_order_product(obj)
+    return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_assembly(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_assembly
@@ -124,24 +138,16 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.orders.services.supply_flow import order_can_move_to_new_supply
     return order_can_move_to_new_supply(obj)
 
-  def _resolve_product(self, obj):
-    if obj.product_id:
-      product = getattr(obj, "product", None)
-      if product is not None:
-        return product
-    from apps.warehouse.services.stock_deduction import resolve_order_product
-    return resolve_order_product(obj)
-
   def get_warehouse_quantity(self, obj):
-    product = self._resolve_product(obj)
+    product = _resolve_order_product(obj)
     return product.quantity if product else None
 
   def get_photo_url(self, obj):
-    product = self._resolve_product(obj)
+    product = _resolve_order_product(obj)
     return (product.photo_url or "").strip() if product else ""
 
   def get_tech_size(self, obj):
-    product = self._resolve_product(obj)
+    product = _resolve_order_product(obj)
     if not product:
       return ""
     return (product.tech_size or product.wb_size or "").strip()
@@ -149,7 +155,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
 
 class OrderPrintSerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
-  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
+  cell_number = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
   marking_bound = serializers.BooleanField(read_only=True)
   can_send_to_delivery = serializers.SerializerMethodField()
@@ -175,9 +181,17 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "can_send_to_delivery",
     )
 
+  def get_cell_number(self, obj):
+    product = _resolve_order_product(obj)
+    if product and product.cell_id:
+      return str(product.cell.number)
+    return ""
+
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
+    product = _resolve_order_product(obj)
+    return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_delivery(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_delivery
@@ -446,7 +460,7 @@ class BatchBindScanSerializer(serializers.Serializer):
 
 
 class SupplyOrderSerializer(serializers.ModelSerializer):
-  cell_number = serializers.CharField(source="product.cell.number", read_only=True, default="")
+  cell_number = serializers.SerializerMethodField()
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   requires_marking = serializers.SerializerMethodField()
   can_send_to_delivery = serializers.SerializerMethodField()
@@ -470,9 +484,17 @@ class SupplyOrderSerializer(serializers.ModelSerializer):
       "block_reason",
     )
 
+  def get_cell_number(self, obj):
+    product = _resolve_order_product(obj)
+    if product and product.cell_id:
+      return str(product.cell.number)
+    return ""
+
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-    return resolve_product_requires_marking(obj.product, obj.barcode, obj.seller)
+
+    product = _resolve_order_product(obj)
+    return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_delivery(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_delivery
