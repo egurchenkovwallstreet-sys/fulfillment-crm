@@ -752,9 +752,19 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   if not order.product:
     from apps.warehouse.services.product_lookup import resolve_product_by_barcode
 
-    product = resolve_product_by_barcode(seller, MARKETPLACE_WB, order.barcode)
+    product = resolve_product_by_barcode(
+      seller,
+      MARKETPLACE_WB,
+      order.barcode,
+      register_alias=True,
+    )
     if not product:
-      product = resolve_product_by_barcode(seller, MARKETPLACE_WB, scan_value)
+      product = resolve_product_by_barcode(
+        seller,
+        MARKETPLACE_WB,
+        scan_value,
+        register_alias=True,
+      )
     if product:
       order.product = product
       order.save(update_fields=["product", "updated_at"])

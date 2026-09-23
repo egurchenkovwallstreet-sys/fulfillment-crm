@@ -61,28 +61,25 @@ async function printFbsStickerInWindow(
 
 /**
  * Стикер заказа FBS.
- * Kiosk Chrome (без агента): сразу popup + autoprint, bridge не трогаем.
- * С агентом: bridge → browser fallback.
+ * browserOnly=true (сборка): только popup Chrome — один стикер, без гонки с агентом.
+ * Иначе: агент если доступен, иначе браузер (ожидаем ответ агента, без параллельной печати).
  */
-const BRIDGE_PRINT_RACE_MS = 250
-
 export async function printFbsSticker(
   base64: string,
   autoPrint = true,
   preopened?: Window | null,
   onPrintScheduled?: () => void,
+  browserOnly = false,
 ): Promise<PrintChannel> {
   const browserAutoPrint = autoPrint && shouldBrowserAutoPrint('fbs_sticker')
 
-  if (!isKioskPrintMode() && cachedHealth?.ok === true) {
-    const bridgeAttempt = printViaBridge('fbs_sticker', base64)
-    const winner = await Promise.race([
-      bridgeAttempt.then((ok) => (ok ? 'bridge' : 'no')),
-      new Promise<'no'>((resolve) => {
-        window.setTimeout(() => resolve('no'), BRIDGE_PRINT_RACE_MS)
-      }),
-    ])
-    if (winner === 'bridge') {
+  if (
+    !browserOnly
+    && !isKioskPrintMode()
+    && cachedHealth?.ok === true
+  ) {
+    const ok = await printViaBridge('fbs_sticker', base64)
+    if (ok) {
       closePrintHolder(preopened)
       onPrintScheduled?.()
       return 'bridge'
