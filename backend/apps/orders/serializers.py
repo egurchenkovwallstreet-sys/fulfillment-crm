@@ -5,14 +5,24 @@ from apps.sellers.models import Seller
 from .models import Order, PickList, PickListItem, Supply
 
 
-def _resolve_order_product(order: Order):
+def _resolve_order_product(order: Order, serializer=None):
   if order.product_id:
     product = getattr(order, "product", None)
     if product is not None:
       return product
-  from apps.warehouse.services.stock_deduction import resolve_order_product
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
 
-  return resolve_order_product(order)
+  ctx = serializer.context if serializer is not None else {}
+  return resolve_product_by_barcode(
+    order.seller,
+    MARKETPLACE_WB,
+    order.barcode,
+    select_cell=True,
+    catalog_index=ctx.get("wb_catalog_index"),
+    chrt_product_map=ctx.get("chrt_product_map"),
+    register_alias=True,
+  )
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -86,7 +96,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.warehouse.models import ProductBarcodeAlias
     from apps.warehouse.services.catalog_fetch import normalize_barcode
 
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     product_id = product.id if product else None
     if not product_id:
       return []
@@ -115,7 +125,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     return get_wb_stage_label(obj.wb_supplier_status)
 
   def get_cell_number(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     if product and product.cell_id:
       return str(product.cell.number)
     return ""
@@ -123,7 +133,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_assembly(self, obj):
@@ -139,15 +149,15 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     return order_can_move_to_new_supply(obj)
 
   def get_warehouse_quantity(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     return product.quantity if product else None
 
   def get_photo_url(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     return (product.photo_url or "").strip() if product else ""
 
   def get_tech_size(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     if not product:
       return ""
     return (product.tech_size or product.wb_size or "").strip()
@@ -182,7 +192,7 @@ class OrderPrintSerializer(serializers.ModelSerializer):
     )
 
   def get_cell_number(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     if product and product.cell_id:
       return str(product.cell.number)
     return ""
@@ -190,7 +200,7 @@ class OrderPrintSerializer(serializers.ModelSerializer):
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_delivery(self, obj):
@@ -485,7 +495,7 @@ class SupplyOrderSerializer(serializers.ModelSerializer):
     )
 
   def get_cell_number(self, obj):
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     if product and product.cell_id:
       return str(product.cell.number)
     return ""
@@ -493,7 +503,7 @@ class SupplyOrderSerializer(serializers.ModelSerializer):
   def get_requires_marking(self, obj):
     from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
-    product = _resolve_order_product(obj)
+    product = _resolve_order_product(obj, self)
     return resolve_product_requires_marking(product, obj.barcode, obj.seller)
 
   def get_can_send_to_delivery(self, obj):
@@ -564,7 +574,7 @@ class SupplySerializer(serializers.ModelSerializer):
         for order in assembly_orders
         if order.id in order_data_map
       ]
-    return OrderAssemblySerializer(assembly_orders, many=True).data
+    return OrderAssemblySerializer(assembly_orders, many=True, context=self.context).data
 
   def get_orders_count(self, obj):
     return self._assembly_orders_qs(obj).count()

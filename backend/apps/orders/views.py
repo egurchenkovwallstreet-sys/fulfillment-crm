@@ -504,11 +504,26 @@ def _assembly_order_select_related(qs):
   return qs.select_related("product", "product__cell", "seller")
 
 
-def _build_order_assembly_map(orders) -> dict[int, dict]:
+def _assembly_serializer_context(seller) -> dict:
+  from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+  from apps.warehouse.services.product_lookup import build_wb_chrt_product_map
+
+  try:
+    catalog_index = build_seller_catalog_index(seller)
+    return {
+      "wb_catalog_index": catalog_index,
+      "chrt_product_map": build_wb_chrt_product_map(seller, catalog_index=catalog_index),
+    }
+  except CatalogError:
+    return {}
+
+
+def _build_order_assembly_map(orders, *, seller=None) -> dict[int, dict]:
   unique = list({order.id: order for order in orders}.values())
   if not unique:
     return {}
-  serialized = OrderAssemblySerializer(unique, many=True).data
+  context = _assembly_serializer_context(seller) if seller is not None else {}
+  serialized = OrderAssemblySerializer(unique, many=True, context=context).data
   return {item["id"]: item for item in serialized}
 
 
@@ -603,9 +618,14 @@ class AssemblySellerDetailView(APIView):
     if supplies_qs:
       for supply in supplies_qs:
         all_orders.extend(supply.orders.all())
-    order_data_map = _build_order_assembly_map(all_orders)
+    order_data_map = _build_order_assembly_map(all_orders, seller=seller)
+    assembly_context = _assembly_serializer_context(seller)
 
-    supply_context = {"seller": seller, "order_data_map": order_data_map}
+    supply_context = {
+      "seller": seller,
+      "order_data_map": order_data_map,
+      **assembly_context,
+    }
     if stage == "complete":
       delivery_supplies = SupplySerializer(
         supplies_qs,
@@ -626,7 +646,7 @@ class AssemblySellerDetailView(APIView):
           hidden_restorable_orders_queryset(seller),
         ).order_by("-updated_at")[:50]
       )
-      hidden_map = _build_order_assembly_map(hidden_orders)
+      hidden_map = _build_order_assembly_map(hidden_orders, seller=seller)
       hidden_restorable = [hidden_map[o.id] for o in hidden_orders if o.id in hidden_map]
 
     cancelled_in_supplies = []

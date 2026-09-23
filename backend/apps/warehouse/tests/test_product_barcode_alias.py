@@ -11,7 +11,9 @@ from apps.orders.services.assembly import (
 from apps.orders.services.pick_list import _products_by_barcode
 from apps.sellers.models import Seller
 from apps.warehouse.models import Cell, Product, ProductBarcodeAlias
+from apps.warehouse.services.catalog_fetch import CatalogBarcodeItem
 from apps.warehouse.services.product_lookup import (
+  build_wb_chrt_product_map,
   relink_orders_to_products_for_seller,
   resolve_product_by_barcode,
 )
@@ -128,3 +130,46 @@ class ProductBarcodeAliasTests(TestCase):
     )
     mapping = _products_by_barcode(self.seller, {"04660727916563"})
     self.assertEqual(mapping["04660727916563"].barcode, "4660727916563")
+
+  def test_resolve_second_sku_by_wb_chrt_id(self):
+    product = Product.objects.create(
+      seller=self.seller,
+      cell=self.cell,
+      barcode="4628529294012",
+      marketplace=WB,
+      quantity=4,
+    )
+    chrt_id = 88001
+    catalog_index = {
+      "4628529294012": CatalogBarcodeItem(
+        barcode="4628529294012",
+        wb_nm_id=100,
+        vendor_code="art-1",
+        title="Test",
+        tech_size="M",
+        wb_size="48",
+        photo_url="",
+        requires_marking=False,
+        wb_chrt_id=chrt_id,
+      ),
+      "04628529294012": CatalogBarcodeItem(
+        barcode="04628529294012",
+        wb_nm_id=100,
+        vendor_code="art-1",
+        title="Test",
+        tech_size="M",
+        wb_size="48",
+        photo_url="",
+        requires_marking=False,
+        wb_chrt_id=chrt_id,
+      ),
+    }
+    chrt_map = build_wb_chrt_product_map(self.seller, catalog_index=catalog_index)
+    resolved = resolve_product_by_barcode(
+      self.seller,
+      WB,
+      "04628529294012",
+      catalog_index=catalog_index,
+      chrt_product_map=chrt_map,
+    )
+    self.assertEqual(resolved, product)

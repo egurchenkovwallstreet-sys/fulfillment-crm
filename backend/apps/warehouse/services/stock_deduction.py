@@ -212,6 +212,7 @@ def resolve_order_product(order: Order) -> Product | None:
     MARKETPLACE_WB,
     order.barcode,
     select_cell=True,
+    register_alias=True,
   )
 
 
