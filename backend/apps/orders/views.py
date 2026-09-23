@@ -939,6 +939,13 @@ class AssemblyMarkingStatusView(APIView):
     if not seller:
       return Response(status=status.HTTP_404_NOT_FOUND)
 
+    from apps.orders.services.marking_verification import repair_assembly_marking_wb
+
+    try:
+      repair_assembly_marking_wb(seller, user=request.user)
+    except AssemblyError:
+      pass
+
     status_data = get_assembly_queue_status(seller)
     return Response({
       "success": True,

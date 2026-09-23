@@ -1,6 +1,9 @@
 """Проверка статуса ЧЗ в WB после привязки (POST /api/marketplace/v3/orders/meta)."""
 from __future__ import annotations
 
+import logging
+
+from django.core.cache import cache
 from django.db.models import Q
 
 from apps.integrations.models import AuditLog
@@ -15,6 +18,8 @@ from apps.warehouse.services.marking_lookup import resolve_product_requires_mark
 VERIFY_PENDING = "pending"
 VERIFY_VERIFIED = "verified"
 VERIFY_ERROR = "error"
+
+logger = logging.getLogger(__name__)
 
 
 def order_marking_ready(order: Order) -> bool:
@@ -201,10 +206,10 @@ def _orders_for_marking_verify(
       | ~Q(marking_code=""),
     )
   else:
-    qs = (
-      qs.exclude(marking_verify_status=VERIFY_VERIFIED)
-      .exclude(marking_verify_status=VERIFY_ERROR)
-      .filter(Q(marking_verify_status=VERIFY_PENDING) | ~Q(marking_code=""))
+    # verified тоже перепроверяем — раньше CRM могла ошибочно поставить verified без meta WB
+    qs = qs.exclude(marking_verify_status=VERIFY_ERROR).filter(
+      Q(marking_verify_status__in=[VERIFY_PENDING, VERIFY_VERIFIED])
+      | ~Q(marking_code=""),
     )
   result: list[Order] = []
   for order in qs.select_related("product", "seller"):
@@ -349,6 +354,75 @@ def sync_supply_marking_from_wb(
   return results
 
 
+REPUSH_CACHE_SEC = 300
+
+
+def _maybe_repush_marking_to_wb(order: Order, *, user=None) -> bool:
+  """Повторно отправить ЧЗ в WB, если код есть в CRM, а WB ещё не подтвердил."""
+  code = (order.marking_code or "").strip()
+  if not code:
+    return False
+  if (order.marking_verify_status or "").strip() != VERIFY_PENDING:
+    return False
+  cache_key = f"marking_repush:{order.id}"
+  if cache.get(cache_key):
+    return False
+  from apps.orders.services.assembly import AssemblyError, _push_marking_code_to_wb
+
+  try:
+    _push_marking_code_to_wb(order, code, user=user)
+  except AssemblyError:
+    return False
+  cache.set(cache_key, 1, REPUSH_CACHE_SEC)
+  return True
+
+
+def repair_assembly_marking_wb(seller: Seller, *, user=None, force: bool = False) -> dict:
+  """
+  Сверить ЧЗ готовых заказов с WB и дослать коды, которые не дошли (старый async-баг).
+  """
+  if not force:
+    cache_key = f"marking_repair:{seller.id}"
+    if cache.get(cache_key):
+      return {"synced": 0, "repushed": 0, "downgraded": 0, "skipped": True}
+    cache.set(cache_key, 1, 20)
+
+  orders = list(_orders_for_marking_verify(seller, force_recheck=True))
+  orders = [
+    order
+    for order in orders
+    if (order.marking_code or "").strip()
+    or (order.marking_verify_status or "").strip() in (VERIFY_PENDING, VERIFY_VERIFIED)
+  ]
+  if not orders:
+    return {"synced": 0, "repushed": 0, "downgraded": 0}
+
+  results, meta_count = sync_orders_marking_from_wb(
+    seller,
+    orders,
+    user=user,
+    treat_missing_as_required=True,
+  )
+  downgraded = sum(
+    1
+    for item in results
+    if item.get("changed") and item["status"] == VERIFY_PENDING
+  )
+
+  repushed = 0
+  for order in orders:
+    order.refresh_from_db()
+    if _maybe_repush_marking_to_wb(order, user=user):
+      repushed += 1
+
+  return {
+    "synced": len(results),
+    "repushed": repushed,
+    "downgraded": downgraded,
+    "meta_count": meta_count,
+  }
+
+
 def verify_marking_orders(
   seller: Seller,
   order_ids: list[int] | None = None,
@@ -393,5 +467,13 @@ def verify_marking_orders(
         message=f"ЧЗ подтверждён WB для заказа #{item['wb_order_id']}",
         details={"order_id": item["order_id"], "decision": item["decision"]},
       )
+
+  repushed = 0
+  touched_ids = {item["order_id"] for item in results}
+  for order in Order.objects.filter(pk__in=touched_ids):
+    if _maybe_repush_marking_to_wb(order, user=user):
+      repushed += 1
+  if repushed:
+    logger.info("Re-pushed %s marking codes to WB for seller=%s", repushed, seller.id)
 
   return results
