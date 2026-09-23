@@ -696,13 +696,21 @@ function WbAssemblySellerPage() {
     }, 80)
   }
 
+  function orderBarcodeMatchesScan(order: AssemblyOrder, code: string): boolean {
+    if (normalizeScanCode(order.barcode) === code) return true
+    for (const alt of order.alternate_barcodes ?? []) {
+      if (normalizeScanCode(alt) === code) return true
+    }
+    return false
+  }
+
   function findLocalOrderByBarcode(
     barcode: string,
     orderList: AssemblyOrder[],
   ): AssemblyOrder | undefined {
     const code = normalizeScanCode(barcode)
     return orderList.find((order) => {
-      if (normalizeScanCode(order.barcode) !== code) return false
+      if (!orderBarcodeMatchesScan(order, code)) return false
       if (orderStickerPrinted(order) && order.marking_verify_status !== 'error') return false
       const wb = (order.wb_supplier_status || '').trim()
       return (

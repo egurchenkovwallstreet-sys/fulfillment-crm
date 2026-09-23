@@ -168,6 +168,15 @@ def _scan_matches_pick_list_barcode(pick_list: PickList, scan: str) -> bool:
   for barcode in _pick_list_barcodes(pick_list):
     if _barcodes_match(barcode or "", scan_norm):
       return True
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  product = resolve_product_by_barcode(pick_list.seller, MARKETPLACE_WB, scan_norm)
+  if product:
+    return PickListItem.objects.filter(
+      pick_list=pick_list,
+      product_id=product.id,
+    ).exists()
   return False
 
 
@@ -175,10 +184,27 @@ def _orders_matching_barcode(orders: list[Order], barcode: str) -> list[Order]:
   barcode_norm = _normalize_scan_value(barcode)
   if not barcode_norm:
     return []
-  return [
+  matched = [
     order
     for order in orders
     if _barcodes_match(order.barcode or "", barcode_norm)
+  ]
+  if matched:
+    return matched
+  if not orders:
+    return []
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.product_lookup import product_scan_barcodes, resolve_product_by_barcode
+
+  product = resolve_product_by_barcode(orders[0].seller, MARKETPLACE_WB, barcode_norm)
+  if not product:
+    return []
+  product_barcodes = product_scan_barcodes(product)
+  return [
+    order
+    for order in orders
+    if order.product_id == product.id
+    or any(_barcodes_match(order.barcode or "", code) for code in product_barcodes)
   ]
 
 

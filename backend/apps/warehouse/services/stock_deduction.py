@@ -204,10 +204,14 @@ def assert_order_stock_deducted_at_print(order: Order) -> None:
 def resolve_order_product(order: Order) -> Product | None:
   if order.product_id:
     return Product.objects.select_related("cell").filter(pk=order.product_id).first()
-  return (
-    Product.objects.filter(seller=order.seller, barcode=order.barcode)
-    .select_related("cell")
-    .first()
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  return resolve_product_by_barcode(
+    order.seller,
+    MARKETPLACE_WB,
+    order.barcode,
+    select_cell=True,
   )
 
 

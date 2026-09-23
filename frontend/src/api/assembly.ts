@@ -47,6 +47,8 @@ export interface AssemblyOrder {
   marking_verify_status?: string
   marking_verify_error?: string
   requires_marking: boolean
+  /** Доп. баркоды того же товара WB (второй sku) */
+  alternate_barcodes?: string[]
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
   can_move_to_new_supply?: boolean

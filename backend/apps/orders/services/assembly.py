@@ -157,7 +157,7 @@ def _order_needs_marking_scan(order: Order) -> bool:
   return order.status in (Order.Status.IN_PICKING, Order.Status.ASSEMBLED)
 
 
-def _match_order_by_scan(orders_qs, scan_value: str) -> Order | None:
+def _match_order_by_scan(orders_qs, scan_value: str, *, seller: Seller | None = None) -> Order | None:
   scan_norm = _normalize_scan_value(scan_value)
   if not scan_norm:
     return None
@@ -173,6 +173,29 @@ def _match_order_by_scan(orders_qs, scan_value: str) -> Order | None:
       continue
     seen_ids.add(order.id)
     candidates.append(order)
+
+  if not candidates:
+    from apps.warehouse.services.product_lookup import (
+      product_scan_barcodes,
+      resolve_product_by_barcode,
+    )
+
+    resolved_seller = seller
+    if resolved_seller is None:
+      sample = orders_qs.first()
+      resolved_seller = sample.seller if sample else None
+    if resolved_seller:
+      product = resolve_product_by_barcode(resolved_seller, MARKETPLACE_WB, scan_norm)
+      if product:
+        product_barcodes = product_scan_barcodes(product)
+        for order in orders_qs:
+          if order.id in seen_ids:
+            continue
+          if order.product_id == product.id or any(
+            _barcodes_match(order.barcode or "", bc) for bc in product_barcodes
+          ):
+            seen_ids.add(order.id)
+            candidates.append(order)
 
   if not candidates and scan_norm.isdigit():
     try:
@@ -263,10 +286,17 @@ def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
   if not scan:
     return False
 
-  item_barcodes = list(
-    PickListItem.objects.filter(pick_list=pick_list).values_list("barcode", flat=True),
+  items = list(
+    PickListItem.objects.filter(pick_list=pick_list).select_related("product"),
   )
+  item_barcodes = [item.barcode for item in items]
   if any(_barcodes_match(barcode or "", scan) for barcode in item_barcodes):
+    return True
+
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  product = resolve_product_by_barcode(pick_list.seller, MARKETPLACE_WB, scan)
+  if product and any(item.product_id == product.id for item in items):
     return True
 
   if scan.isdigit():
@@ -322,11 +352,11 @@ def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
 
   active_lists = _get_active_pick_lists(seller)
   if active_lists:
-    if _match_order_by_scan(_scannable_orders_qs(seller), scan_value):
+    if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
       return
     raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
-  if _match_order_by_scan(_scannable_orders_qs(seller), scan_value):
+  if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
     return
 
 
@@ -337,7 +367,7 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
 
   base_qs = _assembly_orders_qs(seller)
 
-  order = _match_order_by_scan(_scannable_orders_qs(seller), scan_value)
+  order = _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller)
   if order:
     return order
 
@@ -345,7 +375,7 @@ def _find_active_order(seller: Seller, scan_value: str) -> Order:
     status__in=[Order.Status.LABEL_PRINTED, Order.Status.MARKED],
     marking_verify_status="error",
   )
-  order = _match_order_by_scan(retry_qs, scan_value)
+  order = _match_order_by_scan(retry_qs, scan_value, seller=seller)
   if order:
     return order
 
@@ -370,11 +400,13 @@ def _order_requires_marking(
       pass
     else:
       if lookup.wb_found:
-        product = order.product or Product.objects.filter(
-          seller=seller,
-          barcode=order.barcode,
-          marketplace=MARKETPLACE_WB,
-        ).first()
+        from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+        product = order.product or resolve_product_by_barcode(
+          seller,
+          MARKETPLACE_WB,
+          order.barcode,
+        )
         if product:
           update_fields = ["updated_at"]
           if product.requires_marking != lookup.requires_marking:
@@ -718,11 +750,11 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
     )
 
   if not order.product:
-    product = Product.objects.filter(
-      seller=seller,
-      barcode=order.barcode,
-      marketplace=MARKETPLACE_WB,
-    ).first()
+    from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+    product = resolve_product_by_barcode(seller, MARKETPLACE_WB, order.barcode)
+    if not product:
+      product = resolve_product_by_barcode(seller, MARKETPLACE_WB, scan_value)
     if product:
       order.product = product
       order.save(update_fields=["product", "updated_at"])

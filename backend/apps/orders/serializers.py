@@ -32,6 +32,7 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   status_display = serializers.CharField(source="get_status_display", read_only=True)
   wb_stage_display = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
+  alternate_barcodes = serializers.SerializerMethodField()
   can_send_to_assembly = serializers.SerializerMethodField()
   can_send_to_delivery = serializers.SerializerMethodField()
   can_move_to_new_supply = serializers.SerializerMethodField()
@@ -63,12 +64,32 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "marking_verify_status",
       "marking_verify_error",
       "requires_marking",
+      "alternate_barcodes",
       "can_send_to_assembly",
       "can_send_to_delivery",
       "can_move_to_new_supply",
       "warehouse_quantity",
       "created_at",
     )
+
+  def get_alternate_barcodes(self, obj):
+    from apps.warehouse.models import ProductBarcodeAlias
+    from apps.warehouse.services.catalog_fetch import normalize_barcode
+
+    product_id = obj.product_id
+    if not product_id:
+      from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+      product = resolve_product_by_barcode(obj.seller, "wb", obj.barcode)
+      product_id = product.id if product else None
+    if not product_id:
+      return []
+    primary = normalize_barcode(obj.barcode)
+    aliases = ProductBarcodeAlias.objects.filter(product_id=product_id).values_list(
+      "barcode",
+      flat=True,
+    )
+    return [code for code in aliases if normalize_barcode(code) != primary]
 
   def get_wb_stage_display(self, obj):
     from apps.orders.services.assembly import get_wb_stage_label

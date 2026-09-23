@@ -84,16 +84,14 @@ def _delete_product_and_cell(product: Product) -> None:
 
 
 def _find_product_by_barcode(seller: Seller, marketplace: str, barcode: str) -> Product | None:
-  mp = normalize_marketplace(marketplace)
-  for variant in barcode_lookup_variants(barcode, mp):
-    product = (
-      Product.objects.filter(seller=seller, marketplace=mp, barcode=variant)
-      .select_related("cell")
-      .first()
-    )
-    if product:
-      return product
-  return None
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  return resolve_product_by_barcode(
+    seller,
+    marketplace,
+    barcode,
+    select_cell=True,
+  )
 
 
 def _product_in_session(session: ArticleIntakeSession, product: Product | None) -> bool:

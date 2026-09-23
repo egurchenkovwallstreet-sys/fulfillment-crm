@@ -151,6 +151,31 @@ class Product(models.Model):
     return None
 
 
+class ProductBarcodeAlias(models.Model):
+  """Дополнительный баркод WB (второй sku на том же chrtId), тот же Product."""
+
+  product = models.ForeignKey(
+    Product,
+    on_delete=models.CASCADE,
+    related_name="barcode_aliases",
+    verbose_name="Товар",
+  )
+  barcode = models.CharField("Баркод", max_length=100, db_index=True)
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    verbose_name = "Доп. баркод товара"
+    verbose_name_plural = "Доп. баркоды товаров"
+    unique_together = [("product", "barcode")]
+    indexes = [
+      models.Index(fields=["barcode"]),
+      models.Index(fields=["product", "barcode"]),
+    ]
+
+  def __str__(self):
+    return f"{self.barcode} → {self.product.barcode}"
+
+
 class ProductDailyQuantity(models.Model):
   """Снимок CRM-остатка на конец календарного дня (Europe/Moscow)."""
 

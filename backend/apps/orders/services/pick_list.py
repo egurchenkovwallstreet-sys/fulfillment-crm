@@ -17,6 +17,7 @@ from apps.sellers.services.warehouse_filter import (
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+from apps.warehouse.services.product_lookup import products_by_barcodes
 
 
 class PickListError(Exception):
@@ -182,14 +183,7 @@ def _orders_for_pick_list(seller: Seller, *, stage: str = "new"):
 
 
 def _products_by_barcode(seller: Seller, barcodes: set[str]) -> dict[str, Product]:
-  if not barcodes:
-    return {}
-  products = Product.objects.filter(
-    seller=seller,
-    barcode__in=barcodes,
-    marketplace=MARKETPLACE_WB,
-  ).select_related("cell")
-  return {product.barcode: product for product in products}
+  return products_by_barcodes(seller, barcodes, marketplace=MARKETPLACE_WB)
 
 
 def _optional_link_orders_to_products(

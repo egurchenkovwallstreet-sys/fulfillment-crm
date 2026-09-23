@@ -58,6 +58,18 @@ def sync_wb_product_cards():
 
 
 @shared_task(queue="sync")
+def sync_wb_barcode_aliases():
+  """Подтянуть вторые баркоды WB (skus[]) и привязать к товарам CRM — 06:00 и 15:00 МСК."""
+  from apps.warehouse.services.wb_barcode_alias_sync import sync_wb_barcode_aliases_all_sellers
+
+  result = sync_wb_barcode_aliases_all_sellers()
+  if result["errors"]:
+    logger.warning("WB barcode alias sync errors: %s", result["errors"])
+  logger.info("WB barcode alias sync done: %s", result["results"])
+  return result
+
+
+@shared_task(queue="sync")
 def sync_ozon_orders():
   """Синхронизация отправлений Ozon FBS для всех активных селлеров с ключами."""
   from apps.orders.services.ozon_postings import OzonPostingSyncError, sync_ozon_postings

@@ -35,7 +35,10 @@ def _get_seller_token(seller: Seller) -> str:
 
 
 def _link_product(seller: Seller, barcode: str) -> Product | None:
-  return Product.objects.filter(seller=seller, barcode=barcode).first()
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+
+  return resolve_product_by_barcode(seller, MARKETPLACE_WB, barcode)
 
 
 def _touch_order_warehouse(seller: Seller, wb_order) -> None:

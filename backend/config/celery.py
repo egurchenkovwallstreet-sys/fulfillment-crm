@@ -29,6 +29,14 @@ app.conf.beat_schedule = {
         "task": "apps.integrations.tasks.sync_wb_product_cards",
         "schedule": crontab(hour=3, minute=0),
     },
+    "sync-wb-barcode-aliases-morning": {
+        "task": "apps.integrations.tasks.sync_wb_barcode_aliases",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    "sync-wb-barcode-aliases-afternoon": {
+        "task": "apps.integrations.tasks.sync_wb_barcode_aliases",
+        "schedule": crontab(hour=15, minute=0),
+    },
     "sync-ozon-orders": {
         "task": "apps.integrations.tasks.sync_ozon_orders",
         "schedule": 60.0,
