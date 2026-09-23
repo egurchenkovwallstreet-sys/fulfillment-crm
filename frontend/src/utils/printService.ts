@@ -9,6 +9,7 @@ import {
   printSupplySticker as browserPrintSupplySticker,
   normalizeImageBase64,
   closePrintHolder,
+  blankPrintHolder,
 } from './browserPrint'
 import { isKioskPrintMode, shouldBrowserAutoPrint } from './printMode'
 
@@ -16,6 +17,7 @@ export type PrintChannel = 'bridge' | 'browser'
 export {
   openPrintHolder,
   closePrintHolder,
+  blankPrintHolder,
   setPrintHolderMessage,
   warmFbsPrintWindow,
   preloadFbsSticker,

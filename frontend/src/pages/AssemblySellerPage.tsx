@@ -73,6 +73,7 @@ import {
 } from '../components/AssemblyMarkingPanels'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
+  blankPrintHolder,
   closePrintHolder,
   openPrintHolder,
   printFbsSticker,
@@ -742,7 +743,22 @@ function WbAssemblySellerPage() {
   function resumeBarcodeScanAfterPrint() {
     setStickerPreview(null)
     resetScanFlow(true)
-    releaseBarcodeForNextScan()
+    blankPrintHolder()
+    try {
+      window.focus()
+    } catch {
+      // ignore
+    }
+    const refocus = () => {
+      scanBusyRef.current = false
+      setScanBusy(false)
+      focusBarcodeInput()
+    }
+    refocus()
+    window.setTimeout(refocus, 0)
+    window.setTimeout(refocus, 100)
+    window.setTimeout(refocus, 350)
+    keepBarcodeFocus(20000)
   }
 
   function resetScanFlow(force = false) {
@@ -802,7 +818,7 @@ function WbAssemblySellerPage() {
     setLastPrinted(order as unknown as AssemblyOrder)
     cacheOrderSticker({ id: order.id, sticker_file: file })
     preloadFbsSticker(file)
-    await printSticker(file, preopened, () => releaseBarcodeForNextScan())
+    await printSticker(file, preopened)
     markAutoPrinted(order.id)
     flashPrintOk()
   }
@@ -2041,6 +2057,10 @@ function WbAssemblySellerPage() {
 
     void bindMarking(id, orderId, code)
       .then(() => refreshAssemblyUi())
+      .then(() => {
+        window.setTimeout(() => focusBarcodeInput(), 0)
+        window.setTimeout(() => focusBarcodeInput(), 250)
+      })
       .catch((err) => {
         const boundOrder =
           err instanceof ApiError && err.order && typeof err.order === 'object'
@@ -2903,22 +2923,6 @@ function WbAssemblySellerPage() {
             </div>
           )}
 
-          {stickerPreview && (
-            <div className="assembly-sticker-preview">
-              <img src={`data:image/png;base64,${stickerPreview}`} alt="Стикер FBS" />
-              {(lastPrintedFresh || lastPrinted) && (
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--small assembly-sticker-preview__reprint"
-                  onClick={() => confirmReprintSticker((lastPrintedFresh || lastPrinted)!)}
-                  disabled={loading}
-                  {...uiHint('Напечатать этот стикер ещё раз — остаток не списывается')}
-                >
-                  Повторная печать
-                </button>
-              )}
-            </div>
-          )}
         </section>
       )}
 

@@ -90,9 +90,11 @@ function schedulePopupPrint(win: Window, onScheduled?: () => void): void {
       } catch {
         // ignore
       }
+      blankPrintHolder(win)
       refocusCrm()
       window.setTimeout(refocusCrm, 50)
       window.setTimeout(refocusCrm, 250)
+      window.setTimeout(refocusCrm, 600)
     }, 0)
   }
 
@@ -185,6 +187,21 @@ export function setPrintHolderMessage(win: Window | null, message: string) {
       `<!DOCTYPE html><html><head><meta charset="UTF-8"><title></title></head><body style="font-family:Arial,sans-serif;padding:16px">${message}</body></html>`,
     )
     win.document.close()
+  } catch {
+    // ignore
+  }
+}
+
+/** Сбросить popup после печати — стикер не должен висеть на экране. */
+export function blankPrintHolder(win?: Window | null) {
+  const target = win ?? cachedPrintWindow
+  if (!target || target.closed) return
+  try {
+    target.document.open()
+    target.document.write(
+      '<!DOCTYPE html><html><head><title></title></head><body style="margin:0;background:#fff"></body></html>',
+    )
+    target.document.close()
   } catch {
     // ignore
   }
