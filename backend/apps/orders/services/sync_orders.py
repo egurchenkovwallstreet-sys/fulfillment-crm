@@ -36,9 +36,20 @@ def _get_seller_token(seller: Seller) -> str:
 
 def _link_product(seller: Seller, barcode: str) -> Product | None:
   from apps.integrations.marketplace import WB as MARKETPLACE_WB
-  from apps.warehouse.services.product_lookup import resolve_product_by_barcode
+  from apps.warehouse.services.product_lookup import (
+    resolve_product_by_barcode,
+    sync_product_wb_barcodes,
+  )
 
-  return resolve_product_by_barcode(seller, MARKETPLACE_WB, barcode)
+  product = resolve_product_by_barcode(
+    seller,
+    MARKETPLACE_WB,
+    barcode,
+    register_alias=True,
+  )
+  if product:
+    sync_product_wb_barcodes(seller, product, extra_barcodes={barcode})
+  return product
 
 
 def _touch_order_warehouse(seller: Seller, wb_order) -> None:
@@ -390,13 +401,16 @@ def sync_orders_for_seller(seller: Seller, *, user=None, mode: str = "full") -> 
   )
 
   from apps.warehouse.services.product_lookup import relink_orders_to_products_for_seller
+  from apps.warehouse.services.wb_barcode_alias_sync import sync_linked_order_barcodes_for_seller
 
   orders_relinked = relink_orders_to_products_for_seller(seller)
+  barcode_aliases_added = sync_linked_order_barcodes_for_seller(seller)
 
   return {
     "seller_id": seller.id,
     "sync_mode": mode,
     "orders_relinked": orders_relinked,
+    "barcode_aliases_added": barcode_aliases_added,
     "created": created,
     "updated": updated,
     "without_product": skipped,

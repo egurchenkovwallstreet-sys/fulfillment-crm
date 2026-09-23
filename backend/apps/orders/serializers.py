@@ -216,6 +216,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
   tech_size = serializers.SerializerMethodField()
   color_label = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
+  alternate_barcodes = serializers.SerializerMethodField()
 
   class Meta:
     model = PickListItem
@@ -223,6 +224,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "id",
       "cell_number",
       "barcode",
+      "alternate_barcodes",
       "product_name",
       "wb_nm_id",
       "wb_article",
@@ -274,6 +276,13 @@ class PickListItemSerializer(serializers.ModelSerializer):
     if not seller:
       return bool(obj.product.requires_marking) if obj.product_id else False
     return resolve_product_requires_marking(obj.product, obj.barcode, seller)
+
+  def get_alternate_barcodes(self, obj):
+    from apps.warehouse.services.product_lookup import product_alternate_barcodes
+
+    if not obj.product_id:
+      return []
+    return product_alternate_barcodes(obj.product)
 
 
 class PickListSerializer(serializers.ModelSerializer):

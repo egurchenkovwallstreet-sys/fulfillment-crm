@@ -92,6 +92,57 @@ class AssemblyBarcodeMatchTest(TestCase):
       scan_order_barcode(self.seller, "9999999999999", user=self.user)
     self.assertIn(ctx.exception.code, ("not_in_pick_list", "order_not_found"))
 
+  def test_intake_barcode_finds_order_with_wb_second_barcode(self):
+    """Приёмка по A, заказ WB пришёл на B — после sync оба в одной паре SKU."""
+    from apps.orders.models import PickList, PickListItem
+    from apps.orders.services.assembly import _scan_allowed_in_pick_list
+    from apps.warehouse.services.product_lookup import sync_product_wb_barcodes
+
+    product = Product.objects.create(
+      seller=self.seller,
+      barcode="04660727916563",
+      cell=self.cell,
+      wb_chrt_id=77001,
+    )
+    order = Order.objects.create(
+      seller=self.seller,
+      wb_order_id=500099,
+      barcode="04628529294012",
+      product=product,
+      wb_warehouse_id=100,
+      status=Order.Status.IN_PICKING,
+      wb_supplier_status="confirm",
+      has_sticker=True,
+      sticker_file="c3RpY2tlcg==",
+    )
+    pick_list = PickList.objects.create(
+      seller=self.seller,
+      marketplace="wb",
+      wb_warehouse_id=100,
+      warehouse_name="Склад",
+    )
+    PickListItem.objects.create(
+      pick_list=pick_list,
+      cell=self.cell,
+      product=product,
+      barcode=product.barcode,
+      quantity=1,
+    )
+
+    sync_product_wb_barcodes(
+      self.seller,
+      product,
+      extra_barcodes={order.barcode},
+    )
+
+    self.assertTrue(_scan_allowed_in_pick_list(pick_list, "04660727916563"))
+    matched = _match_order_by_scan(
+      Order.objects.filter(pk=order.pk),
+      "04660727916563",
+      seller=self.seller,
+    )
+    self.assertEqual(matched.id, order.id)
+
   def test_repeat_chz_scan_returns_marking_already_bound(self):
     self.order_50.status = Order.Status.LABEL_PRINTED
     self.order_50.marking_code = "0104600000000010215ABC1234567890"

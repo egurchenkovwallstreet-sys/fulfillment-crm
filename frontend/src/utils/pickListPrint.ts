@@ -60,10 +60,18 @@ function sortPickListItems(items: PickList['items']): PickList['items'] {
   )
 }
 
+function formatPickListBarcodes(item: PickList['items'][number]): string {
+  const primary = (item.barcode || '').trim()
+  const alternates = (item.alternate_barcodes ?? []).filter((code) => code && code !== primary)
+  if (!primary) return alternates.join(' / ') || '—'
+  if (!alternates.length) return primary
+  return `${primary} / ${alternates.join(' / ')}`
+}
+
 function rowHtml(item: PickList['items'][number]): string {
   const cell = escapeHtml(item.cell_number || '—')
   const qty = escapeHtml(String(item.quantity))
-  const barcode = escapeHtml(item.barcode || '—')
+  const barcode = escapeHtml(formatPickListBarcodes(item))
   const article = escapeHtml(
     item.wb_article || (item.wb_nm_id != null ? String(item.wb_nm_id) : '—'),
   )

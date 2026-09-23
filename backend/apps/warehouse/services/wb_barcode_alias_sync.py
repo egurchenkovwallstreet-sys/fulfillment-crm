@@ -222,8 +222,62 @@ def sync_wb_barcode_aliases_for_seller(seller: Seller) -> BarcodeAliasSyncResult
     _register_aliases_for_product(seller, product, all_skus, result)
 
   _sync_aliases_from_orphan_orders(seller, index, by_chrt, result)
+  _sync_aliases_from_linked_orders(seller, index, result)
   result.orders_relinked = relink_orders_to_products_for_seller(seller)
   return result
+
+
+def _sync_aliases_from_linked_orders(
+  seller: Seller,
+  index: dict,
+  result: BarcodeAliasSyncResult,
+) -> None:
+  """Заказы уже с product, но баркод заказа ещё не в паре SKU — дописать алиас."""
+  from apps.warehouse.services.product_lookup import (
+    product_scan_barcodes,
+    sync_product_wb_barcodes,
+  )
+
+  orders = (
+    Order.objects.filter(seller=seller, product__isnull=False)
+    .exclude(barcode="")
+    .select_related("product")
+  )
+  for order in orders.iterator():
+    product = order.product
+    if not product:
+      continue
+    scan_codes = product_scan_barcodes(product)
+    order_code = normalize_barcode(order.barcode)
+    if not order_code:
+      continue
+    if any(
+      order_code == code or (
+        order_code.isdigit()
+        and code.isdigit()
+        and (order_code.lstrip("0") or "0") == (code.lstrip("0") or "0")
+      )
+      for code in scan_codes
+    ):
+      continue
+    added = sync_product_wb_barcodes(
+      seller,
+      product,
+      catalog_index=index,
+      extra_barcodes={order.barcode},
+    )
+    result.aliases_added += added
+
+
+def sync_linked_order_barcodes_for_seller(seller: Seller) -> int:
+  """Дописать вторые баркоды WB к товарам по уже привязанным заказам (без force refresh)."""
+  try:
+    index = build_seller_catalog_index(seller)
+  except CatalogError:
+    index = {}
+  result = BarcodeAliasSyncResult(seller_id=seller.id)
+  _sync_aliases_from_linked_orders(seller, index, result)
+  return result.aliases_added
 
 
 def sync_wb_barcode_aliases_all_sellers() -> dict:

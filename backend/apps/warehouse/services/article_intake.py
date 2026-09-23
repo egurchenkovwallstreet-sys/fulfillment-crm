@@ -466,6 +466,8 @@ def confirm_group(
       existing.photo_url = item.photo_url
       existing.color_label = item.color_label
       existing.article_group_key = group_key
+      if item.wb_chrt_id and existing.wb_chrt_id != item.wb_chrt_id:
+        existing.wb_chrt_id = item.wb_chrt_id
       existing.save(
         update_fields=[
           "name",
@@ -473,6 +475,7 @@ def confirm_group(
           "quantity",
           "requires_marking",
           "wb_nm_id",
+          "wb_chrt_id",
           "vendor_code",
           "tech_size",
           "wb_size",
@@ -482,6 +485,14 @@ def confirm_group(
           "updated_at",
         ]
       )
+      if normalize_marketplace(mp) == WB:
+        from apps.warehouse.services.product_lookup import sync_product_wb_barcodes
+
+        sync_product_wb_barcodes(
+          seller,
+          existing,
+          extra_barcodes={item.barcode},
+        )
       refresh_cell_occupied(cell)
       if cell_number not in created_cells:
         created_cells.append(cell_number)
@@ -507,6 +518,7 @@ def confirm_group(
       quantity=0,
       requires_marking=item.requires_marking,
       wb_nm_id=item.wb_nm_id,
+      wb_chrt_id=item.wb_chrt_id or None,
       vendor_code=item.vendor_code,
       tech_size=item.tech_size,
       wb_size=item.wb_size,
@@ -514,6 +526,14 @@ def confirm_group(
       color_label=item.color_label,
       article_group_key=group_key,
     )
+    if normalize_marketplace(mp) == WB:
+      from apps.warehouse.services.product_lookup import sync_product_wb_barcodes
+
+      sync_product_wb_barcodes(
+        seller,
+        product,
+        extra_barcodes={item.barcode},
+      )
     refresh_cell_occupied(cell)
     created_cells.append(cell_number)
     created_products += 1

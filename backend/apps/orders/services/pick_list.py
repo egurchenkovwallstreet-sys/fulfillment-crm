@@ -17,7 +17,12 @@ from apps.sellers.services.warehouse_filter import (
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
 from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
-from apps.warehouse.services.product_lookup import products_by_barcodes, resolve_product_by_barcode
+from apps.warehouse.services.product_lookup import (
+  product_alternate_barcodes,
+  products_by_barcodes,
+  resolve_product_by_barcode,
+  sync_product_wb_barcodes,
+)
 
 
 class PickListError(Exception):
@@ -190,17 +195,38 @@ def _optional_link_orders_to_products(
   seller: Seller,
   orders: list[Order],
   products_by_barcode: dict[str, Product],
+  *,
+  catalog_index: dict | None = None,
 ) -> None:
   """Привязать product к заказам одним bulk_update — не блокирует лист, если товара нет."""
   to_update: list[Order] = []
   for order in orders:
     if order.product_id:
+      product = order.product
+      sync_product_wb_barcodes(
+        seller,
+        product,
+        catalog_index=catalog_index,
+        extra_barcodes={order.barcode},
+      )
       continue
     product = products_by_barcode.get(order.barcode)
     if not product:
-      product = resolve_product_by_barcode(seller, MARKETPLACE_WB, order.barcode)
+      product = resolve_product_by_barcode(
+        seller,
+        MARKETPLACE_WB,
+        order.barcode,
+        catalog_index=catalog_index,
+        register_alias=True,
+      )
     if not product:
       continue
+    sync_product_wb_barcodes(
+      seller,
+      product,
+      catalog_index=catalog_index,
+      extra_barcodes={order.barcode},
+    )
     order.product = product
     order.product_id = product.id
     to_update.append(order)
@@ -213,17 +239,35 @@ def _group_orders_for_pick_list(
   orders: list[Order],
 ) -> tuple[list[dict], int]:
   """Сгруппировать заказы для листа. Заказы без товара в CRM — по баркоду, ячейка «—»."""
-  barcodes = {order.barcode for order in orders if order.barcode}
-  products_by_barcode = _products_by_barcode(seller, barcodes)
-  _optional_link_orders_to_products(seller, orders, products_by_barcode)
+  from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
 
-  grouped: dict[tuple[int, int, str], dict] = defaultdict(
+  try:
+    catalog_index = build_seller_catalog_index(seller)
+  except CatalogError:
+    catalog_index = {}
+
+  barcodes = {order.barcode for order in orders if order.barcode}
+  products_by_barcode = products_by_barcodes(
+    seller,
+    barcodes,
+    marketplace=MARKETPLACE_WB,
+    catalog_index=catalog_index or None,
+  )
+  _optional_link_orders_to_products(
+    seller,
+    orders,
+    products_by_barcode,
+    catalog_index=catalog_index or None,
+  )
+
+  grouped: dict[tuple, dict] = defaultdict(
     lambda: {
       "quantity": 0,
       "order_ids": [],
       "product": None,
       "cell": None,
       "barcode": "",
+      "order_barcodes": set(),
     }
   )
   orders_without_product = 0
@@ -235,16 +279,25 @@ def _group_orders_for_pick_list(
       order.product = product
 
     if product:
-      key = (product.cell_id, product.id, order.barcode)
+      sync_product_wb_barcodes(
+        seller,
+        product,
+        catalog_index=catalog_index or None,
+        extra_barcodes={order.barcode},
+      )
+      key = (product.cell_id or 0, product.id)
       grouped[key]["product"] = product
       grouped[key]["cell"] = product.cell
+      grouped[key]["barcode"] = product.barcode
     else:
       orders_without_product += 1
-      key = (0, 0, order.barcode)
+      key = ("raw", order.barcode)
       grouped[key]["product"] = None
       grouped[key]["cell"] = None
+      grouped[key]["barcode"] = order.barcode
 
-    grouped[key]["barcode"] = order.barcode
+    if order.barcode:
+      grouped[key]["order_barcodes"].add(order.barcode)
     grouped[key]["quantity"] += 1
     grouped[key]["order_ids"].append(order.id)
 
@@ -260,10 +313,12 @@ def _group_orders_for_pick_list(
   ):
     product = data["product"]
     cell_number = str(data["cell"].number) if data["cell"] else "—"
+    alternate_barcodes = product_alternate_barcodes(product) if product else []
     preview_items.append({
       "id": index,
       "cell_number": cell_number,
       "barcode": data["barcode"],
+      "alternate_barcodes": alternate_barcodes,
       "product_name": product.name if product else "—",
       "wb_nm_id": product.wb_nm_id if product else None,
       "wb_article": _product_wb_article(product) or "—",
