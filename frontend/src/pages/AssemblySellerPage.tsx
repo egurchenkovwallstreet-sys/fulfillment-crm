@@ -696,12 +696,9 @@ function WbAssemblySellerPage() {
     }, 80)
   }
 
+  /** Локальный предпросмотр: только точный баркод заказа (второй sku — через API). */
   function orderBarcodeMatchesScan(order: AssemblyOrder, code: string): boolean {
-    if (normalizeScanCode(order.barcode) === code) return true
-    for (const alt of order.alternate_barcodes ?? []) {
-      if (normalizeScanCode(alt) === code) return true
-    }
-    return false
+    return normalizeScanCode(order.barcode) === code
   }
 
   function findLocalOrderByBarcode(
@@ -775,15 +772,10 @@ function WbAssemblySellerPage() {
     return printFbsSticker(payload, true, preopened, onPrintScheduled, true)
   }
 
-  function enrichOrderForPrint(
-    apiOrder: PrintOrder,
-    barcode: string,
-    orderList: AssemblyOrder[],
-  ): PrintOrder {
-    const local = findLocalOrderByBarcode(barcode, orderList)
+  /** Стикер только с сервера / кэша того же order.id — без подстановки чужого заказа. */
+  function orderForPrint(apiOrder: PrintOrder): PrintOrder {
     const sticker =
       (apiOrder.sticker_file || '').trim()
-      || (local ? stickerPayloadForOrder(local) : '')
       || orderStickerCacheRef.current.get(apiOrder.id)
       || ''
     return { ...apiOrder, sticker_file: sticker }
@@ -832,6 +824,21 @@ function WbAssemblySellerPage() {
         'Печатать повторно только если стикер повреждён или потерян.\n' +
         'Остаток в CRM не списывается. Продолжить?',
       confirmLabel: 'Печать ещё раз',
+      onConfirm: () => void runReprintSticker(order.id, onDone),
+    })
+  }
+
+  function showMarkingAlreadyBoundModal(order: AssemblyOrder | PrintOrder, onDone?: () => void) {
+    const stickerNo = formatStickerNumber(order)
+    setModal({
+      kind: 'confirm',
+      title: 'ЧЗ уже привязан',
+      message:
+        'Этот код Честного знака уже привязан к стикеру заказа.\n\n' +
+        `Заказ WB #${order.wb_order_id}` +
+        (stickerNo ? `\nНомер стикера: ${stickerNo}` : '') +
+        '\n\nПовторная автопечать не выполняется. Можно распечатать стикер вручную.',
+      confirmLabel: 'Распечатать стикер',
       onConfirm: () => void runReprintSticker(order.id, onDone),
     })
   }
@@ -1899,7 +1906,7 @@ function WbAssemblySellerPage() {
         return
       }
 
-      const printOrder = enrichOrderForPrint(result.order, barcode, orderList)
+      const printOrder = orderForPrint(result.order)
       await completeBarcodePrintFlow(printOrder, printWin)
     } catch (err) {
       closePrintHolder(printWin)
@@ -1919,6 +1926,12 @@ function WbAssemblySellerPage() {
           errOrder as unknown as PrintOrder,
           `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
         )
+        return
+      }
+
+      if (err instanceof ApiError && err.code === 'marking_already_bound' && errOrder) {
+        resetScanFlow(true)
+        showMarkingAlreadyBoundModal(errOrder as PrintOrder, () => resetScanFlow(true))
         return
       }
 
@@ -2016,6 +2029,15 @@ function WbAssemblySellerPage() {
     void bindMarking(id, orderId, code)
       .then(() => refreshAssemblyUi())
       .catch((err) => {
+        const boundOrder =
+          err instanceof ApiError && err.order && typeof err.order === 'object'
+            ? (err.order as AssemblyOrder)
+            : orderSnapshot
+        if (err instanceof ApiError && err.code === 'marking_already_bound' && boundOrder) {
+          showMarkingAlreadyBoundModal(boundOrder as PrintOrder, () => releaseBarcodeForNextScan())
+          void refreshAssemblyUi()
+          return
+        }
         if (err instanceof ApiError && err.code === 'already_printed') {
           void refreshAssemblyUi()
           return

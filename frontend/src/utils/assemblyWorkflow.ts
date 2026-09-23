@@ -145,6 +145,8 @@ export function canSwitchToStage(
 }
 
 const SCAN_ERROR_TITLES: Record<string, string> = {
+  marking_already_bound: 'ЧЗ уже привязан',
+  marking_not_found: 'ЧЗ не найден',
   duplicate_marking: 'ЧЗ уже использован сегодня',
   wb_bind_failed: 'WB отклонил Честный знак',
   invalid_marking_code: 'Неверный код ЧЗ',

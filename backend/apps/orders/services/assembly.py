@@ -26,7 +26,11 @@ from apps.sellers.services.warehouse_filter import (
 )
 from apps.orders.models import Order, PickList, PickListItem, Supply
 from apps.orders.services.order_sticker import order_sticker_printed_in_crm
-from apps.orders.services.marking import parse_wb_marking_error, validate_marking_code
+from apps.orders.services.marking import (
+  MARKING_MIN_LEN,
+  parse_wb_marking_error,
+  validate_marking_code,
+)
 from apps.sellers.models import Seller
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
@@ -146,6 +150,77 @@ def _barcodes_match(left: str, right: str) -> bool:
   return False
 
 
+def _barcode_in_set(code: str, codes: set[str]) -> bool:
+  return any(_barcodes_match(code, bc) for bc in codes)
+
+
+def _is_likely_marking(scan: str) -> bool:
+  raw = (scan or "").strip()
+  if len(raw) < MARKING_MIN_LEN:
+    return False
+  normalized, error = validate_marking_code(raw)
+  if error and len(normalized) < MARKING_MIN_LEN:
+    return False
+  return True
+
+
+def _find_order_by_bound_marking(seller: Seller, marking_code: str) -> Order | None:
+  normalized, validation_error = validate_marking_code(marking_code)
+  if validation_error:
+    return None
+  return (
+    Order.objects.filter(seller=seller, marking_code=normalized)
+    .exclude(marking_verify_status="error")
+    .exclude(status=Order.Status.CANCELLED)
+    .select_related("product")
+    .first()
+  )
+
+
+def _candidate_sort_key(order: Order):
+  return (0 if _order_needs_marking_scan(order) else 1, order.id)
+
+
+def _wb_order_id_fallback(orders_qs, scan_norm: str) -> Order | None:
+  if not scan_norm.isdigit():
+    return None
+  try:
+    return orders_qs.filter(wb_order_id=int(scan_norm)).first()
+  except (ValueError, OverflowError):
+    return None
+
+
+def _assert_order_matches_scan(order: Order, scan_norm: str, seller: Seller) -> None:
+  """Стикер только если баркод заказа совпадает со сканом или с парой баркодов одного SKU."""
+  if _barcodes_match(order.barcode or "", scan_norm):
+    return
+  from apps.warehouse.services.product_lookup import (
+    product_scan_barcodes,
+    resolve_product_by_barcode,
+  )
+
+  product = resolve_product_by_barcode(seller, MARKETPLACE_WB, scan_norm)
+  if not product:
+    raise AssemblyError(
+      "Баркода нет в листе подбора!",
+      code="not_in_pick_list",
+      order=order,
+    )
+  product_barcodes = product_scan_barcodes(product)
+  if not _barcode_in_set(scan_norm, product_barcodes):
+    raise AssemblyError(
+      "Баркода нет в листе подбора!",
+      code="not_in_pick_list",
+      order=order,
+    )
+  if not _barcode_in_set(order.barcode or "", product_barcodes):
+    raise AssemblyError(
+      "Баркода нет в листе подбора!",
+      code="not_in_pick_list",
+      order=order,
+    )
+
+
 def _order_needs_marking_scan(order: Order) -> bool:
   """Нужен ли скан DataMatrix прямо сейчас (не путать с «ждёт проверки WB» после печати)."""
   if not _order_requires_marking(order):
@@ -158,57 +233,53 @@ def _order_needs_marking_scan(order: Order) -> bool:
 
 
 def _match_order_by_scan(orders_qs, scan_value: str, *, seller: Seller | None = None) -> Order | None:
+  """
+  Найти заказ по скану: сначала точное совпадение order.barcode,
+  затем второй баркод того же SKU (основной + алиас в CRM).
+  Не подбираем «любой заказ товара» — только заказы, чей баркод в паре SKU.
+  """
   scan_norm = _normalize_scan_value(scan_value)
   if not scan_norm:
     return None
 
-  candidates: list[Order] = []
-  seen_ids: set[int] = set()
+  exact: list[Order] = []
   for order in orders_qs:
-    if order.id in seen_ids:
-      continue
-    barcode_hit = _barcodes_match(order.barcode or "", scan_norm)
-    wb_hit = scan_norm.isdigit() and str(order.wb_order_id) == scan_norm
-    if not barcode_hit and not wb_hit:
-      continue
-    seen_ids.add(order.id)
-    candidates.append(order)
+    if _barcodes_match(order.barcode or "", scan_norm):
+      exact.append(order)
+  if exact:
+    exact.sort(key=_candidate_sort_key)
+    return exact[0]
 
-  if not candidates:
-    from apps.warehouse.services.product_lookup import (
-      product_scan_barcodes,
-      resolve_product_by_barcode,
-    )
+  resolved_seller = seller
+  if resolved_seller is None:
+    sample = orders_qs.first()
+    resolved_seller = sample.seller if sample else None
+  if not resolved_seller:
+    return _wb_order_id_fallback(orders_qs, scan_norm)
 
-    resolved_seller = seller
-    if resolved_seller is None:
-      sample = orders_qs.first()
-      resolved_seller = sample.seller if sample else None
-    if resolved_seller:
-      product = resolve_product_by_barcode(resolved_seller, MARKETPLACE_WB, scan_norm)
-      if product:
-        product_barcodes = product_scan_barcodes(product)
-        for order in orders_qs:
-          if order.id in seen_ids:
-            continue
-          if order.product_id == product.id or any(
-            _barcodes_match(order.barcode or "", bc) for bc in product_barcodes
-          ):
-            seen_ids.add(order.id)
-            candidates.append(order)
-
-  if not candidates and scan_norm.isdigit():
-    try:
-      return orders_qs.filter(wb_order_id=int(scan_norm)).first()
-    except (ValueError, OverflowError):
-      return None
-  if not candidates:
-    return None
-
-  candidates.sort(
-    key=lambda order: (0 if _order_needs_marking_scan(order) else 1, order.id),
+  from apps.warehouse.services.product_lookup import (
+    product_scan_barcodes,
+    resolve_product_by_barcode,
   )
-  return candidates[0]
+
+  product = resolve_product_by_barcode(resolved_seller, MARKETPLACE_WB, scan_norm)
+  if not product:
+    return _wb_order_id_fallback(orders_qs, scan_norm)
+
+  product_barcodes = product_scan_barcodes(product)
+  if not _barcode_in_set(scan_norm, product_barcodes):
+    return _wb_order_id_fallback(orders_qs, scan_norm)
+
+  pair_matches: list[Order] = []
+  for order in orders_qs:
+    if _barcode_in_set(order.barcode or "", product_barcodes):
+      pair_matches.append(order)
+
+  if not pair_matches:
+    return _wb_order_id_fallback(orders_qs, scan_norm)
+
+  pair_matches.sort(key=_candidate_sort_key)
+  return pair_matches[0]
 
 
 def _is_marking_retry_order(order: Order) -> bool:
@@ -296,8 +367,14 @@ def _scan_allowed_in_pick_list(pick_list: PickList, scan_value: str) -> bool:
   from apps.warehouse.services.product_lookup import resolve_product_by_barcode
 
   product = resolve_product_by_barcode(pick_list.seller, MARKETPLACE_WB, scan)
-  if product and any(item.product_id == product.id for item in items):
-    return True
+  if product:
+    from apps.warehouse.services.product_lookup import product_scan_barcodes
+
+    product_barcodes = product_scan_barcodes(product)
+    if _barcode_in_set(scan, product_barcodes) and any(
+      _barcode_in_set(item.barcode or "", product_barcodes) for item in items
+    ):
+      return True
 
   if scan.isdigit():
     order = Order.objects.filter(
@@ -721,8 +798,22 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   if not scan_value:
     raise AssemblyError("Пустой штрихкод")
 
+  if _is_likely_marking(scan_value):
+    bound = _find_order_by_bound_marking(seller, scan_value)
+    if bound:
+      raise _marking_error(
+        f"Этот ЧЗ уже привязан к стикеру заказа WB #{bound.wb_order_id}",
+        bound,
+        code="marking_already_bound",
+      )
+    raise AssemblyError(
+      "Этот ЧЗ не найден в текущей сборке. Сначала отсканируйте баркод заказа.",
+      code="marking_not_found",
+    )
+
   _assert_scan_in_pick_list(seller, scan_value)
   order = _find_active_order(seller, scan_value)
+  _assert_order_matches_scan(order, scan_value, seller)
   _prepare_order_for_scan(order, _find_pick_list_for_scan(seller, scan_value))
 
   if order_sticker_printed_in_crm(order) and not _is_marking_retry_order(order):
@@ -845,7 +936,30 @@ def bind_marking_and_print(
   except Order.DoesNotExist as exc:
     raise AssemblyError("Заказ не найден", code="order_not_found") from exc
 
+  normalized, validation_error = validate_marking_code(marking_code)
+  if validation_error:
+    raise _marking_error(validation_error, order, code="invalid_marking_code")
+
+  existing_bound = (
+    Order.objects.filter(seller=seller, marking_code=normalized)
+    .exclude(marking_verify_status="error")
+    .select_related("product")
+    .first()
+  )
+  if existing_bound:
+    raise _marking_error(
+      f"Этот ЧЗ уже привязан к стикеру заказа WB #{existing_bound.wb_order_id}",
+      existing_bound,
+      code="marking_already_bound",
+    )
+
   if order_sticker_printed_in_crm(order) and not _is_marking_retry_order(order):
+    if (order.marking_code or "").strip() == normalized:
+      raise _marking_error(
+        f"Этот ЧЗ уже привязан к стикеру заказа WB #{order.wb_order_id}",
+        order,
+        code="marking_already_bound",
+      )
     raise AssemblyError(
       f"Стикер заказа WB #{order.wb_order_id} уже напечатан — заказ в «Готовые». "
       "Повторная печать только через подтверждение менеджера.",
@@ -895,25 +1009,6 @@ def bind_marking_and_print(
       "Нажмите «Подтянуть стикеры» и повторите скан.",
       order,
       code="no_sticker",
-    )
-
-  normalized, validation_error = validate_marking_code(marking_code)
-  if validation_error:
-    raise _marking_error(validation_error, order, code="invalid_marking_code")
-
-  duplicate = (
-    Order.objects.filter(marking_code=normalized)
-    .exclude(pk=order.pk)
-    .exclude(marking_verify_status="error")
-    .exists()
-  )
-  if duplicate:
-    raise _marking_error(
-      "Этот код ЧЗ уже привязан к другому заказу в CRM сегодня. "
-      "Если товар уже отгружали — очистка списка ЧЗ в 23:59; "
-      "иначе возьмите другой экземпляр товара.",
-      order,
-      code="duplicate_marking",
     )
 
   from apps.warehouse.services.stock_deduction import (
