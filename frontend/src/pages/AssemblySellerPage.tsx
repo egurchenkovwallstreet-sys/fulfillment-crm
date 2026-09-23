@@ -672,15 +672,40 @@ function WbAssemblySellerPage() {
     }, 120)
   }
 
-  function findLocalMarkingOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
+  function findLocalOrderByBarcode(
+    barcode: string,
+    orderList: AssemblyOrder[],
+  ): AssemblyOrder | undefined {
     const code = normalizeScanCode(barcode)
-    return orderList.find(
-      (order) =>
-        normalizeScanCode(order.barcode) === code &&
-        orderNeedsMarkingScan(order) &&
-        order.has_sticker &&
-        Boolean((order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id)),
-    )
+    return orderList.find((order) => {
+      if (normalizeScanCode(order.barcode) !== code) return false
+      if (orderStickerPrinted(order) && order.marking_verify_status !== 'error') return false
+      const wb = (order.wb_supplier_status || '').trim()
+      return (
+        order.status === 'in_picking' ||
+        order.status === 'assembled' ||
+        (wb === 'confirm' && order.status === 'new')
+      )
+    })
+  }
+
+  function findLocalMarkingOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
+    const order = findLocalOrderByBarcode(barcode, orderList)
+    if (!order || !order.requires_marking || !orderNeedsMarkingScan(order)) return undefined
+    if (
+      !order.has_sticker &&
+      !Boolean((order.sticker_file || '').trim() || orderStickerCacheRef.current.get(order.id))
+    ) {
+      return undefined
+    }
+    return order
+  }
+
+  function findLocalReadyPrintOrder(barcode: string, orderList: AssemblyOrder[]): AssemblyOrder | undefined {
+    const order = findLocalOrderByBarcode(barcode, orderList)
+    if (!order || order.requires_marking || !canAutoPrintOrder(order)) return undefined
+    if (!stickerPayloadForOrder(order)) return undefined
+    return order
   }
 
   function stickerPayloadForOrder(order: Pick<AssemblyOrder, 'id' | 'sticker_file'>): string {
@@ -1818,8 +1843,13 @@ function WbAssemblySellerPage() {
     setScanBusy(true)
     scanRef.current?.blur()
 
-    const localMarkingOrder = findLocalMarkingOrder(barcode, data?.orders ?? [])
+    const orderList = data?.orders ?? []
+    const localMarkingOrder = findLocalMarkingOrder(barcode, orderList)
+    const localPrintOrder = findLocalReadyPrintOrder(barcode, orderList)
     let optimisticMarking = false
+    let optimisticPrinted = false
+    let printWin: Window | null = null
+
     if (localMarkingOrder) {
       optimisticMarking = true
       const localSticker = stickerPayloadForOrder(localMarkingOrder)
@@ -1828,9 +1858,15 @@ function WbAssemblySellerPage() {
       )
       scanBusyRef.current = false
       setScanBusy(false)
+    } else if (localPrintOrder) {
+      const localSticker = stickerPayloadForOrder(localPrintOrder)
+      printWin = openPrintHolder()
+      optimisticPrinted = true
+      void finishPrint(
+        { ...localPrintOrder, sticker_file: localSticker } as PrintOrder,
+        printWin,
+      )
     }
-
-    const printWin: Window | null = openPrintHolder()
 
     try {
       const result = await scanOrderBarcode(id, barcode)
@@ -1856,16 +1892,23 @@ function WbAssemblySellerPage() {
         resetScanFlow(true)
       }
 
-      try {
-        await finishPrint(result.order, printWin)
-      } catch (printErr) {
-        closePrintHolder(printWin)
-        throw printErr
+      if (!optimisticPrinted) {
+        if (!printWin) {
+          printWin = openPrintHolder()
+        }
+        try {
+          await finishPrint(result.order, printWin)
+        } catch (printErr) {
+          closePrintHolder(printWin)
+          throw printErr
+        }
       }
       void refreshMarkingStatus()
       void load({ silent: true })
     } catch (err) {
-      closePrintHolder(printWin)
+      if (!optimisticPrinted) {
+        closePrintHolder(printWin)
+      }
       const errOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'
           ? (err.order as AssemblyOrder)

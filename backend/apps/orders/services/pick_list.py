@@ -16,6 +16,7 @@ from apps.sellers.services.warehouse_filter import (
 )
 from apps.integrations.marketplace import WB as MARKETPLACE_WB
 from apps.warehouse.models import Product
+from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
 
 
 class PickListError(Exception):
@@ -272,6 +273,7 @@ def _group_orders_for_pick_list(
       "wb_article": _product_wb_article(product) or "—",
       "tech_size": _product_size_label(product) or "—",
       "color_label": (product.color_label or "").strip() if product else "",
+      "requires_marking": resolve_product_requires_marking(product, data["barcode"], seller),
       "quantity": data["quantity"],
       "picked_quantity": 0,
       "order_ids": data["order_ids"],

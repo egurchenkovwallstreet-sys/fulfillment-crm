@@ -72,6 +72,7 @@ class PickListCellOrderTests(TestCase):
         barcode=f"bc-{cell.number}",
         marketplace=WB,
         quantity=1,
+        requires_marking=(cell.number == "11"),
       )
       for cell in cells
     ]
@@ -87,3 +88,7 @@ class PickListCellOrderTests(TestCase):
 
     payload = PickListSerializer(pick_list).data
     self.assertEqual([item["cell_number"] for item in payload["items"]], ["5", "11", "30"])
+    marking_by_barcode = {item["barcode"]: item["requires_marking"] for item in payload["items"]}
+    self.assertFalse(marking_by_barcode["bc-5"])
+    self.assertTrue(marking_by_barcode["bc-11"])
+    self.assertFalse(marking_by_barcode["bc-30"])

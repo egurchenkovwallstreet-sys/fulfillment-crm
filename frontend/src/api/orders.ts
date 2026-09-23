@@ -42,6 +42,8 @@ export interface PickListItem {
   wb_article?: string
   tech_size?: string
   color_label?: string
+  /** Из карточки товара CRM (needKiz при приёмке) — известно при формировании листа */
+  requires_marking?: boolean
   quantity: number
   picked_quantity: number
 }

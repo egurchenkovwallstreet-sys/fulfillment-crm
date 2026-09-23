@@ -170,6 +170,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
   wb_article = serializers.SerializerMethodField()
   tech_size = serializers.SerializerMethodField()
   color_label = serializers.SerializerMethodField()
+  requires_marking = serializers.SerializerMethodField()
 
   class Meta:
     model = PickListItem
@@ -182,6 +183,7 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "wb_article",
       "tech_size",
       "color_label",
+      "requires_marking",
       "quantity",
       "picked_quantity",
     )
@@ -219,6 +221,14 @@ class PickListItemSerializer(serializers.ModelSerializer):
     if not obj.product_id:
       return ""
     return (obj.product.color_label or "").strip()
+
+  def get_requires_marking(self, obj):
+    from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+
+    seller = obj.pick_list.seller if obj.pick_list_id else None
+    if not seller:
+      return bool(obj.product.requires_marking) if obj.product_id else False
+    return resolve_product_requires_marking(obj.product, obj.barcode, seller)
 
 
 class PickListSerializer(serializers.ModelSerializer):
