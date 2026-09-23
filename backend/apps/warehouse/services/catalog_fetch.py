@@ -39,20 +39,51 @@ def normalize_barcode(value: str) -> str:
   return barcode
 
 
+def wb_ean_barcode_variants(value: str) -> list[str]:
+  """EAN-13 ↔ GTIN-14 (04660727916563 ↔ 4660727916563) — один и тот же sku WB."""
+  barcode = normalize_barcode(value)
+  if not barcode or not barcode.isdigit():
+    return [barcode] if barcode else []
+  variants = [barcode]
+  if len(barcode) == 14 and barcode.startswith("0"):
+    short = barcode[1:]
+    if short not in variants:
+      variants.append(short)
+  elif len(barcode) == 13:
+    padded = f"0{barcode}"
+    if padded not in variants:
+      variants.append(padded)
+  return variants
+
+
 def barcode_lookup_variants(value: str, marketplace: str) -> list[str]:
-  """Варианты баркода для поиска в CRM (Ozon: с/без префикса OZN)."""
-  from apps.integrations.marketplace import OZON, normalize_marketplace
+  """Варианты баркода для поиска в CRM (WB: EAN-13/GTIN-14; Ozon: префикс OZN)."""
+  from apps.integrations.marketplace import OZON, WB, normalize_marketplace
   from apps.warehouse.services.catalog_fetch_ozon import ozon_barcode_aliases
 
   barcode = normalize_barcode(value)
   if not barcode:
     return []
   variants = [barcode]
-  if normalize_marketplace(marketplace) == OZON:
+  mp = normalize_marketplace(marketplace)
+  if mp == WB:
+    for alias in wb_ean_barcode_variants(barcode):
+      if alias not in variants:
+        variants.append(alias)
+  elif mp == OZON:
     for alias in ozon_barcode_aliases(barcode):
       if alias not in variants:
         variants.append(alias)
   return variants
+
+
+def catalog_index_get(index: dict, barcode: str):
+  """Найти позицию каталога WB по баркоду (с учётом EAN-13/GTIN-14)."""
+  for variant in wb_ean_barcode_variants(barcode):
+    item = index.get(variant)
+    if item:
+      return item
+  return None
 
 
 def _size_chrt_id(size: dict) -> int:
@@ -279,11 +310,16 @@ def fetch_seller_catalog_items(seller: Seller, *, force_refresh: bool = False) -
   return items
 
 
-def build_seller_catalog_index(seller: Seller) -> dict[str, CatalogBarcodeItem]:
-  """Индекс баркод → данные карточки WB для селлера."""
+def build_seller_catalog_index(
+  seller: Seller,
+  *,
+  force_refresh: bool = False,
+) -> dict[str, CatalogBarcodeItem]:
+  """Индекс баркод → данные карточки WB для селлера (все EAN-варианты → одна карточка)."""
   index: dict[str, CatalogBarcodeItem] = {}
-  for item in fetch_seller_catalog_items(seller):
-    index[item.barcode] = item
+  for item in fetch_seller_catalog_items(seller, force_refresh=force_refresh):
+    for variant in wb_ean_barcode_variants(item.barcode):
+      index.setdefault(variant, item)
   return index
 
 
@@ -292,18 +328,27 @@ def build_catalog_index_for_barcodes(
   barcodes: set[str] | list[str],
 ) -> dict[str, CatalogBarcodeItem]:
   """Индекс только для баркодов из файла — останавливаемся, когда все найдены."""
-  needed = {normalize_barcode(code) for code in barcodes if normalize_barcode(code)}
+  needed: set[str] = set()
+  for code in barcodes:
+    for variant in wb_ean_barcode_variants(normalize_barcode(code)):
+      if variant:
+        needed.add(variant)
   if not needed:
     return {}
   index: dict[str, CatalogBarcodeItem] = {}
+  found: set[str] = set()
   try:
     token = _get_token(seller)
     for card_batch in iter_seller_card_pages(token):
       for item in _parse_cards_to_items(card_batch):
-        if item.barcode not in needed:
+        item_variants = wb_ean_barcode_variants(item.barcode)
+        if not any(variant in needed for variant in item_variants):
           continue
-        index[item.barcode] = item
-        if len(index) >= len(needed):
+        for variant in item_variants:
+          index.setdefault(variant, item)
+          if variant in needed:
+            found.add(variant)
+        if found >= needed:
           return index
   except WBApiError as exc:
     raise CatalogError(str(exc)) from exc

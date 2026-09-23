@@ -106,3 +106,25 @@ class ProductBarcodeAliasTests(TestCase):
     self.assertEqual(linked, 1)
     orphan.refresh_from_db()
     self.assertEqual(orphan.product_id, self.product.id)
+
+  def test_resolve_product_by_gtin14_leading_zero(self):
+    ean_product = Product.objects.create(
+      seller=self.seller,
+      cell=self.cell,
+      barcode="4660727916563",
+      marketplace=WB,
+      quantity=3,
+    )
+    resolved = resolve_product_by_barcode(self.seller, WB, "04660727916563")
+    self.assertEqual(resolved, ean_product)
+
+  def test_products_by_barcodes_gtin14(self):
+    Product.objects.create(
+      seller=self.seller,
+      cell=self.cell,
+      barcode="4660727916563",
+      marketplace=WB,
+      quantity=3,
+    )
+    mapping = _products_by_barcode(self.seller, {"04660727916563"})
+    self.assertEqual(mapping["04660727916563"].barcode, "4660727916563")

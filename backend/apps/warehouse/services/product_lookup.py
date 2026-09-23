@@ -63,28 +63,41 @@ def products_by_barcodes(
 ) -> dict[str, Product]:
   """Словарь баркод → товар (основные и альтернативные коды)."""
   mp = normalize_marketplace(marketplace)
-  normalized = {normalize_barcode(code) for code in barcodes if normalize_barcode(code)}
-  if not normalized:
+  requested = {normalize_barcode(code) for code in barcodes if normalize_barcode(code)}
+  if not requested:
     return {}
 
-  result: dict[str, Product] = {}
+  lookup_codes: set[str] = set()
+  for code in requested:
+    for variant in barcode_lookup_variants(code, mp):
+      lookup_codes.add(normalize_barcode(variant))
+
+  by_code: dict[str, Product] = {}
   products = (
-    Product.objects.filter(seller=seller, marketplace=mp, barcode__in=normalized)
+    Product.objects.filter(seller=seller, marketplace=mp, barcode__in=lookup_codes)
     .select_related("cell")
   )
   for product in products:
-    result[product.barcode] = product
+    by_code[product.barcode] = product
 
   aliases = (
     ProductBarcodeAlias.objects.filter(
       product__seller=seller,
       product__marketplace=mp,
-      barcode__in=normalized,
+      barcode__in=lookup_codes,
     )
     .select_related("product", "product__cell")
   )
   for alias in aliases:
-    result.setdefault(alias.barcode, alias.product)
+    by_code.setdefault(alias.barcode, alias.product)
+
+  result: dict[str, Product] = {}
+  for code in requested:
+    for variant in barcode_lookup_variants(code, mp):
+      product = by_code.get(normalize_barcode(variant))
+      if product:
+        result[code] = product
+        break
   return result
 
 
