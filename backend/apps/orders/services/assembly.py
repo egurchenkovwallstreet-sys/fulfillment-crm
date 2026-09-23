@@ -920,6 +920,53 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
   }
 
 
+def _push_marking_code_to_wb(order: Order, marking_code: str, *, user=None) -> None:
+  """PUT sgtin в WB сразу при скане — без ожидания Celery."""
+  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
+
+  code = (marking_code or "").strip()
+  if not code:
+    raise AssemblyError("Код Честного знака пустой", code="invalid_marking_code", order=order)
+
+  client = _get_client(order.seller)
+  try:
+    client.bind_order_sgtin(order.wb_order_id, [code])
+  except WBApiError as exc:
+    error_text = parse_wb_marking_error(exc)
+    order.marking_verify_status = "error"
+    order.marking_verify_error = error_text
+    order.marking_bound = False
+    order.save(
+      update_fields=[
+        "marking_verify_status",
+        "marking_verify_error",
+        "marking_bound",
+        "updated_at",
+      ]
+    )
+    AuditLog.objects.create(
+      user=user,
+      seller=order.seller,
+      action_type=AuditLog.ActionType.API_ERROR,
+      message=f"Ошибка привязки ЧЗ WB #{order.wb_order_id}: {exc}",
+      details={"order_id": order.id, "status_code": exc.status_code},
+    )
+    raise _marking_error(
+      f"WB не принял код ЧЗ: {error_text}",
+      order,
+      code="wb_marking_bind_failed",
+    ) from exc
+
+  queue_last_pick_list_marking_verify(order.seller)
+  AuditLog.objects.create(
+    user=user,
+    seller=order.seller,
+    action_type=AuditLog.ActionType.MARKING,
+    message=f"ЧЗ отправлен в WB — заказ #{order.wb_order_id}",
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
+
+
 def bind_marking_and_print(
   seller: Seller,
   order_id: int,
@@ -927,7 +974,7 @@ def bind_marking_and_print(
   *,
   user=None,
 ) -> dict:
-  """Скан ЧЗ → привязка в WB → сразу печать стикера (проверка WB — в фоне)."""
+  """Скан ЧЗ → синхронная привязка в WB → печать стикера. Доставка только после verified WB."""
   try:
     order = Order.objects.select_related("product").get(
       pk=order_id,
@@ -1046,34 +1093,21 @@ def bind_marking_and_print(
   AuditLog.objects.create(
     user=user,
     seller=seller,
-    action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ отправлен в WB — заказ #{order.wb_order_id}, стикер к печати",
-    details={"order_id": order.id, "barcode": order.barcode},
-  )
-  AuditLog.objects.create(
-    user=user,
-    seller=seller,
     action_type=AuditLog.ActionType.LABEL_PRINT,
     message=f"Печать стикера после ЧЗ — заказ WB #{order.wb_order_id}",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
-  from apps.integrations.tasks import bind_order_marking_wb_task
-
-  bind_order_marking_wb_task.delay(
-    order.id,
-    normalized,
-    user.id if getattr(user, "is_authenticated", False) else None,
-  )
+  _push_marking_code_to_wb(order, normalized, user=user)
 
   return {
     "action": "print",
     "order": order,
     "stock": stock_info,
-    "immediate_verify": False,
+    "immediate_verify": True,
     "message": (
-      f"Стикер заказа #{order.wb_order_id} отправлен на печать. "
-      "Привязка ЧЗ в WB и проверка — в фоне."
+      f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
+      "Стикер к печати. Доставка — только после подтверждения WB."
     ),
   }
 

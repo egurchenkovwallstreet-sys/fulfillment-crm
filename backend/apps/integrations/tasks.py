@@ -226,14 +226,10 @@ def reconcile_stuck_delivery_orders():
 
 @shared_task(queue="sync")
 def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | None = None):
-  """Привязка ЧЗ в WB после моментальной печати стикера в CRM."""
+  """Повторная привязка ЧЗ в WB (если синхронный вызов не удался ранее)."""
   from apps.accounts.models import User
-  from apps.integrations.models import AuditLog
-  from apps.integrations.wb_client import WBApiError
   from apps.orders.models import Order
-  from apps.orders.services.assembly import _get_client
-  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
-  from apps.orders.services.marking import parse_wb_marking_error
+  from apps.orders.services.assembly import AssemblyError, _push_marking_code_to_wb
 
   order = (
     Order.objects.filter(pk=order_id)
@@ -244,50 +240,21 @@ def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | 
     return {"success": False, "detail": "order_not_found", "order_id": order_id}
 
   user = User.objects.filter(pk=user_id).first() if user_id else None
-  seller = order.seller
-  code = (marking_code or "").strip()
+  code = (marking_code or order.marking_code or "").strip()
   if not code:
     return {"success": False, "detail": "empty_code", "order_id": order_id}
 
-  client = _get_client(seller)
   try:
-    client.bind_order_sgtin(order.wb_order_id, [code])
-  except WBApiError as exc:
-    error_text = parse_wb_marking_error(exc)
-    order.marking_verify_status = "error"
-    order.marking_verify_error = error_text
-    order.marking_bound = False
-    order.save(
-      update_fields=[
-        "marking_verify_status",
-        "marking_verify_error",
-        "marking_bound",
-        "updated_at",
-      ]
-    )
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message=f"Ошибка привязки ЧЗ WB #{order.wb_order_id}: {exc}",
-      details={"order_id": order.id, "status_code": exc.status_code},
-    )
+    _push_marking_code_to_wb(order, code, user=user)
+  except AssemblyError as exc:
     logger.warning(
       "Background WB marking bind failed order=%s wb=%s: %s",
       order.id,
       order.wb_order_id,
-      error_text,
+      exc,
     )
-    return {"success": False, "order_id": order.id, "error": error_text}
+    return {"success": False, "order_id": order.id, "error": str(exc)}
 
-  queue_last_pick_list_marking_verify(seller)
-  AuditLog.objects.create(
-    user=user,
-    seller=seller,
-    action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ привязан в WB (фон) — заказ #{order.wb_order_id}",
-    details={"order_id": order.id, "barcode": order.barcode},
-  )
   logger.info("Background WB marking bind ok order=%s wb=%s", order.id, order.wb_order_id)
   return {"success": True, "order_id": order.id}
 

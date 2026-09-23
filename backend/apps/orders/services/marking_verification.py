@@ -19,16 +19,15 @@ VERIFY_ERROR = "error"
 
 def order_marking_ready(order: Order) -> bool:
   """ЧЗ привязан и проверен WB — можно передавать в доставку."""
+  if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
+    return True
+
   status = (order.marking_verify_status or "").strip()
   if status == VERIFY_ERROR:
     return False
-  if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
-    return True
-  if status == VERIFY_PENDING:
+  if status != VERIFY_VERIFIED:
     return False
-  if status == VERIFY_VERIFIED:
-    return order.marking_bound
-  return order.marking_bound
+  return bool(order.marking_bound)
 
 
 def _sgtin_key(value: str) -> bool:
@@ -153,6 +152,10 @@ def _apply_verify_result(order: Order, decision: str) -> str:
     order.status = Order.Status.MARKED
   elif status == VERIFY_ERROR:
     order.marking_bound = False
+  elif status == VERIFY_PENDING:
+    order.marking_bound = False
+    if order.status == Order.Status.MARKED:
+      order.status = Order.Status.LABEL_PRINTED
 
   order.save(
     update_fields=[
@@ -215,6 +218,30 @@ def _orders_for_marking_verify(
   return result
 
 
+def _resolve_marking_decision(
+  meta_item: dict | None,
+  *,
+  has_code: bool,
+  treat_missing_as_required: bool,
+) -> str:
+  """
+  Статус ЧЗ только по ответу WB.
+  Код в CRM без подтверждения в meta WB — pending, никогда не «filled».
+  """
+  if meta_item is None:
+    if not has_code:
+      return "required" if treat_missing_as_required else ""
+    return VERIFY_PENDING
+
+  decision = _meta_marking_decision(meta_item)
+  if decision:
+    return decision
+
+  if has_code:
+    return VERIFY_PENDING
+  return "required" if treat_missing_as_required else ""
+
+
 def sync_orders_marking_from_wb(
   seller: Seller,
   orders: list[Order],
@@ -253,13 +280,11 @@ def sync_orders_marking_from_wb(
   for order in orders:
     meta_item = meta_by_wb_id.get(int(order.wb_order_id))
     has_code = bool((order.marking_code or "").strip())
-    if meta_item is None:
-      if treat_missing_as_required:
-        decision = "filled" if has_code else "required"
-      else:
-        decision = "filled" if has_code else ""
-    else:
-      decision = _meta_marking_decision(meta_item) or ("filled" if has_code else "")
+    decision = _resolve_marking_decision(
+      meta_item,
+      has_code=has_code,
+      treat_missing_as_required=treat_missing_as_required,
+    )
     if not decision:
       continue
     previous_status = (order.marking_verify_status or "").strip()
