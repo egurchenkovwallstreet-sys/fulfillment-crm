@@ -28,7 +28,7 @@ export function applyMarkingScanKey(
   buffer: string,
   e: ScanKeyEvent & { key: string },
 ): { next: string; handled: boolean; submit?: boolean } {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' || e.key === 'Tab') {
     return { next: buffer, handled: true, submit: true }
   }
   if (isGroupSeparatorKey(e)) {

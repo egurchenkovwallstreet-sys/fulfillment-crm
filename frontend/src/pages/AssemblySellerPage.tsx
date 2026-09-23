@@ -529,12 +529,6 @@ function WbAssemblySellerPage() {
   }, [pendingOrder])
 
   useEffect(() => {
-    if (scanPhase !== 'marking') return
-    markingBufferRef.current = ''
-    setMarkingValue('')
-  }, [scanPhase])
-
-  useEffect(() => {
     if (stage !== 'confirm') return
     warmFbsPrintWindow()
   }, [stage])
@@ -632,20 +626,23 @@ function WbAssemblySellerPage() {
     }
   }
 
-  function shouldOpenMarkingForOrder(orderId: number): boolean {
-    if (autoPrintedOrderIdsRef.current.has(orderId)) return false
-    return true
+  function shouldOpenMarkingForOrder(order: AssemblyOrder | PrintOrder): boolean {
+    return orderNeedsMarkingScan(order as AssemblyOrder)
   }
 
   function releaseBarcodeForNextScan(focusDurationMs = 15000) {
     scanBusyRef.current = false
     setScanBusy(false)
+    if (markingLockRef.current || scanPhaseRef.current === 'marking') {
+      focusMarkingInput()
+      return
+    }
     keepBarcodeFocus(focusDurationMs)
     focusBarcodeInput()
   }
 
   function openMarkingScan(order: PrintOrder, _message?: string) {
-    if (!shouldOpenMarkingForOrder(order.id)) return
+    if (!shouldOpenMarkingForOrder(order)) return
     const alreadyOpen = markingLockRef.current && scanPhaseRef.current === 'marking'
     markingLockRef.current = true
     scanPhaseRef.current = 'marking'
@@ -1895,7 +1892,7 @@ function WbAssemblySellerPage() {
 
       if (result.action === 'await_marking' || result.requires_marking) {
         closePrintHolder(printWin)
-        if (shouldOpenMarkingForOrder(result.order.id)) {
+        if (shouldOpenMarkingForOrder(result.order)) {
           openMarkingScan(
             result.order,
             result.message ||
@@ -1903,6 +1900,7 @@ function WbAssemblySellerPage() {
           )
         }
         await refreshAssemblyUi()
+        focusMarkingInput()
         return
       }
 
@@ -1916,12 +1914,7 @@ function WbAssemblySellerPage() {
           : undefined
       const errNeedsMarking = errOrder ? orderNeedsMarkingScan(errOrder) : false
 
-      if (
-        errNeedsMarking &&
-        errOrder &&
-        shouldOpenMarkingForOrder(errOrder.id) &&
-        !autoPrintedOrderIdsRef.current.has(errOrder.id)
-      ) {
+      if (errNeedsMarking && errOrder && shouldOpenMarkingForOrder(errOrder)) {
         openMarkingScan(
           errOrder as unknown as PrintOrder,
           `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
@@ -1974,8 +1967,23 @@ function WbAssemblySellerPage() {
     e?.preventDefault()
     const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
     const orderSnapshot = pendingOrderRef.current ?? pendingOrder
-    if (!id || !code || !orderSnapshot) return
     if (markingSubmitBusyRef.current) return
+    if (!id || !orderSnapshot) {
+      showScanError(
+        'Заказ для ЧЗ не выбран. Отсканируйте баркод заново.',
+        'Ошибка сканирования ЧЗ',
+        () => resetScanFlow(true),
+      )
+      return
+    }
+    if (!code) {
+      showScanError(
+        'Код Честного знака пустой — отсканируйте DataMatrix с упаковки',
+        'Ошибка сканирования ЧЗ',
+        () => focusMarkingInput(),
+      )
+      return
+    }
 
     const quickError = quickMarkingCodeCheck(code)
     if (quickError) {
@@ -2137,12 +2145,18 @@ function WbAssemblySellerPage() {
   }
 
   function handleMarkingKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (markingSubmitBusyRef.current) return
+      const code = (markingBufferRef.current || e.currentTarget.value || markingValue).trim()
+      void handleMarkingSubmit(undefined, code)
+      return
+    }
     const result = applyMarkingScanKey(markingBufferRef.current, e)
     if (!result.handled) return
-      e.preventDefault()
+    e.preventDefault()
     markingBufferRef.current = result.next
     setMarkingValue(result.next)
-    if (result.submit) void handleMarkingSubmit(undefined, result.next)
   }
 
   function handleMarkingPaste(e: ClipboardEvent<HTMLInputElement>) {
@@ -2150,6 +2164,9 @@ function WbAssemblySellerPage() {
     const next = appendPastedMarking(markingBufferRef.current, e.clipboardData.getData('text'))
     markingBufferRef.current = next
     setMarkingValue(next)
+    if (!quickMarkingCodeCheck(next)) {
+      void handleMarkingSubmit(undefined, next)
+    }
   }
 
   const workflowMode: AssemblyWorkflowMode = data?.assembly_workflow_mode ?? 'scan'
@@ -2780,7 +2797,7 @@ function WbAssemblySellerPage() {
                 placeholder={scanBusy ? 'Проверяем заказ…' : 'Баркод заказа...'}
                 autoComplete="off"
                 autoFocus={!markingInProgress}
-                readOnly={scanBusy}
+                readOnly={scanBusy || markingInProgress}
                 tabIndex={markingInProgress ? -1 : 0}
               />
             </form>
