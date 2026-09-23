@@ -9,7 +9,6 @@ import {
   printSupplySticker as browserPrintSupplySticker,
   normalizeImageBase64,
   closePrintHolder,
-  blankPrintHolder,
 } from './browserPrint'
 import { isKioskPrintMode, shouldBrowserAutoPrint } from './printMode'
 

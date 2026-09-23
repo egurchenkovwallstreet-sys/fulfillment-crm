@@ -221,7 +221,6 @@ function WbAssemblySellerPage() {
   const [scanPhase, setScanPhase] = useState<ScanPhase>('barcode')
   const [markingUiOpen, setMarkingUiOpen] = useState(false)
   const [pendingOrder, setPendingOrder] = useState<PrintOrder | null>(null)
-  const [stickerPreview, setStickerPreview] = useState<string | null>(null)
   const [lastPrinted, setLastPrinted] = useState<AssemblyOrder | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -741,7 +740,6 @@ function WbAssemblySellerPage() {
   }
 
   function resumeBarcodeScanAfterPrint() {
-    setStickerPreview(null)
     resetScanFlow(true)
     blankPrintHolder()
     try {
@@ -871,7 +869,7 @@ function WbAssemblySellerPage() {
       const result = await reprintOrderSticker(id, orderId, true)
       const file = (result.order.sticker_file || '').trim()
       if (file) {
-        setStickerPreview(file)
+        cacheOrderSticker({ id: orderId, sticker_file: file })
       }
       await printSticker(result.order.sticker_file, printWin)
       flashPrintOk()
@@ -1505,7 +1503,6 @@ function WbAssemblySellerPage() {
         : `, СЦ #${shipping.shipping_point_id}`
       const msg = `Шаг 4: заказ WB #${result.order.wb_order_id} передан в доставку${scLabel}`
       setLastPrinted(null)
-      setStickerPreview(null)
       setStage('complete')
       await load({ stageKey: 'complete', silent: false })
       void refreshMarkingStatus()
