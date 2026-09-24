@@ -706,11 +706,23 @@ def fetch_missing_assembly_stickers(
   if still_missing:
     message += f". Без стикера в WB осталось: {still_missing}"
 
+  for order in orders:
+    order.refresh_from_db(fields=[
+      "has_sticker",
+      "sticker_file",
+      "sticker_part_a",
+      "sticker_part_b",
+      "updated_at",
+    ])
+
+  from apps.orders.serializers import AssemblyStickerCacheSerializer
+
   return {
     "requested": requested,
     "fetched": fetched,
     "still_missing": still_missing,
     "message": message,
+    "orders": AssemblyStickerCacheSerializer(orders, many=True).data,
   }
 
 
@@ -852,7 +864,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
       )
     _reset_marking_for_retry(order, seller, user=user)
 
-  if not order.has_sticker or not (order.sticker_file or "").strip():
+  if not order.has_sticker:
     raise AssemblyError(
       f"WB ещё не отдал стикер для заказа #{order.wb_order_id}. "
       "Нажмите «Подтянуть стикеры» и повторите скан.",

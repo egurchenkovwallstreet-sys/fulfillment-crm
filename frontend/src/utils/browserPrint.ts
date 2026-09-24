@@ -17,6 +17,7 @@ const PRINT_PREVIEW_SCALE = 3
 const PRINT_POPUP_WIDTH = 200 * PRINT_PREVIEW_SCALE
 const PRINT_POPUP_HEIGHT = 150 * PRINT_PREVIEW_SCALE
 const PRINT_POPUP_FEATURES = `popup=1,width=${PRINT_POPUP_WIDTH},height=${PRINT_POPUP_HEIGHT},left=120,top=80`
+const PRINT_POPUP_FEATURES_HIDDEN = 'popup=1,width=1,height=1,left=-5000,top=-5000'
 
 let cachedPrintWindow: Window | null = null
 
@@ -205,11 +206,20 @@ export function preloadFbsSticker(base64: string): void {
   }
 }
 
-export function openPrintHolder(): Window | null {
+export function openPrintHolder(options?: { hidden?: boolean }): Window | null {
+  const features = options?.hidden ? PRINT_POPUP_FEATURES_HIDDEN : PRINT_POPUP_FEATURES
   if (cachedPrintWindow && !cachedPrintWindow.closed) {
+    if (!options?.hidden) {
+      try {
+        cachedPrintWindow.moveTo(120, 80)
+        cachedPrintWindow.resizeTo(PRINT_POPUP_WIDTH, PRINT_POPUP_HEIGHT)
+      } catch {
+        // ignore
+      }
+    }
     return cachedPrintWindow
   }
-  const win = window.open('about:blank', PRINT_POPUP_NAME, PRINT_POPUP_FEATURES)
+  const win = window.open('about:blank', PRINT_POPUP_NAME, features)
   if (!win) return null
   cachedPrintWindow = win
   try {
@@ -222,6 +232,19 @@ export function openPrintHolder(): Window | null {
     // ignore
   }
   return win
+}
+
+/** Показать превью 3× перед печатью (окно уже открыто скрыто — не блокирует popup). */
+export function revealPrintHolder(win?: Window | null): void {
+  const target = win ?? cachedPrintWindow
+  if (!target || target.closed) return
+  try {
+    target.moveTo(120, 80)
+    target.resizeTo(PRINT_POPUP_WIDTH, PRINT_POPUP_HEIGHT)
+    target.focus()
+  } catch {
+    // ignore
+  }
 }
 
 /** @deprecated не вызывать до печати — открывает окно и забирает фокус. */

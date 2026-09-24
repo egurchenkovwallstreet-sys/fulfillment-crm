@@ -18,6 +18,7 @@ export {
   closePrintHolder,
   blankPrintHolder,
   setPrintHolderMessage,
+  revealPrintHolder,
   warmFbsPrintWindow,
   preloadFbsSticker,
 } from './browserPrint'

@@ -430,9 +430,10 @@ class PickListGenerateSerializer(serializers.Serializer):
 
 
 class AssemblyBindMarkingOrderSerializer(serializers.ModelSerializer):
-  """Ответ bind-marking без sticker_file — стикер уже в кэше браузера после скана баркода."""
+  """Ответ bind-marking / scan await_marking без sticker_file — стикер в кэше браузера."""
 
   status_display = serializers.CharField(source="get_status_display", read_only=True)
+  requires_marking = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -443,9 +444,31 @@ class AssemblyBindMarkingOrderSerializer(serializers.ModelSerializer):
       "status",
       "status_display",
       "has_sticker",
+      "requires_marking",
       "marking_bound",
       "marking_verify_status",
       "marking_verify_error",
+    )
+
+  def get_requires_marking(self, obj):
+    from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
+
+    product = _resolve_order_product(obj, self)
+    return resolve_product_requires_marking(product, obj.barcode, obj.seller)
+
+
+class AssemblyStickerCacheSerializer(serializers.ModelSerializer):
+  """Стикер одного заказа для кэша браузера после fetch-stickers."""
+
+  class Meta:
+    model = Order
+    fields = (
+      "id",
+      "wb_order_id",
+      "has_sticker",
+      "sticker_file",
+      "sticker_part_a",
+      "sticker_part_b",
     )
 
 

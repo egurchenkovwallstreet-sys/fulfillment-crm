@@ -74,6 +74,7 @@ import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
   closePrintHolder,
   openPrintHolder,
+  revealPrintHolder,
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
@@ -659,6 +660,19 @@ function WbAssemblySellerPage() {
     )
   }
 
+  /** Мгновенное поле ЧЗ после баркода — не ждём тяжёлый API. */
+  function shouldInstantMarkingForLocalOrder(order: AssemblyOrder): boolean {
+    if (order.requires_marking === false) return false
+    if (orderStickerPrinted(order) && order.marking_verify_status !== 'error') return false
+    const wb = (order.wb_supplier_status || '').trim()
+    const scannable =
+      order.status === 'in_picking' ||
+      order.status === 'assembled' ||
+      (wb === 'confirm' && (order.status === 'new' || order.status === 'in_supply'))
+    if (!scannable) return false
+    return order.requires_marking === true || order.requires_marking == null
+  }
+
   function cacheOrderSticker(order: { id: number; sticker_file?: string | null }) {
     const file = (order.sticker_file || '').trim()
     if (file) {
@@ -676,8 +690,12 @@ function WbAssemblySellerPage() {
         return
       }
       try {
-        if (!order.has_sticker) {
-          await fetchAssemblyStickers(id, [order.id])
+        const result = await fetchAssemblyStickers(id, [order.id], true)
+        for (const row of result.orders ?? []) {
+          if (row.sticker_file) {
+            cacheOrderSticker(row)
+            preloadFbsSticker(row.sticker_file)
+          }
         }
         await barcodeScanDoneRef.current?.catch(() => {})
         const ready = pendingOrderRef.current ?? order
@@ -687,6 +705,54 @@ function WbAssemblySellerPage() {
         // фон — ошибку покажем при печати
       }
     })()
+  }
+
+  async function validateBarcodeScanInBackground(barcode: string, expectedOrderId: number) {
+    if (!id) return
+    barcodeApiInFlightRef.current = true
+    try {
+      const result = await scanOrderBarcode(id, barcode)
+      cacheOrderSticker(result.order)
+
+      if (result.order.id !== expectedOrderId) {
+        showScanError(
+          'Сервер нашёл другой заказ по этому баркоду. Отсканируйте баркод заново.',
+          'Ошибка сканирования',
+          () => resetScanFlow(true),
+        )
+        return
+      }
+
+      if (result.action === 'await_marking' || result.requires_marking) {
+        pendingOrderRef.current = result.order as PrintOrder
+        flushSync(() => {
+          setPendingOrder(result.order as PrintOrder)
+        })
+        prepareMarkingStickerInBackground(result.order as PrintOrder)
+        void refreshMarkingStatus()
+        return
+      }
+
+      resetScanFlow(true)
+      showScanError(
+        'Для этого товара ЧЗ не требуется — отсканируйте баркод ещё раз для печати.',
+        'ЧЗ не требуется',
+        () => focusBarcodeInput(),
+      )
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'marking_already_bound' && err.order) {
+        showMarkingAlreadyBoundModal(err.order as PrintOrder, () => resetScanFlow(true))
+        return
+      }
+      showScanError(
+        assemblyErrorMessage(err, 'Ошибка сканирования баркода'),
+        assemblyScanErrorTitle(err, 'Ошибка сканирования баркода'),
+        () => resetScanFlow(true),
+      )
+    } finally {
+      barcodeApiInFlightRef.current = false
+      barcodeScanDoneRef.current = Promise.resolve()
+    }
   }
 
   function sleep(ms: number): Promise<void> {
@@ -2048,13 +2114,16 @@ function WbAssemblySellerPage() {
       cacheOrderSticker(localOrder)
     }
 
+    if (localOrder && shouldInstantMarkingForLocalOrder(localOrder)) {
+      openMarkingScan(localOrder as unknown as PrintOrder, undefined, true)
+      prepareMarkingStickerInBackground(localOrder as unknown as PrintOrder)
+      barcodeScanDoneRef.current = validateBarcodeScanInBackground(barcode, localOrder.id)
+      return
+    }
+
     scanBusyRef.current = true
     barcodeApiInFlightRef.current = true
     setScanBusy(true)
-
-    if (localOrder?.requires_marking && orderNeedsMarkingScan(localOrder)) {
-      openMarkingScan(localOrder as unknown as PrintOrder, undefined, true)
-    }
 
     try {
       const scanPromise = scanOrderBarcode(id, barcode)
@@ -2175,6 +2244,17 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
 
+    const printWin = openPrintHolder({ hidden: true })
+    if (!printWin) {
+      markingSubmitBusyRef.current = false
+      showScanError(
+        'Браузер заблокировал окно печати. Разрешите всплывающие окна для CRM и повторите скан ЧЗ.',
+        'Окно печати заблокировано',
+        () => focusMarkingInput(),
+      )
+      return
+    }
+
     const cachedPrintOrder = orderForPrint(orderSnapshot)
 
     try {
@@ -2186,6 +2266,7 @@ function WbAssemblySellerPage() {
       const printOrder = { ...cachedPrintOrder, ...orderForPrint(result.order) }
       const sticker = stickerPayloadForOrder(printOrder)
       if (!sticker) {
+        closePrintHolder(printWin)
         showScanError(
           `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
           'Стикер не загружен',
@@ -2197,7 +2278,7 @@ function WbAssemblySellerPage() {
 
       preloadFbsSticker(sticker)
       await sleep(MARKING_PRINT_DELAY_MS)
-      const printWin = openPrintHolder()
+      revealPrintHolder(printWin)
 
       try {
         await spoolStickerPrintOnce(

@@ -544,6 +544,14 @@ export type FetchAssemblyStickersResult = {
   fetched: number
   still_missing: number
   message: string
+  orders?: Array<{
+    id: number
+    wb_order_id: number
+    has_sticker: boolean
+    sticker_file?: string
+    sticker_part_a?: string
+    sticker_part_b?: string
+  }>
 }
 
 export function fetchAssemblyStickers(sellerId: number, orderIds?: number[], force = false) {

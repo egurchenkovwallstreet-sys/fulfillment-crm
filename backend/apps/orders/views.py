@@ -881,7 +881,10 @@ class AssemblyScanPrintView(APIView):
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 
-    order_data = OrderPrintSerializer(result["order"]).data
+    if result["action"] == "await_marking":
+      order_data = AssemblyBindMarkingOrderSerializer(result["order"]).data
+    else:
+      order_data = OrderPrintSerializer(result["order"]).data
     payload = {
       "success": True,
       "action": result["action"],
