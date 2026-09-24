@@ -489,6 +489,14 @@ class VerifyMarkingSerializer(serializers.Serializer):
   force_recheck = serializers.BooleanField(required=False, default=True)
 
 
+class PushMarkingWbSerializer(serializers.Serializer):
+  order_ids = serializers.ListField(
+    child=serializers.IntegerField(),
+    required=False,
+    allow_empty=True,
+  )
+
+
 class ReplaceOrderSerializer(serializers.Serializer):
   order_id = serializers.IntegerField()
 

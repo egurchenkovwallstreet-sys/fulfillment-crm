@@ -624,10 +624,9 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
 
   from apps.integrations.tasks import bind_order_marking_wb_task
 
-  bind_order_marking_wb_task.delay(
-    order.id,
-    normalized,
-    user.id if getattr(user, "is_authenticated", False) else None,
+  bind_order_marking_wb_task.apply_async(
+    args=(order.id, normalized, user.id if getattr(user, "is_authenticated", False) else None),
+    queue="marking",
   )
 
   AuditLog.objects.create(

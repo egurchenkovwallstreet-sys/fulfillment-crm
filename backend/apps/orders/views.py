@@ -52,6 +52,7 @@ from .serializers import (
   SupplyDeliverSerializer,
   SupplySerializer,
   VerifyMarkingSerializer,
+  PushMarkingWbSerializer,
 )
 from .services.assembly import (
   AssemblyError,
@@ -72,7 +73,7 @@ from .services.assembly_queue import (
   get_assembly_queue_status,
   order_in_assembly,
 )
-from .services.marking_verification import verify_marking_orders
+from .services.marking_verification import push_marking_to_wb_orders, verify_marking_orders
 from .services.supply_flow import (
   SupplyFlowError,
   _serialize_shipping_point_for_api,
@@ -995,6 +996,38 @@ class AssemblyVerifyMarkingView(APIView):
       "verified_count": verified_count,
       "error_count": error_count,
       "pending_count": pending_count,
+    })
+
+
+class AssemblyPushMarkingWbView(APIView):
+  """PUT sgtin в WB для pending-заказов — строго свой ЧЗ к своему wb_order_id."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    serializer = PushMarkingWbSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    order_ids = serializer.validated_data.get("order_ids") or None
+
+    try:
+      result = push_marking_to_wb_orders(
+        seller,
+        order_ids,
+        user=request.user,
+      )
+    except AssemblyError as exc:
+      return _assembly_error_response(exc)
+
+    message_parts = [f"Отправлено в WB: {result['sent_count']}"]
+    if result["error_count"]:
+      message_parts.append(f"ошибок: {result['error_count']}")
+    return Response({
+      "success": True,
+      **result,
+      "message": ". ".join(message_parts),
     })
 
 

@@ -98,7 +98,7 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
-    command: celery -A config worker -Q default,sync --loglevel=info --concurrency=2
+    command: celery -A config worker -Q default,sync,marking --loglevel=info --concurrency=2
     restart: unless-stopped
 
   worker-heavy:

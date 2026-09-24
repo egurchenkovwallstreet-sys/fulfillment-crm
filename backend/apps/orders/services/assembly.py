@@ -1146,20 +1146,15 @@ def bind_marking_and_print(
   )
 
   order_id = order.pk
-  user_id = user.pk if user else None
   wb_order_id = order.wb_order_id
   order_barcode = order.barcode
 
-  def _enqueue_post_bind() -> None:
-    from apps.integrations.tasks import (
-      bind_order_marking_wb_task,
-      record_sticker_billing_task,
-    )
+  def _enqueue_billing() -> None:
+    from apps.integrations.tasks import record_sticker_billing_task
 
-    bind_order_marking_wb_task.delay(order_id, normalized, user_id)
     record_sticker_billing_task.delay(order_id)
 
-  transaction.on_commit(_enqueue_post_bind)
+  transaction.on_commit(_enqueue_billing)
 
   AuditLog.objects.create(
     user=user,
@@ -1167,7 +1162,7 @@ def bind_marking_and_print(
     action_type=AuditLog.ActionType.MARKING,
     message=(
       f"ЧЗ принят CRM — заказ #{wb_order_id}. "
-      "Стикер — сразу; отправка ЧЗ в WB — в фоне."
+      "Стикер — сразу; PUT ЧЗ в WB — отдельным запросом после печати."
     ),
     details={"order_id": order_id, "barcode": order_barcode},
   )
@@ -1177,9 +1172,10 @@ def bind_marking_and_print(
     "order": order,
     "stock": stock_info,
     "immediate_verify": False,
+    "push_marking_after_print": True,
     "message": (
       f"ЧЗ принят CRM для заказа #{order.wb_order_id}. "
-      "Печатайте стикер. Отправка ЧЗ в WB и проверка — в фоне каждые ~5 секунд."
+      "Печатайте стикер — сразу после печати CRM отправит ЧЗ в WB."
     ),
   }
 

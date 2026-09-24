@@ -377,6 +377,64 @@ def _maybe_repush_marking_to_wb(order: Order, *, user=None) -> bool:
   return True
 
 
+def push_marking_to_wb_orders(
+  seller: Seller,
+  order_ids: list[int] | None = None,
+  *,
+  user=None,
+) -> dict:
+  """
+  PUT sgtin в WB для pending-заказов — строго order.marking_code → order.wb_order_id.
+  Отдельный коридор: не Celery sync, синхронный вызов WB API.
+  """
+  from apps.orders.services.assembly import AssemblyError, _push_marking_code_to_wb
+
+  qs = Order.objects.filter(
+    seller=seller,
+    assembly_hidden=False,
+    marking_verify_status=VERIFY_PENDING,
+  ).exclude(marking_code="")
+  if order_ids:
+    qs = qs.filter(pk__in=order_ids)
+
+  sent: list[dict] = []
+  errors: list[dict] = []
+  for order in qs.select_related("seller").order_by("wb_order_id", "id"):
+    code = (order.marking_code or "").strip()
+    if not code:
+      continue
+    if not order.wb_order_id:
+      errors.append({
+        "order_id": order.id,
+        "wb_order_id": None,
+        "error": "У заказа нет wb_order_id",
+      })
+      continue
+    try:
+      _push_marking_code_to_wb(order, code, user=user)
+    except AssemblyError as exc:
+      errors.append({
+        "order_id": order.id,
+        "wb_order_id": order.wb_order_id,
+        "error": str(exc),
+        "code": getattr(exc, "code", None),
+      })
+      continue
+    sent.append({"order_id": order.id, "wb_order_id": order.wb_order_id})
+
+  if sent:
+    from apps.integrations.tasks import verify_seller_marking_codes
+
+    verify_seller_marking_codes.apply_async((seller.id,), countdown=2, queue="marking")
+
+  return {
+    "sent_count": len(sent),
+    "error_count": len(errors),
+    "sent": sent,
+    "errors": errors,
+  }
+
+
 def repair_assembly_marking_wb(seller: Seller, *, user=None, force: bool = False) -> dict:
   """
   Сверить ЧЗ готовых заказов с WB и дослать коды, которые не дошли (старый async-баг).
@@ -436,6 +494,16 @@ def verify_marking_orders(
   if not orders:
     return []
 
+  if force_recheck and not batch:
+    pending_ids = [
+      order.id
+      for order in orders
+      if (order.marking_verify_status or "").strip() == VERIFY_PENDING
+      and (order.marking_code or "").strip()
+    ]
+    if pending_ids:
+      push_marking_to_wb_orders(seller, pending_ids, user=user)
+
   results, meta_count = sync_orders_marking_from_wb(
     seller,
     orders,
@@ -462,7 +530,10 @@ def verify_marking_orders(
         if cache.get(cache_key):
           continue
         cache.set(cache_key, 1, REPUSH_CACHE_SEC)
-        bind_order_marking_wb_task.delay(order.id, order.marking_code, None)
+        bind_order_marking_wb_task.apply_async(
+          (order.id, order.marking_code, None),
+          queue="marking",
+        )
       return []
     AuditLog.objects.create(
       user=user,

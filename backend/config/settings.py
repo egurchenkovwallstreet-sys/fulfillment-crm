@@ -184,6 +184,9 @@ CELERY_TASK_ROUTES = {
   "apps.integrations.tasks.sync_wb_delivery_scans": {"queue": "sync"},
   "apps.integrations.tasks.sync_ozon_orders": {"queue": "sync"},
   "apps.integrations.tasks.sync_orders_for_seller_task": {"queue": "default"},
+  "apps.integrations.tasks.bind_order_marking_wb_task": {"queue": "marking"},
+  "apps.integrations.tasks.verify_seller_marking_codes": {"queue": "marking"},
+  "apps.integrations.tasks.verify_pending_marking_codes": {"queue": "marking"},
 }
 CELERY_RESULT_EXPIRES = 86400
 

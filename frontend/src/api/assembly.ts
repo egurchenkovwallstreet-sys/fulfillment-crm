@@ -222,6 +222,15 @@ export interface VerifyMarkingResult {
   pending_count?: number
 }
 
+export interface PushMarkingWbResult {
+  success: boolean
+  sent_count: number
+  error_count: number
+  sent: Array<{ order_id: number; wb_order_id: number }>
+  errors: Array<{ order_id: number; wb_order_id?: number | null; error: string; code?: string | null }>
+  message: string
+}
+
 export interface ReplaceOrderResult {
   success: boolean
   message: string
@@ -493,6 +502,16 @@ export function fetchAssemblyQueueStatus(sellerId: number) {
 /** @deprecated use fetchAssemblyQueueStatus */
 export function fetchMarkingStatus(sellerId: number) {
   return fetchAssemblyQueueStatus(sellerId)
+}
+
+export function pushMarkingToWb(sellerId: number, orderIds?: number[]) {
+  return apiFetch<PushMarkingWbResult>(
+    `/api/orders/assembly/sellers/${sellerId}/push-marking-wb/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ order_ids: orderIds ?? [] }),
+    },
+  )
 }
 
 export function verifyMarking(

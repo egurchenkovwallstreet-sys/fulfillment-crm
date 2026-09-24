@@ -25,6 +25,7 @@ import {
   startAssembly,
   previewPickList,
   verifyMarking,
+  pushMarkingToWb,
   type AssemblyOrder,
   type AssemblySupply,
   type AssemblySellerDetail,
@@ -239,6 +240,7 @@ function WbAssemblySellerPage() {
   const [scanBusy, setScanBusy] = useState(false)
   const [verifyingChz, setVerifyingChz] = useState(false)
   const [verifyingChzOrderId, setVerifyingChzOrderId] = useState<number | null>(null)
+  const [repushingMarking, setRepushingMarking] = useState(false)
   const [chzVerifyNotice, setChzVerifyNotice] = useState('')
   const verifyInFlightRef = useRef(false)
   const chzVerifyFailStreakRef = useRef(0)
@@ -571,6 +573,27 @@ function WbAssemblySellerPage() {
     }
   }, [id, refreshMarkingStatus])
 
+  const pushMarkingToWbAfterPrint = useCallback(
+    (orderId: number) => {
+      if (!id) return
+      void pushMarkingToWb(id, [orderId])
+        .then(() =>
+          runMarkingVerify({ silent: true, orderIds: [orderId], forceRecheck: true }),
+        )
+        .catch((err) => {
+          chzVerifyFailStreakRef.current += 1
+          if (chzVerifyFailStreakRef.current >= 1) {
+            setChzVerifyNotice(
+              err instanceof Error
+                ? `${err.message} Нажмите «Дослать ЧЗ в WB».`
+                : 'ЧЗ не отправился в WB. Нажмите «Дослать ЧЗ в WB».',
+            )
+          }
+        })
+    },
+    [id, runMarkingVerify],
+  )
+
   useLayoutEffect(() => {
     if (stage !== 'confirm') return
     if (markingUiOpen) {
@@ -593,6 +616,27 @@ function WbAssemblySellerPage() {
     window.addEventListener('focus', onWindowFocus)
     return () => window.removeEventListener('focus', onWindowFocus)
   }, [stage, markingUiOpen])
+
+  useEffect(() => {
+    if (!id || stage !== 'confirm') return
+
+    const pendingMarkingCount =
+      markingStatus.in_assembly.filter(
+        (order) => order.requires_marking && order.marking_verify_status === 'pending',
+      ).length +
+      markingStatus.ready.filter(
+        (order) => order.requires_marking && order.marking_verify_status === 'pending',
+      ).length
+    if (pendingMarkingCount < 1) return
+
+    const verifyTick = () => {
+      if (document.visibilityState !== 'visible') return
+      if (verifyInFlightRef.current) return
+      void runMarkingVerify({ silent: true, forceRecheck: false })
+    }
+    const verifyTimer = window.setInterval(verifyTick, MARKING_STATUS_POLL_MS)
+    return () => window.clearInterval(verifyTimer)
+  }, [id, stage, markingStatus.in_assembly, markingStatus.ready, runMarkingVerify])
 
   useEffect(() => {
     if (!id || stage !== 'confirm') return
@@ -1830,6 +1874,43 @@ function WbAssemblySellerPage() {
     }
   }
 
+  async function handleRepushAllMarkingWb() {
+    if (!id) return
+    setRepushingMarking(true)
+    setError('')
+    try {
+      const pushResult = await pushMarkingToWb(id)
+      const verifyResult = await runMarkingVerify({ silent: false, forceRecheck: true })
+      await load({ silent: true })
+      const lines = [
+        pushResult.message,
+        pushResult.errors.length
+          ? pushResult.errors
+              .slice(0, 8)
+              .map((item) => `#${item.wb_order_id ?? item.order_id}: ${item.error}`)
+              .join('\n')
+          : '',
+      ].filter(Boolean)
+      if (verifyResult?.results.length) {
+        const summary = summarizeChzVerifyResult(verifyResult)
+        setModal({
+          kind: 'block',
+          title: `Дослано в WB: ${pushResult.sent_count}`,
+          message: `${lines.join('\n\n')}\n\n${buildChzVerifyReport(verifyResult)}`,
+        })
+        if (summary.tone === 'error') {
+          setMarkingListKind('errors')
+        }
+      } else {
+        noticeOk(lines.join('\n'), 'ЧЗ отправлены в WB')
+      }
+    } catch (err) {
+      noticeFail('Досылка ЧЗ в WB', err, 'Не удалось отправить ЧЗ в WB')
+    } finally {
+      setRepushingMarking(false)
+    }
+  }
+
   async function handleForceVerifyChz(orderIds?: number[]) {
     if (!id) return
     if (orderIds?.length === 1) {
@@ -2375,13 +2456,7 @@ function WbAssemblySellerPage() {
       patchLocalOrderAfterPrint(result.order)
       blockBackgroundListRefresh()
       void refreshMarkingStatus()
-      window.setTimeout(() => {
-        void runMarkingVerify({
-          silent: true,
-          orderIds: [result.order.id],
-          forceRecheck: false,
-        })
-      }, 2500)
+      pushMarkingToWbAfterPrint(result.order.id)
       scheduleBackgroundOrdersRefresh()
     } catch (err) {
       closePrintHolder()
@@ -2944,6 +3019,19 @@ function WbAssemblySellerPage() {
               {...uiHint('Создать новые поставки WB для выбранных неотсканированных заказов')}
             >
               В новую поставку ({selectedMoveIds.size})
+            </button>
+          )}
+          {stage === 'confirm' && waitingWbCount > 0 && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void handleRepushAllMarkingWb()}
+              disabled={loading || repushingMarking || verifyingChz}
+              {...uiHint(
+                'Отправить в WB все ЧЗ из CRM, которые ещё не дошли до стикеров. Каждый код — только к своему заказу.',
+              )}
+            >
+              {repushingMarking ? 'Досылаем ЧЗ…' : `Дослать ЧЗ в WB (${waitingWbCount})`}
             </button>
           )}
           {stage === 'confirm' && (

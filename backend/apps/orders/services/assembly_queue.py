@@ -92,7 +92,7 @@ def queue_last_pick_list_marking_verify(seller: Seller) -> bool:
   def _enqueue():
     from apps.integrations.tasks import verify_seller_marking_codes
 
-    verify_seller_marking_codes.delay(seller_id)
+    verify_seller_marking_codes.apply_async((seller_id,), queue="marking")
 
   transaction.on_commit(_enqueue)
   return True

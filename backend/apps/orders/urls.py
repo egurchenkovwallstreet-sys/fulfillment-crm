@@ -25,6 +25,7 @@ from .views import (
   AssemblyPickListPreviewView,
   AssemblyStartView,
   AssemblyVerifyMarkingView,
+  AssemblyPushMarkingWbView,
   AssemblyWorkflowModeView,
   OrderListView,
   OrderStatsView,
@@ -136,6 +137,11 @@ urlpatterns = [
       "assembly/sellers/<int:seller_id>/verify-marking/",
       AssemblyVerifyMarkingView.as_view(),
       name="assembly-verify-marking",
+    ),
+    path(
+      "assembly/sellers/<int:seller_id>/push-marking-wb/",
+      AssemblyPushMarkingWbView.as_view(),
+      name="assembly-push-marking-wb",
     ),
     path(
       "assembly/sellers/<int:seller_id>/replace-order/",

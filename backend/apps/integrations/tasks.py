@@ -279,7 +279,7 @@ def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | 
     return {"success": False, "order_id": order.id, "error": str(exc)}
 
   logger.info("Background WB marking bind ok order=%s wb=%s", order.id, order.wb_order_id)
-  verify_seller_marking_codes.apply_async((order.seller_id,), countdown=2)
+  verify_seller_marking_codes.apply_async((order.seller_id,), countdown=2, queue="marking")
   return {"success": True, "order_id": order.id}
 
 
@@ -314,7 +314,7 @@ def verify_pending_marking_codes():
     .distinct()
   )
   for seller_id in seller_ids:
-    verify_seller_marking_codes.delay(seller_id)
+    verify_seller_marking_codes.apply_async((seller_id,), queue="marking")
   logger.info("Queued marking verify for %s sellers", len(seller_ids))
   return {"sellers": len(seller_ids)}
 
