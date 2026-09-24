@@ -382,26 +382,46 @@ def push_marking_to_wb_orders(
   order_ids: list[int] | None = None,
   *,
   user=None,
+  force: bool = False,
+  repair: bool = False,
 ) -> dict:
   """
-  PUT sgtin в WB для pending-заказов — строго order.marking_code → order.wb_order_id.
-  Отдельный коридор: не Celery sync, синхронный вызов WB API.
+  PUT sgtin в WB — строго order.marking_code → order.wb_order_id.
+  force: все напечатанные с ЧЗ (в т.ч. ложный verified); repair: сначала сверка с WB.
   """
   from apps.orders.services.assembly import AssemblyError, _push_marking_code_to_wb
+
+  repair_result: dict | None = None
+  if repair:
+    repair_result = repair_assembly_marking_wb(seller, user=user, force=True)
 
   qs = Order.objects.filter(
     seller=seller,
     assembly_hidden=False,
-    marking_verify_status=VERIFY_PENDING,
-  ).exclude(marking_code="")
+    wb_supplier_status=WB_SUPPLIER_ASSEMBLY,
+  ).exclude(marking_code="").exclude(marking_verify_status=VERIFY_ERROR)
+
+  if not force:
+    qs = qs.filter(marking_verify_status=VERIFY_PENDING)
+  else:
+    qs = qs.filter(
+      status__in=[
+        Order.Status.LABEL_PRINTED,
+        Order.Status.MARKED,
+        Order.Status.ASSEMBLED,
+      ],
+    )
+
   if order_ids:
     qs = qs.filter(pk__in=order_ids)
 
   sent: list[dict] = []
   errors: list[dict] = []
+  skipped = 0
   for order in qs.select_related("seller").order_by("wb_order_id", "id"):
     code = (order.marking_code or "").strip()
     if not code:
+      skipped += 1
       continue
     if not order.wb_order_id:
       errors.append({
@@ -430,8 +450,10 @@ def push_marking_to_wb_orders(
   return {
     "sent_count": len(sent),
     "error_count": len(errors),
+    "skipped_count": skipped,
     "sent": sent,
     "errors": errors,
+    "repair": repair_result,
   }
 
 

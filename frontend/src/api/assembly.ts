@@ -226,8 +226,10 @@ export interface PushMarkingWbResult {
   success: boolean
   sent_count: number
   error_count: number
+  skipped_count?: number
   sent: Array<{ order_id: number; wb_order_id: number }>
   errors: Array<{ order_id: number; wb_order_id?: number | null; error: string; code?: string | null }>
+  repair?: { synced?: number; repushed?: number; downgraded?: number; skipped?: boolean } | null
   message: string
 }
 
@@ -504,12 +506,20 @@ export function fetchMarkingStatus(sellerId: number) {
   return fetchAssemblyQueueStatus(sellerId)
 }
 
-export function pushMarkingToWb(sellerId: number, orderIds?: number[]) {
+export function pushMarkingToWb(
+  sellerId: number,
+  orderIds?: number[],
+  options?: { force?: boolean; repair?: boolean },
+) {
   return apiFetch<PushMarkingWbResult>(
     `/api/orders/assembly/sellers/${sellerId}/push-marking-wb/`,
     {
       method: 'POST',
-      body: JSON.stringify({ order_ids: orderIds ?? [] }),
+      body: JSON.stringify({
+        order_ids: orderIds ?? [],
+        force: options?.force ?? false,
+        repair: options?.repair ?? false,
+      }),
     },
   )
 }

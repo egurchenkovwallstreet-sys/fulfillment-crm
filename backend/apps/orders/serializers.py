@@ -495,6 +495,8 @@ class PushMarkingWbSerializer(serializers.Serializer):
     required=False,
     allow_empty=True,
   )
+  force = serializers.BooleanField(required=False, default=False)
+  repair = serializers.BooleanField(required=False, default=False)
 
 
 class ReplaceOrderSerializer(serializers.Serializer):

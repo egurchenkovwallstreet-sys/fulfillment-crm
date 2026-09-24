@@ -1011,12 +1011,19 @@ class AssemblyPushMarkingWbView(APIView):
     serializer = PushMarkingWbSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     order_ids = serializer.validated_data.get("order_ids") or None
+    force = serializer.validated_data.get("force", False)
+    repair = serializer.validated_data.get("repair", False)
+    if not order_ids and not force and not repair:
+      repair = True
+      force = True
 
     try:
       result = push_marking_to_wb_orders(
         seller,
         order_ids,
         user=request.user,
+        force=force,
+        repair=repair,
       )
     except AssemblyError as exc:
       return _assembly_error_response(exc)

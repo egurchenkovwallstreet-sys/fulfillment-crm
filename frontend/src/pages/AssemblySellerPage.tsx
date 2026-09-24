@@ -1879,11 +1879,14 @@ function WbAssemblySellerPage() {
     setRepushingMarking(true)
     setError('')
     try {
-      const pushResult = await pushMarkingToWb(id)
+      const pushResult = await pushMarkingToWb(id, undefined, { force: true, repair: true })
       const verifyResult = await runMarkingVerify({ silent: false, forceRecheck: true })
       await load({ silent: true })
       const lines = [
         pushResult.message,
+        pushResult.repair?.downgraded
+          ? `Сброшено ложных галочек: ${pushResult.repair.downgraded}`
+          : '',
         pushResult.errors.length
           ? pushResult.errors
               .slice(0, 8)
@@ -2659,6 +2662,11 @@ function WbAssemblySellerPage() {
   const pendingChzCount = readyOrders.filter((order) => orderChzPending(order)).length
   const needsChzVerifyCount = readyOrders.filter((order) => orderNeedsChzVerify(order)).length
   const waitingWbCount = pendingChzCount || needsChzVerifyCount
+  const chzRepushCount = [...readyOrders, ...markingStatus.in_assembly].filter(
+    (order) =>
+      order.requires_marking &&
+      (order.status === 'label_printed' || order.status === 'marked' || order.status === 'assembled'),
+  ).length
   const deliveryUnlocked = assemblyDeliveryUnlocked(markingStatus)
   const showDeliverButton = stage === 'confirm' && readyOrders.length > 0
   const markingQueueBlocked = stage === 'confirm' && markingStatus.errors_count > 0
@@ -3021,17 +3029,17 @@ function WbAssemblySellerPage() {
               В новую поставку ({selectedMoveIds.size})
             </button>
           )}
-          {stage === 'confirm' && waitingWbCount > 0 && (
+          {stage === 'confirm' && chzRepushCount > 0 && (
             <button
               type="button"
               className="btn btn--secondary"
               onClick={() => void handleRepushAllMarkingWb()}
               disabled={loading || repushingMarking || verifyingChz}
               {...uiHint(
-                'Отправить в WB все ЧЗ из CRM, которые ещё не дошли до стикеров. Каждый код — только к своему заказу.',
+                'Сверить ЧЗ с WB и дослать все коды из CRM — каждый только к своему заказу (в т.ч. ложные галочки).',
               )}
             >
-              {repushingMarking ? 'Досылаем ЧЗ…' : `Дослать ЧЗ в WB (${waitingWbCount})`}
+              {repushingMarking ? 'Досылаем ЧЗ…' : `Дослать ЧЗ в WB (${chzRepushCount})`}
             </button>
           )}
           {stage === 'confirm' && (
