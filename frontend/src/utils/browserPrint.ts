@@ -17,7 +17,8 @@ const PRINT_PREVIEW_SCALE = 3
 const PRINT_POPUP_WIDTH = 200 * PRINT_PREVIEW_SCALE
 const PRINT_POPUP_HEIGHT = 150 * PRINT_PREVIEW_SCALE
 const PRINT_POPUP_FEATURES = `popup=1,width=${PRINT_POPUP_WIDTH},height=${PRINT_POPUP_HEIGHT},left=120,top=80`
-const PRINT_POPUP_FEATURES_HIDDEN = 'popup=1,width=1,height=1,left=-5000,top=-5000'
+/** То же 3× превью, но за экраном — для sync open при скане ЧЗ (popup blocker). */
+const PRINT_POPUP_FEATURES_OFFSCREEN = `popup=1,width=${PRINT_POPUP_WIDTH},height=${PRINT_POPUP_HEIGHT},left=-5000,top=-5000`
 
 let cachedPrintWindow: Window | null = null
 
@@ -207,15 +208,17 @@ export function preloadFbsSticker(base64: string): void {
 }
 
 export function openPrintHolder(options?: { hidden?: boolean }): Window | null {
-  const features = options?.hidden ? PRINT_POPUP_FEATURES_HIDDEN : PRINT_POPUP_FEATURES
+  const features = options?.hidden ? PRINT_POPUP_FEATURES_OFFSCREEN : PRINT_POPUP_FEATURES
   if (cachedPrintWindow && !cachedPrintWindow.closed) {
-    if (!options?.hidden) {
-      try {
+    try {
+      if (options?.hidden) {
+        cachedPrintWindow.moveTo(-5000, -5000)
+      } else {
         cachedPrintWindow.moveTo(120, 80)
-        cachedPrintWindow.resizeTo(PRINT_POPUP_WIDTH, PRINT_POPUP_HEIGHT)
-      } catch {
-        // ignore
       }
+      cachedPrintWindow.resizeTo(PRINT_POPUP_WIDTH, PRINT_POPUP_HEIGHT)
+    } catch {
+      // ignore
     }
     return cachedPrintWindow
   }
@@ -314,6 +317,7 @@ export async function printFbsSticker(
   const html = fbsStickerHtml(imgUrl)
   const win = (preopened && !preopened.closed) ? preopened : openPrintHolder()
   if (win) {
+    revealPrintHolder(win)
     const ok = writeHtmlToPopup(win, html)
     if (imgUrl.startsWith('blob:')) {
       window.setTimeout(() => URL.revokeObjectURL(imgUrl), 120_000)
