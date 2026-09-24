@@ -198,6 +198,7 @@ function WbAssemblySellerPage() {
   const markingRef = useRef<HTMLInputElement>(null)
   const scanPanelRef = useRef<HTMLElement>(null)
   const markingBufferRef = useRef('')
+  const markingAutoSubmitTimerRef = useRef<number | null>(null)
   const scanPhaseRef = useRef<ScanPhase>('barcode')
   const markingLockRef = useRef(false)
   const scanBusyRef = useRef(false)
@@ -609,7 +610,12 @@ function WbAssemblySellerPage() {
     if (!order.requires_marking) return false
     if (order.marking_verify_status === 'error') return true
     if (order.status === 'label_printed' || order.status === 'marked') return false
-    return order.status === 'in_picking' || order.status === 'assembled'
+    const wb = (order.wb_supplier_status || '').trim()
+    return (
+      order.status === 'in_picking' ||
+      order.status === 'assembled' ||
+      (wb === 'confirm' && (order.status === 'new' || order.status === 'in_supply'))
+    )
   }
 
   function cacheOrderSticker(order: { id: number; sticker_file?: string | null }) {
@@ -634,8 +640,10 @@ function WbAssemblySellerPage() {
     focusBarcodeInput()
   }
 
-  function openMarkingScan(order: PrintOrder, _message?: string) {
-    if (!shouldOpenMarkingForOrder(order)) return
+  function openMarkingScan(order: PrintOrder, _message?: string, force = false) {
+    if (!force && !shouldOpenMarkingForOrder(order)) return
+    scanBusyRef.current = false
+    setScanBusy(false)
     const alreadyOpen = markingLockRef.current && scanPhaseRef.current === 'marking'
     markingLockRef.current = true
     scanPhaseRef.current = 'marking'
@@ -755,6 +763,10 @@ function WbAssemblySellerPage() {
     if (markingLockRef.current && !force) {
       focusMarkingInput()
       return
+    }
+    if (markingAutoSubmitTimerRef.current) {
+      window.clearTimeout(markingAutoSubmitTimerRef.current)
+      markingAutoSubmitTimerRef.current = null
     }
     markingLockRef.current = false
     scanPhaseRef.current = 'barcode'
@@ -1936,21 +1948,23 @@ function WbAssemblySellerPage() {
     barcodeApiInFlightRef.current = true
     setScanBusy(true)
 
+    if (localOrder?.requires_marking && orderNeedsMarkingScan(localOrder)) {
+      openMarkingScan(localOrder as unknown as PrintOrder, undefined, true)
+    }
+
     try {
       const result = await scanOrderBarcode(id, barcode)
 
       cacheOrderSticker(result.order)
 
       if (result.action === 'await_marking' || result.requires_marking) {
-        if (shouldOpenMarkingForOrder(result.order)) {
-          openMarkingScan(
-            result.order,
-            result.message ||
-              `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
-          )
-        }
-        await refreshAssemblyUi()
-        focusMarkingInput()
+        openMarkingScan(
+          result.order,
+          result.message ||
+            `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
+          true,
+        )
+        void refreshMarkingStatus()
         return
       }
 
@@ -1964,11 +1978,13 @@ function WbAssemblySellerPage() {
           : undefined
       const errNeedsMarking = errOrder ? orderNeedsMarkingScan(errOrder) : false
 
-      if (errNeedsMarking && errOrder && shouldOpenMarkingForOrder(errOrder)) {
+      if (errNeedsMarking && errOrder) {
         openMarkingScan(
           errOrder as unknown as PrintOrder,
           `Заказ WB #${errOrder.wb_order_id} — отсканируйте Честный знак`,
+          true,
         )
+        void refreshMarkingStatus()
         return
       }
 
@@ -2189,12 +2205,31 @@ function WbAssemblySellerPage() {
     }
   }
 
+  function submitMarkingCode(rawCode?: string) {
+    const code = (rawCode ?? markingBufferRef.current ?? markingValue).trim()
+    if (!code || markingSubmitBusyRef.current) return
+    if (quickMarkingCodeCheck(code)) return
+    if (markingAutoSubmitTimerRef.current) {
+      window.clearTimeout(markingAutoSubmitTimerRef.current)
+      markingAutoSubmitTimerRef.current = null
+    }
+    void handleMarkingSubmit(undefined, code)
+  }
+
+  function scheduleMarkingAutoSubmit(code: string) {
+    if (markingAutoSubmitTimerRef.current) {
+      window.clearTimeout(markingAutoSubmitTimerRef.current)
+    }
+    markingAutoSubmitTimerRef.current = window.setTimeout(() => {
+      markingAutoSubmitTimerRef.current = null
+      submitMarkingCode(code)
+    }, 200)
+  }
+
   function handleMarkingKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault()
-      if (markingSubmitBusyRef.current) return
-      const code = (markingBufferRef.current || e.currentTarget.value || markingValue).trim()
-      void handleMarkingSubmit(undefined, code)
+      submitMarkingCode(e.currentTarget.value)
       return
     }
     const result = applyMarkingScanKey(markingBufferRef.current, e)
@@ -2202,6 +2237,11 @@ function WbAssemblySellerPage() {
     e.preventDefault()
     markingBufferRef.current = result.next
     setMarkingValue(result.next)
+    if (result.submit) {
+      submitMarkingCode(result.next)
+      return
+    }
+    scheduleMarkingAutoSubmit(result.next)
   }
 
   function handleMarkingPaste(e: ClipboardEvent<HTMLInputElement>) {
@@ -2209,9 +2249,7 @@ function WbAssemblySellerPage() {
     const next = appendPastedMarking(markingBufferRef.current, e.clipboardData.getData('text'))
     markingBufferRef.current = next
     setMarkingValue(next)
-    if (!quickMarkingCodeCheck(next)) {
-      void handleMarkingSubmit(undefined, next)
-    }
+    submitMarkingCode(next)
   }
 
   const workflowMode: AssemblyWorkflowMode = data?.assembly_workflow_mode ?? 'scan'
@@ -2861,7 +2899,7 @@ function WbAssemblySellerPage() {
               </div>
             )}
             <p className="assembly-scan-hint">
-              DataMatrix с упаковки. Стикер печатается сразу; привязка ЧЗ в WB и проверка — в фоне.
+              DataMatrix с упаковки. После полного скана код отправится сам — Enter не обязателен.
             </p>
             <form onSubmit={handleMarkingSubmit}>
               <input
