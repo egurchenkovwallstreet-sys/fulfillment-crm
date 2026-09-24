@@ -2134,8 +2134,6 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
 
-    const printWin = openPrintHolder()
-
     try {
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
@@ -2143,7 +2141,6 @@ function WbAssemblySellerPage() {
       const printOrder = orderForPrint(result.order)
       const sticker = stickerPayloadForOrder(printOrder)
       if (!sticker) {
-        closePrintHolder(printWin)
         showScanError(
           `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
           'Стикер не загружен',
@@ -2153,6 +2150,7 @@ function WbAssemblySellerPage() {
         return
       }
 
+      const printWin = openPrintHolder()
       try {
         await spoolStickerPrintOnce(
           { ...printOrder, sticker_file: sticker },

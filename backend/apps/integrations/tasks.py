@@ -232,7 +232,7 @@ def reconcile_stuck_delivery_orders():
 
 @shared_task(queue="sync")
 def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | None = None):
-  """Повторная привязка ЧЗ в WB (если синхронный вызов не удался ранее)."""
+  """Привязка ЧЗ к заказу в WB после печати стикера (основной путь и повтор при сбое)."""
   from apps.accounts.models import User
   from apps.orders.models import Order
   from apps.orders.services.assembly import AssemblyError, _push_marking_code_to_wb
