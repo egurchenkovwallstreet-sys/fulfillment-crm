@@ -792,7 +792,7 @@ function WbAssemblySellerPage() {
       setPrintHolderMessage(preopened ?? null, 'Стикер пустой — нечего печатать')
       throw new Error('Стикер пустой — нечего печатать')
     }
-    return printFbsSticker(payload, false, preopened, onPrintScheduled, true)
+    return printFbsSticker(payload, true, preopened, onPrintScheduled, true)
   }
 
   /** Стикер только с сервера / кэша того же order.id — без подстановки чужого заказа. */
@@ -2854,7 +2854,7 @@ function WbAssemblySellerPage() {
         <p className="assembly-kiosk-hint" role="status">
           {isKioskPrintMode()
             ? 'Если после скана окно «Печать» с кнопкой — Chrome без --kiosk-printing. Закройте все chrome.exe в диспетчере задач. Ярлык должен содержать --user-data-dir=%LOCALAPPDATA%\\FulfillmentCRM-Print — тогда одна вкладка CRM, без github/WB.'
-            : 'Стикер печатается через окно Chrome — нужен Enter. Для печати без Enter: ярлык с --user-data-dir и --kiosk-printing или агент печати.'}
+            : 'После скана откроется окно «Печать» — нажмите Enter. Курсор вернётся в поле баркода для следующего заказа.'}
         </p>
       )}
 

@@ -1,4 +1,4 @@
-import { markPrintSurfaceHtml } from './printMode'
+import { isKioskPrintMode, markPrintSurfaceHtml } from './printMode'
 
 /**
  * Печать через Chrome: без колонтитулов (дата, URL, номер страницы).
@@ -130,8 +130,8 @@ function schedulePopupPrint(win: Window, onDone?: () => void): Promise<void> {
           }
         }, 30)
 
-        // Kiosk autoprint иногда не шлёт afterprint
-        window.setTimeout(finish, 3000)
+        // Kiosk: короткий fallback. Обычный Chrome: ждём afterprint (Enter в диалоге).
+        window.setTimeout(finish, isKioskPrintMode() ? 3000 : 120_000)
       }),
   )
 }
