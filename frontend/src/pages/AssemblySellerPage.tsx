@@ -696,7 +696,7 @@ function WbAssemblySellerPage() {
     })
     pendingOrderRef.current = order
     cacheOrderSticker(order)
-    const sticker = (order.sticker_file || '').trim()
+    const sticker = stickerPayloadForOrder(order)
     if (sticker) preloadFbsSticker(sticker)
     focusMarkingInput()
   }
@@ -2135,30 +2135,30 @@ function WbAssemblySellerPage() {
     setMarkingValue('')
 
     const printWin = openPrintHolder()
-    const cachedPrintOrder = orderForPrint(orderSnapshot as PrintOrder)
-    const cachedSticker = stickerPayloadForOrder(cachedPrintOrder)
-    if (!cachedSticker) {
-      closePrintHolder(printWin)
-      showScanError(
-        `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
-        'Стикер не загружен',
-        () => focusMarkingInput(),
-      )
-      markingSubmitBusyRef.current = false
-      return
-    }
 
     try {
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
 
-      const printOrder = {
-        ...orderForPrint(result.order),
-        sticker_file: cachedSticker,
+      const printOrder = orderForPrint(result.order)
+      const sticker = stickerPayloadForOrder(printOrder)
+      if (!sticker) {
+        closePrintHolder(printWin)
+        showScanError(
+          `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
+          'Стикер не загружен',
+          () => focusMarkingInput(),
+        )
+        openMarkingScan(orderSnapshot)
+        return
       }
 
       try {
-        await spoolStickerPrintOnce(printOrder, printWin, resumeBarcodeScanAfterPrint)
+        await spoolStickerPrintOnce(
+          { ...printOrder, sticker_file: sticker },
+          printWin,
+          resumeBarcodeScanAfterPrint,
+        )
       } catch (printErr) {
         showScanError(
           printErr instanceof Error ? printErr.message : 'Стикер не напечатан',

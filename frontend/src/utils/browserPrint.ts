@@ -92,7 +92,8 @@ function waitForStickerImage(win: Window): Promise<void> {
       img.addEventListener('error', done, { once: true })
       const src = (img.src || '').trim()
       const fastSrc = src.startsWith('blob:') || src.startsWith('data:')
-      window.setTimeout(done, fastSrc ? 250 : 1200)
+      // Слишком короткий таймаут (250ms) давал пустой стикер в диалоге печати.
+      window.setTimeout(done, fastSrc ? 900 : 2000)
     } catch {
       done()
     }
