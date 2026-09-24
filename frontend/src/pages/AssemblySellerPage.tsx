@@ -375,15 +375,15 @@ function WbAssemblySellerPage() {
     let ticks = 0
     stickerRefreshTimerRef.current = window.setInterval(() => {
       ticks += 1
-      void load({ silent: true, stageKey: 'confirm' })
-      if (ticks >= 80) {
+      void fetchAssemblyStickers(id).catch(() => {})
+      if (ticks >= 24) {
         if (stickerRefreshTimerRef.current) {
           window.clearInterval(stickerRefreshTimerRef.current)
           stickerRefreshTimerRef.current = null
         }
       }
-    }, 1500)
-  }, [id, load])
+    }, 5000)
+  }, [id])
 
   const notifyCancelledInSupplies = useCallback((items: CancelledInSupplyNotice[]) => {
     if (!items.length) return
@@ -680,7 +680,7 @@ function WbAssemblySellerPage() {
     }
   }
 
-  /** Пока сканируют ЧЗ — подтянуть стикер заказа (тот же order.id, что после баркода). */
+  /** Пока сканируют ЧЗ — стикер этого order.id: из кэша или CRM, без лишних запросов в WB. */
   function prepareMarkingStickerInBackground(order: PrintOrder) {
     if (!id) return
     markingStickerPrepRef.current = (async () => {
@@ -690,17 +690,30 @@ function WbAssemblySellerPage() {
         return
       }
       try {
-        const result = await fetchAssemblyStickers(id, [order.id], true)
+        await barcodeScanDoneRef.current?.catch(() => {})
+        const ready = pendingOrderRef.current ?? order
+        const cachedAfterScan = stickerPayloadForOrder(ready)
+        if (cachedAfterScan) {
+          preloadFbsSticker(cachedAfterScan)
+          return
+        }
+        if (!ready.has_sticker) {
+          const result = await fetchAssemblyStickers(id, [ready.id])
+          for (const row of result.orders ?? []) {
+            if (row.sticker_file) {
+              cacheOrderSticker(row)
+              preloadFbsSticker(row.sticker_file)
+            }
+          }
+          return
+        }
+        const result = await fetchAssemblyStickers(id, [ready.id], true)
         for (const row of result.orders ?? []) {
           if (row.sticker_file) {
             cacheOrderSticker(row)
             preloadFbsSticker(row.sticker_file)
           }
         }
-        await barcodeScanDoneRef.current?.catch(() => {})
-        const ready = pendingOrderRef.current ?? order
-        const sticker = stickerPayloadForOrder(ready)
-        if (sticker) preloadFbsSticker(sticker)
       } catch {
         // фон — ошибку покажем при печати
       }

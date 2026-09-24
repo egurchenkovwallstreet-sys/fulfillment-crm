@@ -179,7 +179,24 @@ def _find_order_by_bound_marking(seller: Seller, marking_code: str) -> Order | N
 
 
 def _candidate_sort_key(order: Order):
-  return (0 if _order_needs_marking_scan(order) else 1, order.id)
+  return (0 if _order_needs_marking_scan(order) else 1, order.wb_order_id or 0, order.id)
+
+
+def _order_available_for_barcode_scan(order: Order) -> bool:
+  """Следующий заказ по тому же баркоду — уже напечатанные не берём."""
+  if _is_marking_retry_order(order):
+    return True
+  if order_sticker_printed_in_crm(order):
+    return False
+  if order.status in (
+    Order.Status.LABEL_PRINTED,
+    Order.Status.MARKED,
+    Order.Status.IN_DELIVERY,
+    Order.Status.SHIPPED,
+    Order.Status.CANCELLED,
+  ):
+    return False
+  return True
 
 
 def _wb_order_id_fallback(orders_qs, scan_norm: str) -> Order | None:
@@ -245,6 +262,8 @@ def _match_order_by_scan(orders_qs, scan_value: str, *, seller: Seller | None = 
 
   exact: list[Order] = []
   for order in orders_qs:
+    if not _order_available_for_barcode_scan(order):
+      continue
     if _barcodes_match(order.barcode or "", scan_norm):
       exact.append(order)
   if exact:
@@ -273,6 +292,8 @@ def _match_order_by_scan(orders_qs, scan_value: str, *, seller: Seller | None = 
 
   pair_matches: list[Order] = []
   for order in orders_qs:
+    if not _order_available_for_barcode_scan(order):
+      continue
     if _barcode_in_set(order.barcode or "", product_barcodes):
       pair_matches.append(order)
 
@@ -424,18 +445,15 @@ def _prepare_order_for_scan(order: Order, pick_list: PickList | None) -> None:
 
 
 def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
-  pick_list = _find_pick_list_for_scan(seller, scan_value)
-  if pick_list:
-    return
-
-  active_lists = _get_active_pick_lists(seller)
-  if active_lists:
-    if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
+  for pick_list in _get_active_pick_lists(seller):
+    if _scan_allowed_in_pick_list(pick_list, scan_value):
       return
-    raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
   if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
     return
+
+  if _get_active_pick_lists(seller):
+    raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
 
 
 def _find_active_order(seller: Seller, scan_value: str) -> Order:
@@ -681,7 +699,14 @@ def fetch_missing_assembly_stickers(
       )
 
   requested = len(orders)
-  fetched = fetch_stickers_for_orders(seller, orders, user=user)
+  orders_needing_wb = [
+    order
+    for order in orders
+    if not (order.sticker_file or "").strip() or not order.has_sticker
+  ]
+  fetched = 0
+  if orders_needing_wb:
+    fetched = fetch_stickers_for_orders(seller, orders_needing_wb, user=user)
   still_missing = sum(1 for order in orders if not (order.sticker_file or "").strip())
 
   AuditLog.objects.create(

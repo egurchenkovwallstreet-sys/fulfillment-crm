@@ -157,3 +157,62 @@ class AssemblyBarcodeMatchTest(TestCase):
       )
     self.assertEqual(ctx.exception.code, "marking_already_bound")
     self.assertEqual(ctx.exception.order.id, self.order_50.id)
+
+  def test_same_barcode_picks_next_order_after_first_printed(self):
+    """8 заказов одного баркода — после печати первого следующий скан берёт следующий заказ."""
+    from apps.orders.models import PickList, PickListItem
+
+    barcode = "04660727916563"
+    pick_list = PickList.objects.create(
+      seller=self.seller,
+      marketplace="wb",
+      wb_warehouse_id=100,
+      warehouse_name="Склад",
+    )
+    PickListItem.objects.create(
+      pick_list=pick_list,
+      cell=self.cell,
+      product=self.product_50,
+      barcode=barcode,
+      quantity=3,
+    )
+
+    self.order_50.sticker_part_a = "111"
+    self.order_50.sticker_part_b = "222"
+    self.order_50.status = Order.Status.LABEL_PRINTED
+    self.order_50.save(
+      update_fields=["sticker_part_a", "sticker_part_b", "status", "updated_at"],
+    )
+
+    second = Order.objects.create(
+      seller=self.seller,
+      wb_order_id=500002,
+      barcode=barcode,
+      product=self.product_50,
+      status=Order.Status.ASSEMBLED,
+      wb_supplier_status="confirm",
+      has_sticker=True,
+      sticker_file="c3RpY2tlcjI=",
+      sticker_part_a="333",
+      sticker_part_b="444",
+    )
+    third = Order.objects.create(
+      seller=self.seller,
+      wb_order_id=500003,
+      barcode=barcode,
+      product=self.product_50,
+      status=Order.Status.IN_PICKING,
+      wb_supplier_status="confirm",
+      has_sticker=True,
+      sticker_file="c3RpY2tlcjM=",
+      sticker_part_a="555",
+      sticker_part_b="666",
+    )
+
+    matched = _match_order_by_scan(self._scannable_qs(), barcode, seller=self.seller)
+    self.assertEqual(matched.id, second.id)
+
+    result = scan_order_barcode(self.seller, barcode, user=self.user)
+    self.assertEqual(result["order"].id, second.id)
+    self.assertNotEqual(result["order"].id, self.order_50.id)
+    self.assertNotEqual(result["order"].id, third.id)

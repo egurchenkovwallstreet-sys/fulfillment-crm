@@ -76,7 +76,6 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "wb_status",
       "wb_stage_display",
       "has_sticker",
-      "sticker_file",
       "sticker_part_a",
       "sticker_part_b",
       "sticker_scan_code",
