@@ -74,7 +74,6 @@ import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
   closePrintHolder,
   openPrintHolder,
-  warmFbsPrintWindow,
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
@@ -211,6 +210,10 @@ function WbAssemblySellerPage() {
   const loadBackgroundTimerRef = useRef<number | null>(null)
   const loadDeferredUntilRef = useRef(0)
   const loadInFlightRef = useRef(false)
+  const markingStickerPrepRef = useRef<Promise<void> | null>(null)
+  const barcodeScanDoneRef = useRef<Promise<void> | null>(null)
+
+  const MARKING_PRINT_DELAY_MS = 500
 
   const [data, setData] = useState<AssemblySellerDetail | null>(
     () => readAssemblySellerCache(id, 'new'),
@@ -663,6 +666,35 @@ function WbAssemblySellerPage() {
     }
   }
 
+  /** Пока сканируют ЧЗ — подтянуть стикер заказа (тот же order.id, что после баркода). */
+  function prepareMarkingStickerInBackground(order: PrintOrder) {
+    if (!id) return
+    markingStickerPrepRef.current = (async () => {
+      const initial = stickerPayloadForOrder(order)
+      if (initial) {
+        preloadFbsSticker(initial)
+        return
+      }
+      try {
+        if (!order.has_sticker) {
+          await fetchAssemblyStickers(id, [order.id])
+        }
+        await barcodeScanDoneRef.current?.catch(() => {})
+        const ready = pendingOrderRef.current ?? order
+        const sticker = stickerPayloadForOrder(ready)
+        if (sticker) preloadFbsSticker(sticker)
+      } catch {
+        // фон — ошибку покажем при печати
+      }
+    })()
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms)
+    })
+  }
+
   function shouldOpenMarkingForOrder(order: AssemblyOrder | PrintOrder): boolean {
     return orderNeedsMarkingScan(order as AssemblyOrder)
   }
@@ -699,7 +731,7 @@ function WbAssemblySellerPage() {
     cacheOrderSticker(order)
     const sticker = stickerPayloadForOrder(order)
     if (sticker) preloadFbsSticker(sticker)
-    warmFbsPrintWindow()
+    prepareMarkingStickerInBackground(order)
     focusMarkingInput()
   }
 
@@ -2025,7 +2057,9 @@ function WbAssemblySellerPage() {
     }
 
     try {
-      const result = await scanOrderBarcode(id, barcode)
+      const scanPromise = scanOrderBarcode(id, barcode)
+      barcodeScanDoneRef.current = scanPromise.then(() => {}).catch(() => {})
+      const result = await scanPromise
 
       cacheOrderSticker(result.order)
 
@@ -2036,6 +2070,7 @@ function WbAssemblySellerPage() {
             `Заказ WB #${result.order.wb_order_id} — отсканируйте Честный знак`,
           true,
         )
+        prepareMarkingStickerInBackground(result.order)
         void refreshMarkingStatus()
         return
       }
@@ -2097,7 +2132,11 @@ function WbAssemblySellerPage() {
       barcodeApiInFlightRef.current = false
       scanBusyRef.current = false
       setScanBusy(false)
-      releaseBarcodeForNextScan()
+      if (markingLockRef.current) {
+        focusMarkingInput()
+      } else {
+        releaseBarcodeForNextScan()
+      }
     }
   }
 
@@ -2136,18 +2175,17 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
 
-    const printWin = openPrintHolder()
     const cachedPrintOrder = orderForPrint(orderSnapshot)
-    const cachedSticker = stickerPayloadForOrder(cachedPrintOrder)
 
     try {
+      await markingStickerPrepRef.current?.catch(() => {})
+      await barcodeScanDoneRef.current?.catch(() => {})
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
 
       const printOrder = { ...cachedPrintOrder, ...orderForPrint(result.order) }
-      const sticker = cachedSticker || stickerPayloadForOrder(printOrder)
+      const sticker = stickerPayloadForOrder(printOrder)
       if (!sticker) {
-        closePrintHolder(printWin)
         showScanError(
           `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
           'Стикер не загружен',
@@ -2156,6 +2194,10 @@ function WbAssemblySellerPage() {
         openMarkingScan(orderSnapshot)
         return
       }
+
+      preloadFbsSticker(sticker)
+      await sleep(MARKING_PRINT_DELAY_MS)
+      const printWin = openPrintHolder()
 
       try {
         await spoolStickerPrintOnce(
@@ -2178,7 +2220,7 @@ function WbAssemblySellerPage() {
       void refreshMarkingStatus()
       scheduleBackgroundOrdersRefresh()
     } catch (err) {
-      closePrintHolder(printWin)
+      closePrintHolder()
       resetScanFlow(true)
       const boundOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'

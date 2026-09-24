@@ -12,7 +12,11 @@ export const PRINT_SIZES = {
 } as const
 
 const PRINT_POPUP_NAME = 'crm_fbs_print'
-const PRINT_POPUP_FEATURES = 'popup=1,width=1,height=1,left=-10000,top=-10000'
+/** Превью стикера на экране — 3× (58×40 мм), печать остаётся 58×40. */
+const PRINT_PREVIEW_SCALE = 3
+const PRINT_POPUP_WIDTH = 200 * PRINT_PREVIEW_SCALE
+const PRINT_POPUP_HEIGHT = 150 * PRINT_PREVIEW_SCALE
+const PRINT_POPUP_FEATURES = `popup=1,width=${PRINT_POPUP_WIDTH},height=${PRINT_POPUP_HEIGHT},left=120,top=80`
 
 let cachedPrintWindow: Window | null = null
 
@@ -48,18 +52,37 @@ function fbsStickerHtml(imgSrc: string): string {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: ${PRINT_SIZES.fbsSticker}; margin: 0; }
     html, body {
-      width: 58mm;
-      height: 40mm;
       overflow: hidden;
       background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    img {
-      display: block;
-      width: 58mm;
-      height: 40mm;
-      object-fit: contain;
+    @media screen {
+      html, body {
+        width: calc(58mm * ${PRINT_PREVIEW_SCALE});
+        height: calc(40mm * ${PRINT_PREVIEW_SCALE});
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      img {
+        display: block;
+        width: calc(58mm * ${PRINT_PREVIEW_SCALE});
+        height: calc(40mm * ${PRINT_PREVIEW_SCALE});
+        object-fit: contain;
+      }
+    }
+    @media print {
+      html, body {
+        width: 58mm;
+        height: 40mm;
+      }
+      img {
+        display: block;
+        width: 58mm;
+        height: 40mm;
+        object-fit: contain;
+      }
     }
   </style>
 </head>
@@ -182,8 +205,7 @@ export function preloadFbsSticker(base64: string): void {
   }
 }
 
-/** Держим окно печати открытым — следующий стикер без window.open и без «Печать…». */
-export function warmFbsPrintWindow(): Window | null {
+export function openPrintHolder(): Window | null {
   if (cachedPrintWindow && !cachedPrintWindow.closed) {
     return cachedPrintWindow
   }
@@ -202,8 +224,9 @@ export function warmFbsPrintWindow(): Window | null {
   return win
 }
 
-export function openPrintHolder(): Window | null {
-  return warmFbsPrintWindow()
+/** @deprecated не вызывать до печати — открывает окно и забирает фокус. */
+export function warmFbsPrintWindow(): Window | null {
+  return openPrintHolder()
 }
 
 export function setPrintHolderMessage(win: Window | null, message: string) {
@@ -266,7 +289,7 @@ export async function printFbsSticker(
   }
 
   const html = fbsStickerHtml(imgUrl)
-  const win = (preopened && !preopened.closed) ? preopened : warmFbsPrintWindow()
+  const win = (preopened && !preopened.closed) ? preopened : openPrintHolder()
   if (win) {
     const ok = writeHtmlToPopup(win, html)
     if (imgUrl.startsWith('blob:')) {
