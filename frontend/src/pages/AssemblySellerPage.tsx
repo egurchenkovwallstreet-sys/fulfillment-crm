@@ -724,23 +724,15 @@ function WbAssemblySellerPage() {
     })()
   }
 
-  async function validateBarcodeScanInBackground(barcode: string, expectedOrderId: number) {
+  async function validateBarcodeScanInBackground(barcode: string) {
     if (!id) return
     barcodeApiInFlightRef.current = true
     try {
       const result = await scanOrderBarcode(id, barcode)
       cacheOrderSticker(result.order)
 
-      if (result.order.id !== expectedOrderId) {
-        showScanError(
-          'Сервер нашёл другой заказ по этому баркоду. Отсканируйте баркод заново.',
-          'Ошибка сканирования',
-          () => resetScanFlow(true),
-        )
-        return
-      }
-
       if (result.action === 'await_marking' || result.requires_marking) {
+        // Сервер — источник истины: следующий заказ в очереди по баркоду (даже если локально угадали другой id).
         pendingOrderRef.current = result.order as PrintOrder
         flushSync(() => {
           setPendingOrder(result.order as PrintOrder)
@@ -859,11 +851,69 @@ function WbAssemblySellerPage() {
     }, 400)
   }
 
-  /** Локальный предпросмотр: основной баркод заказа или доп. sku того же товара. */
+  /** Локальный предпросмотр: основной баркод заказа или второй баркод того же SKU. */
+  function orderProductBarcodes(order: AssemblyOrder): Set<string> {
+    const codes = new Set<string>()
+    const primary = normalizeScanCode(order.barcode)
+    if (primary) codes.add(primary)
+    for (const alt of order.alternate_barcodes ?? []) {
+      const normalized = normalizeScanCode(alt)
+      if (normalized) codes.add(normalized)
+    }
+    return codes
+  }
+
   function orderBarcodeMatchesScan(order: AssemblyOrder, code: string): boolean {
-    if (normalizeScanCode(order.barcode) === code) return true
-    const alternates = order.alternate_barcodes ?? []
-    return alternates.some((alt) => normalizeScanCode(alt) === code)
+    return orderProductBarcodes(order).has(code)
+  }
+
+  function orderAvailableForBarcodeScan(order: AssemblyOrder): boolean {
+    if (orderStickerPrinted(order) && order.marking_verify_status === 'error') return true
+    if (orderStickerPrinted(order)) return false
+    if (
+      order.status === 'label_printed' ||
+      order.status === 'marked' ||
+      order.status === 'in_delivery' ||
+      order.status === 'shipped' ||
+      order.status === 'cancelled'
+    ) {
+      return false
+    }
+    return true
+  }
+
+  function orderScannableOnConfirmStage(order: AssemblyOrder): boolean {
+    const wb = (order.wb_supplier_status || '').trim()
+    return (
+      order.status === 'in_picking' ||
+      order.status === 'assembled' ||
+      (wb === 'confirm' && (order.status === 'new' || order.status === 'in_supply'))
+    )
+  }
+
+  /** Тот же порядок, что _candidate_sort_key на бэкенде: следующий свободный заказ по баркоду. */
+  function barcodeScanCandidateSortKey(order: AssemblyOrder): [number, number, number] {
+    return [orderNeedsMarkingScan(order) ? 0 : 1, order.wb_order_id || 0, order.id]
+  }
+
+  function compareBarcodeScanCandidates(a: AssemblyOrder, b: AssemblyOrder): number {
+    const ka = barcodeScanCandidateSortKey(a)
+    const kb = barcodeScanCandidateSortKey(b)
+    for (let i = 0; i < ka.length; i += 1) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    }
+    return 0
+  }
+
+  function uniqueAssemblyOrdersForScan(orderList: AssemblyOrder[]): AssemblyOrder[] {
+    const seen = new Set<number>()
+    const unique: AssemblyOrder[] = []
+    for (const order of orderList) {
+      if (seen.has(order.id)) continue
+      seen.add(order.id)
+      unique.push(order)
+    }
+    return unique
   }
 
   function findLocalOrderByBarcode(
@@ -871,16 +921,14 @@ function WbAssemblySellerPage() {
     orderList: AssemblyOrder[],
   ): AssemblyOrder | undefined {
     const code = normalizeScanCode(barcode)
-    return orderList.find((order) => {
-      if (!orderBarcodeMatchesScan(order, code)) return false
-      if (orderStickerPrinted(order) && order.marking_verify_status !== 'error') return false
-      const wb = (order.wb_supplier_status || '').trim()
-      return (
-        order.status === 'in_picking' ||
-        order.status === 'assembled' ||
-        (wb === 'confirm' && order.status === 'new')
-      )
+    const candidates = uniqueAssemblyOrdersForScan(orderList).filter((order) => {
+      if (!orderAvailableForBarcodeScan(order)) return false
+      if (!orderScannableOnConfirmStage(order)) return false
+      return orderBarcodeMatchesScan(order, code)
     })
+    if (candidates.length === 0) return undefined
+    candidates.sort(compareBarcodeScanCandidates)
+    return candidates[0]
   }
 
   function stickerPayloadForOrder(order: { id: number; sticker_file?: string | null }): string {
@@ -2133,10 +2181,10 @@ function WbAssemblySellerPage() {
     setScanValue('')
     scanRef.current?.blur()
 
-    const orderList = [
+    const orderList = uniqueAssemblyOrdersForScan([
       ...(data?.orders ?? []),
       ...(data?.active_supplies ?? []).flatMap((supply) => supply.orders ?? []),
-    ]
+    ])
     const localOrder = findLocalOrderByBarcode(barcode, orderList)
     if (localOrder) {
       cacheOrderSticker(localOrder)
@@ -2145,7 +2193,7 @@ function WbAssemblySellerPage() {
     if (localOrder && shouldInstantMarkingForLocalOrder(localOrder)) {
       openMarkingScan(localOrder as unknown as PrintOrder, undefined, true)
       prepareMarkingStickerInBackground(localOrder as unknown as PrintOrder)
-      barcodeScanDoneRef.current = validateBarcodeScanInBackground(barcode, localOrder.id)
+      barcodeScanDoneRef.current = validateBarcodeScanInBackground(barcode)
       return
     }
 
