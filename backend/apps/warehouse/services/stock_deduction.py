@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from apps.integrations.models import AuditLog
 from apps.orders.models import Order, PickList, Supply
+from apps.orders.services.wb_status import WB_SUPPLIER_ASSEMBLY
 from apps.orders.services.marking_verification import order_marking_ready
 from apps.orders.services.order_sticker import order_sticker_printed_in_crm
 from apps.warehouse.models import Product, StockOperation
@@ -23,6 +24,25 @@ def normalize_sticker_key(part_a: str, part_b: str) -> str:
 
 
 def order_on_active_pick_list(order: Order) -> bool:
+  """
+  Заказ на сборке WB — лист считается активным до передачи в доставку.
+  is_completed не блокирует скан и списание, пока заказ в confirm.
+  """
+  if order.assembly_hidden:
+    return False
+  if order.status in (Order.Status.IN_DELIVERY, Order.Status.SHIPPED, Order.Status.CANCELLED):
+    return False
+  if (order.wb_supplier_status or "").strip() != WB_SUPPLIER_ASSEMBLY:
+    return False
+  if order.status in (
+    Order.Status.NEW,
+    Order.Status.IN_PICKING,
+    Order.Status.ASSEMBLED,
+    Order.Status.LABEL_PRINTED,
+    Order.Status.MARKED,
+    Order.Status.IN_SUPPLY,
+  ):
+    return bool(order.pick_list_id)
   if not order.pick_list_id:
     return False
   pick_list = order.pick_list

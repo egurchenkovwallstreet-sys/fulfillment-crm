@@ -59,7 +59,6 @@ import {
   buildChzVerifyReport,
   chzStatusLabel,
   MARKING_STATUS_POLL_MS,
-  MARKING_VERIFY_POLL_MS,
   pickVerifyItemsForOrder,
   summarizeChzVerifyResult,
 } from '../utils/markingVerify'
@@ -208,6 +207,7 @@ function WbAssemblySellerPage() {
   /** Автопечать стикера — строго один раз на заказ; повтор только через кнопку менеджера. */
   const autoPrintedOrderIdsRef = useRef<Set<number>>(new Set())
   const markingSubmitBusyRef = useRef(false)
+  const loadBackgroundTimerRef = useRef<number | null>(null)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(
     () => readAssemblySellerCache(id, 'new'),
@@ -504,8 +504,8 @@ function WbAssemblySellerPage() {
       if (chzVerifyFailStreakRef.current >= 3) {
         setChzVerifyNotice(
           err instanceof Error
-            ? `${err.message} CRM продолжит опрос каждые 4 секунды. Нажмите «Проверить ЧЗ» для ответа по каждому заказу.`
-            : 'WB не ответил по ЧЗ. CRM продолжит опрос каждые 4 секунды.',
+            ? `${err.message} CRM проверит ЧЗ в фоне каждые ~10 секунд. Нажмите «Проверить ЧЗ» для ответа сразу.`
+            : 'WB не ответил по ЧЗ. CRM проверит в фоне каждые ~10 секунд.',
         )
       }
       return null
@@ -556,17 +556,6 @@ function WbAssemblySellerPage() {
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [id, stage, refreshMarkingStatus])
-
-  useEffect(() => {
-    if (!id || stage !== 'confirm') return
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return
-      void runMarkingVerify({ silent: true, forceRecheck: false })
-    }
-    tick()
-    const verifyTimer = window.setInterval(tick, MARKING_VERIFY_POLL_MS)
-    return () => window.clearInterval(verifyTimer)
-  }, [id, stage, runMarkingVerify])
 
   useEffect(() => {
     if (!id || stage !== 'complete') return
@@ -831,13 +820,25 @@ function WbAssemblySellerPage() {
   }
 
   async function refreshAssemblyUi() {
-    await Promise.all([refreshMarkingStatus(), load({ silent: true })])
+    void refreshMarkingStatus()
+    scheduleBackgroundOrdersRefresh()
+  }
+
+  function scheduleBackgroundOrdersRefresh(delayMs = 1500) {
+    if (loadBackgroundTimerRef.current) {
+      window.clearTimeout(loadBackgroundTimerRef.current)
+    }
+    loadBackgroundTimerRef.current = window.setTimeout(() => {
+      loadBackgroundTimerRef.current = null
+      void load({ silent: true })
+    }, delayMs)
   }
 
   async function completeBarcodePrintFlow(order: PrintOrder, preopened?: Window | null) {
     await spoolStickerPrintOnce(order, preopened, resumeBarcodeScanAfterPrint)
     setStage('confirm')
-    await refreshAssemblyUi()
+    void refreshMarkingStatus()
+    scheduleBackgroundOrdersRefresh()
   }
 
   function confirmReprintSticker(order: AssemblyOrder, onDone?: () => void) {
@@ -1648,7 +1649,7 @@ function WbAssemblySellerPage() {
           item.status === 'error' && item.error
             ? `${item.error}\n\nЕсли сканер передал код не полностью — нажмите «Сброс ЧЗ» и отсканируйте DataMatrix заново.`
             : item.status === 'pending'
-              ? 'WB ещё не дал финальный ответ. CRM спросит снова автоматически каждые 4 секунды.'
+              ? 'WB ещё не дал финальный ответ. CRM проверит пачкой в фоне каждые ~10 секунд.'
               : 'Честный знак принят WB — заказ можно передавать в доставку.',
       })
       if (item.status === 'error') {
@@ -1995,7 +1996,7 @@ function WbAssemblySellerPage() {
       }
 
       if (err instanceof ApiError && err.code === 'already_printed') {
-        await refreshAssemblyUi()
+        void refreshAssemblyUi()
         showScanError(
           err instanceof Error
             ? err.message
@@ -2094,12 +2095,12 @@ function WbAssemblySellerPage() {
           'Стикер не напечатан',
           () => resumeBarcodeScanAfterPrint(),
         )
-        await refreshAssemblyUi()
+        void refreshMarkingStatus()
         return
       }
       setStage('confirm')
-      await refreshAssemblyUi()
-      void runMarkingVerify({ silent: true, forceRecheck: false })
+      void refreshMarkingStatus()
+      scheduleBackgroundOrdersRefresh()
     } catch (err) {
       resetScanFlow(true)
       const boundOrder =
@@ -2112,7 +2113,7 @@ function WbAssemblySellerPage() {
         return
       }
       if (err instanceof ApiError && err.code === 'already_printed') {
-        await refreshAssemblyUi()
+        void refreshAssemblyUi()
         return
       }
       showScanError(
@@ -2742,7 +2743,7 @@ function WbAssemblySellerPage() {
           {(waitingWbCount > 0 || chzVerifyNotice) && (
             <p className="assembly-chz-notice">
               {chzVerifyNotice ||
-                `WB проверяет ЧЗ у ${waitingWbCount} заказ(ов). CRM спрашивает WB каждые 4 секунды — лимита попыток нет.`}
+                `WB проверяет ЧЗ у ${waitingWbCount} заказ(ов). Проверка идёт в фоне каждые ~10 секунд.`}
             </p>
           )}
         </>
@@ -2840,10 +2841,9 @@ function WbAssemblySellerPage() {
         <BatchBindPanel
           sellerId={id}
           disabled={!hasPickLists}
-          onBound={async (immediateVerify?: boolean) => {
-            if (immediateVerify) void runMarkingVerify()
-            await refreshMarkingStatus()
-            await load({ silent: true })
+          onBound={async () => {
+            void refreshMarkingStatus()
+            scheduleBackgroundOrdersRefresh()
           }}
           onSuccess={(message) => noticeOk(message, 'Связка ЧЗ')}
           onError={(message) => showError('Связка ЧЗ', message)}

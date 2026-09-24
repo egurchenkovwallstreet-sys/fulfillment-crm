@@ -39,7 +39,7 @@ app.conf.beat_schedule = {
     },
     "verify-pending-marking": {
         "task": "apps.integrations.tasks.verify_pending_marking_codes",
-        "schedule": 600.0,
+        "schedule": 10.0,
     },
     "scan-off-crm-shipments": {
         "task": "apps.integrations.tasks.scan_off_crm_shipments",

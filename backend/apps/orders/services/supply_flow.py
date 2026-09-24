@@ -19,7 +19,7 @@ from apps.integrations.wb_client import (
 )
 from apps.orders.models import Order, PickList, Supply
 from apps.orders.services.assembly import AssemblyError, _get_client, fetch_stickers_for_orders
-from apps.orders.services.assembly_queue import order_in_assembly, queue_last_pick_list_marking_verify
+from apps.orders.services.assembly_queue import order_in_assembly
 from apps.orders.services.wb_status import (
   CANCEL_SUPPLIER_STATUSES,
   CANCEL_WB_STATUSES,
@@ -1310,8 +1310,6 @@ def move_orders_to_new_supply(
       "orders_moved": len(wh_orders),
       "created": not bool(target_id),
     })
-
-  queue_last_pick_list_marking_verify(seller)
 
   AuditLog.objects.create(
     user=user,

@@ -58,7 +58,7 @@ class BindMarkingStrictPrintTest(TestCase):
     )
 
     self.assertEqual(result["action"], "print")
-    self.assertTrue(result["immediate_verify"])
+    self.assertFalse(result["immediate_verify"])
     mock_delay.assert_called_once()
 
     self.order.refresh_from_db()

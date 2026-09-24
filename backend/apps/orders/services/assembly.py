@@ -922,9 +922,7 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
 
 
 def _push_marking_code_to_wb(order: Order, marking_code: str, *, user=None) -> None:
-  """PUT sgtin в WB сразу при скане — без ожидания Celery."""
-  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
-
+  """PUT sgtin в WB — единственный запрос привязки; проверка статуса — пакетом в Celery."""
   code = (marking_code or "").strip()
   if not code:
     raise AssemblyError("Код Честного знака пустой", code="invalid_marking_code", order=order)
@@ -958,7 +956,6 @@ def _push_marking_code_to_wb(order: Order, marking_code: str, *, user=None) -> N
       code="wb_marking_bind_failed",
     ) from exc
 
-  queue_last_pick_list_marking_verify(order.seller)
   AuditLog.objects.create(
     user=user,
     seller=order.seller,
@@ -1100,14 +1097,12 @@ def bind_marking_and_print(
   )
 
   from apps.integrations.tasks import bind_order_marking_wb_task
-  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
 
   bind_order_marking_wb_task.delay(
     order.id,
     normalized,
     user.id if getattr(user, "is_authenticated", False) else None,
   )
-  queue_last_pick_list_marking_verify(seller)
 
   AuditLog.objects.create(
     user=user,
@@ -1121,7 +1116,7 @@ def bind_marking_and_print(
     "action": "print",
     "order": order,
     "stock": stock_info,
-    "immediate_verify": True,
+    "immediate_verify": False,
     "message": (
       f"ЧЗ принят CRM для заказа #{order.wb_order_id}. "
       "Печатайте стикер. Отправка в WB и проверка — в фоне."

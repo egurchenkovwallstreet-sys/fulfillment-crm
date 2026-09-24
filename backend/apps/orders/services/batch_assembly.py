@@ -590,15 +590,6 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
       code="duplicate_marking",
     )
 
-  client = _get_client(seller)
-  from apps.integrations.wb_client import WBApiError
-  from apps.orders.services.marking import parse_wb_marking_error
-
-  try:
-    client.bind_order_sgtin(order.wb_order_id, [normalized])
-  except WBApiError as exc:
-    raise _marking_error(parse_wb_marking_error(exc), order, code="wb_bind_failed") from exc
-
   from apps.warehouse.services.stock_deduction import (
     StockDeductionError,
     deduct_stock_for_sticker_print,
@@ -631,11 +622,19 @@ def _bind_marking_without_print(seller: Seller, order: Order, marking_code: str,
     except Exception:
       logger.exception("billing on sticker print failed for order %s", order.id)
 
+  from apps.integrations.tasks import bind_order_marking_wb_task
+
+  bind_order_marking_wb_task.delay(
+    order.id,
+    normalized,
+    user.id if getattr(user, "is_authenticated", False) else None,
+  )
+
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ (лента) отправлен в WB — заказ #{order.wb_order_id}",
+    message=f"ЧЗ (лента) сохранён — заказ #{order.wb_order_id}, отправка в WB в фоне",
     details={"order_id": order.id, "barcode": order.barcode},
   )
   return order
@@ -718,12 +717,9 @@ def bind_wb_batch_scan(
         **state,
       }
     order = _bind_marking_without_print(seller, order, state["marking_code"], user=user)
-    from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
-
-    immediate_verify = queue_last_pick_list_marking_verify(seller)
     message = (
       f"Связка завершена: заказ WB #{order.wb_order_id}. "
-      "ЧЗ отправлен в WB на проверку."
+      "ЧЗ отправлен в WB в фоне, проверка — пачкой каждые ~10 секунд."
     )
   else:
     from apps.warehouse.services.stock_deduction import (

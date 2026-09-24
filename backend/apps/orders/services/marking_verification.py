@@ -429,6 +429,7 @@ def verify_marking_orders(
   *,
   user=None,
   force_recheck: bool = False,
+  batch: bool = False,
 ) -> list[dict]:
   """Опросить WB: принял ЧЗ → готовы к доставке, отклонил → ошибки ЧЗ."""
   orders = list(_orders_for_marking_verify(seller, order_ids, force_recheck=force_recheck))
@@ -443,6 +444,14 @@ def verify_marking_orders(
   )
   if orders and meta_count == 0:
     wb_ids = [order.wb_order_id for order in orders]
+    if batch:
+      logger.warning(
+        "WB empty /orders/meta batch seller=%s orders=%s wb_ids=%s",
+        seller.id,
+        len(orders),
+        wb_ids[:10],
+      )
+      return []
     AuditLog.objects.create(
       user=user,
       seller=seller,
@@ -467,13 +476,5 @@ def verify_marking_orders(
         message=f"ЧЗ подтверждён WB для заказа #{item['wb_order_id']}",
         details={"order_id": item["order_id"], "decision": item["decision"]},
       )
-
-  repushed = 0
-  touched_ids = {item["order_id"] for item in results}
-  for order in Order.objects.filter(pk__in=touched_ids):
-    if _maybe_repush_marking_to_wb(order, user=user):
-      repushed += 1
-  if repushed:
-    logger.info("Re-pushed %s marking codes to WB for seller=%s", repushed, seller.id)
 
   return results

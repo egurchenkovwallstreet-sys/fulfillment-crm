@@ -1,7 +1,7 @@
 import type { MarkingVerifyItem, VerifyMarkingResult } from '../api/assembly'
 
-export const MARKING_STATUS_POLL_MS = 4_000
-export const MARKING_VERIFY_POLL_MS = 4_000
+export const MARKING_STATUS_POLL_MS = 10_000
+export const MARKING_VERIFY_POLL_MS = 10_000
 
 export function chzStatusLabel(status: string | undefined): string {
   switch ((status || '').trim()) {
@@ -27,7 +27,7 @@ export function buildChzVerifyReport(result: VerifyMarkingResult): string {
       return `${head}\n${item.error}`
     }
     if (item.status === 'pending') {
-      return `${head}\nWB ещё не дал финальный ответ — CRM спросит снова через 4 секунды.`
+      return `${head}\nWB ещё не дал финальный ответ — CRM проверит снова через ~10 секунд.`
     }
     return head
   })
@@ -43,7 +43,7 @@ export function buildChzVerifyReport(result: VerifyMarkingResult): string {
     '',
     ...lines,
     '',
-    'CRM не прекращает проверку сама — опрос каждые 4 секунды, пока WB не ответит «принят» или «отклонён».',
+    'CRM не прекращает проверку сама — опрос каждые 10 секунд, пока WB не ответит «принят» или «отклонён».',
   ]
 
   return summary.join('\n')

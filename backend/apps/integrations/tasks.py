@@ -6,7 +6,7 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-@shared_task(queue="sync")
+@shared_task
 def sync_orders_for_seller_task(
   seller_id: int,
   *,
@@ -259,7 +259,7 @@ def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | 
   return {"success": True, "order_id": order.id}
 
 
-@shared_task
+@shared_task(queue="sync")
 def verify_seller_marking_codes(seller_id: int):
   """Опросить WB по pending ЧЗ одного селлера (после последнего скана листа)."""
   from apps.orders.services.assembly import AssemblyError
@@ -270,7 +270,7 @@ def verify_seller_marking_codes(seller_id: int):
   if not seller:
     return {"skipped": True, "seller_id": seller_id}
   try:
-    results = verify_marking_orders(seller, force_recheck=True)
+    results = verify_marking_orders(seller, force_recheck=True, batch=True)
   except AssemblyError as exc:
     logger.warning("Marking verify failed for seller %s: %s", seller_id, exc)
     return {"seller_id": seller_id, "error": str(exc)}
@@ -278,9 +278,9 @@ def verify_seller_marking_codes(seller_id: int):
   return {"seller_id": seller_id, "count": len(results)}
 
 
-@shared_task
+@shared_task(queue="sync")
 def verify_pending_marking_codes():
-  """Раз в 10 минут: проверка ЧЗ у всех селлеров с заказами pending."""
+  """Каждые 10 сек — пакетная проверка pending/verified ЧЗ у всех селлеров."""
   from apps.orders.models import Order
 
   seller_ids = list(
