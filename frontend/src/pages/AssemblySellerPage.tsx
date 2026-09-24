@@ -291,9 +291,11 @@ function WbAssemblySellerPage() {
       setError('')
     }
     loadInFlightRef.current = true
+    const scrollY = silent ? window.scrollY : 0
     try {
       const fresh = await fetchAssemblySeller(id, pickStage || undefined)
       setData(fresh)
+      if (silent) restorePageScroll(scrollY)
       writeAssemblySellerCache(id, pickStage, fresh)
       if (pickStage === 'confirm' && fresh.orders?.length) {
         warmStickerCacheFromOrders(fresh.orders)
@@ -349,6 +351,7 @@ function WbAssemblySellerPage() {
     const patch = assemblyOrderPatchFromApi(apiOrder)
     const merge = (order: AssemblyOrder): AssemblyOrder =>
       order.id === patch.id ? { ...order, ...patch } : order
+    const scrollY = window.scrollY
     setData((prev) => {
       if (!prev) return prev
       return {
@@ -360,6 +363,7 @@ function WbAssemblySellerPage() {
         })),
       }
     })
+    restorePageScroll(scrollY)
   }
 
   function blockBackgroundListRefresh(delayMs = 12_000) {
@@ -811,16 +815,26 @@ function WbAssemblySellerPage() {
     const sticker = stickerPayloadForOrder(order)
     if (sticker) preloadFbsSticker(sticker)
     prepareMarkingStickerInBackground(order)
-    focusMarkingInput()
+    focusMarkingInput({ scroll: !alreadyOpen })
   }
 
-  function focusMarkingInput() {
-    scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+  function restorePageScroll(y: number) {
+    requestAnimationFrame(() => {
+      window.scrollTo(0, y)
+    })
+  }
+
+  function focusMarkingInput(opts?: { scroll?: boolean }) {
+    if (opts?.scroll) {
+      scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+    }
     markingRef.current?.focus()
   }
 
-  function focusBarcodeInput() {
-    scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+  function focusBarcodeInput(opts?: { scroll?: boolean }) {
+    if (opts?.scroll) {
+      scanPanelRef.current?.scrollIntoView({ block: 'nearest' })
+    }
     scanRef.current?.focus()
     scanRef.current?.select()
   }
@@ -840,8 +854,9 @@ function WbAssemblySellerPage() {
         return
       }
       if (markingLockRef.current || scanPhaseRef.current === 'marking') return
+      if (document.activeElement === scanRef.current) return
       focusBarcodeInput()
-    }, 80)
+    }, 400)
   }
 
   /** Локальный предпросмотр: основной баркод заказа или доп. sku того же товара. */
@@ -2312,6 +2327,13 @@ function WbAssemblySellerPage() {
       patchLocalOrderAfterPrint(result.order)
       blockBackgroundListRefresh()
       void refreshMarkingStatus()
+      window.setTimeout(() => {
+        void runMarkingVerify({
+          silent: true,
+          orderIds: [result.order.id],
+          forceRecheck: false,
+        })
+      }, 2500)
       scheduleBackgroundOrdersRefresh()
     } catch (err) {
       closePrintHolder()
