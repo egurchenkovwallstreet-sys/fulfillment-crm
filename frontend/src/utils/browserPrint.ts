@@ -92,8 +92,7 @@ function waitForStickerImage(win: Window): Promise<void> {
       img.addEventListener('error', done, { once: true })
       const src = (img.src || '').trim()
       const fastSrc = src.startsWith('blob:') || src.startsWith('data:')
-      // Слишком короткий таймаут (250ms) давал пустой стикер в диалоге печати.
-      window.setTimeout(done, fastSrc ? 900 : 2000)
+      window.setTimeout(done, fastSrc ? 180 : 1200)
     } catch {
       done()
     }
@@ -131,7 +130,7 @@ function schedulePopupPrint(win: Window, onDone?: () => void): Promise<void> {
           } catch {
             finish()
           }
-        }, 30)
+        }, 0)
 
         // Kiosk: короткий fallback. Обычный Chrome: ждём afterprint (Enter в диалоге).
         window.setTimeout(finish, isKioskPrintMode() ? 3000 : 120_000)

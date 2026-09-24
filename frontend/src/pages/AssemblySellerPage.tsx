@@ -74,6 +74,7 @@ import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
 import {
   closePrintHolder,
   openPrintHolder,
+  warmFbsPrintWindow,
   printFbsSticker,
   printSupplySticker,
   refreshPrintBridgeStatus,
@@ -698,6 +699,7 @@ function WbAssemblySellerPage() {
     cacheOrderSticker(order)
     const sticker = stickerPayloadForOrder(order)
     if (sticker) preloadFbsSticker(sticker)
+    warmFbsPrintWindow()
     focusMarkingInput()
   }
 
@@ -2134,13 +2136,18 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
 
+    const printWin = openPrintHolder()
+    const cachedPrintOrder = orderForPrint(orderSnapshot)
+    const cachedSticker = stickerPayloadForOrder(cachedPrintOrder)
+
     try {
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
 
-      const printOrder = orderForPrint(result.order)
-      const sticker = stickerPayloadForOrder(printOrder)
+      const printOrder = { ...cachedPrintOrder, ...orderForPrint(result.order) }
+      const sticker = cachedSticker || stickerPayloadForOrder(printOrder)
       if (!sticker) {
+        closePrintHolder(printWin)
         showScanError(
           `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Нажмите «Подтянуть стикеры» и повторите скан.`,
           'Стикер не загружен',
@@ -2150,7 +2157,6 @@ function WbAssemblySellerPage() {
         return
       }
 
-      const printWin = openPrintHolder()
       try {
         await spoolStickerPrintOnce(
           { ...printOrder, sticker_file: sticker },
@@ -2172,6 +2178,7 @@ function WbAssemblySellerPage() {
       void refreshMarkingStatus()
       scheduleBackgroundOrdersRefresh()
     } catch (err) {
+      closePrintHolder(printWin)
       resetScanFlow(true)
       const boundOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'

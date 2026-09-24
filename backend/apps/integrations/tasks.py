@@ -230,6 +230,23 @@ def reconcile_stuck_delivery_orders():
   return result
 
 
+@shared_task(queue="default")
+def record_sticker_billing_task(order_id: int):
+  """Биллинг после печати стикера — не блокирует ответ bind-marking."""
+  from apps.orders.models import Order
+  from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
+
+  order = Order.objects.filter(pk=order_id).select_related("seller").first()
+  if not order or not order.seller_id:
+    return {"success": False, "detail": "order_not_found", "order_id": order_id}
+  try:
+    record_billing_on_sticker_print(order, seller=order.seller)
+  except Exception:
+    logger.exception("Background sticker billing failed order=%s", order_id)
+    return {"success": False, "order_id": order_id}
+  return {"success": True, "order_id": order_id}
+
+
 @shared_task(queue="sync")
 def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | None = None):
   """Привязка ЧЗ к заказу в WB после печати стикера (основной путь и повтор при сбое)."""

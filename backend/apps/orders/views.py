@@ -28,6 +28,7 @@ from apps.sellers.services.warehouse_filter import (
 
 from .models import Order, PickList, Supply
 from .serializers import (
+  AssemblyBindMarkingOrderSerializer,
   AssemblyWorkflowModeSerializer,
   BatchBindScanSerializer,
   BindMarkingSerializer,
@@ -916,7 +917,7 @@ class AssemblyBindMarkingView(APIView):
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 
-    order_data = OrderPrintSerializer(result["order"]).data
+    order_data = AssemblyBindMarkingOrderSerializer(result["order"]).data
     payload = {
       "success": True,
       "action": result["action"],

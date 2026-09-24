@@ -429,6 +429,26 @@ class PickListGenerateSerializer(serializers.Serializer):
     return value
 
 
+class AssemblyBindMarkingOrderSerializer(serializers.ModelSerializer):
+  """Ответ bind-marking без sticker_file — стикер уже в кэше браузера после скана баркода."""
+
+  status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+  class Meta:
+    model = Order
+    fields = (
+      "id",
+      "wb_order_id",
+      "barcode",
+      "status",
+      "status_display",
+      "has_sticker",
+      "marking_bound",
+      "marking_verify_status",
+      "marking_verify_error",
+    )
+
+
 class ScanPrintSerializer(serializers.Serializer):
   barcode = serializers.CharField(max_length=200)
 

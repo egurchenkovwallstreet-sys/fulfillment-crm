@@ -42,27 +42,29 @@ class BindMarkingStrictPrintTest(TestCase):
       sticker_file="aGVsbG8=",
     )
 
+  @patch("apps.integrations.tasks.record_sticker_billing_task.delay")
   @patch("apps.integrations.tasks.bind_order_marking_wb_task.delay")
   @patch("apps.integrations.tasks.verify_seller_marking_codes.apply_async")
   @patch(
     "apps.warehouse.services.stock_deduction.deduct_stock_for_sticker_print",
     return_value={"deducted": True},
   )
-  @patch("apps.sellers.services.sticker_billing.record_billing_on_sticker_print")
   def test_bind_marking_print_first_wb_in_background(
-    self, _billing, _stock, mock_verify, mock_bind_delay,
+    self, _stock, mock_verify, mock_bind_delay, mock_billing_delay,
   ):
     code = "0104600000000010215ABC1234567890"
-    result = bind_marking_and_print(
-      self.seller,
-      self.order.id,
-      code,
-      user=self.user,
-    )
+    with self.captureOnCommitCallbacks(execute=True):
+      result = bind_marking_and_print(
+        self.seller,
+        self.order.id,
+        code,
+        user=self.user,
+      )
 
     self.assertEqual(result["action"], "print")
     self.assertFalse(result["immediate_verify"])
     mock_bind_delay.assert_called_once_with(self.order.id, code, self.user.id)
+    mock_billing_delay.assert_called_once_with(self.order.id)
     mock_verify.assert_not_called()
 
     self.order.refresh_from_db()
@@ -71,15 +73,15 @@ class BindMarkingStrictPrintTest(TestCase):
     self.assertEqual(self.order.marking_verify_status, "pending")
     self.assertFalse(self.order.marking_bound)
 
+  @patch("apps.integrations.tasks.record_sticker_billing_task.delay")
   @patch("apps.integrations.tasks.bind_order_marking_wb_task.delay")
   @patch("apps.integrations.tasks.verify_seller_marking_codes.apply_async")
   @patch(
     "apps.warehouse.services.stock_deduction.deduct_stock_for_sticker_print",
     return_value={"deducted": True},
   )
-  @patch("apps.sellers.services.sticker_billing.record_billing_on_sticker_print")
   def test_bind_marking_rejects_cyrillic_before_wb(
-    self, _billing, _stock, mock_bind_delay, _verify,
+    self, _stock, _verify, mock_bind_delay, mock_billing_delay,
   ):
     with self.assertRaises(AssemblyError) as ctx:
       bind_marking_and_print(
@@ -90,3 +92,4 @@ class BindMarkingStrictPrintTest(TestCase):
       )
     self.assertEqual(ctx.exception.code, "invalid_marking_code")
     mock_bind_delay.assert_not_called()
+    mock_billing_delay.assert_not_called()

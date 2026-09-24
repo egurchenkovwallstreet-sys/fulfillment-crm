@@ -992,7 +992,7 @@ def bind_marking_and_print(
 ) -> dict:
   """Скан DataMatrix → сохранение ЧЗ в CRM → печать стикера; отправка в WB — Celery."""
   try:
-    order = Order.objects.select_related("product").get(
+    order = Order.objects.select_related("product").defer("sticker_file").get(
       pk=order_id,
       seller=seller,
     )
@@ -1056,17 +1056,17 @@ def bind_marking_and_print(
       code="wb_not_confirm",
     )
 
-  if not order.has_sticker or not (order.sticker_file or "").strip():
+  if not order.has_sticker:
     try:
       fetch_stickers_for_orders(seller, [order], user=user)
-      order.refresh_from_db()
+      order.refresh_from_db(fields=["has_sticker", "sticker_part_a", "sticker_part_b"])
     except AssemblyError as exc:
       raise _marking_error(
         f"Не удалось загрузить стикер WB #{order.wb_order_id}: {exc}",
         order,
         code="no_sticker",
       ) from exc
-  if not order.has_sticker or not (order.sticker_file or "").strip():
+  if not order.has_sticker:
     raise _marking_error(
       f"WB ещё не отдал стикер для заказа #{order.wb_order_id}. "
       "Нажмите «Подтянуть стикеры» и повторите скан.",
@@ -1099,12 +1099,6 @@ def bind_marking_and_print(
       stock_info = deduct_stock_for_sticker_print(order=order, user=user)
     except StockDeductionError as exc:
       raise _marking_error(str(exc), order, code="insufficient_stock") from exc
-    try:
-      from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
-
-      record_billing_on_sticker_print(order, seller=seller)
-    except Exception:
-      logger.exception("billing on sticker print failed for order %s", order.id)
 
   AuditLog.objects.create(
     user=user,
@@ -1116,23 +1110,29 @@ def bind_marking_and_print(
 
   order_id = order.pk
   user_id = user.pk if user else None
+  wb_order_id = order.wb_order_id
+  order_barcode = order.barcode
 
-  def _enqueue_wb_bind() -> None:
-    from apps.integrations.tasks import bind_order_marking_wb_task
+  def _enqueue_post_bind() -> None:
+    from apps.integrations.tasks import (
+      bind_order_marking_wb_task,
+      record_sticker_billing_task,
+    )
 
     bind_order_marking_wb_task.delay(order_id, normalized, user_id)
+    record_sticker_billing_task.delay(order_id)
 
-  transaction.on_commit(_enqueue_wb_bind)
+  transaction.on_commit(_enqueue_post_bind)
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.MARKING,
     message=(
-      f"ЧЗ принят CRM — заказ #{order.wb_order_id}. "
+      f"ЧЗ принят CRM — заказ #{wb_order_id}. "
       "Стикер — сразу; отправка ЧЗ в WB — в фоне."
     ),
-    details={"order_id": order.id, "barcode": order.barcode},
+    details={"order_id": order_id, "barcode": order_barcode},
   )
 
   return {
