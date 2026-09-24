@@ -79,7 +79,7 @@ function waitForStickerImage(win: Window): Promise<void> {
       resolve()
     }
     try {
-      const img = win.document.querySelector('img')
+      const img = win.document.querySelector('img') as HTMLImageElement | null
       if (!img) {
         done()
         return
@@ -90,7 +90,9 @@ function waitForStickerImage(win: Window): Promise<void> {
       }
       img.addEventListener('load', done, { once: true })
       img.addEventListener('error', done, { once: true })
-      window.setTimeout(done, 4000)
+      const src = (img.src || '').trim()
+      const fastSrc = src.startsWith('blob:') || src.startsWith('data:')
+      window.setTimeout(done, fastSrc ? 250 : 1200)
     } catch {
       done()
     }

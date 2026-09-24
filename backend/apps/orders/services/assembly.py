@@ -1114,19 +1114,25 @@ def bind_marking_and_print(
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
-  from apps.integrations.tasks import bind_order_marking_wb_task
+  try:
+    _push_marking_code_to_wb(order, normalized, user=user)
+  except AssemblyError:
+    raise
 
-  bind_order_marking_wb_task.delay(
-    order.id,
-    normalized,
-    user.id if getattr(user, "is_authenticated", False) else None,
-  )
+  seller_id = seller.pk
+
+  def _enqueue_marking_verify() -> None:
+    from apps.integrations.tasks import verify_seller_marking_codes
+
+    verify_seller_marking_codes.apply_async((seller_id,), countdown=2)
+
+  transaction.on_commit(_enqueue_marking_verify)
 
   AuditLog.objects.create(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.MARKING,
-    message=f"ЧЗ сохранён — заказ WB #{order.wb_order_id}, отправка в WB в фоне",
+    message=f"ЧЗ принят CRM и отправлен в WB — заказ #{order.wb_order_id}",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
@@ -1137,7 +1143,7 @@ def bind_marking_and_print(
     "immediate_verify": False,
     "message": (
       f"ЧЗ принят CRM для заказа #{order.wb_order_id}. "
-      "Печатайте стикер. Отправка в WB и проверка — в фоне."
+      "Печатайте стикер. Проверка WB — в фоне каждые ~5 секунд."
     ),
   }
 

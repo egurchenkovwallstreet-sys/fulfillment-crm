@@ -895,7 +895,7 @@ class AssemblyScanPrintView(APIView):
 
 
 class AssemblyBindMarkingView(APIView):
-  """Скан DataMatrix → моментальная печать; привязка ЧЗ в WB — в фоне (Celery)."""
+  """Скан DataMatrix → сохранение в CRM + PUT в WB → печать; проверка meta — Celery."""
   permission_classes = [IsAuthenticated, IsManager]
 
   def post(self, request, seller_id):

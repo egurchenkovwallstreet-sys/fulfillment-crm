@@ -42,13 +42,14 @@ class BindMarkingStrictPrintTest(TestCase):
       sticker_file="aGVsbG8=",
     )
 
-  @patch("apps.integrations.tasks.bind_order_marking_wb_task.delay")
+  @patch("apps.integrations.tasks.verify_seller_marking_codes.apply_async")
+  @patch("apps.orders.services.assembly._push_marking_code_to_wb")
   @patch(
     "apps.warehouse.services.stock_deduction.deduct_stock_for_sticker_print",
     return_value={"deducted": True},
   )
   @patch("apps.sellers.services.sticker_billing.record_billing_on_sticker_print")
-  def test_bind_marking_queues_wb_after_crm_save(self, _billing, _stock, mock_delay):
+  def test_bind_marking_sends_wb_on_scan(self, _billing, _stock, mock_push, mock_verify):
     code = "0104600000000010215ABC1234567890"
     result = bind_marking_and_print(
       self.seller,
@@ -59,7 +60,7 @@ class BindMarkingStrictPrintTest(TestCase):
 
     self.assertEqual(result["action"], "print")
     self.assertFalse(result["immediate_verify"])
-    mock_delay.assert_called_once()
+    mock_push.assert_called_once()
 
     self.order.refresh_from_db()
     self.assertEqual(self.order.status, Order.Status.LABEL_PRINTED)
@@ -67,13 +68,14 @@ class BindMarkingStrictPrintTest(TestCase):
     self.assertEqual(self.order.marking_verify_status, "pending")
     self.assertFalse(self.order.marking_bound)
 
-  @patch("apps.integrations.tasks.bind_order_marking_wb_task.delay")
+  @patch("apps.integrations.tasks.verify_seller_marking_codes.apply_async")
+  @patch("apps.orders.services.assembly._push_marking_code_to_wb")
   @patch(
     "apps.warehouse.services.stock_deduction.deduct_stock_for_sticker_print",
     return_value={"deducted": True},
   )
   @patch("apps.sellers.services.sticker_billing.record_billing_on_sticker_print")
-  def test_bind_marking_rejects_cyrillic_before_queue(self, _billing, _stock, mock_delay):
+  def test_bind_marking_rejects_cyrillic_before_wb(self, _billing, _stock, mock_push, _verify):
     with self.assertRaises(AssemblyError) as ctx:
       bind_marking_and_print(
         self.seller,
@@ -82,4 +84,4 @@ class BindMarkingStrictPrintTest(TestCase):
         user=self.user,
       )
     self.assertEqual(ctx.exception.code, "invalid_marking_code")
-    mock_delay.assert_not_called()
+    mock_push.assert_not_called()

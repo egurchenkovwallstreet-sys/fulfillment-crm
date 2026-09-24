@@ -262,6 +262,7 @@ def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | 
     return {"success": False, "order_id": order.id, "error": str(exc)}
 
   logger.info("Background WB marking bind ok order=%s wb=%s", order.id, order.wb_order_id)
+  verify_seller_marking_codes.apply_async((order.seller_id,), countdown=2)
   return {"success": True, "order_id": order.id}
 
 

@@ -829,7 +829,7 @@ function WbAssemblySellerPage() {
       setPrintHolderMessage(preopened ?? null, 'Стикер пустой — нечего печатать')
       throw new Error('Стикер пустой — нечего печатать')
     }
-    return printFbsSticker(payload, true, preopened, onPrintScheduled, true)
+    return printFbsSticker(payload, true, preopened, onPrintScheduled)
   }
 
   /** Стикер только с сервера / кэша того же order.id — без подстановки чужого заказа. */
@@ -2134,29 +2134,31 @@ function WbAssemblySellerPage() {
     markingBufferRef.current = ''
     setMarkingValue('')
 
+    const printWin = openPrintHolder()
+    const cachedPrintOrder = orderForPrint(orderSnapshot as PrintOrder)
+    const cachedSticker = stickerPayloadForOrder(cachedPrintOrder)
+    if (!cachedSticker) {
+      closePrintHolder(printWin)
+      showScanError(
+        `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
+        'Стикер не загружен',
+        () => focusMarkingInput(),
+      )
+      markingSubmitBusyRef.current = false
+      return
+    }
+
     try {
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
 
-      const printOrder = orderForPrint(result.order)
-      const sticker = stickerPayloadForOrder(printOrder)
-      if (!sticker) {
-        showScanError(
-          `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
-          'Стикер не загружен',
-          () => focusMarkingInput(),
-        )
-        openMarkingScan(orderSnapshot)
-        return
+      const printOrder = {
+        ...orderForPrint(result.order),
+        sticker_file: cachedSticker,
       }
 
-      const printWin = openPrintHolder()
       try {
-        await spoolStickerPrintOnce(
-          { ...printOrder, sticker_file: sticker },
-          printWin,
-          resumeBarcodeScanAfterPrint,
-        )
+        await spoolStickerPrintOnce(printOrder, printWin, resumeBarcodeScanAfterPrint)
       } catch (printErr) {
         showScanError(
           printErr instanceof Error ? printErr.message : 'Стикер не напечатан',

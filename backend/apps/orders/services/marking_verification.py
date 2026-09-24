@@ -451,6 +451,18 @@ def verify_marking_orders(
         len(orders),
         wb_ids[:10],
       )
+      from apps.integrations.tasks import bind_order_marking_wb_task
+
+      for order in orders:
+        if (order.marking_verify_status or "").strip() != VERIFY_PENDING:
+          continue
+        if not (order.marking_code or "").strip():
+          continue
+        cache_key = f"marking_repush:{order.id}"
+        if cache.get(cache_key):
+          continue
+        cache.set(cache_key, 1, REPUSH_CACHE_SEC)
+        bind_order_marking_wb_task.delay(order.id, order.marking_code, None)
       return []
     AuditLog.objects.create(
       user=user,
