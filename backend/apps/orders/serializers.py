@@ -169,6 +169,8 @@ class OrderPrintSerializer(serializers.ModelSerializer):
   requires_marking = serializers.SerializerMethodField()
   marking_bound = serializers.BooleanField(read_only=True)
   can_send_to_delivery = serializers.SerializerMethodField()
+  wb_supply_id = serializers.SerializerMethodField()
+  supply_created_at = serializers.SerializerMethodField()
 
   class Meta:
     model = Order
@@ -189,6 +191,8 @@ class OrderPrintSerializer(serializers.ModelSerializer):
       "marking_verify_status",
       "marking_verify_error",
       "can_send_to_delivery",
+      "wb_supply_id",
+      "supply_created_at",
     )
 
   def get_cell_number(self, obj):
@@ -206,6 +210,34 @@ class OrderPrintSerializer(serializers.ModelSerializer):
   def get_can_send_to_delivery(self, obj):
     from apps.orders.services.supply_flow import order_can_send_to_delivery
     return order_can_send_to_delivery(obj)
+
+  def get_wb_supply_id(self, obj):
+    supply = self._primary_supply(obj)
+    return (supply.wb_supply_id or "").strip() if supply else ""
+
+  def get_supply_created_at(self, obj):
+    supply = self._primary_supply(obj)
+    if not supply or not supply.created_at:
+      return None
+    return supply.created_at.isoformat()
+
+  def _primary_supply(self, obj):
+    supplies = getattr(obj, "_prefetched_objects_cache", {}).get("supplies")
+    if supplies is not None:
+      items = list(supplies)
+    else:
+      items = list(obj.supplies.all())
+    if not items:
+      return None
+    active = (
+      Supply.Status.FORMING,
+      Supply.Status.READY,
+      Supply.Status.CONFIRMED,
+    )
+    for supply in sorted(items, key=lambda item: item.updated_at, reverse=True):
+      if supply.status in active and (supply.wb_supply_id or "").strip():
+        return supply
+    return max(items, key=lambda item: item.updated_at)
 
 
 class PickListItemSerializer(serializers.ModelSerializer):

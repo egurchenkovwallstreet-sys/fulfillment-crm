@@ -53,6 +53,8 @@ export interface AssemblyOrder {
   can_send_to_delivery: boolean
   can_move_to_new_supply?: boolean
   can_print_label?: boolean
+  wb_supply_id?: string
+  supply_created_at?: string | null
   delivery_method_id?: number | null
   carriage_id?: number | null
   warehouse_quantity: number | null
@@ -172,6 +174,8 @@ export interface PrintOrder {
   marking_verify_error?: string
   cell_number?: string
   can_send_to_delivery: boolean
+  wb_supply_id?: string
+  supply_created_at?: string | null
 }
 
 export interface StockDeductionInfo {

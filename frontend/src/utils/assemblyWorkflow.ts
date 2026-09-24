@@ -20,7 +20,7 @@ export const WORKFLOW_STEPS = [
   {
     id: 3 as WorkflowStepId,
     title: 'Честный знак',
-    hint: 'Скан DataMatrix → привязка к стикеру в WB → сразу печать. Заказ сразу в «Готовые»',
+    hint: 'Скан DataMatrix → печать стикера. Отправка ЧЗ в WB — в фоне',
   },
   {
     id: 4 as WorkflowStepId,

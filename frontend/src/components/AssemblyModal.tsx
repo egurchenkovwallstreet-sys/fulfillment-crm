@@ -20,6 +20,15 @@ export type AssemblyModalState =
       confirmLabel: string
       onConfirm: () => void
     }
+  | {
+      kind: 'marking-bound'
+      title: string
+      message: string
+      resetLabel: string
+      onReset: () => void
+      reprintLabel?: string
+      onReprint?: () => void
+    }
 
 type Props = {
   modal: AssemblyModalState
@@ -115,7 +124,37 @@ export function AssemblyModal({ modal, onClose, loading = false }: Props) {
           <p className="assembly-modal__hint">Нажмите «Понятно» или клавишу Enter на клавиатуре</p>
         )}
         <div className="assembly-modal__actions">
-          {modal.kind === 'confirm' ? (
+          {modal.kind === 'marking-bound' ? (
+            <>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={loading}
+                onClick={() => {
+                  modal.onReset()
+                  onClose()
+                }}
+              >
+                {modal.resetLabel}
+              </button>
+              {modal.onReprint && modal.reprintLabel ? (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={loading}
+                  onClick={() => {
+                    modal.onReprint?.()
+                    onClose()
+                  }}
+                >
+                  {modal.reprintLabel}
+                </button>
+              ) : null}
+              <button type="button" className="btn btn--ghost" onClick={onClose} disabled={loading}>
+                Закрыть
+              </button>
+            </>
+          ) : modal.kind === 'confirm' ? (
             <>
               <button
                 type="button"

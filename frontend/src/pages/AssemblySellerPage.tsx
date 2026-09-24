@@ -79,7 +79,6 @@ import {
   printSupplySticker,
   refreshPrintBridgeStatus,
   setPrintHolderMessage,
-  warmFbsPrintWindow,
   preloadFbsSticker,
   type PrintChannel,
 } from '../utils/printService'
@@ -529,11 +528,6 @@ function WbAssemblySellerPage() {
 
   useEffect(() => {
     if (stage !== 'confirm') return
-    warmFbsPrintWindow()
-  }, [stage])
-
-  useEffect(() => {
-    if (stage !== 'confirm') return
     const onWindowFocus = () => {
       if (markingUiOpen || scanBusyRef.current) return
       focusBarcodeInput()
@@ -786,7 +780,7 @@ function WbAssemblySellerPage() {
       setPrintHolderMessage(preopened ?? null, 'Стикер пустой — нечего печатать')
       throw new Error('Стикер пустой — нечего печатать')
     }
-    return printFbsSticker(payload, true, preopened, onPrintScheduled, true)
+    return printFbsSticker(payload, false, preopened, onPrintScheduled, true)
   }
 
   /** Стикер только с сервера / кэша того же order.id — без подстановки чужого заказа. */
@@ -847,19 +841,56 @@ function WbAssemblySellerPage() {
     })
   }
 
+  function formatSupplyDate(iso?: string | null): string {
+    if (!iso) return '—'
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   function showMarkingAlreadyBoundModal(order: AssemblyOrder | PrintOrder, onDone?: () => void) {
     const stickerNo = formatStickerNumber(order)
+    const supplyId = (order.wb_supply_id || '').trim()
+    const supplyDate = formatSupplyDate(order.supply_created_at)
     setModal({
-      kind: 'confirm',
+      kind: 'marking-bound',
       title: 'ЧЗ уже привязан',
       message:
-        'Этот код Честного знака уже привязан к стикеру заказа.\n\n' +
+        'Этот код Честного знака уже есть в CRM и привязан к другому заказу.\n\n' +
         `Заказ WB #${order.wb_order_id}` +
-        (stickerNo ? `\nНомер стикера: ${stickerNo}` : '') +
-        '\n\nПовторная автопечать не выполняется. Можно распечатать стикер вручную.',
-      confirmLabel: 'Распечатать стикер',
-      onConfirm: () => void runReprintSticker(order.id, onDone),
+        (stickerNo ? `\nСтикер: ${stickerNo}` : '') +
+        (supplyId ? `\nПоставка WB: ${supplyId}` : '') +
+        `\nДата поставки: ${supplyDate}` +
+        '\n\nНажмите «Сброс ЧЗ», чтобы удалить код из CRM и WB и собрать заново.',
+      resetLabel: 'Сброс ЧЗ',
+      onReset: () => void runResetBoundMarking(order.id, onDone),
+      reprintLabel: 'Распечатать стикер',
+      onReprint: () => void runReprintSticker(order.id, onDone),
     })
+  }
+
+  async function runResetBoundMarking(orderId: number, onDone?: () => void) {
+    if (!id) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await resetAssemblyMarking(id, [orderId])
+      noticeOk(result.message, 'Сброс ЧЗ')
+      await refreshMarkingStatus()
+      await load({ silent: true })
+      resetScanFlow(true)
+      onDone?.()
+    } catch (err) {
+      noticeFail('Сброс ЧЗ', err, 'Не удалось сбросить ЧЗ')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function runReprintSticker(orderId: number, onDone?: () => void) {
@@ -1904,7 +1935,6 @@ function WbAssemblySellerPage() {
     scanBusyRef.current = true
     barcodeApiInFlightRef.current = true
     setScanBusy(true)
-    const printWin = openPrintHolder()
 
     try {
       const result = await scanOrderBarcode(id, barcode)
@@ -1912,7 +1942,6 @@ function WbAssemblySellerPage() {
       cacheOrderSticker(result.order)
 
       if (result.action === 'await_marking' || result.requires_marking) {
-        closePrintHolder(printWin)
         if (shouldOpenMarkingForOrder(result.order)) {
           openMarkingScan(
             result.order,
@@ -1926,9 +1955,9 @@ function WbAssemblySellerPage() {
       }
 
       const printOrder = orderForPrint(result.order)
+      const printWin = openPrintHolder()
       await completeBarcodePrintFlow(printOrder, printWin)
     } catch (err) {
-      closePrintHolder(printWin)
       const errOrder =
         err instanceof ApiError && err.order && typeof err.order === 'object'
           ? (err.order as AssemblyOrder)
@@ -2018,76 +2047,68 @@ function WbAssemblySellerPage() {
     setError('')
     markingBufferRef.current = ''
     setMarkingValue('')
-    resetScanFlow(true)
 
-    const sticker = stickerPayloadForOrder(orderSnapshot)
-    const printWin = warmFbsPrintWindow()
+    try {
+      const result = await bindMarking(id, orderId, code)
+      cacheOrderSticker(result.order)
+      resetScanFlow(true)
 
-    if (!autoPrintedOrderIdsRef.current.has(orderId)) {
+      const printOrder = orderForPrint(result.order)
+      const sticker = stickerPayloadForOrder(printOrder)
       if (!sticker) {
-        markingSubmitBusyRef.current = false
         showScanError(
-          `WB не отдал стикер для заказа #${orderSnapshot.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
+          `WB не отдал стикер для заказа #${printOrder.wb_order_id}. Дождитесь фоновой подгрузки или нажмите «Подтянуть стикеры».`,
           'Стикер не загружен',
           () => focusMarkingInput(),
         )
         openMarkingScan(orderSnapshot)
         return
       }
+
+      const printWin = openPrintHolder()
       try {
         await spoolStickerPrintOnce(
-          { ...orderSnapshot, sticker_file: sticker } as PrintOrder,
+          { ...printOrder, sticker_file: sticker },
           printWin,
           resumeBarcodeScanAfterPrint,
         )
       } catch (printErr) {
-        markingSubmitBusyRef.current = false
         showScanError(
           printErr instanceof Error ? printErr.message : 'Стикер не напечатан',
           'Стикер не напечатан',
           () => resumeBarcodeScanAfterPrint(),
         )
+        await refreshAssemblyUi()
         return
       }
-    } else {
-      closePrintHolder(printWin)
-      resumeBarcodeScanAfterPrint()
-    }
-
-    void bindMarking(id, orderId, code)
-      .then(() => refreshAssemblyUi())
-      .then(() => {
-        window.setTimeout(() => focusBarcodeInput(), 0)
-        window.setTimeout(() => focusBarcodeInput(), 250)
-      })
-      .catch((err) => {
-        const boundOrder =
-          err instanceof ApiError && err.order && typeof err.order === 'object'
-            ? (err.order as AssemblyOrder)
-            : orderSnapshot
-        if (err instanceof ApiError && err.code === 'marking_already_bound' && boundOrder) {
-          showMarkingAlreadyBoundModal(boundOrder as PrintOrder, () => resumeBarcodeScanAfterPrint())
-          void refreshAssemblyUi()
-          return
-        }
-        if (err instanceof ApiError && err.code === 'already_printed') {
-          void refreshAssemblyUi()
-          return
-        }
-        showScanError(
-          assemblyErrorMessage(
-            err,
-            'Стикер напечатан. Привязка ЧЗ в WB — в фоне; при ошибке смотрите «Ошибки ЧЗ».',
-            orderSnapshot,
-          ),
-          assemblyScanErrorTitle(err, 'Ошибка ЧЗ'),
-          () => resumeBarcodeScanAfterPrint(),
-        )
+      setStage('confirm')
+      await refreshAssemblyUi()
+      void runMarkingVerify({ silent: true, forceRecheck: false })
+    } catch (err) {
+      resetScanFlow(true)
+      const boundOrder =
+        err instanceof ApiError && err.order && typeof err.order === 'object'
+          ? (err.order as AssemblyOrder)
+          : orderSnapshot
+      if (err instanceof ApiError && err.code === 'marking_already_bound' && boundOrder) {
+        showMarkingAlreadyBoundModal(boundOrder as PrintOrder, () => resumeBarcodeScanAfterPrint())
         void refreshAssemblyUi()
-      })
-      .finally(() => {
-        markingSubmitBusyRef.current = false
-      })
+        return
+      }
+      if (err instanceof ApiError && err.code === 'already_printed') {
+        await refreshAssemblyUi()
+        return
+      }
+      showScanError(
+        assemblyErrorMessage(err, 'Не удалось привязать ЧЗ', orderSnapshot),
+        assemblyScanErrorTitle(err, 'Ошибка ЧЗ'),
+        () => focusMarkingInput(),
+      )
+      openMarkingScan(orderSnapshot)
+      void refreshAssemblyUi()
+    } finally {
+      markingSubmitBusyRef.current = false
+    }
   }
 
   async function handleReplaceOrderFromList(order: AssemblyOrder) {

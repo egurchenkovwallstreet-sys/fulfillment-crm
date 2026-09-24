@@ -173,6 +173,7 @@ def _find_order_by_bound_marking(seller: Seller, marking_code: str) -> Order | N
     .exclude(marking_verify_status="error")
     .exclude(status=Order.Status.CANCELLED)
     .select_related("product")
+    .prefetch_related("supplies")
     .first()
   )
 
@@ -974,7 +975,7 @@ def bind_marking_and_print(
   *,
   user=None,
 ) -> dict:
-  """Скан ЧЗ → синхронная привязка в WB → печать стикера. Доставка только после verified WB."""
+  """Скан DataMatrix → сохранение ЧЗ в CRM → печать стикера; отправка в WB — Celery."""
   try:
     order = Order.objects.select_related("product").get(
       pk=order_id,
@@ -1094,11 +1095,27 @@ def bind_marking_and_print(
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.LABEL_PRINT,
-    message=f"Печать стикера после ЧЗ — заказ WB #{order.wb_order_id}",
+    message=f"Стикер после ЧЗ — заказ WB #{order.wb_order_id}",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 
-  _push_marking_code_to_wb(order, normalized, user=user)
+  from apps.integrations.tasks import bind_order_marking_wb_task
+  from apps.orders.services.assembly_queue import queue_last_pick_list_marking_verify
+
+  bind_order_marking_wb_task.delay(
+    order.id,
+    normalized,
+    user.id if getattr(user, "is_authenticated", False) else None,
+  )
+  queue_last_pick_list_marking_verify(seller)
+
+  AuditLog.objects.create(
+    user=user,
+    seller=seller,
+    action_type=AuditLog.ActionType.MARKING,
+    message=f"ЧЗ сохранён — заказ WB #{order.wb_order_id}, отправка в WB в фоне",
+    details={"order_id": order.id, "barcode": order.barcode},
+  )
 
   return {
     "action": "print",
@@ -1106,8 +1123,8 @@ def bind_marking_and_print(
     "stock": stock_info,
     "immediate_verify": True,
     "message": (
-      f"ЧЗ отправлен в WB для заказа #{order.wb_order_id}. "
-      "Стикер к печати. Доставка — только после подтверждения WB."
+      f"ЧЗ принят CRM для заказа #{order.wb_order_id}. "
+      "Печатайте стикер. Отправка в WB и проверка — в фоне."
     ),
   }
 
@@ -1187,22 +1204,19 @@ def reset_assembly_marking_for_pick_list(
     raise AssemblyError("Нет активного листа подбора", code="no_pick_list")
 
   pick_list_ids = {pl.id for pl in pick_lists}
-  qs = Order.objects.filter(seller=seller, pick_list_id__in=pick_list_ids).select_related("product")
   if order_ids:
-    qs = qs.filter(pk__in=order_ids)
+    qs = Order.objects.filter(seller=seller, pk__in=order_ids).select_related("product")
+  else:
+    qs = Order.objects.filter(seller=seller, pick_list_id__in=pick_list_ids).select_related("product")
 
   reset_ids: list[int] = []
   skipped = 0
   errors: list[dict] = []
 
+  explicit_ids = set(order_ids or [])
+
   for order in qs:
-    if not order_in_assembly(order):
-      skipped += 1
-      continue
     if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
-      skipped += 1
-      continue
-    if not order_on_active_pick_list(order):
       skipped += 1
       continue
 
@@ -1210,9 +1224,17 @@ def reset_assembly_marking_for_pick_list(
       Order.Status.LABEL_PRINTED,
       Order.Status.MARKED,
     )
-    if not needs_reset and order.status == Order.Status.IN_PICKING:
+    if not needs_reset:
       skipped += 1
       continue
+
+    if order.id not in explicit_ids:
+      if not order_in_assembly(order):
+        skipped += 1
+        continue
+      if not order_on_active_pick_list(order):
+        skipped += 1
+        continue
 
     try:
       _reset_assembly_marking_pick_order(order, seller, user=user)
