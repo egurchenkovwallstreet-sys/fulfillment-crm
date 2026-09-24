@@ -208,6 +208,8 @@ function WbAssemblySellerPage() {
   const autoPrintedOrderIdsRef = useRef<Set<number>>(new Set())
   const markingSubmitBusyRef = useRef(false)
   const loadBackgroundTimerRef = useRef<number | null>(null)
+  const loadDeferredUntilRef = useRef(0)
+  const loadInFlightRef = useRef(false)
 
   const [data, setData] = useState<AssemblySellerDetail | null>(
     () => readAssemblySellerCache(id, 'new'),
@@ -275,10 +277,15 @@ function WbAssemblySellerPage() {
     const pickStage = opts?.stageKey ?? stage
     const silent = opts?.silent ?? true
     if (silent) {
+      if (Date.now() < loadDeferredUntilRef.current) return
+      if (loadInFlightRef.current) return
+    }
+    if (silent) {
       setRefreshing(true)
     } else {
       setError('')
     }
+    loadInFlightRef.current = true
     try {
       const fresh = await fetchAssemblySeller(id, pickStage || undefined)
       setData(fresh)
@@ -307,11 +314,52 @@ function WbAssemblySellerPage() {
         showError('Загрузка сборки', msg)
       }
     } finally {
+      loadInFlightRef.current = false
       if (silent) {
         setRefreshing(false)
       }
     }
   }, [id, stage, showError, warmStickerCacheFromOrders])
+
+  function assemblyOrderPatchFromApi(
+    apiOrder: PrintOrder | AssemblyOrder,
+  ): Partial<AssemblyOrder> & { id: number } {
+    return {
+      id: apiOrder.id,
+      status: apiOrder.status || 'label_printed',
+      status_display: apiOrder.status_display || 'Стикер напечатан',
+      has_sticker: apiOrder.has_sticker ?? true,
+      sticker_file: apiOrder.sticker_file,
+      sticker_part_a: apiOrder.sticker_part_a,
+      sticker_part_b: apiOrder.sticker_part_b,
+      marking_verify_status: apiOrder.marking_verify_status,
+      marking_verify_error: apiOrder.marking_verify_error,
+      marking_bound: apiOrder.marking_bound,
+      requires_marking: apiOrder.requires_marking,
+      can_send_to_delivery: apiOrder.can_send_to_delivery,
+    }
+  }
+
+  function patchLocalOrderAfterPrint(apiOrder: PrintOrder | AssemblyOrder) {
+    const patch = assemblyOrderPatchFromApi(apiOrder)
+    const merge = (order: AssemblyOrder): AssemblyOrder =>
+      order.id === patch.id ? { ...order, ...patch } : order
+    setData((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        orders: prev.orders?.map(merge),
+        active_supplies: prev.active_supplies?.map((supply) => ({
+          ...supply,
+          orders: supply.orders?.map(merge),
+        })),
+      }
+    })
+  }
+
+  function blockBackgroundListRefresh(delayMs = 12_000) {
+    loadDeferredUntilRef.current = Date.now() + delayMs
+  }
 
   const refreshAssemblyStickersInBackground = useCallback(() => {
     if (!id) return
@@ -504,8 +552,8 @@ function WbAssemblySellerPage() {
       if (chzVerifyFailStreakRef.current >= 3) {
         setChzVerifyNotice(
           err instanceof Error
-            ? `${err.message} CRM проверит ЧЗ в фоне каждые ~10 секунд. Нажмите «Проверить ЧЗ» для ответа сразу.`
-            : 'WB не ответил по ЧЗ. CRM проверит в фоне каждые ~10 секунд.',
+            ? `${err.message} CRM проверит ЧЗ в фоне каждые ~5 секунд. Нажмите «Проверить ЧЗ» для ответа сразу.`
+            : 'WB не ответил по ЧЗ. CRM проверит в фоне каждые ~5 секунд.',
         )
       }
       return null
@@ -824,9 +872,28 @@ function WbAssemblySellerPage() {
     scheduleBackgroundOrdersRefresh()
   }
 
-  function scheduleBackgroundOrdersRefresh(delayMs = 1500) {
+  function scheduleBackgroundOrdersRefresh(delayMs = 8000) {
     if (loadBackgroundTimerRef.current) {
       window.clearTimeout(loadBackgroundTimerRef.current)
+    }
+    if (Date.now() < loadDeferredUntilRef.current) {
+      const wait = loadDeferredUntilRef.current - Date.now() + 400
+      loadBackgroundTimerRef.current = window.setTimeout(
+        () => scheduleBackgroundOrdersRefresh(delayMs),
+        wait,
+      )
+      return
+    }
+    if (
+      scanBusyRef.current
+      || markingSubmitBusyRef.current
+      || markingLockRef.current
+    ) {
+      loadBackgroundTimerRef.current = window.setTimeout(
+        () => scheduleBackgroundOrdersRefresh(delayMs),
+        2000,
+      )
+      return
     }
     loadBackgroundTimerRef.current = window.setTimeout(() => {
       loadBackgroundTimerRef.current = null
@@ -836,6 +903,8 @@ function WbAssemblySellerPage() {
 
   async function completeBarcodePrintFlow(order: PrintOrder, preopened?: Window | null) {
     await spoolStickerPrintOnce(order, preopened, resumeBarcodeScanAfterPrint)
+    patchLocalOrderAfterPrint(order)
+    blockBackgroundListRefresh()
     setStage('confirm')
     void refreshMarkingStatus()
     scheduleBackgroundOrdersRefresh()
@@ -1649,7 +1718,7 @@ function WbAssemblySellerPage() {
           item.status === 'error' && item.error
             ? `${item.error}\n\nЕсли сканер передал код не полностью — нажмите «Сброс ЧЗ» и отсканируйте DataMatrix заново.`
             : item.status === 'pending'
-              ? 'WB ещё не дал финальный ответ. CRM проверит пачкой в фоне каждые ~10 секунд.'
+              ? 'WB ещё не дал финальный ответ. CRM проверит пачкой в фоне каждые ~5 секунд.'
               : 'Честный знак принят WB — заказ можно передавать в доставку.',
       })
       if (item.status === 'error') {
@@ -2068,7 +2137,6 @@ function WbAssemblySellerPage() {
     try {
       const result = await bindMarking(id, orderId, code)
       cacheOrderSticker(result.order)
-      resetScanFlow(true)
 
       const printOrder = orderForPrint(result.order)
       const sticker = stickerPayloadForOrder(printOrder)
@@ -2099,6 +2167,8 @@ function WbAssemblySellerPage() {
         return
       }
       setStage('confirm')
+      patchLocalOrderAfterPrint(result.order)
+      blockBackgroundListRefresh()
       void refreshMarkingStatus()
       scheduleBackgroundOrdersRefresh()
     } catch (err) {
@@ -2743,7 +2813,7 @@ function WbAssemblySellerPage() {
           {(waitingWbCount > 0 || chzVerifyNotice) && (
             <p className="assembly-chz-notice">
               {chzVerifyNotice ||
-                `WB проверяет ЧЗ у ${waitingWbCount} заказ(ов). Проверка идёт в фоне каждые ~10 секунд.`}
+                `WB проверяет ЧЗ у ${waitingWbCount} заказ(ов). Проверка идёт в фоне каждые ~5 секунд.`}
             </p>
           )}
         </>

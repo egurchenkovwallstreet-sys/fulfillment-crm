@@ -503,6 +503,24 @@ def _order_requires_marking(
   return False
 
 
+def refresh_assembly_marking_flags(seller: Seller, orders: list[Order]) -> int:
+  """После «На сборку»: обновить requires_marking у товаров из WB (фон, не блокирует скан)."""
+  checked = 0
+  seen_product_ids: set[int] = set()
+  for order in orders:
+    if order.product_id and order.product_id in seen_product_ids:
+      continue
+    try:
+      _order_requires_marking(order, seller=seller, refresh_from_wb=True)
+    except Exception:
+      logger.exception("marking flag refresh failed order=%s", order.id)
+      continue
+    checked += 1
+    if order.product_id:
+      seen_product_ids.add(order.product_id)
+  return checked
+
+
 def _sticker_item_order_id(item: dict) -> int | None:
   for key in ("orderId", "order_id", "id"):
     raw = item.get(key)

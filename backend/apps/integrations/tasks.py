@@ -184,11 +184,17 @@ def fetch_assembly_stickers_task(
     fetched,
     len(orders),
   )
+
+  from apps.orders.services.assembly import refresh_assembly_marking_flags
+
+  marking_checked = refresh_assembly_marking_flags(seller, orders)
+
   return {
     "success": True,
     "fetched": fetched,
     "requested": len(orders),
     "still_missing": len(still_missing),
+    "marking_checked": marking_checked,
   }
 
 
@@ -280,7 +286,7 @@ def verify_seller_marking_codes(seller_id: int):
 
 @shared_task(queue="sync")
 def verify_pending_marking_codes():
-  """Каждые 10 сек — пакетная проверка pending/verified ЧЗ у всех селлеров."""
+  """Каждые 5 сек — пакетная проверка pending/verified ЧЗ у всех селлеров."""
   from apps.orders.models import Order
 
   seller_ids = list(
