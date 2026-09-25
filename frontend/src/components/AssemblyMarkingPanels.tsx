@@ -91,7 +91,6 @@ export function AssemblyQueueListModal({
   verifyingChzOrderId = null,
 }: AssemblyQueueListModalProps) {
   const markingOrders = orders.filter((order) => order.requires_marking)
-  const markingCount = markingOrders.length
   const resetMarkingOrders = markingOrders.filter((order) => orderHasMarkingToReset(order))
   const resetMarkingCount = resetMarkingOrders.length
   const title =
