@@ -1244,7 +1244,7 @@ def reset_assembly_marking_for_pick_list(
   order_ids: list[int] | None = None,
   user=None,
 ) -> dict:
-  """Сброс ЧЗ: CRM + WB. Из модалки «На сборке» — по списку order_ids без лишних фильтров."""
+  """Сброс ЧЗ: только CRM. Из модалки «На сборке» — по списку order_ids."""
   from apps.orders.services.assembly_queue import order_in_assembly
   from apps.orders.services.marking_cleanup import _order_has_marking_data
   from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
@@ -1318,20 +1318,7 @@ def reset_assembly_marking_for_pick_list(
 
 
 def _reset_assembly_marking_pick_order(order: Order, seller: Seller, *, user=None) -> None:
-  """Снять ЧЗ в WB/CRM, оставить заказ в листе подбора для повторного скана."""
-  had_code = bool((order.marking_code or "").strip())
-
-  if had_code:
-    client = _get_client(seller)
-    try:
-      client.delete_order_meta(order.wb_order_id, key="sgtin")
-    except WBApiError as exc:
-      raise _marking_error(
-        f"WB #{order.wb_order_id}: не удалось снять ЧЗ — {parse_wb_marking_error(exc)}",
-        order,
-        code="wb_unbind_failed",
-      ) from exc
-
+  """Снять ЧЗ только в CRM — WB не трогаем. Заказ остаётся в листе для повторного скана."""
   order.marking_code = ""
   order.marking_bound = False
   order.marking_verify_status = ""
@@ -1354,7 +1341,7 @@ def _reset_assembly_marking_pick_order(order: Order, seller: Seller, *, user=Non
     user=user,
     seller=seller,
     action_type=AuditLog.ActionType.ASSEMBLY,
-    message=f"Сброс ЧЗ — заказ WB #{order.wb_order_id} (лист подбора)",
+    message=f"Сброс ЧЗ в CRM — заказ WB #{order.wb_order_id} (лист подбора)",
     details={"order_id": order.id, "barcode": order.barcode},
   )
 

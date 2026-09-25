@@ -1,5 +1,3 @@
-from unittest.mock import patch
-
 from django.test import TestCase
 
 from apps.accounts.models import Fulfillment, User
@@ -60,9 +58,7 @@ class ResetAssemblyMarkingModalTest(TestCase):
       sticker_part_b="222",
     )
 
-  @patch("apps.orders.services.assembly._get_client")
-  def test_reset_by_modal_order_ids_without_pick_list_gate(self, mock_client):
-    mock_client.return_value.delete_order_meta.return_value = None
+  def test_reset_by_modal_order_ids_crm_only(self):
     result = reset_assembly_marking_for_pick_list(
       self.seller,
       order_ids=[self.order.id],
@@ -73,8 +69,7 @@ class ResetAssemblyMarkingModalTest(TestCase):
     self.assertEqual(self.order.marking_code, "")
     self.assertEqual(self.order.status, Order.Status.ASSEMBLED)
 
-  @patch("apps.orders.services.assembly._get_client")
-  def test_reset_skips_order_without_marking_data(self, mock_client):
+  def test_reset_skips_order_without_marking_data(self):
     fresh = Order.objects.create(
       seller=self.seller,
       wb_order_id=800002,
@@ -91,4 +86,3 @@ class ResetAssemblyMarkingModalTest(TestCase):
         user=self.user,
       )
     self.assertEqual(ctx.exception.code, "nothing_to_reset")
-    mock_client.assert_not_called()

@@ -1170,7 +1170,7 @@ function WbAssemblySellerPage() {
         (stickerNo ? `\nСтикер: ${stickerNo}` : '') +
         (supplyId ? `\nПоставка WB: ${supplyId}` : '') +
         `\nДата поставки: ${supplyDate}` +
-        '\n\nНажмите «Сброс ЧЗ», чтобы удалить код из CRM и WB и собрать заново.',
+        '\n\nНажмите «Сброс ЧЗ», чтобы удалить код из CRM и собрать заново.',
       resetLabel: 'Сброс ЧЗ',
       onReset: () => void runResetBoundMarking(order.id, onDone),
       reprintLabel: 'Распечатать стикер',
@@ -2518,8 +2518,8 @@ function WbAssemblySellerPage() {
     }
     const label =
       count === 1
-        ? 'Сбросить ЧЗ у выбранного заказа?\n\nКод будет удалён из CRM и WB. Повторите скан баркода и DataMatrix.'
-        : `Сбросить ЧЗ у ${count} заказов?\n\nКоды будут удалены из CRM и WB. Повторите скан баркода и DataMatrix.`
+        ? 'Сбросить ЧЗ у выбранного заказа?\n\nКод будет удалён только из CRM. Повторите скан баркода и DataMatrix.'
+        : `Сбросить ЧЗ у ${count} заказов?\n\nКоды будут удалены только из CRM. Повторите скан баркода и DataMatrix.`
     if (!window.confirm(label)) return
 
     setLoading(true)

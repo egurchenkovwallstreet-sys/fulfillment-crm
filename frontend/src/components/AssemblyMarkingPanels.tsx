@@ -125,7 +125,7 @@ export function AssemblyQueueListModal({
                 disabled={loading}
                 onClick={() => onResetMarking(resetMarkingOrders.map((order) => order.id))}
                 {...uiHint(
-                  'Снять ЧЗ в CRM и WB у заказов, где код уже был — для повторного скана (ПВЗ, возврат)',
+                  'Снять ЧЗ только в CRM у заказов, где код уже был — для повторного скана (ПВЗ, возврат)',
                 )}
               >
                 Сбросить ЧЗ ({resetMarkingCount})
