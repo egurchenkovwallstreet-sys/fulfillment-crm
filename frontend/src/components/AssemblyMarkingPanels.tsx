@@ -2,6 +2,7 @@ import type { AssemblyOrder } from '../api/assembly'
 import { ProductPhotoThumb } from './ProductPhotoThumb'
 import { formatStickerNumber } from '../utils/stickerLabel'
 import { chzStatusLabel } from '../utils/markingVerify'
+import { orderHasMarkingToReset } from '../utils/assemblyWorkflow'
 import { uiHint } from '../utils/uiHint'
 
 export type AssemblyQueuePanelKind = 'in_assembly' | 'ready' | 'errors'
@@ -91,6 +92,8 @@ export function AssemblyQueueListModal({
 }: AssemblyQueueListModalProps) {
   const markingOrders = orders.filter((order) => order.requires_marking)
   const markingCount = markingOrders.length
+  const resetMarkingOrders = markingOrders.filter((order) => orderHasMarkingToReset(order))
+  const resetMarkingCount = resetMarkingOrders.length
   const title =
     kind === 'errors'
       ? 'Ошибки Честного знака'
@@ -115,17 +118,17 @@ export function AssemblyQueueListModal({
         <div className="assembly-marking-modal__head">
           <h2 id="marking-list-title">{title}</h2>
           <div className="assembly-marking-list__head-actions">
-            {kind === 'in_assembly' && onResetMarking && markingCount > 0 && (
+            {kind === 'in_assembly' && onResetMarking && resetMarkingCount > 0 && (
               <button
                 type="button"
                 className="btn btn--small btn--secondary"
                 disabled={loading}
-                onClick={() => onResetMarking(markingOrders.map((order) => order.id))}
+                onClick={() => onResetMarking(resetMarkingOrders.map((order) => order.id))}
                 {...uiHint(
-                  'Снять сохранённый ЧЗ в CRM и WB — повторный скан баркода и DataMatrix',
+                  'Снять ЧЗ в CRM и WB у заказов, где код уже был — для повторного скана (ПВЗ, возврат)',
                 )}
               >
-                Сбросить ЧЗ ({markingCount})
+                Сбросить ЧЗ ({resetMarkingCount})
               </button>
             )}
             <button

@@ -38,6 +38,15 @@ export function orderStickerPrinted(order: AssemblyOrder): boolean {
   return order.status === 'label_printed' || order.status === 'marked'
 }
 
+/** Есть что сбросить кнопкой «Сбросить ЧЗ» (код в CRM, статус verify или напечатанный стикер). */
+export function orderHasMarkingToReset(order: AssemblyOrder): boolean {
+  if (!order.requires_marking) return false
+  if (order.marking_bound) return true
+  if ((order.marking_verify_status || '').trim()) return true
+  if ((order.marking_verify_error || '').trim()) return true
+  return orderStickerPrinted(order)
+}
+
 export function orderCanDeliver(order: AssemblyOrder): boolean {
   return Boolean(order.can_send_to_delivery)
 }

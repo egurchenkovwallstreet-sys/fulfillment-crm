@@ -1244,27 +1244,26 @@ def reset_assembly_marking_for_pick_list(
   order_ids: list[int] | None = None,
   user=None,
 ) -> dict:
-  """Сброс ЧЗ у заказов «На сборке» из активного листа подбора (повторный скан)."""
+  """Сброс ЧЗ: CRM + WB. Из модалки «На сборке» — по списку order_ids без лишних фильтров."""
   from apps.orders.services.assembly_queue import order_in_assembly
   from apps.orders.services.marking_cleanup import _order_has_marking_data
   from apps.warehouse.services.marking_lookup import resolve_product_requires_marking
   from apps.warehouse.services.stock_deduction import order_on_active_pick_list
 
-  pick_lists = _get_active_pick_lists(seller)
-  if not pick_lists or not any(pl.items.exists() for pl in pick_lists):
-    raise AssemblyError("Нет активного листа подбора", code="no_pick_list")
+  explicit_ids = set(order_ids or [])
 
-  pick_list_ids = {pl.id for pl in pick_lists}
-  if order_ids:
-    qs = Order.objects.filter(seller=seller, pk__in=order_ids).select_related("product")
+  if explicit_ids:
+    qs = Order.objects.filter(seller=seller, pk__in=explicit_ids).select_related("product")
   else:
+    pick_lists = _get_active_pick_lists(seller)
+    if not pick_lists or not any(pl.items.exists() for pl in pick_lists):
+      raise AssemblyError("Нет активного листа подбора", code="no_pick_list")
+    pick_list_ids = {pl.id for pl in pick_lists}
     qs = Order.objects.filter(seller=seller, pick_list_id__in=pick_list_ids).select_related("product")
 
   reset_ids: list[int] = []
   skipped = 0
   errors: list[dict] = []
-
-  explicit_ids = set(order_ids or [])
 
   for order in qs:
     if not resolve_product_requires_marking(order.product, order.barcode, order.seller):
@@ -1301,7 +1300,7 @@ def reset_assembly_marking_for_pick_list(
     raise AssemblyError(errors[0]["error"], code="reset_failed")
   if not reset_ids and skipped:
     raise AssemblyError(
-      "Нет заказов с ЧЗ для сброса в листе подбора",
+      "Нет заказов с ЧЗ для сброса",
       code="nothing_to_reset",
     )
 

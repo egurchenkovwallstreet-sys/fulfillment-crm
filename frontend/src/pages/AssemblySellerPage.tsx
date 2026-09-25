@@ -49,6 +49,7 @@ import {
   orderCanDeliver,
   orderChzPending,
   orderNeedsChzVerify,
+  orderHasMarkingToReset,
   orderStickerPrinted,
   assemblyDeliveryUnlocked,
   resolveWorkflowStep,
@@ -2508,9 +2509,11 @@ function WbAssemblySellerPage() {
 
   async function handleResetAssemblyMarking(orderIds?: number[]) {
     if (!id) return
-    const count = orderIds?.length ?? markingStatus.in_assembly.filter((o) => o.requires_marking).length
+    const resettable = markingStatus.in_assembly.filter((o) => orderHasMarkingToReset(o))
+    const targetIds = orderIds ?? resettable.map((o) => o.id)
+    const count = targetIds.length
     if (count < 1) {
-      showError('Сброс ЧЗ', 'Нет заказов с ЧЗ для сброса')
+      showError('Сброс ЧЗ', 'Нет заказов с сохранённым ЧЗ для сброса')
       return
     }
     const label =
@@ -2522,7 +2525,7 @@ function WbAssemblySellerPage() {
     setLoading(true)
     setError('')
     try {
-      const result = await resetAssemblyMarking(id, orderIds)
+      const result = await resetAssemblyMarking(id, targetIds)
       noticeOk(result.message, 'Сброс ЧЗ')
       setMarkingStatus((prev) => ({
         ...prev,

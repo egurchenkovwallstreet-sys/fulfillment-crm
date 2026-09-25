@@ -1,4 +1,4 @@
-"""Удаление кодов ЧЗ из БД — ежедневно в 23:59 для отгруженных заказов."""
+"""Удаление кодов ЧЗ из CRM — ежедневно в 23:59 (все отсканированные в CRM)."""
 from __future__ import annotations
 
 from django.db.models import Q
@@ -59,39 +59,42 @@ def _clear_posting_marking(posting: OzonPosting) -> bool:
   return True
 
 
-def _shipped_wb_orders_with_marking():
-  return Order.objects.exclude(marking_code="").filter(
-    Q(status__in=[Order.Status.IN_DELIVERY, Order.Status.SHIPPED])
-    | Q(in_delivery_at__isnull=False),
-  )
-
-
-def _shipped_ozon_postings_with_marking():
-  return OzonPosting.objects.filter(
-    Q(crm_stage=OzonPosting.CrmStage.IN_DELIVERY)
-    | Q(shipped_at__isnull=False),
+def _wb_orders_with_crm_marking():
+  """Все WB-заказы, где в CRM есть следы отсканированного ЧЗ."""
+  return Order.objects.filter(
+    Q(marking_code__isnull=False) & ~Q(marking_code="")
+    | Q(marking_bound=True)
+    | ~Q(marking_verify_status="")
+    | ~Q(marking_verify_error="")
   )
 
 
 def clear_daily_shipped_marking_codes() -> dict:
   """
-  Ежедневная очистка (23:59): CRM забывает ЧЗ отгруженных заказов.
-  На следующий день тот же физический код можно сканировать как новый.
+  Ежедневная очистка (23:59): CRM забывает все отсканированные ЧЗ.
+  Только поля CRM — без массовых вызовов WB. На следующий день тот же код
+  можно привязать к новому заказу (после отказа в ПВЗ и т.п.).
   """
   wb_cleared = 0
-  for order in _shipped_wb_orders_with_marking().iterator():
+  for order in _wb_orders_with_crm_marking().iterator():
     if _clear_order_marking(order):
       wb_cleared += 1
 
   ozon_cleared = 0
-  for posting in _shipped_ozon_postings_with_marking().iterator():
+  for posting in OzonPosting.objects.all().iterator():
+    if not (
+      (posting.marking_code or "").strip()
+      or posting.marking_bound
+      or posting.marking_codes
+    ):
+      continue
     if _clear_posting_marking(posting):
       ozon_cleared += 1
 
   return {
     "wb_cleared": wb_cleared,
     "ozon_cleared": ozon_cleared,
-    "mode": "daily_shipped",
+    "mode": "daily_all_crm",
   }
 
 
@@ -102,5 +105,5 @@ def clear_expired_marking_codes(*, hours: int | None = None) -> dict:
 
 
 def clear_all_delivered_marking_codes() -> dict:
-  """Срочный сброс: удалить все ЧЗ у заказов, уже переданных в доставку."""
+  """Срочный сброс всех ЧЗ в CRM (то же, что ежедневная очистка)."""
   return clear_daily_shipped_marking_codes()

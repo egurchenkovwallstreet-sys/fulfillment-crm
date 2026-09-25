@@ -321,7 +321,7 @@ def verify_pending_marking_codes():
 
 @shared_task
 def clear_daily_marking_codes():
-  """Ежедневно в 23:59 — удалить ЧЗ у отгруженных заказов (CRM «забывает» коды)."""
+  """Ежедневно в 23:59 — CRM забывает все отсканированные ЧЗ (поля CRM, без WB)."""
   from apps.orders.services.marking_cleanup import clear_daily_shipped_marking_codes
 
   result = clear_daily_shipped_marking_codes()
