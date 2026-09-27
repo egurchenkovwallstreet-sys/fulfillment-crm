@@ -159,24 +159,47 @@ def quantity_on_date(product: Product, target_date: date) -> int:
     .values_list("quantity", flat=True)
     .first()
   )
-  if exact is not None:
+  if exact is not None and int(exact) > 0:
     return int(exact)
 
-  first_date = first_snapshot_date(product)
-  if first_date is None:
-    if target_date == today_local() and product.quantity > 0:
-      return int(product.quantity)
-    return 0
-  if target_date < first_date:
+  if exact is None:
+    first_date = first_snapshot_date(product)
+    if first_date is None:
+      if target_date == today_local() and product.quantity > 0:
+        return int(product.quantity)
+      return 0
+    if target_date < first_date:
+      return 0
+
+    previous = (
+      ProductDailyQuantity.objects.filter(product=product, date__lt=target_date)
+      .order_by("-date")
+      .values_list("quantity", flat=True)
+      .first()
+    )
+    qty = int(previous or 0)
+    if qty > 0:
+      return qty
+
+  # Явный ноль в снимке или дыра в календаре — восстановление по CRM.
+  if product.quantity <= 0 or target_date > today_local():
     return 0
 
-  previous = (
-    ProductDailyQuantity.objects.filter(product=product, date__lt=target_date)
+  last_positive = (
+    ProductDailyQuantity.objects.filter(
+      product=product,
+      date__lte=target_date,
+      quantity__gt=0,
+    )
     .order_by("-date")
     .values_list("quantity", flat=True)
     .first()
   )
-  return int(previous or 0)
+  if last_positive is not None:
+    return int(last_positive)
+  if target_date == today_local():
+    return int(product.quantity)
+  return 0
 
 
 def compute_current_positive_stock_since(product: Product, *, to_date: date | None = None) -> date | None:
@@ -217,6 +240,8 @@ def first_positive_quantity_date(product: Product) -> date | None:
     if quantity_on_date(product, current) > 0:
       return current
     current += timedelta(days=1)
+  if product.quantity > 0:
+    return product.positive_stock_since or today_local()
   return None
 
 
