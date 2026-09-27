@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -181,6 +181,32 @@ def sync_storage_charges_for_product(
   return touched + deleted
 
 
+def storage_sync_from_date(
+  product: Product,
+  seller: Seller,
+  charge_date: date,
+) -> date | None:
+  """С какой даты догонять начисления до charge_date (включительно)."""
+  if product_volume_liters(product) <= ZERO:
+    return None
+
+  first_pos = first_positive_quantity_date(product)
+  if first_pos is None:
+    return None
+
+  last_charged = (
+    DailyStorageCharge.objects.filter(seller=seller, product=product)
+    .order_by("-charge_date")
+    .values_list("charge_date", flat=True)
+    .first()
+  )
+  if last_charged is None:
+    return first_pos
+  if last_charged >= charge_date:
+    return charge_date
+  return last_charged + timedelta(days=1)
+
+
 @transaction.atomic
 def accrue_daily_storage_for_seller(seller: Seller, charge_date=None) -> int:
   if charge_date is None:
@@ -197,29 +223,53 @@ def accrue_daily_storage_for_seller(seller: Seller, charge_date=None) -> int:
       date__lte=charge_date,
     ).values_list("product_id", flat=True)
   )
+  product_ids.update(
+    DailyStorageCharge.objects.filter(
+      seller=seller,
+      charge_date__lt=charge_date,
+    ).values_list("product_id", flat=True)
+  )
 
   for product in Product.objects.filter(seller=seller, id__in=product_ids):
     record_product_daily_quantity(product, on_date=charge_date)
+    from_date = storage_sync_from_date(product, seller, charge_date)
+    if from_date is None or from_date > charge_date:
+      continue
     touched += sync_storage_charges_for_product(
       product,
       seller=seller,
+      from_date=from_date,
       to_date=charge_date,
     )
   return touched
 
 
-def accrue_daily_storage_all_sellers() -> dict:
-  charge_date = today_local()
+def accrue_daily_storage_for_fulfillment(fulfillment=None, charge_date=None) -> dict:
+  """Начислить хранение активным селлерам (опционально одного фулфилмента)."""
+  if charge_date is None:
+    charge_date = today_local()
+  sellers_qs = Seller.objects.filter(is_active=True)
+  if fulfillment is not None:
+    sellers_qs = sellers_qs.filter(fulfillment=fulfillment)
   total = 0
   sellers = 0
-  for seller in Seller.objects.filter(is_active=True):
+  for seller in sellers_qs:
     try:
       count = accrue_daily_storage_for_seller(seller, charge_date)
       total += count
       sellers += 1
     except Exception:
       logger.exception("daily storage accrual failed for seller %s", seller.id)
-  return {"date": charge_date.isoformat(), "sellers": sellers, "products": total}
+  return {
+    "date": charge_date.isoformat(),
+    "sellers": sellers,
+    "products": total,
+    "fulfillment_id": fulfillment.id if fulfillment is not None else None,
+  }
+
+
+def accrue_daily_storage_all_sellers() -> dict:
+  return accrue_daily_storage_for_fulfillment(fulfillment=None)
 
 
 def _empty_week_chart(weeks: int = 4) -> dict:
