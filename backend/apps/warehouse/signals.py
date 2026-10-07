@@ -31,12 +31,3 @@ def product_record_daily_quantity(sender, instance: Product, created: bool, **kw
   record_product_daily_quantity(instance, quantity=new_qty, on_date=on_date)
   if created or previous_qty != new_qty:
     touch_positive_stock_since(instance, previous_qty, new_qty, on_date=on_date)
-    from apps.sellers.services.liter_billing import sync_storage_charges_for_product
-    from apps.warehouse.services.liter_pricing import product_volume_liters
-
-    if product_volume_liters(instance) > 0:
-      sync_storage_charges_for_product(
-        instance,
-        from_date=on_date,
-        to_date=on_date,
-      )

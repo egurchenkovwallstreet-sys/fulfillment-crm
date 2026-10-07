@@ -99,11 +99,6 @@ def rebuild_admin_billing_cache(
     fulfillment = Fulfillment.objects.filter(pk=fulfillment_id).first()
 
   try:
-    from apps.sellers.services.liter_billing import accrue_daily_storage_for_fulfillment
-
-    accrue_meta = accrue_daily_storage_for_fulfillment(fulfillment=fulfillment)
-    logger.info("Storage accrual before admin billing rebuild: %s", accrue_meta)
-
     payload = load_admin_billing_dashboard(
       fulfillment=fulfillment,
       marketplace=marketplace,
