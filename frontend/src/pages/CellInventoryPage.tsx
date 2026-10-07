@@ -9,7 +9,6 @@ import {
   fetchSellers,
   mergeDuplicateCells,
   moveProductToCell,
-  mergeDuplicateCells,
   refreshSellerProductsFromWb,
   type Cell,
   type CellDetail,
