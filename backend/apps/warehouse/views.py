@@ -236,14 +236,72 @@ class SellerProductsView(APIView):
     context: dict = {}
     from apps.integrations.marketplace import WB as MARKETPLACE_WB
 
+    duplicate_meta: dict[int, dict] = {}
     if marketplace == MARKETPLACE_WB:
       from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+      from apps.warehouse.services.wb_duplicate_cells import duplicate_meta_by_product_id
 
       try:
         context["wb_catalog_index"] = build_seller_catalog_index(seller)
       except CatalogError:
         pass
-    return Response(ProductSerializer(products, many=True, context=context).data)
+      duplicate_meta = duplicate_meta_by_product_id(
+        seller,
+        catalog_index=context.get("wb_catalog_index"),
+      )
+    data = ProductSerializer(products, many=True, context=context).data
+    for item in data:
+      meta = duplicate_meta.get(item["id"])
+      if meta:
+        item.update(meta)
+    return Response(data)
+
+
+class MergeDuplicateCellsView(APIView):
+  """Объединить дубли одного размера WB (несколько ячеек) в выбранный товар."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = _require_seller(request, seller_id)
+    marketplace = parse_marketplace(request)
+    from apps.integrations.marketplace import WB as MARKETPLACE_WB
+
+    if marketplace != MARKETPLACE_WB:
+      return Response(
+        {"detail": "Объединение дублей доступно только для WB"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+    target_id = request.data.get("target_product_id")
+    if not target_id:
+      return Response({"detail": "Укажите target_product_id"}, status=status.HTTP_400_BAD_REQUEST)
+    from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+    from apps.warehouse.services.wb_duplicate_cells import (
+      DuplicateCellsError,
+      merge_wb_duplicate_products,
+    )
+
+    catalog_index = None
+    try:
+      catalog_index = build_seller_catalog_index(seller)
+    except CatalogError:
+      pass
+    try:
+      product = merge_wb_duplicate_products(
+        seller,
+        target_product_id=int(target_id),
+        user=request.user,
+        catalog_index=catalog_index,
+      )
+    except DuplicateCellsError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    ctx: dict = {}
+    if catalog_index is not None:
+      ctx["wb_catalog_index"] = catalog_index
+    return Response({
+      "success": True,
+      "product": ProductSerializer(product, context=ctx).data,
+    })
 
 
 class SellerProductsRefreshView(APIView):

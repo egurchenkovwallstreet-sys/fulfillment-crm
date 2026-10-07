@@ -7,7 +7,9 @@ import {
   fetchProductWbStocks,
   fetchSellerProducts,
   fetchSellers,
+  mergeDuplicateCells,
   moveProductToCell,
+  mergeDuplicateCells,
   refreshSellerProductsFromWb,
   type Cell,
   type CellDetail,
@@ -30,6 +32,11 @@ type DeleteCellTarget = {
   cellId: number
   cellNumber: string
   product: Product | null
+}
+
+function duplicateGroupMembers(product: Product, catalog: Product[]): Product[] {
+  const ids = new Set<number>([product.id, ...(product.duplicate_product_ids ?? [])])
+  return catalog.filter((p) => ids.has(p.id))
 }
 
 function WbStocksLines({
@@ -89,6 +96,9 @@ export function CellInventoryPage() {
   >({})
   const [wbStocksLoading, setWbStocksLoading] = useState(false)
   const [wbStocksError, setWbStocksError] = useState('')
+  const [mergeAnchor, setMergeAnchor] = useState<Product | null>(null)
+  const [mergeTargetId, setMergeTargetId] = useState<number | ''>('')
+  const [merging, setMerging] = useState(false)
 
   useEffect(() => {
     fetchSellers()
@@ -133,7 +143,7 @@ export function CellInventoryPage() {
     setRefreshing(true)
     try {
       const result = await refreshSellerProductsFromWb(Number(sellerId))
-      setProducts(result.products)
+      await loadProducts()
       showSuccess('Каталог', result.message)
     } catch (err) {
       showError('Каталог', err instanceof Error ? err.message : 'Ошибка обновления из WB')
@@ -162,6 +172,29 @@ export function CellInventoryPage() {
       printCellLabel(label, true)
     } catch (err) {
       showError('Печать', err instanceof Error ? err.message : 'Ошибка печати')
+    }
+  }
+
+  async function handleMergeSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!sellerId || !mergeTargetId) return
+    setMerging(true)
+    try {
+      await mergeDuplicateCells(Number(sellerId), Number(mergeTargetId))
+      showSuccess(
+        'Объединение',
+        'Дубли объединены: остатки сложены, лишние ячейки удалены, джитины записаны как доп. баркоды.',
+      )
+      setMergeAnchor(null)
+      setMergeTargetId('')
+      await loadProducts()
+      if (sellerId) {
+        setCells(await fetchAllCells(Number(sellerId)))
+      }
+    } catch (err) {
+      showError('Объединение', err instanceof Error ? err.message : 'Не удалось объединить')
+    } finally {
+      setMerging(false)
     }
   }
 
@@ -259,6 +292,22 @@ export function CellInventoryPage() {
   }, [isWb, sellerId, barcodeQuery, filteredProducts])
 
   const showWbStocksInTable = isWb && barcodeQuery.trim().length > 0
+
+  const duplicateGroupCount = useMemo(() => {
+    const seen = new Set<number>()
+    let count = 0
+    for (const product of products) {
+      if (!product.has_duplicate_cells || product.duplicate_chrt_id == null) continue
+      if (seen.has(product.duplicate_chrt_id)) continue
+      seen.add(product.duplicate_chrt_id)
+      count += 1
+    }
+    return count
+  }, [products])
+
+  const mergeGroupProducts = mergeAnchor
+    ? duplicateGroupMembers(mergeAnchor, products)
+    : []
 
   return (
     <>
@@ -432,6 +481,12 @@ export function CellInventoryPage() {
             </button>
           )}
         </div>
+        {isWb && duplicateGroupCount > 0 && (
+          <p className="cell-inventory-dup-banner">
+            Найдено групп с дублями (один размер WB в разных ячейках):{' '}
+            <strong>{duplicateGroupCount}</strong>. Строки подсвечены — нажмите «Объединить».
+          </p>
+        )}
         {!sellerId ? (
           <p className="cell-inventory-empty">Выберите селлера</p>
         ) : loading && products.length === 0 ? (
@@ -457,11 +512,39 @@ export function CellInventoryPage() {
             </thead>
             <tbody>
               {filteredProducts.map((product) => (
-                <tr key={product.id}>
+                <tr
+                  key={product.id}
+                  className={product.has_duplicate_cells ? 'cell-inventory-row--duplicate' : undefined}
+                >
                   <td>
                     <ProductPhotoThumb url={product.photo_url ?? ''} alt={product.name || product.barcode} />
                   </td>
-                  <td><strong>№{product.cell_number}</strong></td>
+                  <td className="cell-inventory-cell-col">
+                    <strong>№{product.cell_number}</strong>
+                    {product.has_duplicate_cells && (
+                      <div className="cell-inventory-dup-meta">
+                        <span className="cell-inventory-dup-meta__label">
+                          Дубли:{' '}
+                          {(product.duplicate_cell_numbers ?? [])
+                            .map((num) => `№${num}`)
+                            .join(', ')}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn--warning btn--small"
+                          onClick={() => {
+                            setMergeAnchor(product)
+                            setMergeTargetId(product.id)
+                          }}
+                          {...uiHint(
+                            'Объединить все ячейки этого размера WB в одну: остатки суммируются, другие ячейки удаляются.',
+                          )}
+                        >
+                          Объединить
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <WbBarcodeHint
                       displayCode={product.barcode}
@@ -532,6 +615,63 @@ export function CellInventoryPage() {
           </table>
         )}
       </section>
+
+      {mergeAnchor && mergeGroupProducts.length > 0 && (
+        <div
+          className="cell-inventory-modal-backdrop"
+          role="presentation"
+          onClick={() => !merging && setMergeAnchor(null)}
+        >
+          <div className="cell-inventory-modal" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Объединить дубли одного товара</h3>
+            <p className="cell-inventory-merge-intro">
+              Один размер WB разнесён по нескольким ячейкам. Выберите ячейку, которую оставляем — остальные
+              будут удалены, остатки сложатся, баркоды джитинов станут доп. SKU.
+            </p>
+            <form onSubmit={(e) => void handleMergeSubmit(e)}>
+              <ul className="cell-inventory-merge-options">
+                {mergeGroupProducts.map((item) => (
+                  <li key={item.id}>
+                    <label className="cell-inventory-merge-option">
+                      <input
+                        type="radio"
+                        name="merge-target"
+                        value={item.id}
+                        checked={mergeTargetId === item.id}
+                        onChange={() => setMergeTargetId(item.id)}
+                      />
+                      <span>
+                        <strong>№{item.cell_number}</strong>
+                        {' · '}
+                        <code>{item.barcode}</code>
+                        {' · '}
+                        {item.quantity} шт.
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="cell-inventory-modal__actions">
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={merging || !mergeTargetId}
+                >
+                  {merging ? 'Объединение…' : 'Объединить и удалить другие ячейки'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={merging}
+                  onClick={() => setMergeAnchor(null)}
+                >
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {moveProductId && movingProduct && (
         <div className="cell-inventory-modal-backdrop" role="presentation" onClick={() => setMoveProductId(null)}>

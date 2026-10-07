@@ -262,3 +262,79 @@
   color: #b91c1c;
   font-weight: 600;
 }
+
+.cell-inventory-dup-banner {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 0.92rem;
+}
+
+.cell-inventory-row--duplicate {
+  background: #fffbeb;
+}
+
+.cell-inventory-row--duplicate:hover {
+  background: #fef3c7;
+}
+
+.cell-inventory-cell-col {
+  min-width: 9rem;
+}
+
+.cell-inventory-dup-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.cell-inventory-dup-meta__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #b45309;
+  line-height: 1.35;
+}
+
+.cell-inventory-merge-intro {
+  font-size: 0.9rem;
+}
+
+.cell-inventory-merge-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cell-inventory-merge-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cell-inventory-merge-option:has(input:checked) {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.btn.btn--warning {
+  background: #ea580c;
+  border-color: #ea580c;
+  color: #fff;
+}
+
+.btn.btn--warning:hover:not(:disabled) {
+  background: #c2410c;
+  border-color: #c2410c;
+}

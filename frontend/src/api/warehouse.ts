@@ -16,6 +16,10 @@ export type Product = {
   barcode: string
   alternate_barcodes?: string[]
   wb_sku_codes?: string[]
+  has_duplicate_cells?: boolean
+  duplicate_cell_numbers?: string[]
+  duplicate_product_ids?: number[]
+  duplicate_chrt_id?: number
   name: string
   quantity: number
   cell: number
@@ -207,6 +211,16 @@ export function fetchCellDetail(sellerId: number, cellNumber: string) {
 
 export function fetchSellerProducts(sellerId: number) {
   return apiFetch<Product[]>(`/api/warehouse/sellers/${sellerId}/products/`)
+}
+
+export function mergeDuplicateCells(sellerId: number, targetProductId: number) {
+  return apiFetch<{ success: boolean; product: Product }>(
+    `/api/warehouse/sellers/${sellerId}/products/merge-duplicates/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ target_product_id: targetProductId }),
+    },
+  )
 }
 
 export function fetchProductWbStocks(sellerId: number, barcodes: string[]) {

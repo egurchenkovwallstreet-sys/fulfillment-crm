@@ -18,6 +18,7 @@ from .views import (
   OnboardingPreviewView,
   ProductCellLabelView,
   ProductMoveCellView,
+  MergeDuplicateCellsView,
   SellerListView,
   SellerProductsRefreshView,
   SellerProductWbStocksView,
@@ -80,6 +81,11 @@ from .views_wb_fact_intake import (
 urlpatterns = [
   path("sellers/", SellerListView.as_view(), name="warehouse_sellers"),
   path("sellers/<int:seller_id>/products/", SellerProductsView.as_view(), name="warehouse_seller_products"),
+  path(
+    "sellers/<int:seller_id>/products/merge-duplicates/",
+    MergeDuplicateCellsView.as_view(),
+    name="warehouse_merge_duplicate_cells",
+  ),
   path(
     "sellers/<int:seller_id>/products/wb-stocks/",
     SellerProductWbStocksView.as_view(),
