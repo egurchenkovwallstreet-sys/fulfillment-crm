@@ -134,6 +134,25 @@ def count_live_open_orders_for_barcode_on_warehouse(
   return new_count, picking_count, new_count + picking_count
 
 
+def count_live_open_orders_for_warehouses(
+  seller: Seller,
+  barcode: str,
+  warehouses: list[SellerWarehouse],
+) -> tuple[int, int, int]:
+  """Сумма «Новые» + «На сборке» по API для списка FBS-складов."""
+  total_new = 0
+  total_picking = 0
+  for warehouse in warehouses:
+    new_count, picking_count, _ = count_live_open_orders_for_barcode_on_warehouse(
+      seller,
+      barcode,
+      warehouse,
+    )
+    total_new += new_count
+    total_picking += picking_count
+  return total_new, total_picking, total_new + total_picking
+
+
 def live_open_orders_error_as_wb_stock(exc: Exception) -> WBStockError:
   if isinstance(exc, LiveWbOrdersError):
     return WBStockError(str(exc))

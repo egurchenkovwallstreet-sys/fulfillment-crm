@@ -16,10 +16,8 @@ from apps.warehouse.services.product_catalog import (
   try_enrich_product_from_catalog,
 )
 from apps.warehouse.services.intake_increment_wb import apply_wb_increment_stock
-from apps.warehouse.services.stock_balance import (
-  compute_wb_amount_from_crm,
-  count_reserved_open_orders,
-)
+from apps.warehouse.services.stock_balance import compute_wb_amount_from_crm
+from apps.warehouse.services.wb_physical_stock import push_wb_for_manager_physical_count
 from apps.warehouse.services.wb_stocks import (
   STOCK_MODE_INTAKE,
   STOCK_MODE_SET_ACTUAL,
@@ -302,19 +300,24 @@ def perform_intake(
   elif stock_mode == STOCK_MODE_SET_ACTUAL and mp != OZON and warehouse is not None:
     try_enrich_product_from_catalog(product, seller)
     product.refresh_from_db()
-    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
     try:
-      wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (
-        _write_wb_balance_for_intake(
-          seller=seller,
-          product=product,
-          warehouse=warehouse,
-          barcode=barcode,
-          crm_quantity=crm_quantity_after,
-          reserved_new_orders=reserved_new_orders,
-        )
+      (
+        wb_sync,
+        verified,
+        wb_quantity_target,
+        restock_required,
+        wb_quantity_before,
+        wb_quantity_actual,
+        reserved_new_orders,
+        reserved_picking_orders,
+      ) = push_wb_for_manager_physical_count(
+        seller=seller,
+        product=product,
+        warehouse=warehouse,
+        barcode=barcode,
+        crm_quantity=crm_quantity_after,
+        stock_mode_label=stock_mode,
       )
-      wb_sync["mode"] = stock_mode
     except WBStockError as exc:
       raise IntakeError(str(exc)) from exc
 
@@ -326,9 +329,15 @@ def perform_intake(
       f"остаток CRM = {crm_quantity_after} шт. (подтверждено менеджером)"
     )
   elif stock_mode == STOCK_MODE_SET_ACTUAL:
+    reserve_note = ""
+    if mp != OZON and warehouse is not None:
+      reserve_note = (
+        f", «Новые» {reserved_new_orders}, «На сборке» {reserved_picking_orders}, "
+        f"WB {wb_quantity_target}"
+      )
     comment = (
-      f"Фактический остаток при приёмке: CRM {crm_quantity_after} шт., "
-      f"склад {warehouse.name or warehouse.wb_warehouse_id}"
+      f"Фактический остаток при приёмке: CRM {crm_quantity_after} шт.{reserve_note}, "
+      f"склад {warehouse.name or warehouse.wb_warehouse_id if warehouse else '—'}"
     )
   elif use_wb_increment:
     comment = (
@@ -457,18 +466,43 @@ def force_rewrite_intake(
   product.quantity = crm_quantity
   product.save(update_fields=["quantity", "updated_at"])
 
-  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
-  wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (
-    _write_wb_balance_for_intake(
-      seller=seller,
-      product=product,
-      warehouse=warehouse,
-      barcode=barcode,
-      crm_quantity=crm_quantity,
-      reserved_new_orders=reserved_new_orders,
+  reserved_picking_orders = 0
+  if stock_mode == STOCK_MODE_SET_ACTUAL:
+    try:
+      (
+        wb_sync,
+        verified,
+        wb_quantity_target,
+        restock_required,
+        wb_quantity_before,
+        wb_quantity_actual,
+        reserved_new_orders,
+        reserved_picking_orders,
+      ) = push_wb_for_manager_physical_count(
+        seller=seller,
+        product=product,
+        warehouse=warehouse,
+        barcode=barcode,
+        crm_quantity=crm_quantity,
+        stock_mode_label=stock_mode,
+      )
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+  else:
+    from apps.warehouse.services.stock_balance import count_reserved_open_orders
+
+    reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
+    wb_sync, verified, wb_quantity_target, restock_required, wb_quantity_before, wb_quantity_actual = (
+      _write_wb_balance_for_intake(
+        seller=seller,
+        product=product,
+        warehouse=warehouse,
+        barcode=barcode,
+        crm_quantity=crm_quantity,
+        reserved_new_orders=reserved_new_orders,
+      )
     )
-  )
-  wb_sync["mode"] = stock_mode
+    wb_sync["mode"] = stock_mode
 
   StockOperation.objects.create(
     product=product,

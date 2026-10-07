@@ -17,11 +17,8 @@ from apps.warehouse.services.product_catalog import (
   create_kwargs_for_new_product,
   try_enrich_product_from_catalog,
 )
-from apps.warehouse.services.stock_balance import (
-  RESERVED_ORDERS_LABEL,
-  compute_wb_amount_from_crm,
-  count_reserved_open_orders,
-)
+from apps.warehouse.services.stock_balance import RESERVED_ORDERS_LABEL, compute_wb_amount_from_crm
+from apps.warehouse.services.wb_physical_stock import wb_target_for_manager_physical_count
 from apps.warehouse.services.stock_balance_messages import stock_balance_breakdown_message
 from apps.warehouse.services.stock_transfer import even_split_quantity
 from apps.warehouse.services.wb_stocks import (
@@ -249,7 +246,6 @@ def perform_inventory(
   if distribute and mp == OZON:
     raise IntakeError("Инвентаризация с распределением только для Wildberries")
 
-  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
   if distribute:
     warehouses = _working_warehouses(seller)
     warehouse_ids = [wh.id for wh in warehouses]
@@ -257,10 +253,28 @@ def perform_inventory(
     warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
 
   crm_quantity_after = physical_quantity
-  wb_target_quantity, restock_required = compute_wb_amount_from_crm(
-    crm_quantity_after,
-    reserved_new_orders,
-  )
+  reserved_picking_orders = 0
+  if mp == OZON:
+    reserved_new_orders = 0
+    wb_target_quantity = 0
+    restock_required = False
+  else:
+    try:
+      (
+        wb_target_quantity,
+        restock_required,
+        reserved_new_orders,
+        reserved_picking_orders,
+        reserved_total,
+      ) = wb_target_for_manager_physical_count(
+        seller,
+        barcode,
+        crm_quantity_after,
+        warehouses,
+      )
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+    reserved_new_orders = reserved_total
 
   product = (
     Product.objects.select_for_update()
@@ -351,6 +365,7 @@ def perform_inventory(
       "barcode": barcode,
       "physical_quantity": physical_quantity,
       "reserved_new_orders": reserved_new_orders,
+      "reserved_picking_orders": reserved_picking_orders,
       "distribute": distribute,
       "crm_quantity_before": crm_quantity_before,
       "crm_quantity_after": crm_quantity_after,
@@ -424,16 +439,33 @@ def force_rewrite_inventory(
     raise IntakeError("Товар не найден — сначала выполните инвентаризацию")
 
   crm_quantity_before = product.quantity
-  reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
+  reserved_picking_orders = 0
   if distribute:
     warehouses = _working_warehouses(seller)
     warehouse_ids = [wh.id for wh in warehouses]
   else:
     warehouses = [] if mp == OZON else _resolve_warehouses(seller, warehouse_ids)
-  wb_target_quantity, restock_required = compute_wb_amount_from_crm(
-    crm_quantity,
-    reserved_new_orders,
-  )
+  if mp == OZON:
+    reserved_new_orders = 0
+    wb_target_quantity = 0
+    restock_required = False
+  else:
+    try:
+      (
+        wb_target_quantity,
+        restock_required,
+        _new_n,
+        reserved_picking_orders,
+        reserved_total,
+      ) = wb_target_for_manager_physical_count(
+        seller,
+        barcode,
+        crm_quantity,
+        warehouses,
+      )
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+    reserved_new_orders = reserved_total
 
   product.quantity = crm_quantity
   product.save(update_fields=["quantity", "updated_at"])

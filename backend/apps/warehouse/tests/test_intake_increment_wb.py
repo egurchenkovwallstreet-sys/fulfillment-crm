@@ -6,7 +6,7 @@ from apps.accounts.models import Fulfillment, User
 from apps.sellers.models import Seller, SellerWarehouse
 from apps.warehouse.models import Cell, Product
 from apps.warehouse.services.intake import perform_intake
-from apps.warehouse.services.wb_stocks import STOCK_MODE_INTAKE
+from apps.warehouse.services.wb_stocks import STOCK_MODE_INTAKE, STOCK_MODE_SET_ACTUAL
 
 
 class IntakeIncrementWbTests(TestCase):
@@ -63,3 +63,27 @@ class IntakeIncrementWbTests(TestCase):
     self.assertEqual(self.product.quantity, 10)
     mock_push.assert_called_once()
     self.assertEqual(mock_push.call_args[0][3], 7)
+
+  @patch("apps.warehouse.services.wb_physical_stock.push_wb_for_manager_physical_count")
+  def test_set_actual_uses_live_reserve_helper(self, mock_push_physical):
+    mock_push_physical.return_value = (
+      {"reserved_open_orders": 5},
+      True,
+      7,
+      False,
+      10,
+      7,
+      3,
+      2,
+    )
+    result = perform_intake(
+      seller=self.seller,
+      barcode="4601111111111",
+      quantity=12,
+      user=self.user,
+      wb_warehouse_id=self.warehouse.id,
+      stock_mode=STOCK_MODE_SET_ACTUAL,
+    )
+    mock_push_physical.assert_called_once()
+    self.assertEqual(result.crm_quantity_after, 12)
+    self.assertEqual(result.wb_quantity_target, 7)
