@@ -100,9 +100,14 @@ export function SellerCabinetPage() {
             )}
           </p>
         </div>
-        <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить остатки, заказы и статистику отгрузок.')}>
-          {loading ? 'Обновление…' : 'Обновить'}
-        </button>
+        <div className="seller-cabinet-top-actions">
+          <Link to="/cabinet/intakes" className="btn btn--secondary" {...uiHint('История приёмок на склад — только просмотр.')}>
+            Приёмки
+          </Link>
+          <button type="button" className="btn btn--ghost" onClick={load} disabled={loading} {...uiHint('Обновить остатки, заказы и статистику отгрузок.')}>
+            {loading ? 'Обновление…' : 'Обновить'}
+          </button>
+        </div>
       </header>
 
       {error && <div className="dashboard-sync-msg dashboard-sync-msg--error">{error}</div>}

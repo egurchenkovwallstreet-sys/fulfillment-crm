@@ -327,6 +327,49 @@ class SellerCabinetBarcodeView(APIView):
     return Response(SellerBarcodeDetailSerializer(detail).data)
 
 
+class SellerIntakeReceiptListView(APIView):
+  """Список приёмок селлера для кабинета (только просмотр)."""
+  permission_classes = [IsAuthenticated, IsSeller]
+
+  def get(self, request):
+    seller = request.user.seller
+    if not seller:
+      return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
+    marketplace = parse_marketplace(request)
+    if not seller_allows_marketplace(seller, marketplace):
+      return Response({"detail": "Маркетплейс недоступен для этого селлера"}, status=status.HTTP_400_BAD_REQUEST)
+    from apps.sellers.services.seller_intake_history import list_seller_intake_receipts
+
+    receipts = list_seller_intake_receipts(seller, marketplace=marketplace)
+    return Response({"receipts": receipts})
+
+
+class SellerIntakeReceiptDetailView(APIView):
+  permission_classes = [IsAuthenticated, IsSeller]
+
+  def get(self, request, receipt_id: str):
+    seller = request.user.seller
+    if not seller:
+      return Response({"detail": "Селлер не привязан"}, status=status.HTTP_400_BAD_REQUEST)
+    marketplace = parse_marketplace(request)
+    if not seller_allows_marketplace(seller, marketplace):
+      return Response({"detail": "Маркетплейс недоступен для этого селлера"}, status=status.HTTP_400_BAD_REQUEST)
+    from apps.sellers.services.seller_intake_history import (
+      SellerIntakeReceiptNotFound,
+      get_seller_intake_receipt_detail,
+    )
+
+    try:
+      payload = get_seller_intake_receipt_detail(
+        seller,
+        receipt_id,
+        marketplace=marketplace,
+      )
+    except SellerIntakeReceiptNotFound as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+    return Response(payload)
+
+
 def _parse_optional_date(value: str | None):
   if not value:
     return None

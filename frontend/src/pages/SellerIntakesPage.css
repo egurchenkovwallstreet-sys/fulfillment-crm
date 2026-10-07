@@ -1,0 +1,71 @@
+.seller-intakes-layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .seller-intakes-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.seller-intakes-list__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.seller-intakes-list__btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.seller-intakes-list__btn:hover {
+  border-color: #94a3b8;
+}
+
+.seller-intakes-list__btn--active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.seller-intakes-empty {
+  margin: 0;
+  color: #64748b;
+}
+
+.seller-intakes-table-scroll {
+  overflow-x: auto;
+}
+
+.seller-intakes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.seller-intakes-table th,
+.seller-intakes-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.seller-intakes-table th {
+  font-size: 0.78rem;
+  color: #64748b;
+  background: #f8fafc;
+}

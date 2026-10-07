@@ -108,3 +108,34 @@ export async function fetchSellerCabinet(marketplace?: string): Promise<SellerCa
 export async function fetchSellerBarcodeDetail(barcode: string): Promise<SellerBarcodeDetail> {
   return apiFetch<SellerBarcodeDetail>(`/api/sellers/cabinet/barcode/${encodeURIComponent(barcode)}/`)
 }
+
+export type SellerIntakeReceiptBrief = {
+  id: string
+  created_at: string
+}
+
+export type SellerIntakeReceiptItem = {
+  barcode: string
+  quantity: number
+  product_name: string
+  tech_size: string
+  photo_url?: string
+}
+
+export type SellerIntakeReceiptDetail = {
+  id: string
+  created_at: string
+  items: SellerIntakeReceiptItem[]
+}
+
+export async function fetchSellerIntakeReceipts(marketplace?: string) {
+  const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ''
+  return apiFetch<{ receipts: SellerIntakeReceiptBrief[] }>(`/api/sellers/cabinet/intakes/${query}`)
+}
+
+export async function fetchSellerIntakeReceiptDetail(receiptId: string, marketplace?: string) {
+  const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ''
+  return apiFetch<SellerIntakeReceiptDetail>(
+    `/api/sellers/cabinet/intakes/${encodeURIComponent(receiptId)}/${query}`,
+  )
+}

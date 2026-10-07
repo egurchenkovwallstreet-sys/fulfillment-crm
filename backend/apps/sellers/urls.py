@@ -21,6 +21,8 @@ from .views_cabinet import (
   AdminSupplyReportView,
   SellerCabinetBarcodeView,
   SellerCabinetView,
+  SellerIntakeReceiptDetailView,
+  SellerIntakeReceiptListView,
   SellerInviteView,
   SellerManageDetailView,
   SellerManageListCreateView,
@@ -74,6 +76,16 @@ urlpatterns = [
     "cabinet/barcode/<str:barcode>/",
     SellerCabinetBarcodeView.as_view(),
     name="seller-cabinet-barcode",
+  ),
+  path(
+    "cabinet/intakes/",
+    SellerIntakeReceiptListView.as_view(),
+    name="seller-cabinet-intakes",
+  ),
+  path(
+    "cabinet/intakes/<str:receipt_id>/",
+    SellerIntakeReceiptDetailView.as_view(),
+    name="seller-cabinet-intake-detail",
   ),
   path(
     "<int:seller_id>/warehouses/",

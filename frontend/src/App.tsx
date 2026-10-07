@@ -24,6 +24,7 @@ import { LoginPage } from './pages/LoginPage'
 import { PrintAgentPage } from './pages/PrintAgentPage'
 import { SellerBarcodeDetailPage } from './pages/SellerBarcodeDetailPage'
 import { SellerCabinetPage } from './pages/SellerCabinetPage'
+import { SellerIntakesPage } from './pages/SellerIntakesPage'
 import { SellerRegisterPage } from './pages/SellerRegisterPage'
 import { SellersManagePage } from './pages/SellersManagePage'
 import { WarehouseHubPage } from './pages/WarehouseHubPage'
@@ -64,6 +65,7 @@ function AppRoutes() {
           <Route path="/" element={<HomeRedirect />} />
           <Route element={<SellerRoute />}>
             <Route path="/cabinet" element={<SellerCabinetPage />} />
+            <Route path="/cabinet/intakes" element={<SellerIntakesPage />} />
             <Route path="/cabinet/:barcode" element={<SellerBarcodeDetailPage />} />
           </Route>
           <Route element={<ManagerRoute />}>

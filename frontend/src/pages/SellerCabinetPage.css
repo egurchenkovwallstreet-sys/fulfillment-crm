@@ -1,3 +1,10 @@
+.seller-cabinet-top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .seller-cabinet-legend {
   display: flex;
   flex-wrap: wrap;
