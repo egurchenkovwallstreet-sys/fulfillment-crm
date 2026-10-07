@@ -1,45 +1,97 @@
-.wb-barcode-hint {
-  position: relative;
-  display: inline-block;
-  cursor: help;
+.wb-barcode-hint__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
 }
 
-.wb-barcode-hint__display {
+.wb-barcode-hint__trigger code {
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
 
-.wb-barcode-hint__popover {
-  display: none;
-  position: absolute;
-  z-index: 40;
-  left: 0;
-  top: calc(100% + 4px);
-  min-width: 10rem;
-  max-width: 18rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 4px;
-  background: #1a1a1a;
-  color: #f5f5f5;
+.wb-barcode-hint__trigger:hover code,
+.wb-barcode-hint__trigger:focus-visible code {
+  color: #1d4ed8;
+}
+
+.wb-barcode-hint__icon {
+  flex-shrink: 0;
   font-size: 0.75rem;
-  line-height: 1.35;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  white-space: pre-wrap;
+  line-height: 1;
+  color: #64748b;
+}
+
+.wb-barcode-hint-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.wb-barcode-hint-modal {
+  width: min(22rem, 100%);
+  max-height: min(80vh, 28rem);
+  overflow: auto;
+  padding: 1rem 1.1rem;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+}
+
+.wb-barcode-hint-modal h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.wb-barcode-hint-modal__section {
+  margin-bottom: 0.85rem;
+}
+
+.wb-barcode-hint-modal__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.wb-barcode-hint-modal__code {
+  display: block;
+  word-break: break-all;
+  font-size: 0.92rem;
+}
+
+.wb-barcode-hint-modal__list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.wb-barcode-hint-modal__list li {
+  margin: 0.2rem 0;
   word-break: break-all;
 }
 
-.wb-barcode-hint__primary {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 0.15rem;
+.wb-barcode-hint-modal__empty {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: #64748b;
 }
 
-.wb-barcode-hint__jitin {
-  display: block;
-  opacity: 0.92;
-}
-
-.wb-barcode-hint:hover .wb-barcode-hint__popover,
-.wb-barcode-hint:focus-within .wb-barcode-hint__popover {
-  display: block;
+.wb-barcode-hint-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
 }

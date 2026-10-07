@@ -14,6 +14,8 @@ export type Cell = {
 export type Product = {
   id: number
   barcode: string
+  alternate_barcodes?: string[]
+  wb_sku_codes?: string[]
   name: string
   quantity: number
   cell: number

@@ -2759,6 +2759,7 @@ function WbAssemblySellerPage() {
             primaryBarcode={order.primary_barcode}
             alternateBarcodes={order.alternate_barcodes}
             wbSkuCodes={order.wb_sku_codes}
+            alwaysInteractive
           />
         </td>
         <td>
@@ -3467,6 +3468,7 @@ function WbAssemblySellerPage() {
                         primaryBarcode={order.primary_barcode}
                         alternateBarcodes={order.alternate_barcodes}
                         wbSkuCodes={order.wb_sku_codes}
+                        alwaysInteractive
                       />
                     </td>
                     <td>{order.wb_stage_display || order.status_display}</td>

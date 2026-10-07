@@ -174,26 +174,50 @@ def product_scan_barcodes(product: Product) -> set[str]:
   return codes
 
 
-def product_alternate_barcodes(product: Product) -> list[str]:
+def _catalog_skus_for_product(product: Product, catalog_index: dict | None) -> set[str]:
+  if not catalog_index:
+    return set()
+  from apps.integrations.marketplace import WB as MARKETPLACE_WB
+  from apps.warehouse.services.catalog_fetch import catalog_index_get
+  from apps.warehouse.services.wb_barcode_alias_sync import _skus_for_chrt_id
+
+  if normalize_marketplace(product.marketplace) != MARKETPLACE_WB:
+    return set()
+  chrt_id = product.wb_chrt_id
+  catalog_item = catalog_index_get(catalog_index, product.barcode)
+  if catalog_item and catalog_item.wb_chrt_id:
+    chrt_id = int(catalog_item.wb_chrt_id)
+  if not chrt_id:
+    return set()
+  return {
+    normalize_barcode(code)
+    for code in _skus_for_chrt_id(catalog_index, int(chrt_id))
+    if normalize_barcode(code)
+  }
+
+
+def product_alternate_barcodes(product: Product, *, catalog_index: dict | None = None) -> list[str]:
   """Доп. баркоды SKU (без основного product.barcode)."""
   primary_variants = {
     normalize_barcode(variant)
     for variant in barcode_lookup_variants(product.barcode, product.marketplace)
   }
   primary_variants.discard("")
+  scan_codes = set(product_scan_barcodes(product))
+  scan_codes.update(_catalog_skus_for_product(product, catalog_index))
   return [
     code
-    for code in sorted(product_scan_barcodes(product))
+    for code in sorted(scan_codes)
     if code and code not in primary_variants
   ]
 
 
-def product_wb_sku_codes(product: Product | None) -> list[str]:
+def product_wb_sku_codes(product: Product | None, *, catalog_index: dict | None = None) -> list[str]:
   """Все sku WB товара: основной баркод ячейки, затем джитины/алиасы."""
   if product is None:
     return []
   primary = normalize_barcode(product.barcode)
-  alternates = product_alternate_barcodes(product)
+  alternates = product_alternate_barcodes(product, catalog_index=catalog_index)
   codes: list[str] = []
   if primary:
     codes.append(primary)

@@ -18,6 +18,7 @@ import {
 } from '../api/warehouse'
 import { CellLabelPrompt } from '../components/CellLabelPrompt'
 import { ProductPhotoThumb } from '../components/ProductPhotoThumb'
+import { WbBarcodeHint } from '../components/WbBarcodeHint'
 import { useAuth } from '../context/AuthContext'
 import { useCrmNotice } from '../context/CrmNoticeContext'
 import { useMarketplace } from '../context/MarketplaceContext'
@@ -361,7 +362,15 @@ export function CellInventoryPage() {
               <dl className="cell-detail-facts">
                 <div>
                   <dt>Баркод</dt>
-                  <dd>{cellDetail.product.barcode}</dd>
+                  <dd>
+                    <WbBarcodeHint
+                      displayCode={cellDetail.product.barcode}
+                      primaryBarcode={cellDetail.product.barcode}
+                      alternateBarcodes={cellDetail.product.alternate_barcodes}
+                      wbSkuCodes={cellDetail.product.wb_sku_codes}
+                      alwaysInteractive={isWb}
+                    />
+                  </dd>
                 </div>
                 <div>
                   <dt>Артикул</dt>
@@ -453,7 +462,15 @@ export function CellInventoryPage() {
                     <ProductPhotoThumb url={product.photo_url ?? ''} alt={product.name || product.barcode} />
                   </td>
                   <td><strong>№{product.cell_number}</strong></td>
-                  <td>{product.barcode}</td>
+                  <td>
+                    <WbBarcodeHint
+                      displayCode={product.barcode}
+                      primaryBarcode={product.barcode}
+                      alternateBarcodes={product.alternate_barcodes}
+                      wbSkuCodes={product.wb_sku_codes}
+                      alwaysInteractive={isWb}
+                    />
+                  </td>
                   <td>{product.vendor_code || '—'}</td>
                   <td>
                     <strong className="cell-inventory-size">

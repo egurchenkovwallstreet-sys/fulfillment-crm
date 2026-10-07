@@ -36,12 +36,16 @@ class CellSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
   cell_number = serializers.CharField(source="cell.number", read_only=True)
   seller_name = serializers.CharField(source="seller.company_name", read_only=True)
+  alternate_barcodes = serializers.SerializerMethodField()
+  wb_sku_codes = serializers.SerializerMethodField()
 
   class Meta:
     model = Product
     fields = (
       "id",
       "barcode",
+      "alternate_barcodes",
+      "wb_sku_codes",
       "name",
       "quantity",
       "cell",
@@ -60,6 +64,18 @@ class ProductSerializer(serializers.ModelSerializer):
       "height_cm",
       "volume_liters",
     )
+
+  def get_alternate_barcodes(self, obj):
+    from apps.warehouse.services.product_lookup import product_alternate_barcodes
+
+    index = (self.context or {}).get("wb_catalog_index")
+    return product_alternate_barcodes(obj, catalog_index=index)
+
+  def get_wb_sku_codes(self, obj):
+    from apps.warehouse.services.product_lookup import product_wb_sku_codes
+
+    index = (self.context or {}).get("wb_catalog_index")
+    return product_wb_sku_codes(obj, catalog_index=index)
 
 
 class CellDetailSerializer(serializers.Serializer):

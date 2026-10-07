@@ -1,4 +1,5 @@
 import type { AssemblyOrder } from '../api/assembly'
+import { WbBarcodeHint } from './WbBarcodeHint'
 import { ProductPhotoThumb } from './ProductPhotoThumb'
 import { formatStickerNumber } from '../utils/stickerLabel'
 import { chzStatusLabel } from '../utils/markingVerify'
@@ -159,7 +160,13 @@ export function AssemblyQueueListModal({
                       <span>WB #{order.wb_order_id}</span>
                     </div>
                     <div className="assembly-marking-list__row">
-                      <code>{order.barcode}</code>
+                      <WbBarcodeHint
+                        displayCode={order.barcode}
+                        primaryBarcode={order.primary_barcode}
+                        alternateBarcodes={order.alternate_barcodes}
+                        wbSkuCodes={order.wb_sku_codes}
+                        alwaysInteractive
+                      />
                     </div>
                     <div className="assembly-marking-list__cell">
                       Ячейка: <strong>{cell || '—'}</strong>

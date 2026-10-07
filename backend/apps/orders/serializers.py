@@ -101,7 +101,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     product = _resolve_order_product(obj, self)
     if not product:
       return []
-    return product_alternate_barcodes(product)
+    index = (self.context or {}).get("wb_catalog_index")
+    return product_alternate_barcodes(product, catalog_index=index)
 
   def get_primary_barcode(self, obj):
     from apps.warehouse.services.catalog_fetch import normalize_barcode
@@ -118,8 +119,9 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     from apps.warehouse.services.product_lookup import product_wb_sku_codes
 
     product = _resolve_order_product(obj, self)
+    index = (self.context or {}).get("wb_catalog_index")
     if product:
-      return product_wb_sku_codes(product)
+      return product_wb_sku_codes(product, catalog_index=index)
     code = normalize_barcode(obj.barcode)
     return [code] if code else []
 

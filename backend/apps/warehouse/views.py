@@ -135,7 +135,18 @@ class CellDetailView(APIView):
       .select_related("cell", "seller")
       .first()
     )
-    payload = CellDetailSerializer({"cell": cell, "product": product}).data
+    detail_context: dict = {}
+    if marketplace == WB:
+      from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+
+      try:
+        detail_context["wb_catalog_index"] = build_seller_catalog_index(seller)
+      except CatalogError:
+        pass
+    payload = CellDetailSerializer(
+      {"cell": cell, "product": product},
+      context=detail_context,
+    ).data
     if product and marketplace == WB:
       wb_stocks, wb_stocks_error = build_wb_stock_lines(seller, product.barcode)
       payload["wb_stocks"] = wb_stocks
@@ -222,7 +233,17 @@ class SellerProductsView(APIView):
       .order_by("cell__number")
     )
     products = sorted(products, key=lambda p: int(p.cell.number) if p.cell.number.isdigit() else p.cell.number)
-    return Response(ProductSerializer(products, many=True).data)
+    context: dict = {}
+    from apps.integrations.marketplace import WB as MARKETPLACE_WB
+
+    if marketplace == MARKETPLACE_WB:
+      from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+
+      try:
+        context["wb_catalog_index"] = build_seller_catalog_index(seller)
+      except CatalogError:
+        pass
+    return Response(ProductSerializer(products, many=True, context=context).data)
 
 
 class SellerProductsRefreshView(APIView):
