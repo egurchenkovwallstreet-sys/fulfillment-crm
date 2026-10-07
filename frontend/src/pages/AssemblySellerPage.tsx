@@ -24,6 +24,7 @@ import {
   fetchSupplyBarcode,
   setAssemblyWorkflowMode,
   startAssembly,
+  generateAssemblyPickList,
   previewPickList,
   verifyMarking,
   pushMarkingToWb,
@@ -261,6 +262,7 @@ function WbAssemblySellerPage() {
   const [pickListPreviews, setPickListPreviews] = useState<PickList[]>([])
   const [ribbonPrinting, setRibbonPrinting] = useState(false)
   const [pickListDownloading, setPickListDownloading] = useState(false)
+  const [pickListGenerating, setPickListGenerating] = useState(false)
   const [stickersFetching, setStickersFetching] = useState(false)
   const [stickerFetchingOrderId, setStickerFetchingOrderId] = useState<number | null>(null)
   const [buildVersion, setBuildVersion] = useState('')
@@ -1511,6 +1513,37 @@ function WbAssemblySellerPage() {
           ? [preview.pick_list]
           : []
     return fromApi.filter((list) => list.items?.length)
+  }
+
+  async function handleGeneratePickList() {
+    if (!id) return
+    setError('')
+    setPickListGenerating(true)
+    try {
+      const result = await generateAssemblyPickList(id)
+      const lists = result.active_pick_lists?.length
+        ? result.active_pick_lists
+        : result.pick_lists?.length
+          ? result.pick_lists
+          : result.pick_list
+            ? [result.pick_list]
+            : []
+      if (lists.length) {
+        setPickListPreviews(lists)
+      }
+      const count = result.pick_lists_count ?? lists.length
+      noticeOk(
+        count
+          ? `Листов подбора: ${count}. Можно скачать PDF или сканировать баркоды.`
+          : 'Лист подбора обновлён.',
+        'Лист подбора',
+      )
+      await load({ silent: true, stageKey: 'confirm' })
+    } catch (err) {
+      noticeFail('Лист подбора', err, 'Не удалось сформировать лист подбора')
+    } finally {
+      setPickListGenerating(false)
+    }
   }
 
   async function handleDownloadPickListPdf(target?: PickList) {
@@ -3193,6 +3226,17 @@ function WbAssemblySellerPage() {
             <div className="assembly-picklist-actions">
               <button
                 type="button"
+                className="btn btn--primary btn--small"
+                onClick={() => void handleGeneratePickList()}
+                disabled={loading || pickListGenerating}
+                {...uiHint(
+                  'Пересобрать активные листы подбора из всех заказов, которые уже на сборке (в WB confirm)',
+                )}
+              >
+                {pickListGenerating ? 'Формируем…' : 'Сформировать лист подбора'}
+              </button>
+              <button
+                type="button"
                 className="btn btn--secondary btn--small"
                 onClick={() => void handleDownloadPickListPdf()}
                 disabled={loading || pickListDownloading || !canDownloadPickList}
@@ -3203,8 +3247,9 @@ function WbAssemblySellerPage() {
             </div>
           </div>
           <p>
-            Лист формируется автоматически при «Передать на сборку».
-            PDF всегда можно скачать повторно — по сохранённому списку или по текущим заказам на сборке.
+            Лист формируется автоматически при «Передать на сборку». Если листа нет или он устарел —
+            нажмите «Сформировать лист подбора» (всегда по текущим заказам на сборке).
+            PDF можно скачать повторно в любой момент.
           </p>
           {hasPickLists && displayPickLists.length > 0 && (
             <ul className="assembly-picklists">

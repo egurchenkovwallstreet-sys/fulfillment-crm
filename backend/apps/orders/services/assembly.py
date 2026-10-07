@@ -445,12 +445,12 @@ def _prepare_order_for_scan(order: Order, pick_list: PickList | None) -> None:
 
 
 def _assert_scan_in_pick_list(seller: Seller, scan_value: str) -> None:
+  if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
+    return
+
   for pick_list in _get_active_pick_lists(seller):
     if _scan_allowed_in_pick_list(pick_list, scan_value):
       return
-
-  if _match_order_by_scan(_scannable_orders_qs(seller), scan_value, seller=seller):
-    return
 
   if _get_active_pick_lists(seller):
     raise AssemblyError("Баркода нет в листе подбора!", code="not_in_pick_list")
@@ -803,6 +803,12 @@ def start_assembly(seller: Seller, *, user=None) -> dict:
     pick_lists_count = len(pick_lists)
   except PickListError as exc:
     pick_list_error = str(exc)
+  except Exception as exc:
+    logging.getLogger(__name__).exception(
+      "Auto pick list after assembly transfer failed seller_id=%s",
+      seller.id,
+    )
+    pick_list_error = f"Не удалось сформировать лист подбора: {exc}"
 
   wb_errors = [
     item.get("error", "")

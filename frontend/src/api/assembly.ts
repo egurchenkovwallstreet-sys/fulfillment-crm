@@ -328,6 +328,26 @@ export function startAssembly(sellerId: number) {
   })
 }
 
+export interface GenerateAssemblyPickListResult {
+  success: boolean
+  detail?: string
+  pick_lists_count?: number
+  pick_lists?: PickList[]
+  active_pick_lists?: PickList[]
+  pick_list?: PickList | null
+}
+
+/** Активные листы подбора из заказов уже на сборке (stage confirm, force). */
+export function generateAssemblyPickList(sellerId: number) {
+  return apiFetch<GenerateAssemblyPickListResult>(
+    `/api/orders/assembly/sellers/${sellerId}/generate-pick-list/`,
+    {
+      method: 'POST',
+      body: '{}',
+    },
+  )
+}
+
 export interface DeletePickListResult {
   success: boolean
   deleted_pick_list_id: number

@@ -1,3 +1,5 @@
+import logging
+
 from django.db.models import Count, Prefetch
 from django.utils import timezone
 from rest_framework import status
@@ -109,6 +111,20 @@ from .services.batch_assembly import (
 )
 from .services.ozon_assembly import OzonAssemblyError
 from .services.sync_orders import SyncError, sync_all_active_sellers, sync_orders_for_seller
+
+logger = logging.getLogger(__name__)
+
+
+def _serialize_wb_pick_lists_for_api(seller, user) -> list:
+  lists = active_wb_pick_lists(seller)
+  if not lists:
+    return []
+  try:
+    qs = _pick_lists_queryset_for_user(user).filter(pk__in=[item.pk for item in lists])
+    return PickListSerializer(qs, many=True).data
+  except Exception:
+    logger.exception("Pick list serialization failed seller_id=%s", seller.id)
+    return []
 
 
 def _assembly_error_response(exc: Exception, *, status_code=status.HTTP_400_BAD_REQUEST):
@@ -724,14 +740,55 @@ class AssemblyStartView(APIView):
     except AssemblyError as exc:
       return _assembly_error_response(exc)
 
-    active_lists = active_wb_pick_lists(seller)
+    serialized = _serialize_wb_pick_lists_for_api(seller, request.user)
     return Response({
       "success": True,
       **result,
-      "pick_lists": PickListSerializer(active_lists, many=True).data,
-      "active_pick_lists": PickListSerializer(active_lists, many=True).data,
-      "pick_list": PickListSerializer(active_lists[0]).data if active_lists else None,
+      "pick_lists": serialized,
+      "active_pick_lists": serialized,
+      "pick_list": serialized[0] if serialized else None,
     }, status=status.HTTP_201_CREATED)
+
+
+class AssemblyGeneratePickListView(APIView):
+  """Пересобрать активные листы подбора из заказов на вкладке «На сборке»."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, seller_id):
+    seller = get_seller_for_user(request.user, seller_id, active_only=True)
+    if not seller:
+      return Response(status=status.HTTP_404_NOT_FOUND)
+
+    try:
+      pick_lists = generate_pick_lists(
+        seller,
+        user=request.user,
+        force=True,
+        stage="confirm",
+      )
+    except PickListError as exc:
+      return Response({"success": False, "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+      logger.exception("Generate confirm pick list failed seller_id=%s", seller.id)
+      return Response(
+        {"success": False, "detail": str(exc)},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      )
+
+    serialized = _serialize_wb_pick_lists_for_api(seller, request.user)
+    if not serialized and pick_lists:
+      serialized = PickListBriefSerializer(pick_lists, many=True).data
+
+    return Response(
+      {
+        "success": True,
+        "pick_lists_count": len(pick_lists),
+        "pick_lists": serialized,
+        "active_pick_lists": serialized,
+        "pick_list": serialized[0] if serialized else None,
+      },
+      status=status.HTTP_201_CREATED,
+    )
 
 
 class AssemblyPickListPreviewView(APIView):
