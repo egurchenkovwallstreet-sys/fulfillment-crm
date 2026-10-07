@@ -22,12 +22,57 @@ from apps.warehouse.services.liter_pricing import (
 )
 from apps.warehouse.services.storage_stock_tracking import (
   first_positive_quantity_date,
-  iter_positive_quantity_days,
   record_product_daily_quantity,
+  quantity_on_date,
 )
 
 logger = logging.getLogger(__name__)
 ZERO = Decimal("0")
+
+
+def quantity_for_storage_accrual(
+  product: Product,
+  seller: Seller,
+  target_date: date,
+) -> int:
+  """Остаток для начисления хранения (снимки CRM + догон по прошлым начислениям)."""
+  qty = quantity_on_date(product, target_date)
+  if qty > 0:
+    return qty
+  if product.quantity <= 0 or target_date > today_local():
+    return 0
+
+  charged_qty = (
+    DailyStorageCharge.objects.filter(
+      seller=seller,
+      product=product,
+      charge_date__lte=target_date,
+      quantity__gt=0,
+    )
+    .order_by("-charge_date")
+    .values_list("quantity", flat=True)
+    .first()
+  )
+  if charged_qty is not None:
+    return int(charged_qty)
+
+  return int(product.quantity)
+
+
+def iter_positive_storage_days(
+  product: Product,
+  seller: Seller,
+  from_date: date,
+  to_date: date,
+) -> list[tuple[date, int]]:
+  days: list[tuple[date, int]] = []
+  current = from_date
+  while current <= to_date:
+    qty = quantity_for_storage_accrual(product, seller, current)
+    if qty > 0:
+      days.append((current, qty))
+    current += timedelta(days=1)
+  return days
 
 
 def record_shipment_liter_charge_for_order(
@@ -153,10 +198,12 @@ def sync_storage_charges_for_product(
         product=product,
         charge_date__gte=from_date,
         charge_date__lte=to_date,
+        quantity__gt=0,
+        amount__gt=0,
       ).values_list("charge_date", flat=True)
     )
 
-  positive_days = iter_positive_quantity_days(product, from_date, to_date)
+  positive_days = iter_positive_storage_days(product, seller, from_date, to_date)
   positive_dates = {charge_date for charge_date, _ in positive_days}
 
   touched = 0
