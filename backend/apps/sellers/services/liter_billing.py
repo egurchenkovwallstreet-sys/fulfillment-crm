@@ -190,21 +190,28 @@ def storage_sync_from_date(
   if product_volume_liters(product) <= ZERO:
     return None
 
-  first_pos = first_positive_quantity_date(product)
-  if first_pos is None:
-    return None
-
   last_charged = (
     DailyStorageCharge.objects.filter(seller=seller, product=product)
     .order_by("-charge_date")
     .values_list("charge_date", flat=True)
     .first()
   )
+
+  first_pos = first_positive_quantity_date(product)
+  if first_pos is None:
+    if product.quantity <= 0 and not last_charged:
+      return None
+    if last_charged:
+      if last_charged >= charge_date:
+        return charge_date
+      return last_charged + timedelta(days=1)
+    return product.positive_stock_since or charge_date
+
   if last_charged is None:
     return first_pos
   if last_charged >= charge_date:
     return charge_date
-  return last_charged + timedelta(days=1)
+  return max(first_pos, last_charged + timedelta(days=1))
 
 
 @transaction.atomic
