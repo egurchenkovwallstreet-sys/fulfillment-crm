@@ -15,6 +15,7 @@ from apps.warehouse.services.product_catalog import (
   create_kwargs_for_new_product,
   try_enrich_product_from_catalog,
 )
+from apps.warehouse.services.intake_increment_wb import apply_wb_increment_stock
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_open_orders,
@@ -197,6 +198,12 @@ def perform_intake(
     .first()
   )
   crm_quantity_before = product.quantity if product else 0
+  use_wb_increment = (
+    mp != OZON
+    and warehouse is not None
+    and stock_mode == STOCK_MODE_INTAKE
+  )
+  reserved_picking_orders = 0
 
   if stock_mode in (STOCK_MODE_SYNC_FROM_WB, STOCK_MODE_SET_ACTUAL):
     if stock_mode == STOCK_MODE_SET_ACTUAL:
@@ -237,13 +244,17 @@ def perform_intake(
       refresh_cell_occupied(cell)
       is_new = True
   elif product:
-    crm_quantity_after = crm_quantity_before + intake_quantity
-    product.quantity = crm_quantity_after
-    product.save(update_fields=["quantity", "updated_at"])
-    try_enrich_product_from_catalog(product, seller)
-    is_new = False
+    if use_wb_increment:
+      try_enrich_product_from_catalog(product, seller)
+      is_new = False
+    else:
+      crm_quantity_after = crm_quantity_before + intake_quantity
+      product.quantity = crm_quantity_after
+      product.save(update_fields=["quantity", "updated_at"])
+      try_enrich_product_from_catalog(product, seller)
+      is_new = False
   else:
-    crm_quantity_after = intake_quantity
+    crm_quantity_after = 0 if use_wb_increment else intake_quantity
     cell = _assign_cell(seller, cell_mode, cell_id, mp)
     try:
       catalog_kwargs = create_kwargs_for_new_product(
@@ -265,35 +276,30 @@ def perform_intake(
     refresh_cell_occupied(cell)
     is_new = True
 
-  if mp == OZON:
-    comment = f"Приёмка Ozon +{intake_quantity} шт."
-  elif stock_mode == STOCK_MODE_SYNC_FROM_WB:
-    comment = (
-      f"Сверка с WB, склад {warehouse.name or warehouse.wb_warehouse_id}: "
-      f"остаток CRM = {crm_quantity_after} шт. (подтверждено менеджером)"
-    )
-  elif stock_mode == STOCK_MODE_SET_ACTUAL:
-    comment = (
-      f"Фактический остаток при приёмке: CRM {crm_quantity_after} шт., "
-      f"склад {warehouse.name or warehouse.wb_warehouse_id}"
-    )
-  else:
-    comment = (
-      f"Приёмка +{intake_quantity} шт., CRM {crm_quantity_before}→{crm_quantity_after}, "
-      f"склад WB {warehouse.name or warehouse.wb_warehouse_id}"
-    )
-
-  StockOperation.objects.create(
-    product=product,
-    operation_type=StockOperation.OperationType.INTAKE
-    if stock_mode == STOCK_MODE_INTAKE
-    else StockOperation.OperationType.ADJUSTMENT,
-    quantity=intake_quantity if stock_mode == STOCK_MODE_INTAKE else crm_quantity_after,
-    performed_by=user,
-    comment=comment,
-  )
-
-  if stock_mode in (STOCK_MODE_INTAKE, STOCK_MODE_SET_ACTUAL) and mp != OZON and warehouse is not None:
+  if use_wb_increment:
+    try_enrich_product_from_catalog(product, seller)
+    product.refresh_from_db()
+    try:
+      increment_result = apply_wb_increment_stock(
+        seller=seller,
+        warehouse=warehouse,
+        product=product,
+        barcode=barcode,
+        add_quantity=intake_quantity,
+        stock_mode_label=stock_mode,
+      )
+    except WBStockError as exc:
+      raise IntakeError(str(exc)) from exc
+    crm_quantity_after = increment_result.crm_quantity_after
+    wb_quantity_before = increment_result.wb_quantity_before
+    wb_quantity_target = increment_result.wb_quantity_target
+    wb_quantity_actual = increment_result.wb_quantity_actual
+    reserved_new_orders = increment_result.reserved_new_orders
+    reserved_picking_orders = increment_result.reserved_picking_orders
+    verified = increment_result.verified
+    restock_required = increment_result.restock_required
+    wb_sync = increment_result.wb_sync
+  elif stock_mode == STOCK_MODE_SET_ACTUAL and mp != OZON and warehouse is not None:
     try_enrich_product_from_catalog(product, seller)
     product.refresh_from_db()
     reserved_new_orders = count_reserved_open_orders(seller, barcode, marketplace=mp)
@@ -312,6 +318,41 @@ def perform_intake(
     except WBStockError as exc:
       raise IntakeError(str(exc)) from exc
 
+  if mp == OZON:
+    comment = f"Приёмка Ozon +{intake_quantity} шт."
+  elif stock_mode == STOCK_MODE_SYNC_FROM_WB:
+    comment = (
+      f"Сверка с WB, склад {warehouse.name or warehouse.wb_warehouse_id}: "
+      f"остаток CRM = {crm_quantity_after} шт. (подтверждено менеджером)"
+    )
+  elif stock_mode == STOCK_MODE_SET_ACTUAL:
+    comment = (
+      f"Фактический остаток при приёмке: CRM {crm_quantity_after} шт., "
+      f"склад {warehouse.name or warehouse.wb_warehouse_id}"
+    )
+  elif use_wb_increment:
+    comment = (
+      f"Приёмка +{intake_quantity} шт., CRM {crm_quantity_before}→{crm_quantity_after}, "
+      f"WB {wb_quantity_before}→{wb_quantity_target}, "
+      f"«Новые» {reserved_new_orders}, «На сборке» {reserved_picking_orders}, "
+      f"склад WB {warehouse.name or warehouse.wb_warehouse_id}"
+    )
+  else:
+    comment = (
+      f"Приёмка +{intake_quantity} шт., CRM {crm_quantity_before}→{crm_quantity_after}, "
+      f"склад WB {warehouse.name or warehouse.wb_warehouse_id}"
+    )
+
+  StockOperation.objects.create(
+    product=product,
+    operation_type=StockOperation.OperationType.INTAKE
+    if stock_mode == STOCK_MODE_INTAKE
+    else StockOperation.OperationType.ADJUSTMENT,
+    quantity=intake_quantity if stock_mode == STOCK_MODE_INTAKE else crm_quantity_after,
+    performed_by=user,
+    comment=comment,
+  )
+
   if any(value is not None for value in (length_cm, width_cm, height_cm)):
     apply_product_dimensions(
       product,
@@ -323,6 +364,10 @@ def perform_intake(
   warehouse_label = ""
   if warehouse is not None:
     warehouse_label = warehouse.name or str(warehouse.wb_warehouse_id)
+
+  reserved_for_display = reserved_new_orders
+  if wb_sync and wb_sync.get("reserved_open_orders") is not None:
+    reserved_for_display = int(wb_sync["reserved_open_orders"])
 
   AuditLog.objects.create(
     user=user,
@@ -347,7 +392,8 @@ def perform_intake(
       "crm_quantity_before": crm_quantity_before,
       "crm_quantity_after": crm_quantity_after,
       "wb_quantity_target": wb_quantity_target,
-      "reserved_new_orders": reserved_new_orders,
+      "reserved_new_orders": reserved_for_display,
+      "reserved_picking_orders": reserved_picking_orders,
       "verified": verified,
       "restock_required": restock_required,
     },
@@ -365,7 +411,7 @@ def perform_intake(
     wb_quantity_before=wb_quantity_before,
     wb_quantity_target=wb_quantity_target,
     wb_quantity_actual=wb_quantity_actual,
-    reserved_new_orders=reserved_new_orders,
+    reserved_new_orders=reserved_for_display,
     intake_quantity=intake_quantity,
     physical_quantity=physical_quantity,
     restock_required=restock_required,

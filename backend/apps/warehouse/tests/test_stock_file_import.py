@@ -69,9 +69,16 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(by_barcode["4601111111111"].cell_number, "12")
     self.assertEqual(by_barcode["4602222222222"].cell_number, "15")
 
+  @patch("apps.warehouse.services.stock_file_import.count_live_open_orders_for_barcode_on_warehouse")
   @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
   @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
-  def test_preview_shows_target_cell_from_excel(self, mock_catalog, mock_wb_stocks):
+  def test_preview_shows_target_cell_from_excel(
+    self,
+    mock_catalog,
+    mock_wb_stocks,
+    mock_live_orders,
+  ):
+    mock_live_orders.return_value = (0, 0, 0)
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
     mock_wb_stocks.return_value = {"4601111111111": {"total": 0}}
     file_bytes = self._build_excel([("4601111111111", 4, 7)])
@@ -87,6 +94,7 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(row["cell_number"], "7")
     self.assertTrue(row["will_create_cell"])
 
+  @patch("apps.warehouse.services.stock_file_import.count_live_open_orders_for_barcode_on_warehouse")
   @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
   @patch("apps.warehouse.services.stock_file_import.set_wb_stocks_absolute_batch")
   @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
@@ -95,7 +103,9 @@ class StockFileImportCellTests(TestCase):
     mock_catalog,
     mock_push_batch,
     mock_wb_stocks,
+    mock_live_orders,
   ):
+    mock_live_orders.return_value = (0, 0, 0)
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
     mock_wb_stocks.side_effect = [
       {"4601111111111": {"total": 0}},
@@ -125,6 +135,7 @@ class StockFileImportCellTests(TestCase):
     self.assertEqual(pushed[0][0], "4601111111111")
     self.assertEqual(pushed[0][1], 4)
 
+  @patch("apps.warehouse.services.stock_file_import.count_live_open_orders_for_barcode_on_warehouse")
   @patch("apps.warehouse.services.stock_file_import.fetch_wb_stocks_for_warehouses")
   @patch("apps.warehouse.services.stock_file_import.set_wb_stocks_absolute_batch")
   @patch("apps.warehouse.services.stock_file_import.build_catalog_index_for_barcodes")
@@ -133,7 +144,9 @@ class StockFileImportCellTests(TestCase):
     mock_catalog,
     mock_push_batch,
     mock_wb_stocks,
+    mock_live_orders,
   ):
+    mock_live_orders.return_value = (0, 0, 0)
     mock_catalog.return_value = {"4601111111111": self.catalog_item}
     mock_wb_stocks.side_effect = [
       {"4601111111111": {"total": 2}},
@@ -163,7 +176,7 @@ class StockFileImportCellTests(TestCase):
     product = Product.objects.get(seller=self.seller, barcode="4601111111111")
     old_cell.refresh_from_db()
     self.assertEqual(product.cell.number, "22")
-    self.assertEqual(product.quantity, 3)
+    self.assertEqual(product.quantity, 4)
     self.assertFalse(old_cell.is_occupied)
     mock_push_batch.assert_called_once()
     self.assertEqual(mock_push_batch.call_args[0][2][0][1], 4)

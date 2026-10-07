@@ -21,6 +21,10 @@ from apps.warehouse.services.cells import (
   get_or_create_cell_by_number,
   refresh_cell_occupied,
 )
+from apps.warehouse.services.live_wb_orders import (
+  LiveWbOrdersError,
+  count_live_open_orders_for_barcode_on_warehouse,
+)
 from apps.warehouse.services.stock_balance import (
   compute_wb_amount_from_crm,
   count_reserved_new_orders,
@@ -29,7 +33,6 @@ from apps.warehouse.services.wb_stocks import (
   WBStockError,
   fetch_wb_stocks_for_warehouses,
   get_seller_warehouse,
-  increment_product_warehouse_stock,
   set_wb_stocks_absolute_batch,
 )
 
@@ -102,6 +105,7 @@ class _ImportPlan:
   crm_wh_expected: int
   crm_total_expected: int
   reserved_new: int
+  reserved_picking: int
   product: Product | None = None
   created_product: bool = False
 
@@ -260,10 +264,35 @@ def _normalize_import_mode(mode: str | None) -> str:
   return normalized
 
 
+def _increment_row_values(
+  seller: Seller,
+  warehouse,
+  *,
+  barcode: str,
+  wb_before: int,
+  add_quantity: int,
+) -> tuple[int, int, int, int, str]:
+  wb_after = wb_before + add_quantity
+  try:
+    reserved_new, reserved_picking, reserved_total = count_live_open_orders_for_barcode_on_warehouse(
+      seller,
+      barcode,
+      warehouse,
+    )
+  except LiveWbOrdersError as exc:
+    raise StockFileImportError(str(exc)) from exc
+  crm_after = wb_after + reserved_total
+  message = ""
+  if reserved_total:
+    message = f"«Новые» {reserved_new}, «На сборке» {reserved_picking}"
+  return crm_after, wb_after, reserved_new, reserved_picking, message
+
+
 def _preview_row_values(
   *,
   mode: str,
   seller: Seller,
+  warehouse,
   row: ParsedStockRow,
   product: Product | None,
   crm_wh_before: int,
@@ -279,13 +308,14 @@ def _preview_row_values(
       message = f"«Новых» ({reserved_new}) больше остатка из файла — на WB будет 0"
     return crm_after, wb_after, reserved_new, message
 
-  crm_before = product.quantity if product else 0
-  return (
-    crm_before + row.add_quantity,
-    wb_before + row.add_quantity,
-    reserved_new,
-    "",
+  crm_after, wb_after, reserved_new, _reserved_picking, message = _increment_row_values(
+    seller,
+    warehouse,
+    barcode=row.barcode,
+    wb_before=wb_before,
+    add_quantity=row.add_quantity,
   )
+  return crm_after, wb_after, reserved_new + _reserved_picking, message
 
 
 def _resolve_import_cell(
@@ -382,6 +412,7 @@ def build_stock_import_preview(
     crm_after, wb_after, reserved_new, message = _preview_row_values(
       mode=mode,
       seller=seller,
+      warehouse=warehouse,
       row=row,
       product=product,
       crm_wh_before=_get_crm_warehouse_qty(product, warehouse),
@@ -515,18 +546,22 @@ def _build_import_plans(
     product = products.get(barcode)
     wb_before = int((wb_stock_map.get(barcode) or {}).get("total") or 0)
     crm_wh_before = _get_crm_warehouse_qty(product, warehouse)
-    reserved_new = count_reserved_new_orders(seller, barcode) if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW else 0
-
+    reserved_picking = 0
     if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW:
+      reserved_new = count_reserved_new_orders(seller, barcode)
       crm_expected = add_qty
       wb_expected, _restock = compute_wb_amount_from_crm(add_qty, reserved_new)
       crm_wh_expected = add_qty
       crm_total_expected = add_qty
     else:
-      crm_before = product.quantity if product else 0
-      crm_expected = crm_before + add_qty
-      wb_expected = wb_before + add_qty
-      crm_wh_expected = crm_wh_before + add_qty
+      crm_expected, wb_expected, reserved_new, reserved_picking, _msg = _increment_row_values(
+        seller,
+        warehouse,
+        barcode=barcode,
+        wb_before=wb_before,
+        add_quantity=add_qty,
+      )
+      crm_wh_expected = wb_expected
       crm_total_expected = crm_expected
 
     plans.append(
@@ -542,6 +577,7 @@ def _build_import_plans(
         crm_wh_expected=crm_wh_expected,
         crm_total_expected=crm_total_expected,
         reserved_new=reserved_new,
+        reserved_picking=reserved_picking,
       )
     )
 
@@ -614,17 +650,21 @@ def _apply_crm_import_plans(
     else:
       if product:
         old_cell = _assign_product_cell(product, cell)
-        product.quantity += add_qty
+        product.quantity = plan.crm_total_expected
         product.save(update_fields=["quantity", "cell", "updated_at"])
         _refresh_cells_after_assign(cell, old_cell)
-        increment_product_warehouse_stock(product, warehouse, add_qty)
+        ProductWarehouseStock.objects.update_or_create(
+          product=product,
+          seller_warehouse=warehouse,
+          defaults={"quantity": plan.wb_expected},
+        )
       else:
         product = Product.objects.create(
           seller=seller,
           barcode=plan.parsed.barcode,
           name=catalog_item.title,
           cell=cell,
-          quantity=add_qty,
+          quantity=plan.crm_total_expected,
           requires_marking=catalog_item.requires_marking,
           wb_nm_id=catalog_item.wb_nm_id,
           vendor_code=catalog_item.vendor_code,
@@ -633,7 +673,11 @@ def _apply_crm_import_plans(
           photo_url=catalog_item.photo_url,
         )
         refresh_cell_occupied(cell)
-        increment_product_warehouse_stock(product, warehouse, add_qty)
+        ProductWarehouseStock.objects.update_or_create(
+          product=product,
+          seller_warehouse=warehouse,
+          defaults={"quantity": plan.wb_expected},
+        )
         created_here = True
 
     plan.product = product
@@ -667,7 +711,10 @@ def _apply_crm_import_plans(
         + (
           f", «Новые» −{plan.reserved_new}, WB={plan.wb_expected}"
           if mode == STOCK_IMPORT_MODE_SET_MINUS_NEW
-          else ""
+          else (
+            f", WB {plan.wb_before}→{plan.wb_expected}, "
+            f"«Новые» {plan.reserved_new}, «На сборке» {plan.reserved_picking}"
+          )
         )
       ),
     )
