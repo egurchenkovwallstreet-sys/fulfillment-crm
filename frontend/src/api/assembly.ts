@@ -49,6 +49,10 @@ export interface AssemblyOrder {
   requires_marking: boolean
   /** Доп. баркоды того же товара WB (второй sku) */
   alternate_barcodes?: string[]
+  /** Основной баркод ячейки CRM */
+  primary_barcode?: string
+  /** Все sku WB размера (основной + джитины) */
+  wb_sku_codes?: string[]
   can_send_to_assembly: boolean
   can_send_to_delivery: boolean
   can_move_to_new_supply?: boolean

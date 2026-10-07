@@ -314,11 +314,17 @@ def _group_orders_for_pick_list(
     product = data["product"]
     cell_number = str(data["cell"].number) if data["cell"] else "—"
     alternate_barcodes = product_alternate_barcodes(product) if product else []
+    order_barcodes = sorted(
+      code
+      for code in (normalize_barcode(b) for b in data["order_barcodes"])
+      if code
+    )
     preview_items.append({
       "id": index,
       "cell_number": cell_number,
       "barcode": data["barcode"],
       "alternate_barcodes": alternate_barcodes,
+      "order_barcodes": order_barcodes,
       "product_name": product.name if product else "—",
       "wb_nm_id": product.wb_nm_id if product else None,
       "wb_article": _product_wb_article(product) or "—",

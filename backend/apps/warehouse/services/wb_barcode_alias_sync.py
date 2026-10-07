@@ -130,11 +130,12 @@ def _sync_aliases_from_catalog_by_chrt(
   (та же ячейка, что у первого известного баркода).
   """
   for chrt_id, skus in by_chrt.items():
-    if len(skus) < 2:
+    if not skus:
       continue
     product = _find_product_for_chrt(seller, chrt_id, skus)
     if not product:
       continue
+    result.products_checked += 1
     if not product.wb_chrt_id:
       product.wb_chrt_id = chrt_id
       product.save(update_fields=["wb_chrt_id", "updated_at"])
@@ -239,11 +240,31 @@ def sync_wb_barcode_aliases_from_index(
   by_chrt = _barcodes_by_chrt_id(index)
   _backfill_product_chrt_ids(seller, index, result)
   _sync_aliases_from_catalog_by_chrt(seller, by_chrt, result)
+  _sync_all_products_skus_from_index(seller, index, result)
   _sync_aliases_from_orphan_orders(seller, index, by_chrt, result)
   _sync_aliases_from_linked_orders(seller, index, result)
   if relink_orders:
     result.orders_relinked = relink_orders_to_products_for_seller(seller)
   return result
+
+
+def _sync_all_products_skus_from_index(
+  seller: Seller,
+  index: dict,
+  result: BarcodeAliasSyncResult,
+) -> None:
+  """Для каждого товара WB — все skus размера из каталога → алиасы одной ячейки."""
+  from apps.warehouse.services.product_lookup import sync_product_wb_barcodes
+
+  products = Product.objects.filter(seller=seller, marketplace=MARKETPLACE_WB).only(
+    "id",
+    "barcode",
+    "wb_chrt_id",
+    "marketplace",
+  )
+  for product in products.iterator():
+    added = sync_product_wb_barcodes(seller, product, catalog_index=index)
+    result.aliases_added += added
 
 
 def sync_wb_barcode_aliases_for_seller(seller: Seller) -> BarcodeAliasSyncResult:

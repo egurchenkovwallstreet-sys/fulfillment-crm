@@ -11,6 +11,7 @@ from apps.warehouse.services.cell_label import build_cell_label_data
 from apps.warehouse.services.cells import create_cell_with_next_number, first_free_cell, refresh_cell_occupied
 from apps.warehouse.services.catalog_fetch import CatalogError
 from apps.warehouse.services.liter_pricing import apply_product_dimensions
+from apps.warehouse.services.catalog_fetch import CatalogError
 from apps.warehouse.services.product_catalog import (
   create_kwargs_for_new_product,
   try_enrich_product_from_catalog,
@@ -377,6 +378,14 @@ def perform_intake(
   reserved_for_display = reserved_new_orders
   if wb_sync and wb_sync.get("reserved_open_orders") is not None:
     reserved_for_display = int(wb_sync["reserved_open_orders"])
+
+  if mp == WB and product:
+    from apps.warehouse.services.product_lookup import sync_product_wb_barcodes
+
+    try:
+      sync_product_wb_barcodes(seller, product)
+    except CatalogError:
+      pass
 
   AuditLog.objects.create(
     user=user,

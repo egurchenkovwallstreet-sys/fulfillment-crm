@@ -61,11 +61,11 @@ function sortPickListItems(items: PickList['items']): PickList['items'] {
 }
 
 function formatPickListBarcodes(item: PickList['items'][number]): string {
-  const primary = (item.barcode || '').trim()
-  const alternates = (item.alternate_barcodes ?? []).filter((code) => code && code !== primary)
-  if (!primary) return alternates.join(' / ') || '—'
-  if (!alternates.length) return primary
-  return `${primary} / ${alternates.join(' / ')}`
+  const primary = (item.primary_barcode || item.barcode || '').trim()
+  const orderJitins = (item.order_barcodes ?? []).filter((code) => code && code !== primary)
+  if (!primary) return orderJitins.join('\n') || '—'
+  if (!orderJitins.length) return primary
+  return `${primary}\n${orderJitins.join('\n')}`
 }
 
 function rowHtml(item: PickList['items'][number]): string {
@@ -82,7 +82,7 @@ function rowHtml(item: PickList['items'][number]): string {
     <tr>
       <td class="col-cell"><div class="row-text row-text--cell">${cell}</div></td>
       <td class="col-qty"><div class="row-text">${qty}</div></td>
-      <td class="col-barcode"><div class="row-text">${barcode}</div></td>
+      <td class="col-barcode"><div class="row-text row-text--barcode">${barcode.replace(/\n/g, '<br>')}</div></td>
       <td class="col-article"><div class="row-text">${article}</div></td>
       <td class="col-size"><div class="row-text">${size}</div></td>
       <td class="col-color"><div class="row-text">${color}</div></td>

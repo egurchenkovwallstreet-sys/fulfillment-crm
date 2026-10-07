@@ -109,6 +109,11 @@ def confirm_onboarding(
     },
   )
 
+  if mp == WB and created_products:
+    from apps.warehouse.services.wb_barcode_alias_sync import sync_wb_barcode_aliases_for_seller
+
+    sync_wb_barcode_aliases_for_seller(seller)
+
   return {
     "created_products": created_products,
     "skipped": skipped,

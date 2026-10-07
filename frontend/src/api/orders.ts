@@ -39,6 +39,9 @@ export interface PickListItem {
   barcode: string
   /** Второй sku WB того же размера (алиас в CRM) */
   alternate_barcodes?: string[]
+  primary_barcode?: string
+  /** Баркоды заказов в строке, отличные от основного */
+  order_barcodes?: string[]
   product_name: string
   wb_nm_id?: number | null
   wb_article?: string

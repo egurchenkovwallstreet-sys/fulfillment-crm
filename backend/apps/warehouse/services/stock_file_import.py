@@ -853,6 +853,11 @@ def apply_stock_import(
       f"CRM обновлена ({applied} баркодов), но WB отклонил пакетную загрузку: {exc}",
     ) from exc
 
+  if plans and catalog_index:
+    from apps.warehouse.services.wb_barcode_alias_sync import sync_wb_barcode_aliases_from_index
+
+    sync_wb_barcode_aliases_from_index(seller, catalog_index, relink_orders=False)
+
   verify_mismatches = _verify_wb_import_plans(seller, warehouse, plans)
   mismatches.extend(verify_mismatches)
 

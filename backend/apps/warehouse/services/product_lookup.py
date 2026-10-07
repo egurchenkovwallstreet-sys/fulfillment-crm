@@ -188,6 +188,27 @@ def product_alternate_barcodes(product: Product) -> list[str]:
   ]
 
 
+def product_wb_sku_codes(product: Product | None) -> list[str]:
+  """Все sku WB товара: основной баркод ячейки, затем джитины/алиасы."""
+  if product is None:
+    return []
+  primary = normalize_barcode(product.barcode)
+  alternates = product_alternate_barcodes(product)
+  codes: list[str] = []
+  if primary:
+    codes.append(primary)
+  for code in alternates:
+    if code not in codes:
+      codes.append(code)
+  return codes
+
+
+def product_primary_barcode(product: Product | None) -> str:
+  if product is None:
+    return ""
+  return normalize_barcode(product.barcode)
+
+
 def sync_product_wb_barcodes(
   seller: Seller,
   product: Product,

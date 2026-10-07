@@ -53,6 +53,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
   wb_stage_display = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
   alternate_barcodes = serializers.SerializerMethodField()
+  primary_barcode = serializers.SerializerMethodField()
+  wb_sku_codes = serializers.SerializerMethodField()
   can_send_to_assembly = serializers.SerializerMethodField()
   can_send_to_delivery = serializers.SerializerMethodField()
   can_move_to_new_supply = serializers.SerializerMethodField()
@@ -84,6 +86,8 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
       "marking_verify_error",
       "requires_marking",
       "alternate_barcodes",
+      "primary_barcode",
+      "wb_sku_codes",
       "can_send_to_assembly",
       "can_send_to_delivery",
       "can_move_to_new_supply",
@@ -92,19 +96,32 @@ class OrderAssemblySerializer(serializers.ModelSerializer):
     )
 
   def get_alternate_barcodes(self, obj):
-    from apps.warehouse.models import ProductBarcodeAlias
-    from apps.warehouse.services.catalog_fetch import normalize_barcode
+    from apps.warehouse.services.product_lookup import product_alternate_barcodes
 
     product = _resolve_order_product(obj, self)
-    product_id = product.id if product else None
-    if not product_id:
+    if not product:
       return []
-    primary = normalize_barcode(obj.barcode)
-    aliases = ProductBarcodeAlias.objects.filter(product_id=product_id).values_list(
-      "barcode",
-      flat=True,
-    )
-    return [code for code in aliases if normalize_barcode(code) != primary]
+    return product_alternate_barcodes(product)
+
+  def get_primary_barcode(self, obj):
+    from apps.warehouse.services.catalog_fetch import normalize_barcode
+    from apps.warehouse.services.product_lookup import product_primary_barcode
+
+    product = _resolve_order_product(obj, self)
+    primary = product_primary_barcode(product)
+    if primary:
+      return primary
+    return normalize_barcode(obj.barcode)
+
+  def get_wb_sku_codes(self, obj):
+    from apps.warehouse.services.catalog_fetch import normalize_barcode
+    from apps.warehouse.services.product_lookup import product_wb_sku_codes
+
+    product = _resolve_order_product(obj, self)
+    if product:
+      return product_wb_sku_codes(product)
+    code = normalize_barcode(obj.barcode)
+    return [code] if code else []
 
   def get_wb_stage_display(self, obj):
     from apps.orders.services.assembly import get_wb_stage_label
@@ -248,6 +265,8 @@ class PickListItemSerializer(serializers.ModelSerializer):
   color_label = serializers.SerializerMethodField()
   requires_marking = serializers.SerializerMethodField()
   alternate_barcodes = serializers.SerializerMethodField()
+  primary_barcode = serializers.SerializerMethodField()
+  order_barcodes = serializers.SerializerMethodField()
 
   class Meta:
     model = PickListItem
@@ -255,7 +274,9 @@ class PickListItemSerializer(serializers.ModelSerializer):
       "id",
       "cell_number",
       "barcode",
+      "primary_barcode",
       "alternate_barcodes",
+      "order_barcodes",
       "product_name",
       "wb_nm_id",
       "wb_article",
@@ -314,6 +335,34 @@ class PickListItemSerializer(serializers.ModelSerializer):
     if not obj.product_id:
       return []
     return product_alternate_barcodes(obj.product)
+
+  def get_primary_barcode(self, obj):
+    from apps.warehouse.services.catalog_fetch import normalize_barcode
+    from apps.warehouse.services.product_lookup import product_primary_barcode
+
+    if obj.product_id:
+      primary = product_primary_barcode(obj.product)
+      if primary:
+        return primary
+    return normalize_barcode(obj.barcode)
+
+  def get_order_barcodes(self, obj):
+    from apps.warehouse.services.catalog_fetch import normalize_barcode
+
+    primary = self.get_primary_barcode(obj)
+    if not obj.pick_list_id:
+      return []
+    qs = Order.objects.filter(pick_list_id=obj.pick_list_id)
+    if obj.product_id:
+      qs = qs.filter(product_id=obj.product_id)
+    else:
+      qs = qs.filter(product_id__isnull=True, barcode=obj.barcode)
+    codes: set[str] = set()
+    for raw in qs.values_list("barcode", flat=True):
+      code = normalize_barcode(raw)
+      if code and code != primary:
+        codes.add(code)
+    return sorted(codes)
 
 
 class PickListSerializer(serializers.ModelSerializer):

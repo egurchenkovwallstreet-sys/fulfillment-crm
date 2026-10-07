@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { WbBarcodeHint } from '../components/WbBarcodeHint'
 import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -899,6 +900,10 @@ function WbAssemblySellerPage() {
   /** Локальный предпросмотр: основной баркод заказа или второй баркод того же SKU. */
   function orderProductBarcodes(order: AssemblyOrder): Set<string> {
     const codes = new Set<string>()
+    for (const code of order.wb_sku_codes ?? []) {
+      const normalized = normalizeScanCode(code)
+      if (normalized) codes.add(normalized)
+    }
     const primary = normalizeScanCode(order.barcode)
     if (primary) codes.add(primary)
     for (const alt of order.alternate_barcodes ?? []) {
@@ -2748,7 +2753,14 @@ function WbAssemblySellerPage() {
           </td>
         )}
         <td>{order.wb_order_id}</td>
-        <td><code>{order.barcode}</code></td>
+        <td>
+          <WbBarcodeHint
+            displayCode={order.barcode}
+            primaryBarcode={order.primary_barcode}
+            alternateBarcodes={order.alternate_barcodes}
+            wbSkuCodes={order.wb_sku_codes}
+          />
+        </td>
         <td>
           <ProductPhotoThumb
             url={order.photo_url ?? ''}
@@ -3449,7 +3461,14 @@ function WbAssemblySellerPage() {
                 {hiddenRestorableOrders.map((order) => (
                   <tr key={`hidden-${order.id}`}>
                     <td>{order.wb_order_id}</td>
-                    <td><code>{order.barcode}</code></td>
+                    <td>
+                      <WbBarcodeHint
+                        displayCode={order.barcode}
+                        primaryBarcode={order.primary_barcode}
+                        alternateBarcodes={order.alternate_barcodes}
+                        wbSkuCodes={order.wb_sku_codes}
+                      />
+                    </td>
                     <td>{order.wb_stage_display || order.status_display}</td>
                     <td>{order.has_sticker ? formatStickerNumber(order) || '✓' : '—'}</td>
                     <td>
