@@ -239,7 +239,11 @@ def _group_orders_for_pick_list(
   orders: list[Order],
 ) -> tuple[list[dict], int]:
   """Сгруппировать заказы для листа. Заказы без товара в CRM — по баркоду, ячейка «—»."""
-  from apps.warehouse.services.catalog_fetch import CatalogError, build_seller_catalog_index
+  from apps.warehouse.services.catalog_fetch import (
+    CatalogError,
+    build_seller_catalog_index,
+    normalize_barcode,
+  )
 
   try:
     catalog_index = build_seller_catalog_index(seller)
