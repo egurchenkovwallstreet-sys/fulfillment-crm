@@ -85,15 +85,6 @@ def rebuild_admin_billing_cache(
   """Пересчитать статистику и положить в Redis."""
   from apps.accounts.models import Fulfillment
 
-  fulfillment = None
-  if fulfillment_id is not None:
-    fulfillment = Fulfillment.objects.filter(pk=fulfillment_id).first()
-
-  from apps.sellers.services.liter_billing import accrue_daily_storage_for_fulfillment
-
-  accrue_meta = accrue_daily_storage_for_fulfillment(fulfillment=fulfillment)
-  logger.info("Storage accrual before admin billing rebuild: %s", accrue_meta)
-
   lock_key = billing_lock_key(fulfillment_id=fulfillment_id, marketplace=marketplace)
   if not cache.add(lock_key, "1", timeout=REFRESH_LOCK_TTL_SEC):
     logger.info(
@@ -101,14 +92,18 @@ def rebuild_admin_billing_cache(
       fulfillment_id,
       marketplace,
     )
-    return {
-      "skipped": True,
-      "fulfillment_id": fulfillment_id,
-      "marketplace": marketplace,
-      "storage_accrual": accrue_meta,
-    }
+    return {"skipped": True, "fulfillment_id": fulfillment_id, "marketplace": marketplace}
+
+  fulfillment = None
+  if fulfillment_id is not None:
+    fulfillment = Fulfillment.objects.filter(pk=fulfillment_id).first()
 
   try:
+    from apps.sellers.services.liter_billing import accrue_daily_storage_for_fulfillment
+
+    accrue_meta = accrue_daily_storage_for_fulfillment(fulfillment=fulfillment)
+    logger.info("Storage accrual before admin billing rebuild: %s", accrue_meta)
+
     payload = load_admin_billing_dashboard(
       fulfillment=fulfillment,
       marketplace=marketplace,

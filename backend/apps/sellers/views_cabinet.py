@@ -272,9 +272,6 @@ class SellerCabinetView(APIView):
         seller,
         marketplace=marketplace,
       )
-      from apps.sellers.services.liter_billing import accrue_daily_storage_for_seller
-
-      accrue_daily_storage_for_seller(seller)
       summary_data = SellerCabinetSummarySerializer(summary).data
       stages_data = SellerWbStageCountsSerializer(stages).data
       weekly_data = SellerWeeklyShipmentsSerializer(weekly_shipments).data
@@ -441,7 +438,16 @@ class AdminBillingDashboardView(APIView):
       fulfillment_id = fulfillment.id if fulfillment else None
       force_refresh = request.query_params.get("refresh") == "1"
 
-      if force_refresh:
+      data, meta = get_cached_admin_billing(
+        fulfillment_id=fulfillment_id,
+        marketplace=marketplace,
+      )
+      if data is None and not force_refresh:
+        data, meta = ensure_admin_billing_cached(
+          fulfillment_id=fulfillment_id,
+          marketplace=marketplace,
+        )
+      elif force_refresh and data is None:
         rebuild_admin_billing_cache(
           fulfillment_id=fulfillment_id,
           marketplace=marketplace,
@@ -450,26 +456,13 @@ class AdminBillingDashboardView(APIView):
           fulfillment_id=fulfillment_id,
           marketplace=marketplace,
         )
-        refreshing = False
-      else:
-        data, meta = get_cached_admin_billing(
+
+      stale = is_cache_stale(meta)
+      refreshing = False
+      if data is not None and (force_refresh or stale):
+        refreshing = queue_admin_billing_refresh(
           fulfillment_id=fulfillment_id,
           marketplace=marketplace,
-        )
-        if data is None:
-          data, meta = ensure_admin_billing_cached(
-            fulfillment_id=fulfillment_id,
-            marketplace=marketplace,
-          )
-
-        stale = is_cache_stale(meta)
-        refreshing = bool(
-          data is not None
-          and stale
-          and queue_admin_billing_refresh(
-            fulfillment_id=fulfillment_id,
-            marketplace=marketplace,
-          )
         )
 
       if data is None:
@@ -481,7 +474,7 @@ class AdminBillingDashboardView(APIView):
       response_payload = {
         **data,
         "cached_at": meta.get("cached_at") if meta else None,
-        "refreshing": refreshing,
+        "refreshing": refreshing or (stale and not force_refresh),
       }
       return Response(response_payload)
     except Exception as exc:
