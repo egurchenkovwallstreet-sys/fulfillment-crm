@@ -249,8 +249,18 @@ def record_sticker_billing_task(order_id: int):
   return {"success": True, "order_id": order_id}
 
 
-@shared_task(queue="sync")
-def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | None = None):
+@shared_task(
+  bind=True,
+  queue="marking",
+  max_retries=5,
+  default_retry_delay=20,
+)
+def bind_order_marking_wb_task(
+  self,
+  order_id: int,
+  marking_code: str,
+  user_id: int | None = None,
+):
   """Привязка ЧЗ к заказу в WB после печати стикера (основной путь и повтор при сбое)."""
   from apps.accounts.models import User
   from apps.orders.models import Order
@@ -272,15 +282,41 @@ def bind_order_marking_wb_task(order_id: int, marking_code: str, user_id: int | 
   try:
     _push_marking_code_to_wb(order, code, user=user)
   except AssemblyError as exc:
+    fail_code = getattr(exc, "code", None)
+    if fail_code in ("wb_marking_bind_failed", "invalid_marking_code"):
+      logger.warning(
+        "Background WB marking bind failed order=%s wb=%s: %s",
+        order.id,
+        order.wb_order_id,
+        exc,
+      )
+      return {"success": False, "order_id": order.id, "error": str(exc)}
     logger.warning(
-      "Background WB marking bind failed order=%s wb=%s: %s",
+      "Background WB marking bind retry order=%s wb=%s attempt=%s: %s",
       order.id,
       order.wb_order_id,
+      self.request.retries + 1,
       exc,
     )
-    return {"success": False, "order_id": order.id, "error": str(exc)}
+    raise self.retry(exc=exc)
 
   logger.info("Background WB marking bind ok order=%s wb=%s", order.id, order.wb_order_id)
+  from apps.orders.services.marking_verification import verify_marking_orders
+
+  try:
+    verify_marking_orders(
+      order.seller,
+      [order.id],
+      user=user,
+      force_recheck=False,
+      batch=False,
+    )
+  except AssemblyError as exc:
+    logger.warning(
+      "Marking verify right after WB bind failed order=%s: %s",
+      order.id,
+      exc,
+    )
   verify_seller_marking_codes.apply_async((order.seller_id,), countdown=2, queue="marking")
   return {"success": True, "order_id": order.id}
 

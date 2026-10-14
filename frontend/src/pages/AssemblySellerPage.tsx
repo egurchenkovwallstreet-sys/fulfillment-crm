@@ -43,6 +43,7 @@ import {
 import { ApiError } from '../api/client'
 import { syncOrders, fetchPickList } from '../api/orders'
 import { syncSellerWarehouses, toggleSellerWarehouse } from '../api/sellers'
+import { mergeVerifyIntoMarkingStatus } from '../utils/markingStatusMerge'
 import {
   WORKFLOW_STEPS,
   buildDeliveryConfirmMessage,
@@ -372,6 +373,40 @@ function WbAssemblySellerPage() {
     restorePageScroll(scrollY)
   }
 
+  function patchLocalOrdersFromVerify(result: VerifyMarkingResult) {
+    if (!result.results.length) return
+    const patchById = new Map<number, Partial<AssemblyOrder> & { id: number }>()
+    for (const item of result.results) {
+      if (item.order) {
+        patchById.set(item.order_id, assemblyOrderPatchFromApi(item.order))
+      } else {
+        patchById.set(item.order_id, {
+          id: item.order_id,
+          marking_verify_status: item.status,
+          marking_verify_error: item.error,
+          marking_bound: item.marking_bound,
+        })
+      }
+    }
+    const merge = (order: AssemblyOrder): AssemblyOrder => {
+      const patch = patchById.get(order.id)
+      return patch ? { ...order, ...patch } : order
+    }
+    const scrollY = window.scrollY
+    setData((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        orders: prev.orders?.map(merge),
+        active_supplies: prev.active_supplies?.map((supply) => ({
+          ...supply,
+          orders: supply.orders?.map(merge),
+        })),
+      }
+    })
+    restorePageScroll(scrollY)
+  }
+
   function blockBackgroundListRefresh(delayMs = 12_000) {
     loadDeferredUntilRef.current = Date.now() + delayMs
   }
@@ -555,10 +590,22 @@ function WbAssemblySellerPage() {
       const result = await verifyMarking(id, opts?.orderIds, {
         forceRecheck: opts?.forceRecheck ?? !silent,
       })
+      setMarkingStatus((prev) => mergeVerifyIntoMarkingStatus(prev, result))
+      patchLocalOrdersFromVerify(result)
       await refreshMarkingStatus()
       chzVerifyFailStreakRef.current = 0
       if (silent) {
-        setChzVerifyNotice('')
+        const verified =
+          result.verified_count ?? result.results.filter((item) => item.status === 'verified').length
+        const errors =
+          result.error_count ?? result.results.filter((item) => item.status === 'error').length
+        if (verified > 0) {
+          setChzVerifyNotice(`ЧЗ принят WB: ${verified}`)
+        } else if (errors > 0) {
+          setChzVerifyNotice(`ЧЗ отклонён WB: ${errors}`)
+        } else {
+          setChzVerifyNotice('')
+        }
       }
       return result
     } catch (err) {
@@ -578,22 +625,36 @@ function WbAssemblySellerPage() {
   }, [id, refreshMarkingStatus])
 
   const pushMarkingToWbAfterPrint = useCallback(
-    (orderId: number) => {
+    async (orderId: number) => {
       if (!id) return
-      void pushMarkingToWb(id, [orderId])
-        .then(() =>
-          runMarkingVerify({ silent: true, orderIds: [orderId], forceRecheck: true }),
-        )
-        .catch((err) => {
+      try {
+        const pushResult = await pushMarkingToWb(id, [orderId])
+        if (pushResult.sent_count < 1 && pushResult.error_count > 0) {
+          const firstErr = pushResult.errors[0]?.error || 'WB не принял код'
           chzVerifyFailStreakRef.current += 1
-          if (chzVerifyFailStreakRef.current >= 1) {
-            setChzVerifyNotice(
-              err instanceof Error
-                ? `${err.message} Нажмите «Дослать ЧЗ в WB».`
-                : 'ЧЗ не отправился в WB. Нажмите «Дослать ЧЗ в WB».',
-            )
+          setChzVerifyNotice(`${firstErr} Нажмите «Дослать ЧЗ в WB».`)
+        }
+        if (pushResult.verify_results?.length) {
+          const wrapped: VerifyMarkingResult = {
+            success: true,
+            results: pushResult.verify_results,
           }
-        })
+          setMarkingStatus((prev) => mergeVerifyIntoMarkingStatus(prev, wrapped))
+          patchLocalOrdersFromVerify(wrapped)
+          const verified = pushResult.verify_results.filter((item) => item.status === 'verified').length
+          if (verified > 0) {
+            setChzVerifyNotice(`ЧЗ принят WB: ${verified}`)
+          }
+        }
+        await runMarkingVerify({ silent: true, orderIds: [orderId], forceRecheck: true })
+      } catch (err) {
+        chzVerifyFailStreakRef.current += 1
+        setChzVerifyNotice(
+          err instanceof Error
+            ? `${err.message} Нажмите «Дослать ЧЗ в WB».`
+            : 'ЧЗ не отправился в WB. Нажмите «Дослать ЧЗ в WB».',
+        )
+      }
     },
     [id, runMarkingVerify],
   )
@@ -2492,6 +2553,7 @@ function WbAssemblySellerPage() {
           () => resumeBarcodeScanAfterPrint(),
         )
         void refreshMarkingStatus()
+        void pushMarkingToWbAfterPrint(result.order.id)
         return
       }
       setStage('confirm')

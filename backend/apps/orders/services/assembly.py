@@ -1159,7 +1159,7 @@ def bind_marking_and_print(
 
     bind_order_marking_wb_task.apply_async(
       (order_id, normalized, getattr(user, "id", None)),
-      countdown=1,
+      countdown=12,
       queue="marking",
     )
 

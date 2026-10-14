@@ -442,10 +442,22 @@ def push_marking_to_wb_orders(
       continue
     sent.append({"order_id": order.id, "wb_order_id": order.wb_order_id})
 
+  verify_results: list[dict] = []
   if sent:
     from apps.integrations.tasks import verify_seller_marking_codes
 
     verify_seller_marking_codes.apply_async((seller.id,), countdown=2, queue="marking")
+    sent_ids = [item["order_id"] for item in sent]
+    try:
+      verify_results = verify_marking_orders(
+        seller,
+        sent_ids,
+        user=user,
+        force_recheck=False,
+        batch=False,
+      )
+    except AssemblyError:
+      verify_results = []
 
   return {
     "sent_count": len(sent),
@@ -454,6 +466,7 @@ def push_marking_to_wb_orders(
     "sent": sent,
     "errors": errors,
     "repair": repair_result,
+    "verify_results": verify_results,
   }
 
 
@@ -534,43 +547,57 @@ def verify_marking_orders(
   )
   if orders and meta_count == 0:
     wb_ids = [order.wb_order_id for order in orders]
-    if batch:
-      logger.warning(
-        "WB empty /orders/meta batch seller=%s orders=%s wb_ids=%s",
-        seller.id,
-        len(orders),
-        wb_ids[:10],
+    pending_ids = [
+      order.id
+      for order in orders
+      if (order.marking_verify_status or "").strip() == VERIFY_PENDING
+      and (order.marking_code or "").strip()
+    ]
+    if pending_ids and not force_recheck:
+      push_marking_to_wb_orders(seller, pending_ids, user=user)
+      results, meta_count = sync_orders_marking_from_wb(
+        seller,
+        orders,
+        user=user,
+        treat_missing_as_required=True,
       )
-      from apps.integrations.tasks import bind_order_marking_wb_task
 
-      for order in orders:
-        if (order.marking_verify_status or "").strip() != VERIFY_PENDING:
-          continue
-        if not (order.marking_code or "").strip():
-          continue
-        cache_key = f"marking_repush:{order.id}"
-        if cache.get(cache_key):
-          continue
-        cache.set(cache_key, 1, REPUSH_CACHE_SEC)
-        bind_order_marking_wb_task.apply_async(
-          (order.id, order.marking_code, None),
-          queue="marking",
-        )
-      return results
-    AuditLog.objects.create(
-      user=user,
-      seller=seller,
-      action_type=AuditLog.ActionType.API_ERROR,
-      message="WB не вернул статусы ЧЗ (пустой ответ /orders/meta)",
-      details={
-        "order_ids": [order.id for order in orders],
-        "wb_ids": wb_ids[:20],
-      },
+  if orders and meta_count == 0:
+    wb_ids = [order.wb_order_id for order in orders]
+    logger.warning(
+      "WB empty /orders/meta seller=%s batch=%s orders=%s wb_ids=%s",
+      seller.id,
+      batch,
+      len(orders),
+      wb_ids[:10],
     )
-    raise AssemblyError(
-      "WB не вернул статусы Честного знака. Нажмите «Проверить ЧЗ» ещё раз.",
-      code="wb_verify_empty",
-    )
+    from apps.integrations.tasks import bind_order_marking_wb_task
+
+    for order in orders:
+      if (order.marking_verify_status or "").strip() != VERIFY_PENDING:
+        continue
+      if not (order.marking_code or "").strip():
+        continue
+      cache_key = f"marking_repush:{order.id}"
+      if cache.get(cache_key):
+        continue
+      cache.set(cache_key, 1, REPUSH_CACHE_SEC)
+      bind_order_marking_wb_task.apply_async(
+        (order.id, order.marking_code, None),
+        queue="marking",
+      )
+    if not batch:
+      AuditLog.objects.create(
+        user=user,
+        seller=seller,
+        action_type=AuditLog.ActionType.API_ERROR,
+        message="WB не вернул статусы ЧЗ (пустой ответ /orders/meta) — повторная отправка в очереди",
+        details={
+          "order_ids": [order.id for order in orders],
+          "wb_ids": wb_ids[:20],
+        },
+      )
+    return results
 
   for item in results:
     if item["status"] == VERIFY_VERIFIED and item.get("changed"):
