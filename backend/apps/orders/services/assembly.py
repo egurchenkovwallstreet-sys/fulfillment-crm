@@ -948,12 +948,6 @@ def scan_order_barcode(seller: Seller, scan_value: str, *, user=None) -> dict:
         stock_info = deduct_stock_for_sticker_print(order=order, user=user)
       except StockDeductionError as exc:
         raise AssemblyError(str(exc), code="insufficient_stock", order=order) from exc
-    try:
-      from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
-
-      record_billing_on_sticker_print(order, seller=seller)
-    except Exception:
-      logger.exception("billing on sticker print failed for order %s", order.id)
     AuditLog.objects.create(
       user=user,
       seller=seller,

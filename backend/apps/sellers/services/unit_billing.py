@@ -22,7 +22,7 @@ from apps.sellers.services.seller_billing_stats import (
   _seller_fallback_tariff,
 )
 from apps.sellers.services.warehouse_filter import (
-  get_billing_warehouse_match_ids,
+  get_enabled_warehouse_match_ids,
   seller_has_warehouse_config,
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
@@ -181,15 +181,6 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
   if mode not in TARIFF_APPLY_MODES:
     raise TariffBillingError("Неизвестный режим применения тарифа")
 
-  from apps.sellers.services.crm_product_stats import WB_STICKER_STOCK_COMMENT
-  from apps.sellers.services.sticker_billing import (
-    _local_order_index,
-    _order_sticker_event_date,
-    _parse_sticker_key,
-    _parse_wb_order_id,
-  )
-  from apps.warehouse.models import StockOperation
-
   today = today_local()
   _, current_week_end = calendar_week_bounds_offset(0, today)
   oldest_week_start, _ = calendar_week_bounds_offset(SHIPMENTS_WEEKS_HISTORY - 1, today)
@@ -197,72 +188,32 @@ def rebuild_wb_unit_shipment_charges(seller: Seller, *, mode: str) -> int:
 
   price_by_barcode = _barcode_price_map(seller, marketplace=WB)
   fallback_tariff = _seller_fallback_tariff(seller, marketplace=WB)
-  order_index = _local_order_index(seller)
   match_ids = (
-    get_billing_warehouse_match_ids(seller)
+    get_enabled_warehouse_match_ids(seller)
     if seller_has_warehouse_config(seller)
     else None
   )
 
   updated = 0
-  seen_sticker_keys: set[str] = set()
   seen_orders: set[int] = set()
 
-  sticker_orders = Order.objects.filter(
+  delivery_orders = Order.objects.filter(
     seller=seller,
-    has_sticker=True,
     wb_order_id__isnull=False,
+    in_delivery_at__isnull=False,
+    in_delivery_at__date__gte=from_date,
+    in_delivery_at__date__lte=current_week_end,
   )
-  for order in sticker_orders:
+  for order in delivery_orders:
     wb_order_id = int(order.wb_order_id)
     if wb_order_id in seen_orders:
       continue
-    charge_date = _order_sticker_event_date(order)
-    if charge_date is None or charge_date < from_date or charge_date > current_week_end:
-      continue
     seen_orders.add(wb_order_id)
-    meta = order_index.get(wb_order_id) or _ShippedOrderMeta(
+    charge_date = timezone.localtime(order.in_delivery_at).date()
+    meta = _ShippedOrderMeta(
       barcode=(order.barcode or "").strip(),
       warehouse_id=order.wb_warehouse_id,
     )
-    if _upsert_wb_unit_charge(
-      seller=seller,
-      wb_order_id=wb_order_id,
-      charge_date=charge_date,
-      meta=meta,
-      price_by_barcode=price_by_barcode,
-      fallback_tariff=fallback_tariff,
-      match_ids=match_ids,
-    ):
-      updated += 1
-
-  ops = StockOperation.objects.filter(
-    product__seller=seller,
-    product__marketplace=WB,
-    operation_type=StockOperation.OperationType.SHIPMENT,
-    comment__icontains=WB_STICKER_STOCK_COMMENT,
-    created_at__date__gte=from_date,
-    created_at__date__lte=current_week_end,
-  ).select_related("product").order_by("created_at")
-
-  for op in ops:
-    comment = op.comment or ""
-    sticker_key = _parse_sticker_key(comment)
-    if sticker_key:
-      if sticker_key in seen_sticker_keys:
-        continue
-      seen_sticker_keys.add(sticker_key)
-
-    wb_order_id = _parse_wb_order_id(comment)
-    if wb_order_id is None or wb_order_id in seen_orders:
-      continue
-    seen_orders.add(wb_order_id)
-
-    meta = order_index.get(wb_order_id)
-    if meta is None and op.product:
-      meta = _ShippedOrderMeta(barcode=(op.product.barcode or "").strip())
-
-    charge_date = timezone.localtime(op.created_at).date()
     if _upsert_wb_unit_charge(
       seller=seller,
       wb_order_id=wb_order_id,

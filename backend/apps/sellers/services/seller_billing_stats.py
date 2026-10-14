@@ -25,7 +25,7 @@ from apps.sellers.services.calendar_periods import (
 )
 from apps.sellers.services.wb_order_stats import SellerAnalyticsError
 from apps.sellers.services.warehouse_filter import (
-  get_billing_warehouse_match_ids,
+  get_enabled_warehouse_match_ids,
   order_matches_enabled_warehouse,
   seller_has_warehouse_config,
 )
@@ -162,22 +162,21 @@ def _order_eligible_for_billing(
   match_ids: set[int] | None,
   wb_order_id: int | None = None,
 ) -> bool:
-  """
-  Заказы для биллинга: склады, когда-либо подключённые в CRM, и зафиксированные начисления.
-  Отключение или удаление склада не убирает прошлые отгрузки из расчётов.
-  """
-  if wb_order_id is not None and ShipmentUnitCharge.objects.filter(
-    seller=seller,
-    wb_order_id=wb_order_id,
-  ).exists():
-    return True
+  """Заказы для биллинга: только FBS-склады, которые сейчас обслуживает фулфилмент."""
+  if meta is None and wb_order_id is not None:
+    row = Order.objects.filter(seller=seller, wb_order_id=wb_order_id).values_list(
+      "barcode",
+      "wb_warehouse_id",
+    ).first()
+    if row:
+      meta = _ShippedOrderMeta(barcode=str(row[0] or "").strip(), warehouse_id=row[1])
   if meta is None:
     return False
   if not seller_has_warehouse_config(seller):
     return True
-  match_ids = match_ids if match_ids is not None else get_billing_warehouse_match_ids(seller)
+  match_ids = match_ids if match_ids is not None else get_enabled_warehouse_match_ids(seller)
   if not match_ids:
-    return meta.warehouse_id is not None or meta.office_id is not None
+    return False
   return order_matches_enabled_warehouse(
     seller,
     meta.warehouse_id,
@@ -286,9 +285,9 @@ def _build_week_payload(
 
 
 def load_weekly_shipped_orders(seller: Seller, *, weeks: int = SHIPMENTS_WEEKS_HISTORY) -> dict:
-  from apps.sellers.services.sticker_billing import load_weekly_shipped_orders as _load_sticker_prints
+  from apps.sellers.services.delivery_billing import load_weekly_shipped_orders as _load_delivery
 
-  return _load_sticker_prints(seller, weeks=weeks)
+  return _load_delivery(seller, weeks=weeks)
 
 
 def _decimal_amount(value) -> Decimal:

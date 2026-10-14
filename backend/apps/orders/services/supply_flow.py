@@ -1553,6 +1553,18 @@ def _complete_order_in_delivery(
       "updated_at",
     ],
   )
+  try:
+    from apps.sellers.services.delivery_billing import record_billing_on_order_delivery
+
+    record_billing_on_order_delivery(order, seller=seller)
+  except Exception:
+    import logging
+
+    logging.getLogger(__name__).exception(
+      "Delivery billing failed order=%s seller=%s",
+      order.id,
+      seller.id,
+    )
   stock_info = stock_deduction_info(order)
   AuditLog.objects.create(
     user=user,

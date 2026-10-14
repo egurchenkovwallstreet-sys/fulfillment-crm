@@ -156,8 +156,21 @@ def _sync_crm_orders_delivery_status(
 
 
 def record_shipment_charges_for_orders(orders: list[Order], *, seller: Seller) -> None:
-  """Начисления отгрузки — только при печати FBS-стикера в CRM (sticker_billing)."""
-  del orders, seller
+  """Начисления отгрузки — при фиксации «в доставку» (обслуживаемые склады)."""
+  from apps.sellers.services.delivery_billing import record_billing_on_order_delivery
+
+  for order in orders:
+    if order.in_delivery_at is None:
+      continue
+    try:
+      record_billing_on_order_delivery(order, seller=seller)
+    except Exception:
+      import logging
+
+      logging.getLogger(__name__).exception(
+        "Delivery billing sync failed order=%s",
+        order.id,
+      )
 
 
 def _finalize_supply_scan(

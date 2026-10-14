@@ -11,7 +11,10 @@ from apps.sellers.services.seller_billing_stats import (
   _order_eligible_for_billing,
   _sum_shipped_orders,
 )
-from apps.sellers.services.warehouse_filter import get_billing_warehouse_match_ids
+from apps.sellers.services.warehouse_filter import (
+  get_billing_warehouse_match_ids,
+  get_enabled_warehouse_match_ids,
+)
 from apps.warehouse.models import Cell, Product
 
 
@@ -63,23 +66,23 @@ class WarehouseBillingFilterTests(TestCase):
     match_ids = get_billing_warehouse_match_ids(self.seller)
     self.assertIn(888, match_ids)
 
-  def test_order_eligible_after_warehouse_disabled(self):
+  def test_order_not_eligible_on_disabled_warehouse(self):
     SellerWarehouse.objects.create(
       seller=self.seller,
       wb_warehouse_id=601,
       is_enabled=False,
     )
     meta = _ShippedOrderMeta(barcode=self.product.barcode, warehouse_id=601)
-    self.assertTrue(
+    self.assertFalse(
       _order_eligible_for_billing(
         self.seller,
         meta,
-        match_ids=get_billing_warehouse_match_ids(self.seller),
+        match_ids=get_enabled_warehouse_match_ids(self.seller),
         wb_order_id=12345,
       )
     )
 
-  def test_sum_shipped_orders_keeps_deleted_warehouse_history(self):
+  def test_sum_shipped_orders_skips_non_enabled_warehouse(self):
     ExcludedSellerWarehouse.objects.create(
       seller=self.seller,
       marketplace=WB,
@@ -109,10 +112,10 @@ class WarehouseBillingFilterTests(TestCase):
       order_index=order_index,
       price_by_barcode={self.product.barcode: Decimal("10.00")},
       fallback_tariff=Decimal("10.00"),
-      match_ids=get_billing_warehouse_match_ids(self.seller),
+      match_ids=get_enabled_warehouse_match_ids(self.seller),
     )
-    self.assertEqual(count, 1)
-    self.assertEqual(amount, Decimal("10.00"))
+    self.assertEqual(count, 0)
+    self.assertEqual(amount, Decimal("0"))
 
   def test_supply_warehouse_in_billing_match_ids(self):
     Supply.objects.create(

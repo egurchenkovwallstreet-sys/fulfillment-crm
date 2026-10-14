@@ -177,7 +177,7 @@ export function AdminBillingPage() {
           hint={
             isOzon
               ? 'Селлеры с режимом «за единицу». Сумма — тариф × количество отгруженных единиц.'
-              : 'Селлеры с режимом «за единицу». Только заказы с напечатанным FBS-стикером в CRM × тариф.'
+              : 'Селлеры «за единицу»: заказы, переданные в доставку с обслуживаемых FBS-складов (CRM или ЛК WB) × тариф.'
           }
           weekIndex={weekIndex}
           onWeekIndexChange={setWeekIndex}
@@ -206,7 +206,7 @@ export function AdminBillingPage() {
             <div className="admin-billing-sellers__actions">
               <p className="admin-billing-sellers__meta">
                 {weekTotals.sellers} селлеров · {weekTotals.orders} {unitsLabel.toLowerCase()} ·{' '}
-                {weekTotals.supplies} {isOzon ? 'отгрузок' : 'дн. со стикерами'} ·{' '}
+                {weekTotals.supplies} {isOzon ? 'отгрузок' : 'поставок в доставку'} ·{' '}
                 отгрузка {formatMoney(weekTotals.amount)} · хранение {formatMoney(weekTotals.storage)}
               </p>
               <div className="admin-billing-sellers__buttons">

@@ -306,6 +306,15 @@ def deduct_off_crm_shipment(shipment_id: int, *, user=None) -> dict:
   shipment.resolved_at = timezone.now()
   shipment.save(update_fields=["status", "resolved_by", "resolved_at"])
 
+  try:
+    from apps.sellers.services.delivery_billing import record_billing_for_off_crm_shipment
+
+    record_billing_for_off_crm_shipment(shipment)
+  except Exception:
+    import logging
+
+    logging.getLogger(__name__).exception("Off-CRM delivery billing failed shipment=%s", shipment.id)
+
   return {"shipment_id": shipment.id, "status": shipment.status, "stock": stock}
 
 

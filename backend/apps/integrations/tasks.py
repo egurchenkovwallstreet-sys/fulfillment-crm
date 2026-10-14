@@ -232,17 +232,19 @@ def reconcile_stuck_delivery_orders():
 
 @shared_task(queue="default")
 def record_sticker_billing_task(order_id: int):
-  """Биллинг после печати стикера — не блокирует ответ bind-marking."""
+  """Deprecated alias: начисление только при передаче в доставку."""
   from apps.orders.models import Order
-  from apps.sellers.services.sticker_billing import record_billing_on_sticker_print
+  from apps.sellers.services.delivery_billing import record_billing_on_order_delivery
 
   order = Order.objects.filter(pk=order_id).select_related("seller").first()
   if not order or not order.seller_id:
     return {"success": False, "detail": "order_not_found", "order_id": order_id}
+  if order.in_delivery_at is None:
+    return {"success": True, "order_id": order_id, "skipped": "not_in_delivery"}
   try:
-    record_billing_on_sticker_print(order, seller=order.seller)
+    record_billing_on_order_delivery(order, seller=order.seller)
   except Exception:
-    logger.exception("Background sticker billing failed order=%s", order_id)
+    logger.exception("Background delivery billing failed order=%s", order_id)
     return {"success": False, "order_id": order_id}
   return {"success": True, "order_id": order_id}
 
