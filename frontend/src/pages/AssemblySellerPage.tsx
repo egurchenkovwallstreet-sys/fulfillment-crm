@@ -35,6 +35,7 @@ import {
   type PickList,
   type PrintOrder,
   type MarkingStatusResult,
+  type MarkingVerifyItem,
   type VerifyMarkingResult,
   type SendToDeliveryResult,
   type DeliveryShippingParams,
@@ -641,7 +642,9 @@ function WbAssemblySellerPage() {
           }
           setMarkingStatus((prev) => mergeVerifyIntoMarkingStatus(prev, wrapped))
           patchLocalOrdersFromVerify(wrapped)
-          const verified = pushResult.verify_results.filter((item) => item.status === 'verified').length
+          const verified = pushResult.verify_results.filter(
+            (item: MarkingVerifyItem) => item.status === 'verified',
+          ).length
           if (verified > 0) {
             setChzVerifyNotice(`ЧЗ принят WB: ${verified}`)
           }
