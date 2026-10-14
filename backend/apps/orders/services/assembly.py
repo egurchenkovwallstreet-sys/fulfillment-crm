@@ -1154,7 +1154,17 @@ def bind_marking_and_print(
 
     record_sticker_billing_task.delay(order_id)
 
+  def _enqueue_wb_marking_bind() -> None:
+    from apps.integrations.tasks import bind_order_marking_wb_task
+
+    bind_order_marking_wb_task.apply_async(
+      (order_id, normalized, getattr(user, "id", None)),
+      countdown=1,
+      queue="marking",
+    )
+
   transaction.on_commit(_enqueue_billing)
+  transaction.on_commit(_enqueue_wb_marking_bind)
 
   AuditLog.objects.create(
     user=user,

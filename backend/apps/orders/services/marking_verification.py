@@ -516,7 +516,7 @@ def verify_marking_orders(
   if not orders:
     return []
 
-  if force_recheck and not batch:
+  if force_recheck:
     pending_ids = [
       order.id
       for order in orders
@@ -556,7 +556,7 @@ def verify_marking_orders(
           (order.id, order.marking_code, None),
           queue="marking",
         )
-      return []
+      return results
     AuditLog.objects.create(
       user=user,
       seller=seller,
