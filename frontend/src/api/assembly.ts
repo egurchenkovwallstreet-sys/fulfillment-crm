@@ -232,6 +232,7 @@ export interface PushMarkingWbResult {
   error_count: number
   skipped_count?: number
   sent: Array<{ order_id: number; wb_order_id: number }>
+  verify_results?: MarkingVerifyItem[]
   errors: Array<{ order_id: number; wb_order_id?: number | null; error: string; code?: string | null }>
   repair?: { synced?: number; repushed?: number; downgraded?: number; skipped?: boolean } | null
   message: string
