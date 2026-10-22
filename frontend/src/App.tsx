@@ -20,6 +20,7 @@ import { InventoryPage } from './pages/InventoryPage'
 import { IntakePage } from './pages/IntakePage'
 import { CellInventoryPage } from './pages/CellInventoryPage'
 import { SortPage } from './pages/SortPage'
+import { FboAssemblyPage } from './pages/FboAssemblyPage'
 import { FulfillmentRegisterPage } from './pages/FulfillmentRegisterPage'
 import { LoginPage } from './pages/LoginPage'
 import { PrintAgentPage } from './pages/PrintAgentPage'
@@ -83,6 +84,8 @@ function AppRoutes() {
             <Route path="/intake-cards/:sessionId" element={<WbFactIntakePage />} />
             <Route path="/cells" element={<CellInventoryPage />} />
             <Route path="/sort" element={<SortPage />} />
+            <Route path="/fbo-assembly" element={<FboAssemblyPage />} />
+            <Route path="/fbo-assembly/:sessionId" element={<FboAssemblyPage />} />
             <Route path="/assembly" element={<AssemblySellersPage />} />
             <Route path="/assembly/:sellerId" element={<AssemblySellerPage />} />
             <Route path="/print-agent" element={<PrintAgentPage />} />

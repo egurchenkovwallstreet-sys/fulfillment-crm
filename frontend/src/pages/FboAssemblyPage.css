@@ -1,0 +1,107 @@
+.fbo-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1rem 1rem 2.5rem;
+}
+
+.fbo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.fbo-card {
+  background: var(--surface-elevated, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.fbo-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.fbo-muted {
+  color: var(--text-muted, #64748b);
+  font-size: 0.92rem;
+}
+
+.fbo-open-box {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #cb11ab;
+  margin: 0.5rem 0;
+}
+
+.fbo-scan-input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font-size: 1.1rem;
+  border: 2px dashed #cbd5e1;
+  border-radius: 8px;
+  margin-top: 0.75rem;
+}
+
+.fbo-scan-input:focus {
+  outline: none;
+  border-color: #cb11ab;
+}
+
+.fbo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.fbo-table th,
+.fbo-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.45rem 0.35rem;
+  text-align: left;
+}
+
+.fbo-box-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.fbo-box-row:last-child {
+  border-bottom: none;
+}
+
+.fbo-create-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.fbo-create-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 180px;
+}
+
+.fbo-create-box input {
+  padding: 0.5rem 0.65rem;
+  font-size: 1rem;
+}
+
+.fbo-paused-banner {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}

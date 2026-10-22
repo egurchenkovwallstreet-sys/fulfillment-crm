@@ -74,6 +74,13 @@ const SIDEBAR_NAV: Array<{
     marketplaceOnly: 'wb' as const,
   },
   {
+    to: '/fbo-assembly',
+    label: 'Сборка FBO',
+    hint: 'Короба WB FBO: скан, Excel, этикетки 75×120, списание CRM',
+    roles: ['admin', 'manager'],
+    marketplaceOnly: 'wb' as const,
+  },
+  {
     to: '/assembly',
     label: 'Сборка FBS',
     hint: 'Подбор, скан заказов, ЧЗ, поставки и отправка в доставку',

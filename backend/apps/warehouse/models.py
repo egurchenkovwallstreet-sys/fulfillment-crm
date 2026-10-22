@@ -526,3 +526,103 @@ class XlListLine(models.Model):
 
   def __str__(self):
     return f"{self.barcode} × {self.quantity}"
+
+
+class FboAssemblySession(models.Model):
+  """Сборка FBO (WB): короба, сканы, Excel, списание CRM."""
+
+  class Status(models.TextChoices):
+    ACTIVE = "active", "В работе"
+    PAUSED = "paused", "Пауза"
+    COMPLETED = "completed", "Завершена"
+
+  seller = models.ForeignKey(
+    "sellers.Seller",
+    on_delete=models.CASCADE,
+    related_name="fbo_assembly_sessions",
+  )
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.ACTIVE,
+    db_index=True,
+  )
+  created_by = models.ForeignKey(
+    "accounts.User",
+    on_delete=models.SET_NULL,
+    null=True,
+    related_name="fbo_assembly_sessions",
+  )
+  marketplace = models.CharField(
+    "Маркетплейс",
+    max_length=8,
+    choices=MARKETPLACE_CHOICES,
+    default=MARKETPLACE_WB,
+    db_index=True,
+  )
+  created_at = models.DateTimeField(auto_now_add=True)
+  completed_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Сборка FBO"
+    verbose_name_plural = "Сборки FBO"
+    ordering = ["-created_at"]
+
+  def __str__(self):
+    return f"FBO #{self.pk} · {self.seller}"
+
+
+class FboAssemblyBox(models.Model):
+  class Status(models.TextChoices):
+    OPEN = "open", "Открыт"
+    CLOSED = "closed", "Закрыт"
+
+  session = models.ForeignKey(
+    FboAssemblySession,
+    on_delete=models.CASCADE,
+    related_name="boxes",
+  )
+  box_number = models.CharField("Номер короба", max_length=100)
+  status = models.CharField(
+    max_length=20,
+    choices=Status.choices,
+    default=Status.OPEN,
+    db_index=True,
+  )
+  sort_order = models.PositiveIntegerField("Порядок короба", default=1)
+  created_at = models.DateTimeField(auto_now_add=True)
+  closed_at = models.DateTimeField(null=True, blank=True)
+
+  class Meta:
+    verbose_name = "Короб FBO"
+    verbose_name_plural = "Короба FBO"
+    ordering = ["sort_order", "id"]
+
+  def __str__(self):
+    return f"Короб {self.box_number}"
+
+
+class FboAssemblyLine(models.Model):
+  box = models.ForeignKey(
+    FboAssemblyBox,
+    on_delete=models.CASCADE,
+    related_name="lines",
+  )
+  product = models.ForeignKey(
+    Product,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="fbo_assembly_lines",
+  )
+  barcode = models.CharField("Баркод", max_length=100)
+  quantity = models.PositiveIntegerField("Количество", default=0)
+
+  class Meta:
+    verbose_name = "Строка короба FBO"
+    verbose_name_plural = "Строки коробов FBO"
+    unique_together = [("box", "barcode")]
+    ordering = ["id"]
+
+  def __str__(self):
+    return f"{self.barcode} × {self.quantity}"

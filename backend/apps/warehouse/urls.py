@@ -70,6 +70,17 @@ from .views_article_intake import (
   ArticleIntakeSessionDetailView,
   ArticleIntakeSessionListCreateView,
 )
+from .views_fbo_assembly import (
+  FboAssemblyCloseBoxView,
+  FboAssemblyCompleteView,
+  FboAssemblyCreateBoxView,
+  FboAssemblyExcelView,
+  FboAssemblyPauseView,
+  FboAssemblyResumeView,
+  FboAssemblyScanView,
+  FboAssemblySessionDetailView,
+  FboAssemblySessionListCreateView,
+)
 from .views_wb_fact_intake import (
   WbFactIntakeFinishView,
   WbFactIntakeReportView,
@@ -113,6 +124,47 @@ urlpatterns = [
   path("intake/wb-sync/auto/", WbSyncIntakeAutoView.as_view(), name="intake_wb_sync_auto"),
   path("intake/history/", IntakeHistoryView.as_view(), name="intake_history"),
   path("sort/lookup/", SortLookupView.as_view(), name="sort_lookup"),
+  path("fbo-assembly/sessions/", FboAssemblySessionListCreateView.as_view(), name="fbo_assembly_sessions"),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/",
+    FboAssemblySessionDetailView.as_view(),
+    name="fbo_assembly_session_detail",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/pause/",
+    FboAssemblyPauseView.as_view(),
+    name="fbo_assembly_pause",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/resume/",
+    FboAssemblyResumeView.as_view(),
+    name="fbo_assembly_resume",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/complete/",
+    FboAssemblyCompleteView.as_view(),
+    name="fbo_assembly_complete",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/boxes/",
+    FboAssemblyCreateBoxView.as_view(),
+    name="fbo_assembly_create_box",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/boxes/<int:box_id>/close/",
+    FboAssemblyCloseBoxView.as_view(),
+    name="fbo_assembly_close_box",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/boxes/<int:box_id>/scan/",
+    FboAssemblyScanView.as_view(),
+    name="fbo_assembly_scan",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/excel/",
+    FboAssemblyExcelView.as_view(),
+    name="fbo_assembly_excel",
+  ),
   path("inventory/lookup/", InventoryLookupView.as_view(), name="inventory_lookup"),
   path("inventory/", InventoryView.as_view(), name="inventory"),
   path("inventory/retry/", InventoryRetryView.as_view(), name="inventory_retry"),
