@@ -67,6 +67,13 @@ const SIDEBAR_NAV: Array<{
     roles: ['admin', 'manager'],
   },
   {
+    to: '/sort',
+    label: 'Сортировка',
+    hint: 'Скан баркода — крупно ИП клиента и номер ячейки (WB)',
+    roles: ['admin', 'manager'],
+    marketplaceOnly: 'wb' as const,
+  },
+  {
     to: '/assembly',
     label: 'Сборка FBS',
     hint: 'Подбор, скан заказов, ЧЗ, поставки и отправка в доставку',

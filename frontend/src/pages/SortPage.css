@@ -1,0 +1,86 @@
+.sort-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.sort-page__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+}
+
+.sort-page__hint {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted, #64748b);
+  font-size: 0.95rem;
+}
+
+.sort-display {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+  min-height: 220px;
+}
+
+.sort-display__block {
+  padding: 1.25rem 1.5rem;
+  border-radius: 12px;
+  background: var(--surface-elevated, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.sort-display__block--error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.sort-display__label {
+  display: block;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+  margin-bottom: 0.35rem;
+}
+
+.sort-display__company {
+  font-size: clamp(1.75rem, 5vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.sort-display__cell {
+  font-size: clamp(3rem, 12vw, 5.5rem);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--wb-accent, #cb11ab);
+}
+
+.layout--wb .sort-display__cell {
+  color: #cb11ab;
+}
+
+.sort-display__barcode {
+  margin: 0.75rem 0 0;
+  font-size: 0.95rem;
+  color: var(--text-muted, #64748b);
+  font-family: ui-monospace, monospace;
+}
+
+.sort-barcode-input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font-size: 1.1rem;
+  border: 2px dashed var(--border, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sort-barcode-input:focus {
+  outline: none;
+  border-color: var(--wb-accent, #cb11ab);
+  box-shadow: 0 0 0 3px rgba(203, 17, 171, 0.15);
+}

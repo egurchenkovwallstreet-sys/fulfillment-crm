@@ -69,6 +69,7 @@ from .services.wb_sync_intake import (
   serialize_preview,
 )
 from .services.marking_lookup import lookup_intake_catalog_info, refresh_product_marking
+from .services.sort_lookup import lookup_sort_wb
 from .services.wb_product_sync import refresh_seller_products_from_wb
 
 
@@ -659,6 +660,35 @@ def _inventory_response(result) -> dict:
     "print_cell_label": result.print_cell_label,
     "cell_label": result.cell_label,
   }
+
+
+class SortLookupView(APIView):
+  """Сортировка: по скану баркода — ИП и номер ячейки (только WB)."""
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def get(self, request):
+    barcode = request.query_params.get("barcode", "").strip()
+    if not barcode:
+      return Response(
+        {"detail": "Укажите barcode"},
+        status=status.HTTP_400_BAD_REQUEST,
+      )
+    result = lookup_sort_wb(request.user, barcode)
+    if not result.found:
+      return Response(
+        {
+          "found": False,
+          "detail": result.detail or "Товар не найден в CRM",
+          "barcode": result.barcode,
+        },
+        status=status.HTTP_404_NOT_FOUND,
+      )
+    return Response({
+      "found": True,
+      "company_name": result.company_name,
+      "cell_number": result.cell_number,
+      "barcode": result.barcode,
+    })
 
 
 class InventoryLookupView(APIView):

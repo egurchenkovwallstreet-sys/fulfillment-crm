@@ -386,6 +386,18 @@ export type IntakeRetryPayload = {
   stock_mode: 'intake' | 'set_actual'
 }
 
+export type SortLookupResult = {
+  found: boolean
+  company_name: string
+  cell_number: string
+  barcode: string
+}
+
+export function lookupSortBarcode(barcode: string) {
+  const params = new URLSearchParams({ barcode })
+  return apiFetch<SortLookupResult>(`/api/warehouse/sort/lookup/?${params}`)
+}
+
 export function lookupInventoryBarcode(sellerId: number, barcode: string) {
   const params = new URLSearchParams({
     seller_id: String(sellerId),
