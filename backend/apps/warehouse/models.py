@@ -562,6 +562,11 @@ class FboAssemblySession(models.Model):
   )
   created_at = models.DateTimeField(auto_now_add=True)
   completed_at = models.DateTimeField(null=True, blank=True)
+  stocks_finalized_at = models.DateTimeField(
+    "Остатки CRM/WB списаны",
+    null=True,
+    blank=True,
+  )
 
   class Meta:
     verbose_name = "Сборка FBO"

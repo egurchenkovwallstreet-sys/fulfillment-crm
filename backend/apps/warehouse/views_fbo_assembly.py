@@ -22,6 +22,7 @@ from apps.warehouse.services.fbo_assembly import (
   serialize_box_label,
   serialize_session,
 )
+from apps.warehouse.services.fbo_finalize_stocks import finalize_fbo_session_stocks
 
 
 def _session_or_404(user, session_id: int) -> FboAssemblySession:
@@ -162,7 +163,7 @@ class FboAssemblyScanView(APIView):
       return Response(status=status.HTTP_404_NOT_FOUND)
     barcode = str(request.data.get("barcode") or "").strip()
     try:
-      line, deducted = scan_barcode(
+      line = scan_barcode(
         session,
         box_id=box_id,
         barcode=barcode,
@@ -181,9 +182,24 @@ class FboAssemblyScanView(APIView):
     payload["last_scan"] = {
       "barcode": line.barcode,
       "quantity_in_box": line.quantity,
-      "stock_deducted": deducted,
     }
     return Response(payload)
+
+
+class FboAssemblyFinalizeStocksView(APIView):
+  permission_classes = [IsAuthenticated, IsManager]
+
+  def post(self, request, session_id):
+    session = _session_or_404(request.user, session_id)
+    try:
+      report = finalize_fbo_session_stocks(session, user=request.user)
+    except FboAssemblyError as exc:
+      return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    session = _session_or_404(request.user, session_id)
+    return Response({
+      "session": serialize_session(session),
+      "report": report,
+    })
 
 
 class FboAssemblyExcelView(APIView):

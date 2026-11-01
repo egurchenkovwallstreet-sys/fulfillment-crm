@@ -34,6 +34,8 @@ export type FboAssemblySession = {
   marketplace: string
   created_at: string
   completed_at: string | null
+  stocks_finalized_at: string | null
+  can_finalize_stocks: boolean
   box_count: number
   total_units: number
   open_box_id: number | null
@@ -41,11 +43,36 @@ export type FboAssemblySession = {
   boxes: FboAssemblyBox[]
 }
 
+export type FboFinalizeLineReport = {
+  barcode: string
+  crm_was: number
+  fbo_qty: number
+  wb_new_orders: number
+  wb_picking_orders: number
+  wb_reserved_total: number
+  crm_after: number
+  wb_total_before: number
+  wb_total_after: number
+  check_crm: boolean
+  check_wb: boolean
+  warehouses: Array<{
+    warehouse_name: string
+    before: number
+    after: number
+    changed: boolean
+  }>
+}
+
+export type FboFinalizeReport = {
+  session_id: number
+  finalized_at: string
+  lines: FboFinalizeLineReport[]
+}
+
 export type FboScanResponse = FboAssemblySession & {
   last_scan?: {
     barcode: string
     quantity_in_box: number
-    stock_deducted: boolean
   }
   closed_box_label?: FboBoxLabel
 }
@@ -104,6 +131,13 @@ export function scanFboBarcode(sessionId: number, boxId: number, barcode: string
       method: 'POST',
       body: JSON.stringify({ barcode }),
     },
+  )
+}
+
+export function finalizeFboStocks(sessionId: number) {
+  return apiFetch<{ session: FboAssemblySession; report: FboFinalizeReport }>(
+    `/api/warehouse/fbo-assembly/sessions/${sessionId}/finalize-stocks/`,
+    { method: 'POST' },
   )
 }
 

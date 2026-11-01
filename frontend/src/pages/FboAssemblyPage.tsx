@@ -12,8 +12,10 @@ import {
   pauseFboSession,
   resumeFboSession,
   scanFboBarcode,
+  finalizeFboStocks,
   type FboAssemblyBox,
   type FboAssemblySession,
+  type FboFinalizeReport,
 } from '../api/fboAssembly'
 import { ApiError } from '../api/client'
 import { CrmResultModal, type CrmResultModalState } from '../components/CrmResultModal'
@@ -50,6 +52,7 @@ export function FboAssemblyPage() {
   const [barcode, setBarcode] = useState('')
   const [loading, setLoading] = useState(false)
   const [resultModal, setResultModal] = useState<CrmResultModalState | null>(null)
+  const [finalizeReport, setFinalizeReport] = useState<FboFinalizeReport | null>(null)
 
   const canEdit = session?.status === 'active'
   const openBoxId = session?.open_box_id ?? null
@@ -230,6 +233,25 @@ export function FboAssemblyPage() {
     }
   }
 
+  async function handleFinalizeStocks() {
+    if (!activeId || !session?.can_finalize_stocks) return
+    const ok = window.confirm(
+      'Списать из CRM все отсканированные в этой сборке количества и выставить остатки на включённых складах WB?\n\n' +
+        'Действие выполняется один раз и необратимо.',
+    )
+    if (!ok) return
+    setLoading(true)
+    try {
+      const { session: next, report } = await finalizeFboStocks(activeId)
+      setSession(next)
+      setFinalizeReport(report)
+    } catch (err) {
+      noticeFail('Остатки FBO', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (marketplace !== 'wb') {
     return (
       <div className="fbo-page">
@@ -336,7 +358,31 @@ export function FboAssemblyPage() {
       <p className="fbo-muted">
         Коробов: <strong>{session.box_count}</strong> · отсканировано штук:{' '}
         <strong>{session.total_units}</strong>
+        {session.stocks_finalized_at && (
+          <>
+            {' '}
+            · остатки списаны:{' '}
+            <strong>{new Date(session.stocks_finalized_at).toLocaleString('ru-RU')}</strong>
+          </>
+        )}
       </p>
+
+      {session.can_finalize_stocks && (
+        <div className="fbo-finalize-banner" data-allow-blur>
+          <p>
+            Сборка закрыта. Сканирование только учитывало количества — CRM и WB ещё не обновлены. Нажмите
+            кнопку ниже один раз.
+          </p>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={loading}
+            onClick={() => void handleFinalizeStocks()}
+          >
+            Списать остатки и выставить на WB
+          </button>
+        </div>
+      )}
 
       <div className="fbo-toolbar" data-allow-blur>
         <button type="button" className="btn btn--secondary" onClick={() => void handleDownloadExcel()}>
@@ -456,6 +502,81 @@ export function FboAssemblyPage() {
       )}
 
       {resultModal && <CrmResultModal modal={resultModal} onClose={() => setResultModal(null)} />}
+
+      {finalizeReport && (
+        <div
+          className="fbo-finalize-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          data-allow-blur
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setFinalizeReport(null)
+          }}
+        >
+          <div className="fbo-finalize-modal">
+            <h2>Остатки списаны</h2>
+            <p className="fbo-muted">
+              Сборка #{finalizeReport.session_id} ·{' '}
+              {new Date(finalizeReport.finalized_at).toLocaleString('ru-RU')}
+            </p>
+            <div className="fbo-finalize-table-wrap">
+              <table className="fbo-table fbo-finalize-table">
+                <thead>
+                  <tr>
+                    <th>Баркод</th>
+                    <th>CRM</th>
+                    <th>FBO</th>
+                    <th>Резерв WB</th>
+                    <th>CRM после</th>
+                    <th>WB Σ</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {finalizeReport.lines.map((line) => (
+                    <tr key={line.barcode}>
+                      <td>
+                        <code>{line.barcode}</code>
+                        {line.warehouses.length > 0 && (
+                          <ul className="fbo-finalize-wh-list">
+                            {line.warehouses.map((wh) => (
+                              <li key={wh.warehouse_name}>
+                                {wh.warehouse_name}: {wh.before} → {wh.after}
+                                {wh.changed ? ' ✓' : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                      <td>{line.crm_was}</td>
+                      <td>{line.fbo_qty}</td>
+                      <td>
+                        {line.wb_reserved_total}
+                        <span className="fbo-muted fbo-finalize-reserve-detail">
+                          {' '}
+                          ({line.wb_new_orders}+{line.wb_picking_orders})
+                        </span>
+                      </td>
+                      <td>{line.crm_after}</td>
+                      <td>
+                        {line.wb_total_before} → {line.wb_total_after}
+                      </td>
+                      <td className="fbo-finalize-checks">
+                        {line.check_crm && line.check_wb ? 'OK' : '!'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="fbo-toolbar" style={{ marginTop: '1rem' }}>
+              <button type="button" className="btn btn--primary" onClick={() => setFinalizeReport(null)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

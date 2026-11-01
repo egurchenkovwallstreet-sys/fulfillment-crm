@@ -73,6 +73,7 @@ from .views_article_intake import (
 from .views_fbo_assembly import (
   FboAssemblyCloseBoxView,
   FboAssemblyCompleteView,
+  FboAssemblyFinalizeStocksView,
   FboAssemblyCreateBoxView,
   FboAssemblyExcelView,
   FboAssemblyPauseView,
@@ -144,6 +145,11 @@ urlpatterns = [
     "fbo-assembly/sessions/<int:session_id>/complete/",
     FboAssemblyCompleteView.as_view(),
     name="fbo_assembly_complete",
+  ),
+  path(
+    "fbo-assembly/sessions/<int:session_id>/finalize-stocks/",
+    FboAssemblyFinalizeStocksView.as_view(),
+    name="fbo_assembly_finalize_stocks",
   ),
   path(
     "fbo-assembly/sessions/<int:session_id>/boxes/",

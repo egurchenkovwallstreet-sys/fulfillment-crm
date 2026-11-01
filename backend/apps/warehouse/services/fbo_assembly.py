@@ -15,10 +15,8 @@ from apps.warehouse.models import (
   FboAssemblyLine,
   FboAssemblySession,
   Product,
-  StockOperation,
 )
 from apps.warehouse.services.catalog_fetch import normalize_barcode
-from apps.warehouse.services.cells import refresh_cell_occupied
 from apps.warehouse.services.product_lookup import resolve_product_by_barcode
 
 try:
@@ -55,25 +53,6 @@ def resolve_seller_product(seller: Seller, barcode: str) -> Product | None:
     select_cell=True,
     register_alias=False,
   )
-
-
-def _deduct_one_if_positive(product: Product, *, user, box: FboAssemblyBox, barcode: str) -> bool:
-  if product.quantity < 1:
-    return False
-  product.quantity -= 1
-  product.save(update_fields=["quantity", "updated_at"])
-  refresh_cell_occupied(product.cell)
-  StockOperation.objects.create(
-    product=product,
-    operation_type=StockOperation.OperationType.SHIPMENT,
-    quantity=1,
-    performed_by=user,
-    comment=(
-      f"Сборка FBO: короб {box.box_number}, баркод {barcode}, "
-      f"остаток {product.quantity} шт."
-    ),
-  )
-  return True
 
 
 def serialize_box_label(box: FboAssemblyBox) -> dict:
@@ -135,6 +114,14 @@ def serialize_session(session: FboAssemblySession, *, prefetch: bool = True) -> 
     "marketplace": session.marketplace,
     "created_at": session.created_at.isoformat(),
     "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+    "stocks_finalized_at": (
+      session.stocks_finalized_at.isoformat() if session.stocks_finalized_at else None
+    ),
+    "can_finalize_stocks": (
+      session.status == FboAssemblySession.Status.COMPLETED
+      and not session.stocks_finalized_at
+      and total_units > 0
+    ),
     "box_count": len(boxes),
     "total_units": total_units,
     "open_box_id": open_box.id if open_box else None,
@@ -188,6 +175,8 @@ def complete_session(session: FboAssemblySession, *, user) -> FboAssemblySession
   session = _session_locked(session.pk)
   if session.status == FboAssemblySession.Status.COMPLETED:
     raise FboAssemblyError("Сборка уже завершена")
+  if session.boxes.filter(status=FboAssemblyBox.Status.OPEN).exists():
+    raise FboAssemblyError("Закройте все короба перед завершением сборки")
   session.status = FboAssemblySession.Status.COMPLETED
   session.completed_at = timezone.now()
   session.save(update_fields=["status", "completed_at"])
@@ -244,8 +233,8 @@ def scan_barcode(
   box_id: int,
   barcode: str,
   user,
-) -> tuple[FboAssemblyLine, bool]:
-  """Скан в короб. Возвращает (строка, списано_ли_1_шт)."""
+) -> FboAssemblyLine:
+  """Скан в короб — только учёт количества (списание CRM после закрытия сборки)."""
   session = _session_locked(session.pk)
   _require_editable(session)
   raw = (barcode or "").strip()
@@ -272,9 +261,7 @@ def scan_barcode(
     line.product = product
   line.quantity += 1
   line.save(update_fields=["product", "quantity"])
-
-  deducted = _deduct_one_if_positive(product, user=user, box=box, barcode=code)
-  return line, deducted
+  return line
 
 
 def build_excel_bytes(session: FboAssemblySession) -> bytes:

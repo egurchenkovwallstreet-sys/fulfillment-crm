@@ -38,37 +38,43 @@ export function printFboBoxLabel(data: FboBoxLabelData, autoPrint = true): boole
     .label {
       width: 120mm;
       height: 75mm;
-      padding: 6mm 8mm;
+      padding: 4mm 5mm;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
     }
     .date {
-      font-size: 11pt;
-      color: #444;
+      font-size: 16pt;
+      font-weight: 600;
+      color: #333;
     }
     .seller {
-      font-size: 16pt;
-      font-weight: 700;
-      line-height: 1.2;
+      font-size: 24pt;
+      font-weight: 800;
+      line-height: 1.15;
       text-align: center;
       flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 2mm 0;
+      padding: 1mm 0;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+      hyphens: auto;
     }
     .box {
-      font-size: 36pt;
+      font-size: 54pt;
       font-weight: 900;
       text-align: center;
       line-height: 1;
+      letter-spacing: -0.02em;
     }
     .box-caption {
-      font-size: 10pt;
+      font-size: 14pt;
+      font-weight: 700;
       text-align: center;
-      color: #666;
-      margin-bottom: 2mm;
+      color: #444;
+      margin-bottom: 1mm;
     }
   </style>
 </head>
