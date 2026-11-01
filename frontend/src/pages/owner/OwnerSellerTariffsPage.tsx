@@ -202,7 +202,7 @@ export function OwnerSellerTariffsPage() {
       applyItemsResponse(result)
       const billing = result.result?.billing_policy as { mode?: string; total?: number } | undefined
       const billingNote = billing?.mode === 'recalculate_all'
-        ? ' Пересчитаны все отгрузки за последние 4 недели.'
+        ? ' Пересчитаны все отгрузки за последние 7 недель.'
         : billing?.mode === 'from_today'
           ? ' Новый тариф применён с сегодняшнего дня.'
           : ''
@@ -652,7 +652,7 @@ export function OwnerSellerTariffsPage() {
               </button>
             </div>
             <p className="owner-tariffs-modal__hint">
-              «Пересчитать все» — за последние 4 недели по новым тарифам.
+              «Пересчитать все» — за последние 7 недель (текущая + 6 прошлых) по новым тарифам.
               «С сегодня» — старые суммы не меняются, новый тариф только для сегодняшних и будущих отгрузок.
             </p>
           </div>

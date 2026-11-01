@@ -33,7 +33,7 @@ from apps.warehouse.models import Product
 
 CRM_SUPPLY_NAME_RE = re.compile(r"^CRM-(\d+)-")
 MAX_SUPPLY_ORDER_FETCHES = 300
-SHIPMENTS_WEEKS_HISTORY = 4
+SHIPMENTS_WEEKS_HISTORY = 7
 WB_ORDERS_LOOKBACK_DAYS = 30
 
 

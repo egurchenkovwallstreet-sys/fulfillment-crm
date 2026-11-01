@@ -25,7 +25,11 @@ from apps.warehouse.models import Product
 logger = logging.getLogger(__name__)
 
 
-def _empty_weekly_shipments(weeks: int = 4) -> dict:
+def _empty_weekly_shipments(weeks: int | None = None) -> dict:
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+
+  if weeks is None:
+    weeks = SHIPMENTS_WEEKS_HISTORY
   today = today_local()
   weeks_data = []
   for weeks_ago in range(weeks):

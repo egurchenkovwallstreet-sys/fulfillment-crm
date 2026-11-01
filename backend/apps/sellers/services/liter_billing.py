@@ -279,7 +279,11 @@ def accrue_daily_storage_all_sellers() -> dict:
   return accrue_daily_storage_for_fulfillment(fulfillment=None)
 
 
-def _empty_week_chart(weeks: int = 4) -> dict:
+def _empty_week_chart(weeks: int | None = None) -> dict:
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+
+  if weeks is None:
+    weeks = SHIPMENTS_WEEKS_HISTORY
   today = today_local()
   weeks_data = []
   for weeks_ago in range(weeks):
@@ -304,9 +308,11 @@ def _aggregate_charges_by_week(
   *,
   count_field: str = "orders",
 ) -> dict:
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+
   today = today_local()
   weeks_data = []
-  for weeks_ago in range(4):
+  for weeks_ago in range(SHIPMENTS_WEEKS_HISTORY):
     week_start, week_end = calendar_week_bounds_offset(weeks_ago, today)
     day_amounts: dict[str, Decimal] = defaultdict(lambda: ZERO)
     day_counts: dict[str, int] = defaultdict(int)
@@ -341,9 +347,11 @@ def _aggregate_charges_by_week(
 
 
 def load_weekly_storage_charges(seller: Seller, *, marketplace: str = WB) -> dict:
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+
   mp = normalize_marketplace(marketplace)
   today = today_local()
-  week_start, _ = calendar_week_bounds_offset(3, today)
+  week_start, _ = calendar_week_bounds_offset(SHIPMENTS_WEEKS_HISTORY - 1, today)
   qs = DailyStorageCharge.objects.filter(
     seller=seller,
     charge_date__gte=week_start,
@@ -356,9 +364,11 @@ def load_weekly_storage_charges(seller: Seller, *, marketplace: str = WB) -> dic
 def load_weekly_liter_shipment_charges(seller: Seller, *, marketplace: str = WB) -> dict:
   if not seller_uses_liter_pricing(seller):
     return _empty_week_chart()
+  from apps.sellers.services.seller_billing_stats import SHIPMENTS_WEEKS_HISTORY
+
   mp = normalize_marketplace(marketplace)
   today = today_local()
-  week_start, _ = calendar_week_bounds_offset(3, today)
+  week_start, _ = calendar_week_bounds_offset(SHIPMENTS_WEEKS_HISTORY - 1, today)
   qs = ShipmentLiterCharge.objects.filter(
     seller=seller,
     charge_date__gte=week_start,
